@@ -27,6 +27,7 @@ from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.remember.routers import get_remember_router
 from cognee.api.v1.recall.routers import get_recall_router
+from cognee.api.v1.recall_coverage.routers import get_recall_coverage_router
 from cognee.api.v1.improve.routers import get_improve_router
 from cognee.api.v1.forget.routers import get_forget_router
 from cognee.api.v1.responses.routers import get_responses_router
@@ -312,6 +313,11 @@ app.include_router(
 
 app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["remember"])
 app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"])
+app.include_router(
+    get_recall_coverage_router(),
+    prefix="/api/v1/recall-coverage",
+    tags=["recall-coverage"],
+)
 app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
 app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"])
 

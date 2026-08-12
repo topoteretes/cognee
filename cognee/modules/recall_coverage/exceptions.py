@@ -67,6 +67,24 @@ class CoverageRunInFlightError(CogneeValidationError):
         super().__init__(message, name, status_code, log_level=log_level)
 
 
+class InvalidCoverageParamsError(CogneeValidationError):
+    """A request carried a parameter the run does not have, or an out-of-range value.
+
+    422 rather than a silent drop: a run that appeared to accept ``max_question``
+    (singular) and then executed under the deployment default would report numbers
+    the caller believes were produced under their own thresholds.
+    """
+
+    def __init__(
+        self,
+        message: str = "Invalid recall coverage parameters.",
+        name: str = "InvalidCoverageParamsError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        log_level: str = "WARNING",
+    ):
+        super().__init__(message, name, status_code, log_level=log_level)
+
+
 class CoverageTopicNotFoundError(CogneeValidationError):
     """No topic with this id in the caller's owner scope."""
 

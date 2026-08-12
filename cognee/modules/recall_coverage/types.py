@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # The sink is a wire-level literal, not a row in ``recall_coverage_topics``:
 # questions that matched no topic carry ``topic_id = NULL`` in the database and
@@ -118,40 +118,47 @@ class CoverageParams(BaseModel):
     required and has no default here — :class:`RecallCoverageConfig` is the
     single source of the defaults, and this is the resolved snapshot of them.
     Use :meth:`from_config`.
+
+    The bounds mirror the config's, because a run also takes per-request
+    overrides: a cosine threshold of ``4.2`` is not a stricter run, it is a run in
+    which nothing can ever match, reported as though that were a finding. Out of
+    range therefore raises here and surfaces as a 422 rather than as a confident
+    number.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     # Phase 1 — window, collapse, dedup.
-    max_questions: int
-    max_age_days: int
+    max_questions: int = Field(ge=0)
+    max_age_days: int = Field(ge=0)
     query_types: list[str]
-    fanout_window_seconds: int
-    retry_cooldown_seconds: int
-    dedup_threshold: float
+    fanout_window_seconds: int = Field(ge=0)
+    retry_cooldown_seconds: int = Field(ge=0)
+    dedup_threshold: float = Field(ge=0.0, le=1.0)
 
     # Phase 2 — topic assignment and suggestions.
-    assignment_threshold: float
-    assignment_margin: float
-    sink_cluster_threshold: float
-    suggestion_dedup_threshold: float
-    min_questions_per_topic: int
-    min_scored_questions_per_topic: int
-    max_suggestions_per_run: int
-    topic_label_max_chars: int
+    assignment_threshold: float = Field(ge=0.0, le=1.0)
+    assignment_margin: float = Field(ge=0.0, le=1.0)
+    sink_cluster_threshold: float = Field(ge=0.0, le=1.0)
+    suggestion_dedup_threshold: float = Field(ge=0.0, le=1.0)
+    min_questions_per_topic: int = Field(ge=1)
+    min_scored_questions_per_topic: int = Field(ge=0)
+    max_suggestions_per_run: int = Field(ge=0)
+    topic_label_max_chars: int = Field(ge=1)
 
     # Phase 3 — replay and judge.
-    replay_top_k: int
-    replay_max_concurrent: int
-    judge_max_concurrent: int
-    judge_max_retries: int
-    judge_score_max: int
-    judge_reason_max_chars: int
-    store_context_max_chars: int
+    replay_top_k: int = Field(ge=1)
+    replay_max_concurrent: int = Field(ge=1)
+    judge_max_concurrent: int = Field(ge=1)
+    judge_max_retries: int = Field(ge=0)
+    # At least a 0..1 scale: every aggregate divides by this.
+    judge_score_max: int = Field(ge=1)
+    judge_reason_max_chars: int = Field(ge=1)
+    store_context_max_chars: int = Field(ge=0)
 
     # Phase 4 — alert thresholds.
-    sink_share_alert: float
-    sink_cluster_alert_size: int
+    sink_share_alert: float = Field(ge=0.0, le=1.0)
+    sink_cluster_alert_size: int = Field(ge=0)
 
     @classmethod
     def from_config(cls, config: Optional[Any] = None, **overrides: Any) -> "CoverageParams":

@@ -46,7 +46,7 @@ it is.
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Mapping, Optional, Sequence, Union
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -1267,7 +1267,118 @@ async def load_run_questions(run_id: UUID) -> list[QuestionRecord]:
     return sorted(records, key=report_order_key)
 
 
+async def latest_complete_runs(
+    owner_ids: Sequence[UUID], agent_labels: Optional[Sequence[str]] = None
+) -> dict[str, RunRecord]:
+    """The newest **complete** run per agent label, keyed by label.
+
+    Complete only: a pending run has no numbers and a failed one has numbers
+    nobody should read, so joining either to an agent row would show a coverage
+    score that no finished run ever produced. Newest first, first wins.
+    """
+    terms: list[Any] = [
+        RecallCoverageRun.owner_id.in_(tuple(owner_ids)),
+        RecallCoverageRun.status == RunStatus.COMPLETE.value,
+    ]
+    if agent_labels:
+        terms.append(RecallCoverageRun.agent_label.in_(tuple(agent_labels)))
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageRun)
+            .where(*terms)
+            .order_by(RecallCoverageRun.created_at.desc(), RecallCoverageRun.id)
+        )
+        latest: dict[str, RunRecord] = {}
+        for row in result.scalars().all():
+            latest.setdefault(row.agent_label, _to_run_record(row))
+        return latest
+
+
+@dataclass(frozen=True)
+class BenchmarkCell:
+    """One cell of the datasets x agents benchmark matrix.
+
+    Restricted to **shared** curated rows: identical prompts across agents is the
+    only reason two agents' numbers are comparable at all, so an agent-scoped
+    curated row — one person's list for one tool — would make the comparable
+    number not comparable.
+    """
+
+    agent_label: str
+    run_id: UUID
+    dataset_id: Optional[UUID]
+    dataset_name: Optional[str]
+    question_count: int
+    scored_question_count: int
+    avg_score: Optional[float]
+
+
+async def benchmark_cells(run_ids_by_label: Mapping[str, UUID]) -> list[BenchmarkCell]:
+    """Group the shared curated rows of the given runs by ``(label, dataset)``.
+
+    One ``GROUP BY`` over ``recall_coverage_questions``, joined to
+    ``recall_coverage_curated_questions`` for the scope — the shared/agent
+    distinction lives on the curated question, deliberately not copied onto the
+    question row, so that changing a question's scope cannot leave two records
+    disagreeing.
+
+    ``AVG`` and the scored count both ignore NULL scores, which is the same rule
+    :mod:`cognee.modules.recall_coverage.aggregate` applies in Python: a row we
+    could not judge is absent from the mean rather than counted as a zero.
+    """
+    if not run_ids_by_label:
+        return []
+
+    label_by_run = {run_id: label for label, run_id in run_ids_by_label.items()}
+
+    statement = (
+        select(
+            RecallCoverageQuestion.run_id,
+            RecallCoverageQuestion.dataset_id,
+            func.max(RecallCoverageQuestion.dataset_name).label("dataset_name"),
+            func.count(RecallCoverageQuestion.id).label("question_count"),
+            func.count(RecallCoverageQuestion.judge_score).label("scored_question_count"),
+            func.avg(RecallCoverageQuestion.judge_score).label("avg_score"),
+        )
+        .join(
+            RecallCoverageCuratedQuestion,
+            RecallCoverageQuestion.curated_question_id == RecallCoverageCuratedQuestion.id,
+        )
+        .where(
+            RecallCoverageQuestion.run_id.in_(tuple(label_by_run)),
+            RecallCoverageQuestion.source == QuestionSource.CURATED.value,
+            RecallCoverageCuratedQuestion.scope == CuratedScope.SHARED.value,
+        )
+        .group_by(RecallCoverageQuestion.run_id, RecallCoverageQuestion.dataset_id)
+    )
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        rows = (await session.execute(statement)).all()
+
+    cells = [
+        BenchmarkCell(
+            agent_label=label_by_run[row.run_id],
+            run_id=row.run_id,
+            dataset_id=row.dataset_id,
+            dataset_name=row.dataset_name,
+            question_count=int(row.question_count or 0),
+            scored_question_count=int(row.scored_question_count or 0),
+            avg_score=None if row.avg_score is None else float(row.avg_score),
+        )
+        for row in rows
+    ]
+
+    return sorted(
+        cells,
+        key=lambda cell: (cell.agent_label, cell.dataset_name or "", str(cell.dataset_id)),
+    )
+
+
 __all__ = [
+    "BenchmarkCell",
     "CuratedQuestion",
     "QuestionRecord",
     "RunRecord",
@@ -1275,6 +1386,7 @@ __all__ = [
     "SuggestionRecord",
     "TopicRecord",
     "accept_topic_suggestion",
+    "benchmark_cells",
     "create_curated_question",
     "create_run",
     "create_topic_suggestions",
@@ -1295,6 +1407,7 @@ __all__ = [
     "load_pending_suggestions",
     "load_run_questions",
     "load_settled_suggestions",
+    "latest_complete_runs",
     "mark_run_running",
     "normalize_curated_scope",
     "parse_topic_id",
