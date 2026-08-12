@@ -1,8 +1,7 @@
 import asyncio
-
-import pytest
 from unittest.mock import patch, MagicMock
 
+import pytest
 from sqlalchemy import text, NullPool
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -199,60 +198,6 @@ class TestSQLAlchemyAdapterSqliteConcurrencyModel:
         assert asyncio.run(asyncio.wait_for(run(), timeout=15)) == 2
 
 
-class TestSQLAlchemyAdapterSqlitePoolArgs:
-    """POOL_ARGS is honored on the sqlite branch (issue #4328).
-
-    Defaults are unchanged: with no pool_args the sqlite engine keeps NullPool.
-    ``poolclass: "nullpool"`` is normalized to the class, matching the
-    server-database branch, so one POOL_ARGS value means the same thing on
-    every backend.
-    """
-
-    def test_default_stays_nullpool(self, tmp_path):
-        adapter = _make_sqlite_adapter(tmp_path)
-        assert isinstance(adapter.engine.pool, NullPool)
-
-    def test_sizing_keys_opt_into_a_bounded_pool(self, tmp_path):
-        db_file = (tmp_path / "pooled.db").as_posix()
-        adapter = SQLAlchemyAdapter(
-            f"sqlite+aiosqlite:///{db_file}",
-            pool_args={"pool_size": 3, "max_overflow": 7, "pool_timeout": 11},
-        )
-        pool = adapter.engine.pool
-        assert not isinstance(pool, NullPool)
-        assert pool.size() == 3
-        assert pool._max_overflow == 7
-        assert pool._timeout == 11
-
-    def test_nullpool_string_is_normalized(self, tmp_path):
-        db_file = (tmp_path / "nullpool.db").as_posix()
-        adapter = SQLAlchemyAdapter(
-            f"sqlite+aiosqlite:///{db_file}",
-            pool_args={"poolclass": "nullpool"},
-        )
-        assert isinstance(adapter.engine.pool, NullPool)
-
-    def test_nullpool_with_sizing_keys_fails_fast(self, tmp_path):
-        """NullPool takes no sizing arguments; the contradiction must error
-        (same as the server-database branch), never be silently resolved."""
-        db_file = (tmp_path / "conflict.db").as_posix()
-        with pytest.raises(TypeError):
-            SQLAlchemyAdapter(
-                f"sqlite+aiosqlite:///{db_file}",
-                pool_args={"poolclass": "nullpool", "pool_size": 3},
-            )
-
-    def test_pooled_sqlite_still_executes(self, tmp_path):
-        db_file = (tmp_path / "exec.db").as_posix()
-        adapter = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_file}", pool_args={"pool_size": 2})
-
-        async def run():
-            async with adapter.get_async_session() as session:
-                return (await session.execute(text("select 41 + 1"))).scalar()
-
-        assert asyncio.run(run()) == 42
-
-
 class TestGetAsyncSessionCancellation:
     """
     get_async_session must invalidate the connection when its task is cancelled.
@@ -340,3 +285,57 @@ class TestGetAsyncSessionCancellation:
                 await session.execute(text("SELECT 1"))
                 raise asyncio.CancelledError()
         assert calls["invalidate"] == 1
+
+
+class TestSQLAlchemyAdapterSqlitePoolArgs:
+    """POOL_ARGS is honored on the sqlite branch (issue #4328).
+
+    Defaults are unchanged: with no pool_args the sqlite engine keeps NullPool.
+    ``poolclass: "nullpool"`` is normalized to the class, matching the
+    server-database branch, so one POOL_ARGS value means the same thing on
+    every backend.
+    """
+
+    def test_default_stays_nullpool(self, tmp_path):
+        adapter = _make_sqlite_adapter(tmp_path)
+        assert isinstance(adapter.engine.pool, NullPool)
+
+    def test_sizing_keys_opt_into_a_bounded_pool(self, tmp_path):
+        db_file = (tmp_path / "pooled.db").as_posix()
+        adapter = SQLAlchemyAdapter(
+            f"sqlite+aiosqlite:///{db_file}",
+            pool_args={"pool_size": 3, "max_overflow": 7, "pool_timeout": 11},
+        )
+        pool = adapter.engine.pool
+        assert not isinstance(pool, NullPool)
+        assert pool.size() == 3
+        assert pool._max_overflow == 7
+        assert pool._timeout == 11
+
+    def test_nullpool_string_is_normalized(self, tmp_path):
+        db_file = (tmp_path / "nullpool.db").as_posix()
+        adapter = SQLAlchemyAdapter(
+            f"sqlite+aiosqlite:///{db_file}",
+            pool_args={"poolclass": "nullpool"},
+        )
+        assert isinstance(adapter.engine.pool, NullPool)
+
+    def test_nullpool_with_sizing_keys_fails_fast(self, tmp_path):
+        """NullPool takes no sizing arguments; the contradiction must error
+        (same as the server-database branch), never be silently resolved."""
+        db_file = (tmp_path / "conflict.db").as_posix()
+        with pytest.raises(TypeError):
+            SQLAlchemyAdapter(
+                f"sqlite+aiosqlite:///{db_file}",
+                pool_args={"poolclass": "nullpool", "pool_size": 3},
+            )
+
+    def test_pooled_sqlite_still_executes(self, tmp_path):
+        db_file = (tmp_path / "exec.db").as_posix()
+        adapter = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_file}", pool_args={"pool_size": 2})
+
+        async def run():
+            async with adapter.get_async_session() as session:
+                return (await session.execute(text("select 41 + 1"))).scalar()
+
+        assert asyncio.run(run()) == 42

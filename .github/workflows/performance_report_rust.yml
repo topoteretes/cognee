@@ -71,7 +71,25 @@ jobs:
     # ubuntu-latest (not 22.04): lbug's bundled simsimd needs a C compiler with
     # avx512fp16 / _Float16 support (GCC >= 12). This matches cognee-rs's own CI.
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The War-and-Peace real-LLM arm is the binding case and 90 was too tight:
+    # it was cancelled at the limit on two consecutive runs. Measured, with the
+    # cargo cache warm in every one (restore 1.5-2 min, build ~20 min):
+    #
+    #   03:31 UTC nightly   report 53.9 min   job 76 min   success
+    #   14:53 UTC run       report >67 min    job 90 min   CANCELLED
+    #   18:03 UTC run       report >67 min    job 90 min   CANCELLED
+    #
+    # So this is not a cold-cache problem — the benchmark itself is slower by
+    # day, along with the whole nightly (the Python W&P arm's cognify p50 moved
+    # 425s -> 475s across the same runs), which points at LLM API latency rather
+    # than anything in the pipeline. A cancelled job is the worst outcome
+    # available: it produces no report, no metrics and no Slack link, and it
+    # kills the fail-gate too, so the CLO-490 handling cannot rescue it.
+    #
+    # 150 leaves the report room to reach ~125 min against a 54-min best case.
+    # The other three arms finish far sooner, so the only cost is a longer
+    # worst case for a genuinely hung job.
+    timeout-minutes: 150
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
       html_key: ${{ steps.upload.outputs.html_key }}
@@ -168,34 +186,23 @@ jobs:
             echo "✅ Cassette fresh — replay created ${entities} entity-type nodes." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # ── Mock mode: offline, via the committed harness ────────────────────────
-      # run_mock_bench.sh forwards --mock-llm/--mock-memories to the orchestrator
-      # (which passes them through to the bench subcommand) and puts --memories in
-      # BENCH_CMD, so --memories is never duplicated.
-      - name: Run performance report (mock LLM)
-        if: ${{ inputs.mode == 'mock_llm' }}
-        env:
-          PYTHONFAULTHANDLER: 1
-          COGNEE_SKIP_CONNECTION_TEST: 'true'
-        run: |
-          set -euo pipefail
-          COGNEE_PY="$GITHUB_WORKSPACE" \
-          BENCH_BIN="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli" \
-          RUNS="${{ inputs.runs }}" \
-          OUT_DIR="$GITHUB_WORKSPACE/perf-out" \
-          CASSETTE="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.cassette }}" \
-          MEMORIES="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
-            bash "$GITHUB_WORKSPACE/cognee-rs/scripts/perf/run_mock_bench.sh"
-
-      # ── Real-LLM mode: drive the orchestrator directly (no --mock-llm) ───────
-      # BENCH_CMD holds the bench invocation + corpus; the orchestrator adds
-      # --output and (real mode) sleeps 60s between runs. LLM + embedding config
-      # comes from the same standard CI secrets as the Python perf arms
+      # ── Run the report (both modes) ──────────────────────────────────────────
+      # One step for both modes so the failure handling below cannot drift
+      # between them (mirrors performance_report.yml, which also branches on
+      # mode inside a single step).
+      #
+      # Mock mode: run_mock_bench.sh forwards --mock-llm/--mock-memories to the
+      # orchestrator (which passes them through to the bench subcommand) and puts
+      # --memories in BENCH_CMD, so --memories is never duplicated.
+      #
+      # Real-LLM mode: BENCH_CMD holds the bench invocation + corpus; the
+      # orchestrator adds --output and sleeps 60s between runs. LLM + embedding
+      # config comes from the same standard CI secrets as the Python perf arms
       # (performance_report.yml), so all nightly benchmarks measure one model
       # fleet. Note: the mock cassette was recorded with gpt-4o-mini — mock vs
       # real comparability now depends on the org secrets matching the cassette.
-      - name: Run performance report (real LLM)
-        if: ${{ inputs.mode == 'llm' }}
+      - name: Run performance report
+        id: run
         env:
           PYTHONFAULTHANDLER: 1
           COGNEE_SKIP_CONNECTION_TEST: 'true'
@@ -206,30 +213,52 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: |
           set -euo pipefail
-          # The Rust embedding client sends the model id verbatim to the API,
-          # so a litellm-style prefixed secret ("openai/text-embedding-3-small")
-          # 400s with "invalid model ID". Split the secret into the bare model
-          # and a provider the Rust client understands.
-          if [[ "$EMBEDDING_MODEL_RAW" == */* ]]; then
-            export EMBEDDING_PROVIDER="${EMBEDDING_MODEL_RAW%%/*}"
-          else
-            export EMBEDDING_PROVIDER="openai"
-          fi
-          export EMBEDDING_MODEL="${EMBEDDING_MODEL_RAW##*/}"
-          # The Rust client also does not send OpenAI's `dimensions` truncation
-          # parameter (the Python arms get 1536-d vectors that way), so size the
-          # vector store to the model's NATIVE output or every insert fails with
-          # a dimension mismatch. Unknown models keep the client default.
-          case "$EMBEDDING_MODEL" in
-            text-embedding-3-large) export EMBEDDING_DIMENSIONS=3072 ;;
-            text-embedding-3-small | text-embedding-ada-002) export EMBEDDING_DIMENSIONS=1536 ;;
-          esac
           mkdir -p "$GITHUB_WORKSPACE/perf-out"
-          BENCH_CMD="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli bench --memories $GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
-            python3 "$GITHUB_WORKSPACE/cognee/tests/performance/statistics_percentile_report.py" \
-              --runs "${{ inputs.runs }}" \
-              --output "$GITHUB_WORKSPACE/perf-out/report.json" \
-              --html "$GITHUB_WORKSPACE/perf-out/report.html"
+
+          if [ "${{ inputs.mode }}" = "llm" ]; then
+            # The Rust embedding client sends the model id verbatim to the API,
+            # so a litellm-style prefixed secret ("openai/text-embedding-3-small")
+            # 400s with "invalid model ID". Split the secret into the bare model
+            # and a provider the Rust client understands.
+            if [[ "${EMBEDDING_MODEL_RAW:-}" == */* ]]; then
+              export EMBEDDING_PROVIDER="${EMBEDDING_MODEL_RAW%%/*}"
+            else
+              export EMBEDDING_PROVIDER="openai"
+            fi
+            export EMBEDDING_MODEL="${EMBEDDING_MODEL_RAW##*/}"
+            # The Rust client also does not send OpenAI's `dimensions` truncation
+            # parameter (the Python arms get 1536-d vectors that way), so size the
+            # vector store to the model's NATIVE output or every insert fails with
+            # a dimension mismatch. Unknown models keep the client default.
+            case "$EMBEDDING_MODEL" in
+              text-embedding-3-large) export EMBEDDING_DIMENSIONS=3072 ;;
+              text-embedding-3-small | text-embedding-ada-002) export EMBEDDING_DIMENSIONS=1536 ;;
+            esac
+          fi
+
+          # Capture the exit code instead of failing here: the report writes its
+          # JSON/HTML even when runs fail, and the stage + upload + metrics steps
+          # must still run so a partially-failed arm keeps its Slack numbers and
+          # its report link. The job fails at the end via REPORT_RC.
+          set +e
+          if [ "${{ inputs.mode }}" = "mock_llm" ]; then
+            COGNEE_PY="$GITHUB_WORKSPACE" \
+            BENCH_BIN="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli" \
+            RUNS="${{ inputs.runs }}" \
+            OUT_DIR="$GITHUB_WORKSPACE/perf-out" \
+            CASSETTE="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.cassette }}" \
+            MEMORIES="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
+              bash "$GITHUB_WORKSPACE/cognee-rs/scripts/perf/run_mock_bench.sh"
+          else
+            BENCH_CMD="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli bench --memories $GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
+              python3 "$GITHUB_WORKSPACE/cognee/tests/performance/statistics_percentile_report.py" \
+                --runs "${{ inputs.runs }}" \
+                --output "$GITHUB_WORKSPACE/perf-out/report.json" \
+                --html "$GITHUB_WORKSPACE/perf-out/report.html"
+          fi
+          REPORT_RC=$?
+          set -e
+          echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
 
       # ── Stage the report (common to both modes) for S3 upload ────────────────
       - name: Stage report
@@ -270,3 +299,9 @@ jobs:
             total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
           }' "$JSON_PATH")"
           echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if any benchmark run failed
+        if: ${{ env.REPORT_RC != '0' }}
+        run: |
+          echo "Performance report exited with code $REPORT_RC — one or more benchmark runs failed."
+          exit 1

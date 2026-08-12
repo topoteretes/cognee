@@ -13,6 +13,12 @@ from cognee.modules.users.methods import get_user
 
 SLACK_DATASET_NAME = "slack"
 
+# Structured origin stamp: every integration that ingests data should tag it
+# with a node_set naming the source system, so the origin survives into the
+# graph (NodeSet node + belongs_to_set edges + source_node_set property)
+# instead of living only in the dataset name and the prose of the text.
+SLACK_NODE_SET = ["slack"]
+
 
 def _format_remembered_text(
     text: str, *, channel_name: Optional[str], author_id: Optional[str]
@@ -43,4 +49,5 @@ async def remember_message(
         dataset_name=SLACK_DATASET_NAME,
         user=owner,
         run_in_background=True,
+        node_set=SLACK_NODE_SET,
     )

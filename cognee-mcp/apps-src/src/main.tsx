@@ -629,7 +629,7 @@ function Composer({
       const args: Record<string, string> = { filename: file.name, content_base64 };
       if (selectedDataset) args.dataset_name = selectedDataset;
       const result = await app.callServerTool({
-        name: "cognify_file",
+        name: "remember",
         arguments: args,
       });
       const msg = textOf(result) ?? JSON.stringify(result.content);

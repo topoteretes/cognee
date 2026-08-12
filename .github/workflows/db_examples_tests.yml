@@ -78,7 +78,7 @@ jobs:
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: |
-          uv run python examples/database_examples/neo4j_example.py
+          uv run python examples/guides/neo4j_example.py
 
   run-db-example-ladybug:
     name: "Ladybug DB Example Test"
@@ -111,7 +111,7 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           GRAPH_DATABASE_PROVIDER: "ladybug"
         run: |
-          uv run python examples/database_examples/ladybug_example.py
+          uv run python examples/guides/ladybug_example.py
 
   run-db-example-pgvector:
     name: "PostgreSQL PGVector DB Example Test"
@@ -162,4 +162,4 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: |
-          uv run python examples/database_examples/pgvector_example.py
+          uv run python examples/guides/pgvector_example.py

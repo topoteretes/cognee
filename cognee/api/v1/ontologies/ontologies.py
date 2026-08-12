@@ -1,6 +1,7 @@
-import os
+import hashlib
 import json
-import tempfile
+import os
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -8,6 +9,16 @@ from dataclasses import dataclass
 from fastapi import UploadFile
 
 from cognee.base_config import get_base_config
+
+_ONTOLOGY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+class DuplicateOntologyKeyError(ValueError):
+    """Raised when an ontology key already exists for the user.
+
+    A dedicated type lets the router surface a safe, literal client message
+    without echoing the exception text (avoids stack-trace exposure).
+    """
 
 
 @dataclass
@@ -29,7 +40,12 @@ class OntologyService:
         return base_config.data_root_directory
 
     def _get_user_dir(self, user_id: str) -> Path:
-        user_dir = Path(self.base_dir) / str(user_id)
+        base_dir = os.path.normpath(os.path.abspath(os.path.expanduser(os.fspath(self.base_dir))))
+        user_dir = os.path.normpath(os.path.abspath(os.path.join(base_dir, str(user_id))))
+        base_prefix = base_dir if base_dir.endswith(os.sep) else f"{base_dir}{os.sep}"
+        if user_dir != base_dir and not user_dir.startswith(base_prefix):
+            raise ValueError("Invalid user id")
+        user_dir = Path(user_dir)
         user_dir.mkdir(parents=True, exist_ok=True)
         return user_dir
 
@@ -48,28 +64,41 @@ class OntologyService:
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
+    def _validate_ontology_key(self, ontology_key: str) -> str:
+        normalized_key = ontology_key.strip()
+        if not _ONTOLOGY_KEY_RE.fullmatch(normalized_key):
+            raise ValueError("Invalid ontology key")
+        return normalized_key
+
+    def _get_ontology_path(self, user_dir: Path, ontology_key: str) -> Path:
+        normalized_key = self._validate_ontology_key(ontology_key)
+        storage_name = hashlib.blake2s(normalized_key.encode("utf-8"), digest_size=16).hexdigest()
+        return user_dir / f"{storage_name}.owl"
+
     async def upload_ontology(
         self, ontology_key: str, file: UploadFile, user, description: Optional[str] = None
     ) -> OntologyMetadata:
+        ontology_key = self._validate_ontology_key(ontology_key)
         if not file.filename:
             raise ValueError("File must have a filename")
-        if not file.filename.lower().endswith(".owl"):
+        filename = Path(file.filename).name
+        if not filename.lower().endswith(".owl"):
             raise ValueError("File must be in .owl format")
 
         user_dir = self._get_user_dir(str(user.id))
         metadata = self._load_metadata(user_dir)
 
         if ontology_key in metadata:
-            raise ValueError(f"Ontology key '{ontology_key}' already exists")
+            raise DuplicateOntologyKeyError(f"Ontology key '{ontology_key}' already exists")
 
         content = await file.read()
 
-        file_path = user_dir / f"{ontology_key}.owl"
+        file_path = self._get_ontology_path(user_dir, ontology_key)
         with open(file_path, "wb") as f:
             f.write(content)
 
         ontology_metadata = {
-            "filename": file.filename,
+            "filename": filename,
             "size_bytes": len(content),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "description": description,
@@ -79,7 +108,7 @@ class OntologyService:
 
         return OntologyMetadata(
             ontology_key=ontology_key,
-            filename=file.filename,
+            filename=filename,
             size_bytes=len(content),
             uploaded_at=ontology_metadata["uploaded_at"],
             description=description,
@@ -145,10 +174,11 @@ class OntologyService:
 
         contents = []
         for key in ontology_key:
+            key = self._validate_ontology_key(key)
             if key not in metadata:
                 raise ValueError(f"Ontology key '{key}' not found")
 
-            file_path = user_dir / f"{key}.owl"
+            file_path = self._get_ontology_path(user_dir, key)
             if not file_path.exists():
                 raise ValueError(f"Ontology file for key '{key}' not found")
 
@@ -157,18 +187,14 @@ class OntologyService:
         return contents
 
     def delete_ontology(self, ontology_key: str, user) -> None:
+        ontology_key = self._validate_ontology_key(ontology_key)
         user_dir = self._get_user_dir(str(user.id))
         metadata = self._load_metadata(user_dir)
 
         if ontology_key not in metadata:
             raise ValueError(f"Ontology key '{ontology_key}' not found")
 
-        base_dir = user_dir.resolve()
-        file_path = (user_dir / f"{ontology_key}.owl").resolve()
-
-        # Prevent path traversal from deleting files outside the user's ontology directory.
-        if file_path.parent != base_dir:
-            raise ValueError("Invalid ontology key")
+        file_path = self._get_ontology_path(user_dir, ontology_key)
 
         if file_path.is_file():
             file_path.unlink()
