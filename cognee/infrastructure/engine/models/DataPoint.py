@@ -285,7 +285,14 @@ class DataPoint(BaseModel):
             A list of property names corresponding to the index fields, or an empty list if none
             exist.
         """
-        return data_point.metadata["index_fields"] or []
+        # Match the sibling accessors (get_embeddable_data / _properties) and the
+        # index_data_points guard, which all treat falsy metadata as "nothing to
+        # index". Without this, a node whose metadata is None or {} raises
+        # TypeError / KeyError here (e.g. via upsert_nodes) where those paths
+        # return an empty result.
+        if not data_point.metadata:
+            return []
+        return data_point.metadata.get("index_fields") or []
 
     def update_version(self) -> None:
         """
