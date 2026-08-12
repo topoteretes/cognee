@@ -25,7 +25,7 @@ async def update(
     Update existing data in Cognee.
 
     DLT source manifests get a row-level update: when data_id names a DLT
-    manifest (external_metadata.source == "dlt_source"), the new source is
+    manifest (system_metadata.source == "dlt_source"), the new source is
     re-ingested and diffed against the stored manifest by content-addressed
     row ids. Removed rows are deleted from the graph/vector stores, new and
     edited rows are processed, unchanged rows are left untouched (no
@@ -97,7 +97,7 @@ async def update(
     from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
 
     existing_data = await get_data(user.id, data_id)
-    if existing_data is not None and is_dlt_source_manifest(existing_data.external_metadata):
+    if existing_data is not None and is_dlt_source_manifest(existing_data):
         from cognee.modules.data.methods.get_dataset import get_dataset
         from cognee.tasks.ingestion.update_dlt_source import update_dlt_source_rows
 
