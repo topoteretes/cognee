@@ -136,7 +136,13 @@ def build_retriever(retriever_class, **kwargs):
         results = {"chunks": results, "entities": [], "facts": []}
     retriever.get_retrieved_objects = AsyncMock(return_value=results)
     retriever.get_context_from_objects = AsyncMock(return_value="context")
-    retriever.get_completion_from_context = AsyncMock(return_value=["answer"])
+    # run_sequential_session_turn calls inspect.signature() on this to check for
+    # effective_query/turn_preparation kwargs. On Python 3.10, an un-spec'd Mock crashes
+    # there, and spec=<bound method> crashes too (inspect follows its mocked __func__).
+    # Setting __signature__ directly is the one path inspect.signature() short-circuits on.
+    completion_mock = AsyncMock(return_value=["answer"])
+    completion_mock.__signature__ = inspect.signature(retriever.get_completion_from_context)
+    retriever.get_completion_from_context = completion_mock
     retriever.prepare_session_turn_for_retrieval = AsyncMock(
         return_value=SessionTurnPreparation(should_answer=True, effective_query="question")
     )

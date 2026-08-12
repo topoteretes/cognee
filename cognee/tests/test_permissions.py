@@ -11,6 +11,7 @@ import cognee
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -89,13 +90,23 @@ async def permissions_example_env(tmp_path_factory):
     await _reset_engines_and_prune()
 
 
+async def _mock_structured_output(text_input, system_prompt, response_model, **kwargs):
+    """Session search now makes two structured-output calls per turn (answer + turn
+    analysis, run concurrently), not one - the mock has to answer each with the type it
+    asked for, or the analysis call gets the answer's plain string and crashes downstream.
+    """
+    if response_model is SessionTurnAnalysis:
+        return SessionTurnAnalysis()
+    return "MOCK_ANSWER"
+
+
 async def test_permissions_example_flow(permissions_example_env):
     """Pytest version of `examples/python/permissions_example.py` (same scenarios, asserts instead of prints)."""
     # Patch LLM calls so GRAPH_COMPLETION can run without external API keys.
     llm_patch = patch(
         "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
         new_callable=AsyncMock,
-        return_value="MOCK_ANSWER",
+        side_effect=_mock_structured_output,
     )
 
     # Resolve example data file path (repo-shipped PDF).
