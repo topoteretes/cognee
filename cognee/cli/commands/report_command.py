@@ -5,6 +5,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.reference import SupportsCliCommand
 import cognee.cli.echo as fmt
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 class ReportCommand(SupportsCliCommand):
@@ -22,7 +23,7 @@ class ReportCommand(SupportsCliCommand):
             "--datasets",
             "-d",
             nargs="*",
-            default=["main_dataset"],
+            default=[DEFAULT_DATASET_NAME],
             help="Dataset name(s) to analyse (default: main_dataset)",
         )
         parser.add_argument(
@@ -48,7 +49,7 @@ class ReportCommand(SupportsCliCommand):
                     from cognee.cli.user_resolution import resolve_cli_user
 
                     user = await resolve_cli_user(getattr(args, "user_id", None))
-                    datasets = args.datasets or ["main_dataset"]
+                    datasets = args.datasets or [DEFAULT_DATASET_NAME]
                     return await report(
                         datasets=datasets,
                         output_path=args.output,

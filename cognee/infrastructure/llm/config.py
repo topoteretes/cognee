@@ -32,6 +32,29 @@ KNOWN_LLM_PROVIDERS = frozenset(
     }
 )
 
+# Local inference servers process requests (near-)serially, unlike cloud
+# providers. One definition of the distinction, for everything that needs it:
+# by first-class provider name, or by litellm model routing prefix (LM Studio
+# has no first-class provider in cognee). vLLM is deliberately NOT here: it
+# serves with continuous batching and absorbs concurrency like a cloud
+# endpoint, so it keeps the regular settings.
+LOCAL_LLM_PROVIDERS = frozenset({"ollama", "llama_cpp"})
+LOCAL_LLM_MODEL_PREFIXES = ("lm_studio/",)
+
+# Default RPM budget for local inference servers when LLM_RATE_LIMIT_REQUESTS
+# is not explicitly configured; cloud providers keep the regular default of 60.
+LOCAL_DEFAULT_RATE_LIMIT_REQUESTS = 10
+
+
+def is_local_llm(provider: str | None, model: str | None) -> bool:
+    """True when the provider/model points at a serial local inference server
+    (Ollama, llama.cpp by provider; LM Studio by model prefix). vLLM counts
+    as regular: continuous batching absorbs concurrency like a cloud endpoint.
+    """
+    if (provider or "").lower() in LOCAL_LLM_PROVIDERS:
+        return True
+    return (model or "").lower().startswith(LOCAL_LLM_MODEL_PREFIXES)
+
 
 class LLMConfig(BaseSettings):
     """
@@ -100,15 +123,24 @@ class LLMConfig(BaseSettings):
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
+    image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
+    image_transcription_max_completion_tokens: int = 1024
+    image_transcription_reasoning_effort: str = "low"
     llm_rate_limit_enabled: bool = False
+    # Default 60 requests per interval; local inference servers get
+    # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     llm_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
+    # When the provider reports a rate limit, warn and switch on the RPM limiter
+    # (with the llm_rate_limit_requests/interval budget) for the rest of the process.
+    auto_rate_limit: bool = True
 
     llama_cpp_model_path: str | None = None
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
+    ollama_num_ctx: int = 2048
 
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
@@ -166,6 +198,26 @@ class LLMConfig(BaseSettings):
                 from cognee.infrastructure.llm.exceptions import ProviderNotDeducibleError
 
                 raise ProviderNotDeducibleError(model)
+
+        return self
+
+    @model_validator(mode="after")
+    def default_local_rate_limit_budget(self) -> "LLMConfig":
+        """
+        Give local inference servers a smaller default RPM budget.
+
+        Serial local servers (Ollama, LM Studio, llama.cpp) process requests
+        (near-)serially, so when the rate limiter engages, the regular cloud
+        default of 60 requests per interval would still flood them. An
+        explicitly configured ``LLM_RATE_LIMIT_REQUESTS`` always wins. Runs
+        after ``infer_provider_from_model`` so the provider is already
+        resolved.
+        """
+        if "llm_rate_limit_requests" in self.model_fields_set:
+            return self
+
+        if is_local_llm(self.llm_provider, self.llm_model):
+            self.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
 
         return self
 
@@ -286,6 +338,7 @@ class LLMConfig(BaseSettings):
             "llama_cpp_n_ctx": self.llama_cpp_n_ctx,
             "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
+            "ollama_num_ctx": self.ollama_num_ctx,
             "llm_args": self.llm_args,
         }
 

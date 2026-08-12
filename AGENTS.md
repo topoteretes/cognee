@@ -16,7 +16,7 @@ This document summarizes how to work with the cognee repository: how it’s orga
   - `__main__.py`: Entrypoint to route to CLI.
 - `cognee-mcp/`: Model Context Protocol server exposing cognee as MCP tools (SSE/HTTP/stdio). Contains its own README and Dockerfile.
 - `cognee-frontend/`: Next.js UI for local development and demos.
-- `distributed/`: Utilities for distributed execution (Modal, workers, queues).
+- `distributed/deploy/`: One-click deployment templates (Modal, Fly.io, Railway, Render, Daytona).
 - `examples/`: Example scripts demonstrating the public APIs and features (graph, code graph, multimodal, permissions, etc.).
 - `notebooks/`: Jupyter notebooks for demos and tutorials.
 - `alembic/`: Database migrations for relational backends.
@@ -93,6 +93,40 @@ npm run dev     # Next.js dev server
 npm run lint    # ESLint
 npm run build && npm start
 ```
+
+## Runtime Flags Worth Knowing
+
+Three env flags trade memory features for speed; know what each disables before flipping it:
+
+- `CACHING` (default `true`) — master switch for the session-memory layer. When `false`,
+  `remember(session_id=...)` raises, `recall()` loses session history, `agent_memory`
+  session options error out, and `AUTO_FEEDBACK` is implicitly disabled. Never benchmark
+  cognee with this off — that measures cognee with its memory layer removed.
+- `AUTO_FEEDBACK` (default `true`) — one structured-output LLM call per answered turn
+  that detects implicit feedback and lets memory self-tune. Disable for low-latency,
+  lower-cost reads; session store/recall itself keeps working.
+- `DATASET_QUEUE_ENABLED` (default `true`) — per-process cap on concurrent datasets
+  (`DATASET_QUEUE_MAX_CONCURRENT`, default 6); also tears down subprocess DB engines on
+  scope exit and pins in-use engines against cache eviction. Disable only for
+  single-dataset scripts — under parallel multi-dataset load, turning it off risks
+  file-lock leaks and unbounded embedded engines.
+
+## Multi-Tenancy Support by Backend
+
+With `ENABLE_BACKEND_ACCESS_CONTROL=true` (the default) each user+dataset gets isolated
+graph and vector databases. Backend support (source of truth:
+`cognee/infrastructure/databases/dataset_database_handler/supported_dataset_database_handlers.py`):
+
+- Graph — supported: Ladybug/Kuzu (default), Neo4j (needs multi-database, i.e.
+  Enterprise/Aura), Postgres (demo), Turso. Unsupported: Neptune, ladybug-remote.
+- Vector — supported: LanceDB (default), PGVector, Turso. Unsupported: Neptune
+  Analytics and community adapters (unless they register a handler via
+  `use_dataset_database_handler()`).
+- Relational (SQLite/Postgres) is always a single shared DB (users, ACLs, registry).
+
+Both graph and vector must be supported, or cognee raises `EnvironmentError` — an
+unsupported backend with the flag on is a hard error, not a fallback to shared DBs;
+set `ENABLE_BACKEND_ACCESS_CONTROL=false` to run such backends single-tenant.
 
 ## Coding Style & Naming Conventions
 

@@ -4,28 +4,52 @@ from typing import Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.modules.pipelines.tasks.task import task_summary
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
+from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    construct_data_points_and_edges_with_ontology,
+)
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
-    expand_with_nodes_and_edges,
-    retrieve_existing_edges,
+    attach_new_edges_to_data_points,
+    construct_data_points_and_edges,
+    find_existing_edge_identities,
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
+
+logger = get_logger("extract_graph_from_data")
+
+
+def _remove_duplicate_extracted_nodes_by_id(
+    extracted_graphs: list[KnowledgeGraph],
+) -> None:
+    """Keep the first extracted node for each graph-local ID."""
+    for extracted_graph in extracted_graphs:
+        if not extracted_graph:
+            continue
+
+        nodes_by_id = {}
+        for node in extracted_graph.nodes:
+            if node.id in nodes_by_id:
+                # NOTE: This is a lossy strategy; duplicate IDs may deserve more careful handling.
+                logger.warning("Ignoring duplicate extracted node ID: %s", node.id)
+                continue
+
+            nodes_by_id[node.id] = node
+
+        if len(nodes_by_id) != len(extracted_graph.nodes):
+            extracted_graph.nodes = list(nodes_by_id.values())
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -58,25 +82,25 @@ async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
-    ontology_resolver: BaseOntologyResolver,
+    ontology_resolver: Optional[BaseOntologyResolver],
     pipeline_name: str = None,
     task_name: str = None,
     **kwargs,
 ) -> List[DocumentChunk]:
-    """Integrate chunk graphs with ontology validation and store in databases.
+    """Convert extracted graphs into linked data points for later storage.
 
-    This function processes document chunks and their associated knowledge graphs,
-    validates entities against an ontology resolver, and stores the integrated
-    data points and edges in the configured databases.
+    Graphs take the pure construction path when no ontology resolver is provided.
+    Otherwise, ontology matches are canonicalized and enriched before construction.
+    Candidate edges that already exist in graph storage are not attached again.
 
     Args:
         data_chunks: List of document chunks containing source data
         chunk_graphs: List of knowledge graphs corresponding to each chunk
         graph_model: Pydantic model class for graph data validation
-        ontology_resolver: Resolver for validating entities against ontology
+        ontology_resolver: Optional resolver for ontology canonicalization and enrichment
 
     Returns:
-        List of updated DocumentChunk objects with integrated data
+        The input chunks, updated with their extracted entities
 
     Raises:
         InvalidChunkGraphInputError: If input validation fails
@@ -92,10 +116,8 @@ async def integrate_chunk_graphs(
         )
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
-    if ontology_resolver is None or not hasattr(ontology_resolver, "get_subgraph"):
-        raise InvalidOntologyAdapterError(
-            type(ontology_resolver).__name__ if ontology_resolver else "None"
-        )
+    if ontology_resolver is not None and not hasattr(ontology_resolver, "get_subgraph"):
+        raise InvalidOntologyAdapterError(type(ontology_resolver).__name__)
 
     if not issubclass(graph_model, KnowledgeGraph):
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
@@ -103,23 +125,36 @@ async def integrate_chunk_graphs(
 
         return data_chunks
 
-    existing_edges_map = await retrieve_existing_edges(
-        data_chunks,
-        chunk_graphs,
-    )
+    _remove_duplicate_extracted_nodes_by_id(chunk_graphs)
 
-    data_chunks, entity_nodes = expand_with_nodes_and_edges(
-        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
-    )
+    if ontology_resolver is None:
+        data_points_by_id, edges_by_identity = construct_data_points_and_edges(
+            data_chunks,
+            chunk_graphs,
+        )
+    else:
+        data_points_by_id, edges_by_identity = construct_data_points_and_edges_with_ontology(
+            data_chunks,
+            chunk_graphs,
+            ontology_resolver,
+        )
 
-    if entity_nodes:
+    existing_edge_identities = await find_existing_edge_identities(edges_by_identity.keys())
+    attach_new_edges_to_data_points(
+        data_points_by_id,
+        edges_by_identity,
+        existing_edge_identities,
+    )
+    constructed_data_points = list(data_points_by_id.values())
+
+    if constructed_data_points:
         if pipeline_name or task_name:
-            for node in entity_nodes:
-                _stamp_provenance_deep(node, pipeline_name, task_name)
+            for data_point in constructed_data_points:
+                _stamp_provenance_deep(data_point, pipeline_name, task_name)
 
         cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
         if callable(cache_entity_embeddings):
-            callback_result = cache_entity_embeddings(entity_nodes, **kwargs)
+            callback_result = cache_entity_embeddings(constructed_data_points, **kwargs)
             if inspect.isawaitable(callback_result):
                 await callback_result
 
@@ -167,35 +202,7 @@ async def extract_graph_from_data(
         if inspect.isawaitable(callback_result):
             await callback_result
 
-    # Note: Filter edges with missing source or target nodes
-    if issubclass(graph_model, KnowledgeGraph):
-        for graph in chunk_graphs:
-            valid_node_ids = {node.id for node in graph.nodes}
-            graph.edges = [
-                edge
-                for edge in graph.edges
-                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
-            ]
-
-    # Extract resolver from config if provided, otherwise get default
-    if config is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            config: Config = {
-                "ontology_config": {
-                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
-                }
-            }
-        else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
-
-    ontology_resolver = config["ontology_config"]["ontology_resolver"]
+    ontology_resolver = get_configured_ontology_resolver(config)
 
     task_name = "extract_graph_from_data"
 

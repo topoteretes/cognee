@@ -1,8 +1,7 @@
 from fastapi.responses import JSONResponse
 from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Dict
 from fastapi import APIRouter
-from fastapi.encoders import jsonable_encoder
 from typing import List
 from uuid import UUID
 from pydantic import WithJsonSchema
@@ -13,6 +12,7 @@ from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
+    PipelineRunInfo,
 )
 from cognee.api.DTO import ErrorResponse
 
@@ -28,7 +28,7 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=None,
+        response_model=Dict[UUID, PipelineRunInfo],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -50,7 +50,7 @@ def get_update_router() -> APIRouter:
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
         data: List[UploadFile] = File(
-            default=None,
+            ...,
             description=(
                 "New version of the document that replaces the existing one. The existing "
                 "document is deleted before the replacement is ingested, so always provide "

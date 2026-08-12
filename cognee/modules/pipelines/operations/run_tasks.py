@@ -1,13 +1,10 @@
-import os
-
 import asyncio
-from functools import wraps
+
 from typing import Any, Awaitable, Callable, List, Optional, Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
@@ -36,26 +33,6 @@ from ..tasks.task import Task
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
-def override_run_tasks(new_gen):
-    def decorator(original_gen):
-        @wraps(original_gen)
-        async def wrapper(*args, distributed=None, **kwargs):
-            default_distributed_value = os.getenv("COGNEE_DISTRIBUTED", "False").lower() == "true"
-            distributed = default_distributed_value if distributed is None else distributed
-
-            if distributed:
-                async for run_info in new_gen(*args, **kwargs):
-                    yield run_info
-            else:
-                async for run_info in original_gen(*args, **kwargs):
-                    yield run_info
-
-        return wrapper
-
-    return decorator
-
-
-@override_run_tasks(run_tasks_distributed)
 async def run_tasks(
     tasks: Union[List[Task], Callable[[Any], List[Task]]],
     dataset_id: UUID,

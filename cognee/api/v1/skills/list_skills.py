@@ -17,6 +17,9 @@ from cognee.modules.tools.resolve_skills import (
     _load_skill_nodes,
     find_skill_by_id,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("list_skills")
 
 
 def _skill_to_dict(skill: Skill, *, include_procedure: bool = False) -> dict[str, Any]:
@@ -85,6 +88,48 @@ async def get_skill(skill_id: str, dataset: str | UUID) -> dict[str, Any] | None
     else:
         skill = await find_skill_by_id(skill_id, dataset_id=dataset)
     return _skill_to_dict(skill, include_procedure=True) if skill else None
+
+
+async def delete_skill(skill_id: str, dataset: str | UUID) -> bool:
+    """Hard-delete a single dataset-scoped Skill node (graph node + embeddings).
+
+    Returns True when a matching active Skill was found and removed, False when
+    no such skill exists (so callers can surface a 404).
+    """
+    if not isinstance(dataset, UUID):
+        try:
+            dataset = UUID(str(dataset))
+        except (ValueError, TypeError):
+            return False
+    owner_id = await _resolve_dataset_owner(dataset)
+    if owner_id is not None:
+        async with set_database_global_context_variables(dataset, owner_id):
+            return await _delete_skill_in_context(skill_id, dataset)
+    return await _delete_skill_in_context(skill_id, dataset)
+
+
+async def _delete_skill_in_context(skill_id: str, dataset: UUID) -> bool:
+    skill = await find_skill_by_id(skill_id, dataset_id=dataset)
+    if skill is None:
+        return False
+
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    # delete_nodes cascades connected edges on every graph backend (DETACH
+    # DELETE on ladybug/neo4j/neptune; ON DELETE CASCADE FKs on postgres/turso).
+    await graph_engine.delete_nodes([str(skill.id)])
+
+    # Remove the Skill's embeddings. index_fields=["search_text"] maps to the
+    # ``Skill_search_text`` collection on every vector adapter.
+    try:
+        from cognee.infrastructure.databases.vector import get_vector_engine_async
+
+        vector_engine = await get_vector_engine_async()
+        await vector_engine.delete_data_points("Skill_search_text", [str(skill.id)])
+    except Exception as exc:
+        logger.warning("Skill vector cleanup skipped (non-fatal): %s", exc)
+    return True
 
 
 async def _resolve_dataset_owner(dataset: str | UUID) -> UUID | None:

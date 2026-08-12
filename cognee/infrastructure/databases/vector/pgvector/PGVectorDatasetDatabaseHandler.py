@@ -9,7 +9,7 @@ from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 from cognee.infrastructure.databases.vector.create_vector_engine import (
     create_vector_engine,
-    evict_vector_engines_for_database,
+    vector_engine_cache,
 )
 from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
@@ -100,4 +100,4 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # the drop's awaits would be re-cached and survive a pre-drop eviction.
         # Post-drop nothing stale can persist — engines connect lazily and a fresh
         # adapter starts with empty collection metadata.
-        evict_vector_engines_for_database(dataset_database.vector_database_name)
+        vector_engine_cache.evict_for_database(dataset_database.vector_database_name)
