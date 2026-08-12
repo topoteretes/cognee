@@ -29,16 +29,16 @@ cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 
 
 def _manifest_item():
-    return SimpleNamespace(external_metadata={"source": "dlt_source"}, extension=None)
+    return SimpleNamespace(system_metadata={"source": "dlt_source"}, extension=None)
 
 
 def _legacy_item():
     # Pre-manifest per-row DLT record: unsupported, must fail loudly.
-    return SimpleNamespace(id="legacy-1", external_metadata={"source": "dlt"}, extension=None)
+    return SimpleNamespace(id="legacy-1", system_metadata={"source": "dlt"}, extension=None)
 
 
 def _text_item():
-    return SimpleNamespace(external_metadata=None, extension="txt")
+    return SimpleNamespace(system_metadata=None, extension="txt")
 
 
 class TestCognifyRouting:
@@ -53,6 +53,22 @@ class TestCognifyRouting:
 
     def test_plain_document_routes_standard(self):
         assert cognify_route_for(_text_item()) is CognifyRoute.STANDARD
+
+    def test_user_external_metadata_cannot_steer_routing(self):
+        """Routing keys on system_metadata ONLY. A user storing a 'source' key
+        in their free-form external_metadata must not send their document down
+        the DLT route (or trip the legacy tombstone)."""
+        smuggler = SimpleNamespace(
+            external_metadata={"source": "dlt_source", "source_name": "people"},
+            system_metadata=None,
+            extension="txt",
+        )
+        assert cognify_route_for(smuggler) is CognifyRoute.STANDARD
+
+        legacy_smuggler = SimpleNamespace(
+            external_metadata={"source": "dlt"}, system_metadata=None, extension="txt"
+        )
+        assert cognify_route_for(legacy_smuggler) is CognifyRoute.STANDARD
 
 
 class TestCognifyMakesOneCall:

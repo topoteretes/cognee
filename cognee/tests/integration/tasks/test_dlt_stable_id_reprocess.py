@@ -97,8 +97,7 @@ async def _manifest_record(user, dataset_name=DATASET):
     records = [
         d
         for d in await get_dataset_data(dataset.id)
-        if isinstance(d.external_metadata, dict)
-        and d.external_metadata.get("source") == "dlt_source"
+        if isinstance(d.system_metadata, dict) and d.system_metadata.get("source") == "dlt_source"
     ]
     return dataset, records
 

@@ -168,10 +168,10 @@ async def test_dlt_items_are_routed_out_before_any_read(offline_estimator):
 
     The manifest's raw_data_location points nowhere — if the estimator tried
     document.read() on it, this test would explode. Chunk counts come from
-    external_metadata["row_count"] via the same routing policy execution uses.
+    system_metadata["row_count"] via the same routing policy execution uses.
     """
     manifest_item = SimpleNamespace(
-        external_metadata={"source": "dlt_source", "row_count": 42},
+        system_metadata={"source": "dlt_source", "row_count": 42},
         extension=None,
         raw_data_location="does-not-exist://manifest.json",
     )
@@ -188,7 +188,7 @@ async def test_dlt_items_are_routed_out_before_any_read(offline_estimator):
 async def test_manifest_without_row_count_warns_and_counts_zero(offline_estimator):
     manifest_item = SimpleNamespace(
         id="manifest-1",
-        external_metadata={"source": "dlt_source"},
+        system_metadata={"source": "dlt_source"},
         extension=None,
         raw_data_location="does-not-exist://manifest.json",
     )

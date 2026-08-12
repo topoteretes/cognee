@@ -41,8 +41,8 @@ PEOPLE_ROWS = [
 UNIQUE_ROW_COUNT = 3
 
 
-def _external_metadata(row) -> dict:
-    ext = row["external_metadata"]
+def _system_metadata(row) -> dict:
+    ext = row["system_metadata"]
     if isinstance(ext, str):
         ext = json.loads(ext)
     return ext or {}
@@ -63,12 +63,12 @@ async def test_dlt_mixed_input():
         f"Expected 2 data records (1 DLT manifest + 1 text), got {len(data_rows)}"
     )
 
-    manifest_rows = [r for r in data_rows if _external_metadata(r).get("source") == "dlt_source"]
+    manifest_rows = [r for r in data_rows if _system_metadata(r).get("source") == "dlt_source"]
     assert len(manifest_rows) == 1, (
         f"Expected exactly 1 DLT-source manifest record, got {len(manifest_rows)}"
     )
 
-    manifest_meta = _external_metadata(manifest_rows[0])
+    manifest_meta = _system_metadata(manifest_rows[0])
     assert manifest_meta["row_count"] == UNIQUE_ROW_COUNT, (
         f"Duplicate row was not collapsed: row_count={manifest_meta['row_count']}, "
         f"expected {UNIQUE_ROW_COUNT}"

@@ -8,6 +8,9 @@ class DataItem:
     data: Any
     label: Optional[str] = None
     external_metadata: Optional[dict] = field(default=None)
+    # System-derived metadata (e.g. DLT source stamps) persisted to
+    # Data.system_metadata — never merged with user external_metadata.
+    system_metadata: Optional[dict] = field(default=None)
     data_id: Optional[UUID] = None
     # Optional pre-computed content hash. When set together with an explicit
     # data_id, the add pipeline's incremental skip compares it against the

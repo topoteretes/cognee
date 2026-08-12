@@ -166,7 +166,7 @@ async def resolve_dlt_sources(
             manifest_data_ids.add(item.data_id)
 
     # Manifest source names, collected before document items join the list.
-    ingested_source_names = {item.external_metadata["source_name"] for item in expanded_items}
+    ingested_source_names = {item.system_metadata["source_name"] for item in expanded_items}
     expanded_items.extend(document_data_items)
 
     logger.info(
@@ -340,7 +340,7 @@ async def _build_source_manifest_item(
     return DataItem(
         data=manifest_text,
         label=f"dlt_source:{source_name}",
-        external_metadata={
+        system_metadata={
             "source": "dlt_source",
             "source_name": source_name,
             "dlt_db_name": dlt_db_name,
@@ -426,7 +426,7 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     """Build a text-document DataItem from a document-source dlt row.
 
     The row is expected to carry ``title``/``content`` columns (and optionally
-    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag``
+    ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
     routes the document through normal cognify entity extraction rather
     than the deterministic manifest path.
     """
@@ -435,16 +435,16 @@ def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -
     content = _clean(row_data.get("content"))
     text = f"# {title}\n\n{content}".strip() if title else content
 
-    external_metadata = {"source": source_tag, "title": title or None}
+    system_metadata = {"source": source_tag, "title": title or None}
     if row_data.get("url"):
-        external_metadata["url"] = row_data["url"]
+        system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
-        external_metadata["external_id"] = str(row_data["id"])
+        system_metadata["external_id"] = str(row_data["id"])
 
     return DataItem(
         data=text,
         label=title or str(row_data.get("id")),
-        external_metadata=external_metadata,
+        system_metadata=system_metadata,
         data_id=data_id,
     )
 
@@ -572,7 +572,7 @@ async def _delete_dlt_orphans(
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
 
-    ``sources`` restricts cleanup to Data whose ``external_metadata["source"]``
+    ``sources`` restricts cleanup to Data whose ``system_metadata["source"]``
     is one of the given tags: the default covers relational manifests and
     legacy per-row records, while document cleanup passes its document tags
     (e.g. ``("notion",)``) so reconciling one path never removes the other's
@@ -602,16 +602,18 @@ async def _delete_dlt_orphans(
 
     orphans = []
     for data_item in all_data:
-        ext = data_item.external_metadata
-        if not isinstance(ext, dict):
+        # Deletion decisions key on system_metadata ONLY — external_metadata
+        # is user-writable and must never make a record deletable.
+        meta = data_item.system_metadata
+        if not isinstance(meta, dict):
             continue
-        source = ext.get("source")
+        source = meta.get("source")
         if source not in sources:
             continue
         if (
             source == "dlt_source"
             and manifest_source_names is not None
-            and ext.get("source_name") not in manifest_source_names
+            and meta.get("source_name") not in manifest_source_names
         ):
             continue
         if data_item.id not in fresh_data_ids:

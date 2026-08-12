@@ -140,7 +140,7 @@ async def test_duplicate_source_identity_is_rejected_loudly():
     shared_id = uuid4()
     duplicate_item = DataItem(
         data="{}",
-        external_metadata={"source": "dlt_source", "source_name": "orders"},
+        system_metadata={"source": "dlt_source", "source_name": "orders"},
         data_id=shared_id,
         content_hash="h",
     )
