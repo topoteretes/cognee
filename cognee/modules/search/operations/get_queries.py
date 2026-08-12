@@ -49,21 +49,8 @@ class QueryWindowRow:
     created_at: datetime
 
 
-def session_id_column() -> Optional[Any]:
-    """Return ``Query.session_id`` if that column exists, else ``None``.
-
-    It does not exist yet: propagating the SDK's session id into search history
-    is a separate, currently blocked ticket, and this module must not add the
-    column. Looking it up dynamically means the prefix predicates below are
-    written, tested and correct *now* — the moment the column lands they start
-    filtering with no change here — while today they honestly select nothing
-    instead of quietly degrading into "every row".
-    """
-    return getattr(Query, "session_id", None)
-
-
 def build_session_predicate(
-    session_column: Optional[Any],
+    session_column: Any,
     mode: Union[AgentScopeMode, str] = AgentScopeMode.ALL,
     escaped_prefixes: Sequence[str] = (),
     excluded_prefixes: Sequence[str] = (),
@@ -80,20 +67,10 @@ def build_session_predicate(
     owns. Escaping cannot express that; subtraction can.
 
     The column is a parameter rather than being read from ``Query`` directly so
-    both rules can be exercised against a real database while
-    ``Query.session_id`` does not exist.
+    both rules can be exercised against a purpose-built table.
     """
     if mode == AgentScopeMode.ALL:
         return None
-
-    if session_column is None:
-        # No ``session_id`` column, so no row can be attributed to a session and
-        # every session-scoped mode selects nothing — "api" included. Letting
-        # "api" reason "no row has a session, therefore every row is api" would
-        # make it a second, differently named "all" mode and report the whole
-        # tenant's traffic as one agent's. Per spec, every label except "all"
-        # reports an empty window until the column ships.
-        return false()
 
     if mode == AgentScopeMode.NEGATED:
         if not escaped_prefixes:
@@ -138,7 +115,7 @@ def build_session_predicate(
 def session_predicate_for_scope(scope: AgentScope) -> Optional[ColumnElement[bool]]:
     """The ``session_id`` predicate for a resolved scope, against the live column."""
     return build_session_predicate(
-        session_id_column(), scope.mode, scope.prefixes, scope.excluded_prefixes
+        Query.session_id, scope.mode, scope.prefixes, scope.excluded_prefixes
     )
 
 

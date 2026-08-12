@@ -54,7 +54,7 @@ ALEMBIC_DIR = Path(__file__).resolve().parents[4] / "alembic"
 REVISION_PATH = ALEMBIC_DIR / "versions" / "c7e9a1b3d5f2_add_recall_coverage_tables.py"
 
 # The head this revision was written against.
-PREVIOUS_HEAD = "e5a7b9c1d3f4"
+PREVIOUS_HEAD = "a7c3e9f1b5d8"
 REVISION_ID = "c7e9a1b3d5f2"
 
 

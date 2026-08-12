@@ -4,11 +4,13 @@ Two halves:
 
 * the window filters against the real ``queries`` table on SQLite — tenant-wide
   (no ``user_id`` filter), age-bounded, type-bounded, newest first;
-* the session-id predicate against a stand-in table that *has* a ``session_id``
-  column. ``queries`` does not have one yet (a separate, blocked ticket), so
-  without the stand-in the ``LIKE``-escaping rules that decide which agent a
-  session belongs to would ship untested and be discovered wrong later, on real
-  data, as "Claude Desktop's questions are showing up under Claude Code".
+* the session-id predicate against a two-column stand-in table, one row per
+  interesting session shape. The rules that decide which agent a session
+  belongs to are what would otherwise be discovered wrong later, on real data,
+  as "Claude Desktop's questions are showing up under Claude Code" — so they are
+  exercised against a table holding exactly the awkward cases and nothing else.
+  ``test_session_predicate_is_wired_to_the_live_column`` covers the join back to
+  the real ``Query.session_id``.
 """
 
 import importlib
@@ -32,8 +34,9 @@ get_queries_mod = importlib.import_module("cognee.modules.search.operations.get_
 
 NOW = datetime(2026, 8, 12, 12, 0, 0, tzinfo=timezone.utc)
 
-# A stand-in for ``queries`` once ``session_id`` lands. Its own MetaData so it
-# never joins ``Base.metadata`` and cannot be created by anything else.
+# The session-id cases, isolated from everything else ``queries`` carries. Its
+# own MetaData so it never joins ``Base.metadata`` and cannot be created by
+# anything else.
 _stub_metadata = MetaData()
 SESSIONED_QUERIES = Table(
     "sessioned_queries",
@@ -135,19 +138,27 @@ def test_all_mode_applies_no_session_predicate():
     assert _matching_session_keys("all") == set(SESSION_IDS)
 
 
-def test_session_modes_select_nothing_while_the_column_is_absent():
-    """Until ``Query.session_id`` ships, every session-scoped mode is empty.
+def test_session_predicate_is_wired_to_the_live_column():
+    """The scoped predicates filter on the real ``Query.session_id`` column.
 
-    "api" included: reasoning "no row has a session, so every row is api" would
-    make it a second "all" and report the whole tenant as one agent.
+    Guards the wiring, not the matching rules — those are covered above against
+    a purpose-built table. If ``session_predicate_for_scope`` were ever pointed
+    somewhere other than the live column, every session-scoped label would go
+    quietly wrong while the rule tests kept passing.
     """
-    assert get_queries_mod.session_id_column() is None
-
-    for mode in (AgentScopeMode.PREFIX, AgentScopeMode.NEGATED):
-        predicate = get_queries_mod.build_session_predicate(None, mode, ("claude\\_",))
+    for label in ("claude-code", "api"):
+        predicate = get_queries_mod.session_predicate_for_scope(
+            resolve_agent_scope(label, config=_config())
+        )
         compiled = str(predicate.compile(compile_kwargs={"literal_binds": True}))
 
-        assert compiled in ("false", "0 = 1")
+        assert "queries.session_id" in compiled
+
+    # "all" applies no session predicate at all.
+    assert (
+        get_queries_mod.session_predicate_for_scope(resolve_agent_scope("all", config=_config()))
+        is None
+    )
 
 
 @pytest_asyncio.fixture
@@ -181,6 +192,7 @@ async def _insert_query(engine, **overrides):
         "query_type": "GRAPH_COMPLETION",
         "user_id": uuid4(),
         "dataset_id": None,
+        "session_id": None,
         "created_at": NOW,
     }
     values.update(overrides)
@@ -264,16 +276,24 @@ async def test_window_rows_carry_the_replay_projection(queries_engine):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("agent_label", ["claude-code", "api"])
-async def test_window_is_empty_for_a_session_scoped_label(queries_engine, agent_label):
-    """The expected result for every label except "all" until session_id ships."""
-    await _insert_query(queries_engine)
+async def test_window_selects_only_the_labelled_agents_rows(queries_engine):
+    """The end-to-end cut: three agents' traffic, one label's rows out."""
+    await _insert_query(queries_engine, text="claude asked", session_id="claude_a1")
+    await _insert_query(queries_engine, text="codex asked", session_id="codex_a1")
+    await _insert_query(queries_engine, text="raw api asked", session_id=None)
 
-    rows = await get_queries_mod.get_queries(
-        session_scope=resolve_agent_scope(agent_label, config=_config())
-    )
+    async def texts(agent_label):
+        rows = await get_queries_mod.get_queries(
+            session_scope=resolve_agent_scope(agent_label, config=_config())
+        )
+        return {row.text for row in rows}
 
-    assert rows == []
+    assert await texts("claude-code") == {"claude asked"}
+    assert await texts("codex") == {"codex asked"}
+    # A session id nobody owns, and no session at all, are both "api".
+    assert await texts("api") == {"raw api asked"}
+    # A configured label with no traffic is empty, not an error.
+    assert await texts("cursor") == set()
 
 
 @pytest.mark.asyncio

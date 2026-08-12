@@ -76,9 +76,12 @@ async def queries_engine(tmp_path, monkeypatch):
 
 
 async def _insert(engine, rows):
-    """``rows`` are ``(text, query_type, created_at)`` triples."""
+    """``rows`` are ``(text, query_type, created_at)`` triples, or 4-tuples with
+    a trailing ``session_id``. A missing session id means NULL, which is what
+    raw API traffic records and what the ``api`` label collects."""
     async with engine.get_async_session() as session:
-        for text, query_type, created_at in rows:
+        for row in rows:
+            text, query_type, created_at = row[:3]
             session.add(
                 Query(
                     id=uuid4(),
@@ -86,6 +89,7 @@ async def _insert(engine, rows):
                     query_type=query_type,
                     user_id=uuid4(),
                     created_at=created_at,
+                    session_id=row[3] if len(row) > 3 else None,
                 )
             )
         await session.commit()
@@ -101,18 +105,29 @@ async def test_no_traffic_means_no_agents_rather_than_the_prefix_map(queries_eng
 
 
 @pytest.mark.asyncio
-async def test_a_label_with_traffic_is_reported_with_its_row_count(queries_engine):
+async def test_labels_are_discovered_from_traffic_with_their_row_counts(queries_engine):
+    """An agent exists because it asked something, and is counted by prefix."""
     await _insert(
         queries_engine,
-        [("Where are the runbooks?", RECALL_TYPE, BASE_TIME) for _ in range(3)],
+        [
+            ("Where are the runbooks?", RECALL_TYPE, BASE_TIME, "claude_a1"),
+            ("Where are the runbooks?", RECALL_TYPE, BASE_TIME, "cc_a2"),
+            ("How do I deploy?", RECALL_TYPE, BASE_TIME, "codex_a3"),
+            # No session id: raw API traffic, which is the "api" bucket.
+            ("Anything?", RECALL_TYPE, BASE_TIME),
+        ],
     )
 
-    counted = await agents.agent_window_counts(config=_config())
+    windows = await agents.agent_window_counts(config=_config())
+    counted = {window.label: window.recall_row_count for window in windows}
 
-    # Until Query.session_id ships, "all" is the only label with a non-zero count:
-    # every prefix predicate selects nothing, deliberately, rather than degrading
-    # into "every row" and reporting one tenant as one agent.
-    assert [(window.label, window.recall_row_count) for window in counted] == [("all", 3)]
+    # Both of Claude Code's prefixes land on one label; nothing bleeds across.
+    assert counted["claude-code"] == 2
+    assert counted["codex"] == 1
+    assert counted["api"] == 1
+    assert counted["all"] == 4
+    # A configured label with no traffic is absent, not reported as zero.
+    assert "cursor" not in counted
 
 
 @pytest.mark.asyncio
@@ -132,7 +147,10 @@ async def test_the_window_is_bounded_by_age_and_query_type(queries_engine):
         config=_config(),
     )
 
-    assert [(window.label, window.recall_row_count) for window in counted] == [("all", 1)]
+    assert [(window.label, window.recall_row_count) for window in counted] == [
+        ("all", 1),
+        ("api", 1),
+    ]
 
     # Unbounded, all three rows are in scope — so the filters above did the work.
     unbounded = await agents.agent_window_counts(config=_config())
