@@ -167,6 +167,24 @@ class DuplicateCuratedQuestionError(CogneeValidationError):
         super().__init__(message, name, status_code, log_level=log_level)
 
 
+class CuratedQuestionLimitError(CogneeValidationError):
+    """The scope bucket already holds the configured maximum of curated questions.
+
+    Refused at creation because the curated set is a per-run cost multiplier:
+    each question becomes one replay plus up to three judge LLM calls per
+    readable dataset, on every future run.
+    """
+
+    def __init__(
+        self,
+        message: str = "This scope already holds the maximum number of curated questions.",
+        name: str = "CuratedQuestionLimitError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        log_level: str = "WARNING",
+    ):
+        super().__init__(message, name, status_code, log_level=log_level)
+
+
 class EmptyCuratedQuestionError(CogneeValidationError):
     """A curated question with no question text.
 

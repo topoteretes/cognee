@@ -267,11 +267,13 @@ async def test_the_window_is_the_configured_age_and_query_types(coverage_engine,
     assert before <= kwargs["since"] <= after
     assert kwargs["query_types"] == params.query_types
     assert kwargs["session_scope"].label == "all"
-    # No user filter: a run is tenant-wide.
+    # No single-user filter — a run covers the caller's whole visible scope —
+    # but that scope is bounded: a tenantless caller sees only themselves.
     assert "user_id" not in kwargs
-    # No SQL LIMIT: recall_row_count and collapsed_retry_count are statements
-    # about the whole window, and max_questions truncates after the collapse.
-    assert "limit" not in kwargs
+    assert kwargs["user_ids"] == (stub_pipeline.user.id,)
+    # The fetch is bounded in SQL; when the cap is hit, recall_row_count is
+    # corrected by a COUNT(*) over the same filters.
+    assert kwargs["limit"] == params.window_row_cap
 
 
 # --- the full path -----------------------------------------------------------
@@ -679,7 +681,8 @@ async def test_a_phase_failure_marks_the_run_failed_and_re_raises(coverage_engin
 
     failed = (await repository.list_runs([caller.id]))[0]
     assert failed.status == RunStatus.FAILED.value
-    assert failed.summary == {"error": "the relational database went away"}
+    # Class-prefixed and bounded, because this string is what RunInfo.error returns.
+    assert failed.summary == {"error": "RuntimeError: the relational database went away"}
     assert failed.finished_at is not None
 
 

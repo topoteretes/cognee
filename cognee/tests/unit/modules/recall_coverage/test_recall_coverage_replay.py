@@ -181,7 +181,7 @@ async def test_a_missing_user_is_recorded_as_that_rows_error_only_once():
 
     assert len(attempts) == 1
     assert search.calls == []
-    assert all(row.error == "Could not find user" for row in rows)
+    assert all(row.error == "RuntimeError: Could not find user" for row in rows)
     assert all(row.retrieval_context is None for row in rows)
 
 
@@ -483,7 +483,8 @@ async def test_one_failing_row_does_not_fail_the_run():
         search=flaky,
     )
 
-    assert rows[0].error == "retriever exploded"
+    # Class-prefixed and bounded: this string is persisted and returned by the API.
+    assert rows[0].error == "RuntimeError: retriever exploded"
     assert rows[0].retrieval_context is None
     assert rows[1].error is None
     assert rows[1].retrieval_context == "fine"

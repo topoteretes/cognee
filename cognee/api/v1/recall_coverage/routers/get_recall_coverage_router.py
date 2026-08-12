@@ -26,8 +26,8 @@ Four rules hold across every route here:
   responses by the global handler in ``cognee/api/client.py``.
 * **An unknown ``agent_label`` is a 404; a valid label with no traffic is an empty
   run, not an error.** A typo must not be indistinguishable from "this agent has
-  asked nothing yet", which is a legitimate answer — and, until
-  ``Query.session_id`` ships, the expected one for every label except ``all``.
+  asked nothing yet", which is a legitimate answer — and the expected one for
+  prefix labels over history rows that predate ``Query.session_id``.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -70,8 +70,9 @@ from cognee.modules.recall_coverage.repository import (
     load_pending_suggestions,
     load_run_questions,
     parse_topic_id,
+    visible_user_ids,
 )
-from cognee.modules.recall_coverage.types import SINK_TOPIC_ID, SINK_TOPIC_LABEL
+from cognee.modules.recall_coverage.types import SINK_TOPIC_ID, SINK_TOPIC_LABEL, RunStatus
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -107,6 +108,9 @@ class RunInfo(BaseModel):
     user_count: int = 0
     taxonomy_version: int = 0
     params: Optional[dict] = None
+    # Why a failed run failed. Null on any other status; without it the only
+    # diagnosis path for a failed run would be the server log.
+    error: Optional[str] = None
 
 
 class AlertItem(BaseModel):
@@ -165,6 +169,13 @@ class QuestionRow(BaseModel):
     not returned: it is up to ``store_context_max_chars`` per row, and shipping it
     for every row would make the report an order of magnitude larger than the
     numbers anyone came for.
+
+    ``answer`` is returned only on the **caller's own** rows. It is an LLM
+    completion synthesized from the row user's private retrieval context — the
+    same content ``retrieval_context`` deliberately withholds, in distilled form
+    — so returning it on a teammate's row would hand the reader dataset content
+    their ACL does not grant. Question text is shared (that is the spec'd team
+    contract); answers are not.
     """
 
     question_id: str
@@ -341,6 +352,19 @@ def _owner_scope(user: Any) -> tuple[UUID, ...]:
     return curated_owner_ids(user)
 
 
+def _run_error(run: RunRecord) -> Optional[str]:
+    """A failed run's reason, out of the ``{"error": ...}`` summary it carries.
+
+    ``fail_run`` stores the message in ``summary``, which ``_summary_of``
+    rightly filters out (it is not a report); surfacing it here is what makes a
+    failed run diagnosable through the API at all.
+    """
+    if run.status != RunStatus.FAILED.value or not isinstance(run.summary, dict):
+        return None
+    error = run.summary.get("error")
+    return str(error) if error else None
+
+
 def _run_info(run: RunRecord) -> RunInfo:
     return RunInfo(
         run_id=str(run.id),
@@ -358,6 +382,7 @@ def _run_info(run: RunRecord) -> RunInfo:
         user_count=run.user_count,
         taxonomy_version=run.taxonomy_version,
         params=run.params,
+        error=_run_error(run),
     )
 
 
@@ -388,7 +413,9 @@ def _topic_labels(summary: Mapping[str, Any]) -> dict[str, str]:
     return labels
 
 
-def _question_row(record: QuestionRecord, labels: Mapping[str, str]) -> QuestionRow:
+def _question_row(
+    record: QuestionRecord, labels: Mapping[str, str], *, viewer_id: UUID
+) -> QuestionRow:
     topic_id = SINK_TOPIC_ID if record.topic_id is None else str(record.topic_id)
     return QuestionRow(
         question_id=str(record.id),
@@ -401,7 +428,9 @@ def _question_row(record: QuestionRecord, labels: Mapping[str, str]) -> Question
         user_id=str(record.user_id),
         dataset_id=None if record.dataset_id is None else str(record.dataset_id),
         dataset_name=record.dataset_name,
-        answer=record.answer,
+        # Withheld on other users' rows: the answer is distilled from the row
+        # user's private retrieval context. See the QuestionRow docstring.
+        answer=record.answer if record.user_id == viewer_id else None,
         judge_score=record.judge_score,
         judge_answered=record.judge_answered,
         error=record.error,
@@ -414,7 +443,9 @@ def _question_row(record: QuestionRecord, labels: Mapping[str, str]) -> Question
     )
 
 
-def _report(run: RunRecord, questions: Sequence[QuestionRecord]) -> CoverageReport:
+def _report(
+    run: RunRecord, questions: Sequence[QuestionRecord], *, viewer_id: UUID
+) -> CoverageReport:
     summary = _summary_of(run)
     labels = _topic_labels(summary)
 
@@ -427,7 +458,7 @@ def _report(run: RunRecord, questions: Sequence[QuestionRecord]) -> CoverageRepo
         datasets=[DatasetCell(**cell) for cell in summary.get("datasets", [])],
         users=[UserCell(**cell) for cell in summary.get("users", [])],
         topics=[TopicCell(**cell) for cell in summary.get("topics", [])],
-        questions=[_question_row(record, labels) for record in questions],
+        questions=[_question_row(record, labels, viewer_id=viewer_id) for record in questions],
     )
 
 
@@ -623,7 +654,7 @@ def get_recall_coverage_router() -> APIRouter:
             agent_label=run.agent_label,
             run_id=str(run.id),
         )
-        return _report(run, questions)
+        return _report(run, questions, viewer_id=user.id)
 
     # 4 --------------------------------------------------------------------
     @router.get("/agents", response_model=list[AgentSummary], responses=_ERRORS)
@@ -647,7 +678,10 @@ def get_recall_coverage_router() -> APIRouter:
         since = datetime.now(timezone.utc) - timedelta(days=params.max_age_days)
 
         windows = await agent_window_counts(
-            since=since, query_types=params.query_types, config=config
+            since=since,
+            query_types=params.query_types,
+            config=config,
+            user_ids=await visible_user_ids(user),
         )
         top = windows[: limit if limit is not None else config.agents_list_default_limit]
 

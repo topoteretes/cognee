@@ -1,8 +1,10 @@
-QUESTION
+<question>
 {{ question }}
+</question>
 
-RETRIEVED CONTEXT
+<retrieved_context>
 {{ context }}
+</retrieved_context>
 
 Score from {{ min_score }} to {{ max_score }} how much of what is needed to
 answer the question is present in the retrieved context above.

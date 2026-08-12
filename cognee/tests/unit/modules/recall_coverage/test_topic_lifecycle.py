@@ -142,6 +142,43 @@ async def test_accept_bumps_the_taxonomy_version_from_zero(topics_engine):
 
 
 @pytest.mark.asyncio
+async def test_two_topics_cannot_claim_one_taxonomy_version(topics_engine):
+    """The DB constraint behind the version-bump retry.
+
+    The bump is read-then-write, so two concurrent accepts can compute the same
+    ``max + 1``; the unique constraint on ``(owner_id, taxonomy_version)`` is
+    what turns that from silent divergence into an error the retry can handle.
+    Asserted directly against the table because the race itself cannot be
+    forced deterministically in a test.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    owner_id = uuid4()
+    engine = topics_engine
+
+    def _topic_row():
+        return dict(
+            id=uuid4(),
+            owner_id=owner_id,
+            label="Billing",
+            centroid=[1.0, 0.0, 0.0],
+            embedding_model=MODEL,
+            embedding_dimensions=DIMENSIONS,
+            seed_question_count=1,
+            taxonomy_version=1,
+            created_at=repository._utc_now(),
+            updated_at=repository._utc_now(),
+        )
+
+    async with engine.engine.begin() as connection:
+        await connection.execute(RecallCoverageTopic.__table__.insert().values(**_topic_row()))
+
+    with pytest.raises(IntegrityError):
+        async with engine.engine.begin() as connection:
+            await connection.execute(RecallCoverageTopic.__table__.insert().values(**_topic_row()))
+
+
+@pytest.mark.asyncio
 async def test_the_accepted_topic_is_immediately_active_for_the_next_run(topics_engine):
     owner_id = uuid4()
     suggestion = await _suggest(owner_id)

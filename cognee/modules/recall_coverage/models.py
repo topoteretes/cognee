@@ -32,6 +32,7 @@ from sqlalchemy import (
     String,
     Text,
     UUID,
+    UniqueConstraint,
 )
 
 from cognee.infrastructure.databases.relational.ModelBase import Base
@@ -188,7 +189,17 @@ class RecallCoverageTopic(Base):
 
     __tablename__ = "recall_coverage_topics"
 
-    __table_args__ = (Index("ix_recall_coverage_topics_owner_deleted", "owner_id", "deleted_at"),)
+    __table_args__ = (
+        Index("ix_recall_coverage_topics_owner_deleted", "owner_id", "deleted_at"),
+        # Every version bump lands on exactly one row (a new topic on accept, the
+        # deleted topic itself on delete), so per-owner uniqueness holds by
+        # construction — this constraint is what turns two concurrent bumps
+        # computing the same ``max + 1`` into a retryable IntegrityError instead
+        # of two topics silently claiming one version.
+        UniqueConstraint(
+            "owner_id", "taxonomy_version", name="uq_recall_coverage_topics_owner_version"
+        ),
+    )
 
     id = Column(UUID, primary_key=True, default=uuid4)
 

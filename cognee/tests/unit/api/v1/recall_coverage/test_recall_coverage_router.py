@@ -332,6 +332,62 @@ def test_no_response_model_is_an_out_dto():
     assert [model.__name__ for model in models if issubclass(model, OutDTO)] == []
 
 
+def test_answer_is_returned_only_on_the_callers_own_rows(report_client):
+    """The answer is distilled from the row user's private retrieval context.
+
+    Question text is shared across the tenant by design; the answer is not —
+    returning it on a teammate's row would hand the reader dataset content
+    their ACL does not grant.
+    """
+    body = report_client.get(f"/api/v1/recall-coverage/runs/{RUN_ID}").json()
+
+    own_rows = [q for q in body["questions"] if q["user_id"] == str(OWNER_ID)]
+    other_rows = [q for q in body["questions"] if q["user_id"] == str(OTHER_USER_ID)]
+    assert own_rows and other_rows  # the fixture provides both
+
+    assert all(q["answer"] == "They live in infra-docs." for q in own_rows)
+    assert all(q["answer"] is None for q in other_rows)
+
+
+def test_a_failed_run_reports_why_it_failed(client, monkeypatch):
+    """Without RunInfo.error the only diagnosis path would be the server log."""
+    failed = RunRecord(
+        id=RUN_ID,
+        agent_label=AGENT_LABEL,
+        owner_id=OWNER_ID,
+        status=RunStatus.FAILED.value,
+        params=_params().model_dump(mode="json"),
+        summary={"error": "RuntimeError: the relational database went away"},
+        finished_at=BASE_TIME,
+        created_at=BASE_TIME,
+        taxonomy_version=4,
+    )
+
+    async def fake_get_run(run_id, owner_ids):
+        return failed
+
+    async def fake_questions(run_id):
+        return []
+
+    monkeypatch.setattr(router_module, "get_run", fake_get_run)
+    monkeypatch.setattr(router_module, "load_run_questions", fake_questions)
+
+    body = client.get(f"/api/v1/recall-coverage/runs/{RUN_ID}").json()
+
+    assert body["run"]["status"] == "failed"
+    assert body["run"]["error"] == "RuntimeError: the relational database went away"
+    # The error summary is not a report: no numbers leak out of it.
+    assert body["overall_score"] is None
+    assert body["questions"] == []
+
+
+def test_a_complete_run_reports_no_error(report_client):
+    body = report_client.get(f"/api/v1/recall-coverage/runs/{RUN_ID}").json()
+
+    assert body["run"]["status"] == "complete"
+    assert body["run"]["error"] is None
+
+
 def test_every_question_row_carries_its_source_user_and_dataset(report_client):
     body = report_client.get(f"/api/v1/recall-coverage/runs/{RUN_ID}").json()
 
@@ -667,9 +723,12 @@ def test_agents_are_discovered_from_traffic_and_joined_to_the_latest_run(client,
     ]
     complete = _complete_run([_row()], agent_label=AGENT_LABEL)
 
-    async def fake_counts(*, since=None, query_types=None, labels=None, config=None):
+    async def fake_counts(*, since=None, query_types=None, labels=None, config=None, user_ids=None):
         assert since is not None
         assert query_types
+        # The counts are scoped to the users the caller may analyse; an
+        # unscoped count would leak tenant-wide traffic volumes.
+        assert user_ids is not None
         return windows
 
     async def fake_latest(owner_ids, agent_labels=None):

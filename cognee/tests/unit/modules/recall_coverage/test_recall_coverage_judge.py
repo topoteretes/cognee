@@ -368,7 +368,8 @@ async def test_a_permanently_failing_coverage_call_leaves_the_scores_null():
     assert row.judge_score is None
     assert row.judge_answered is None
     assert row.answer is None
-    assert row.error == "provider down"
+    # Class-prefixed and bounded: this string is persisted and returned by the API.
+    assert row.error == "RuntimeError: provider down"
 
 
 @pytest.mark.asyncio
@@ -393,7 +394,7 @@ async def test_a_failing_verdict_keeps_the_coverage_score_that_already_succeeded
     assert row.judge_score == 4
     assert row.judge_answered is None
     assert row.answer is None
-    assert row.error == "verdict down"
+    assert row.error == "RuntimeError: verdict down"
 
 
 # --------------------------------------------------------------------------

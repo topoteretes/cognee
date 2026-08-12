@@ -70,8 +70,12 @@ from cognee.modules.recall_coverage.exceptions import (
     CoverageRunInFlightError,
     InvalidCoverageParamsError,
 )
-from cognee.modules.recall_coverage.judge import judge_rows
-from cognee.modules.recall_coverage.replay import ReplayUserCache, replay_questions
+from cognee.modules.recall_coverage.judge import judge_rows, preload_judge_prompts
+from cognee.modules.recall_coverage.replay import (
+    ReplayUserCache,
+    error_text,
+    replay_questions,
+)
 from cognee.modules.recall_coverage.repository import (
     RunRecord,
     create_run,
@@ -83,10 +87,11 @@ from cognee.modules.recall_coverage.repository import (
     mark_run_running,
     persist_run_results,
     runs_in_flight,
+    visible_user_ids,
 )
 from cognee.modules.recall_coverage.suggest import suggest_topics
 from cognee.modules.recall_coverage.types import AgentScope, CoverageParams
-from cognee.modules.search.operations import get_queries
+from cognee.modules.search.operations import count_queries, get_queries
 from cognee.modules.users.methods import get_user
 from cognee.shared.logging_utils import get_logger
 
@@ -201,23 +206,33 @@ def schedule_recall_coverage_run(
 
 
 async def _observed_asks(
-    scope: AgentScope, *, params: CoverageParams
+    scope: AgentScope, *, params: CoverageParams, user_ids: Sequence[UUID]
 ) -> tuple[list[Ask], int, int, int]:
     """Phase 1 steps 1-2: the window, collapsed into distinct asks.
 
     Returns the (truncated) asks plus the three counters the run row reports.
-    No SQL ``LIMIT`` is applied to the window: ``recall_row_count`` and
-    ``collapsed_retry_count`` are statements about everything in the age window,
-    and a limit would silently turn them into statements about a sample.
-    ``max_questions`` bounds the expensive part — the embedding and the dedup
-    matmul — by truncating *after* the collapse, newest first.
+    ``user_ids`` is the boundary of the run — the users the caller may analyse
+    (their tenant's members, or themselves; see
+    :func:`cognee.modules.recall_coverage.repository.visible_user_ids`). It is
+    required, not optional: an unbounded window reads strangers' question text on
+    any deployment whose relational database holds more than one tenant.
+
+    The fetch is bounded by ``window_row_cap`` in SQL. When the cap is hit,
+    ``recall_row_count`` is corrected by a ``COUNT(*)`` over the same filters so
+    it stays a statement about the whole window; ``distinct_ask_count`` and
+    ``collapsed_retry_count`` then describe the newest ``window_row_cap`` rows,
+    which the log line says out loud. ``max_questions`` bounds the expensive part
+    — the embedding and the dedup matmul — by truncating *after* the collapse,
+    newest first.
     """
     since = _utc_now() - timedelta(days=params.max_age_days)
 
     rows = await get_queries(
+        limit=params.window_row_cap,
         since=since,
         query_types=params.query_types,
         session_scope=scope,
+        user_ids=user_ids,
     )
 
     collapsed = collapse_asks(
@@ -227,15 +242,31 @@ async def _observed_asks(
         max_questions=params.max_questions,
     )
 
+    recall_row_count = collapsed.recall_row_count
+    if len(rows) >= params.window_row_cap:
+        recall_row_count = await count_queries(
+            since=since,
+            query_types=params.query_types,
+            session_scope=scope,
+            user_ids=user_ids,
+        )
+        logger.warning(
+            "recall_coverage: window truncated at %s of %s rows; ask and retry "
+            "counters describe the newest %s rows only",
+            params.window_row_cap,
+            recall_row_count,
+            params.window_row_cap,
+        )
+
     logger.debug(
         "recall_coverage: %s window rows collapsed into %s asks (%s retries swallowed)",
-        collapsed.recall_row_count,
+        recall_row_count,
         collapsed.distinct_ask_count,
         collapsed.collapsed_retry_count,
     )
     return (
         collapsed.asks,
-        collapsed.recall_row_count,
+        recall_row_count,
         collapsed.distinct_ask_count,
         collapsed.collapsed_retry_count,
     )
@@ -257,8 +288,9 @@ async def run_recall_coverage(
 
     The caller is the run's owner and therefore the owner of the taxonomy the run
     is scored against and of the curated questions it includes. The *questions*
-    are everyone's — a run covers every user in the tenant, and the tenant
-    boundary is the database.
+    are the tenant's: a run covers every user in the caller's tenant — and only
+    them, via :func:`visible_user_ids`, because the relational database itself is
+    not a tenant boundary (OSS deployments share one).
     """
     try:
         await mark_run_running(run_id)
@@ -266,29 +298,51 @@ async def run_recall_coverage(
         user = await get_user(user_id)
         owner_id = user_id
 
+        # Fail-before-spend, like the fingerprint check: a missing judge prompt
+        # file must surface here, not per-row after the replay was paid for.
+        preload_judge_prompts()
+
+        user_ids = await visible_user_ids(user)
+
         asks, recall_row_count, distinct_ask_count, collapsed_retry_count = await _observed_asks(
-            scope, params=params
+            scope, params=params, user_ids=user_ids
         )
 
         # Phase 1 step 3: curated questions, appended after the truncation so a
         # human's list never displaces observed traffic, and replicated into one
-        # partition per dataset the caller can read.
+        # partition per dataset the caller can read. The replication is bounded
+        # by the same ``max_questions`` budget the observed rows already obey —
+        # curated rows are the one input the window caps don't touch, and
+        # N_curated x N_datasets multiplies replay and judge cost. Shared rows
+        # survive truncation first: they are the benchmark set, and dropping one
+        # silently un-compares every agent scored on it.
         datasets = await get_authorized_existing_datasets(
             datasets=None, permission_type="read", user=user
         )
         dataset_names: dict[UUID, str] = {dataset.id: dataset.name for dataset in datasets}
 
         curated = await load_curated_questions_for_scope(user, scope)
+        curated = sorted(curated, key=lambda question: not question.is_shared)
         shared_curated_ids = {question.id for question in curated if question.is_shared}
-        asks = list(asks) + curated_asks(
+        curated_rows = curated_asks(
             curated, user_id=user.id, dataset_ids=[dataset.id for dataset in datasets]
         )
+        if len(curated_rows) > params.max_questions:
+            logger.warning(
+                "recall_coverage: %s curated question rows exceed the max_questions "
+                "budget of %s; rows beyond the budget were dropped, shared benchmark "
+                "rows kept first",
+                len(curated_rows),
+                params.max_questions,
+            )
+            curated_rows = curated_rows[: params.max_questions]
+        asks = list(asks) + curated_rows
 
         if not asks:
             # An empty window is a complete run with overall_score null and no
-            # questions — "nothing asked yet", not a failure. Until
-            # Query.session_id ships this is the expected outcome for every label
-            # except "all".
+            # questions — "nothing asked yet", not a failure. Expected for an
+            # agent that has not asked anything in the window, and for prefix
+            # labels over history that predates Query.session_id.
             return await _persist_empty(
                 run_id,
                 params=params,
@@ -363,7 +417,10 @@ async def run_recall_coverage(
         return await persist_run_results(run_id, rows, summary, counters, params=params)
     except Exception as error:
         logger.error("recall_coverage: run %s failed: %s", run_id, error, exc_info=True)
-        await fail_run(run_id, str(error) or type(error).__name__)
+        # Bounded and class-prefixed, like the per-row errors: this string is
+        # returned by the API as RunInfo.error. The log line above keeps the
+        # full traceback.
+        await fail_run(run_id, error_text(error))
         raise
 
 

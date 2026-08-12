@@ -204,8 +204,8 @@ async def _insert_query(engine, **overrides):
 
 
 @pytest.mark.asyncio
-async def test_window_applies_no_user_filter(queries_engine):
-    """A run is tenant-wide: the database is the tenant boundary, not user_id."""
+async def test_window_applies_no_user_filter_by_default(queries_engine):
+    """Unfiltered when nothing is passed; the boundary is the caller's ``user_ids``."""
     anna, ben = uuid4(), uuid4()
     await _insert_query(queries_engine, user_id=anna, text="anna asked")
     await _insert_query(queries_engine, user_id=ben, text="ben asked")
@@ -213,6 +213,41 @@ async def test_window_applies_no_user_filter(queries_engine):
     rows = await get_queries_mod.get_queries()
 
     assert {row.user_id for row in rows} == {anna, ben}
+
+
+@pytest.mark.asyncio
+async def test_window_is_bounded_by_user_ids(queries_engine):
+    """``user_ids`` is the tenant boundary: a stranger's rows never enter the window.
+
+    The relational database is shared in OSS deployments, so without this filter
+    a coverage run would read every unrelated user's question text.
+    """
+    anna, ben, stranger = uuid4(), uuid4(), uuid4()
+    await _insert_query(queries_engine, user_id=anna, text="anna asked")
+    await _insert_query(queries_engine, user_id=ben, text="ben asked")
+    await _insert_query(queries_engine, user_id=stranger, text="stranger asked")
+
+    rows = await get_queries_mod.get_queries(user_ids=(anna, ben))
+
+    assert {row.user_id for row in rows} == {anna, ben}
+    assert all("stranger" not in row.text for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_count_queries_matches_the_window_it_counts(queries_engine):
+    """Same filters as the read, so a capped fetch can report the true row count."""
+    anna, stranger = uuid4(), uuid4()
+    for index in range(3):
+        await _insert_query(queries_engine, user_id=anna, created_at=NOW - timedelta(minutes=index))
+    await _insert_query(queries_engine, user_id=anna, created_at=NOW - timedelta(days=45))
+    await _insert_query(queries_engine, user_id=stranger, created_at=NOW)
+
+    since = NOW - timedelta(days=30)
+    rows = await get_queries_mod.get_queries(limit=2, since=since, user_ids=(anna,))
+    count = await get_queries_mod.count_queries(since=since, user_ids=(anna,))
+
+    assert len(rows) == 2
+    assert count == 3
 
 
 @pytest.mark.asyncio

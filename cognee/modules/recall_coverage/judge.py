@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field, create_model
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.recall_coverage.dedup import DedupedQuestion
-from cognee.modules.recall_coverage.replay import ReplayedRow
+from cognee.modules.recall_coverage.replay import ReplayedRow, error_text
 from cognee.modules.recall_coverage.types import CoverageParams
 from cognee.root_dir import get_absolute_path
 from cognee.shared.logging_utils import get_logger
@@ -189,6 +189,18 @@ def _system_prompt(file_name: str) -> str:
 
 def _input_prompt(file_name: str, context: dict) -> str:
     return render_prompt(file_name, context, base_directory=get_absolute_path(PROMPT_DIRECTORY))
+
+
+def preload_judge_prompts() -> None:
+    """Read every judge system prompt once, raising if any is missing.
+
+    Called by the pipeline before the replay phase, for the same reason the
+    fingerprint check runs before it: a missing prompt file is a packaging
+    problem that would otherwise surface as one identical per-row error on every
+    row of a "complete" run — after the full replay cost was already paid.
+    """
+    for file_name in (COVERAGE_SYSTEM_PROMPT, ANSWER_SYSTEM_PROMPT, ANSWERED_SYSTEM_PROMPT):
+        _system_prompt(file_name)
 
 
 async def _with_retries(
@@ -368,7 +380,7 @@ async def judge_row(
             judge_score=None,
             judge_answered=None,
             answer=None,
-            error=str(error) or type(error).__name__,
+            error=error_text(error),
         )
 
     if score <= MIN_JUDGE_SCORE:
@@ -398,7 +410,7 @@ async def judge_row(
             judge_answered=None,
             answer=None,
             coverage_reason=coverage_reason,
-            error=str(error) or type(error).__name__,
+            error=error_text(error),
         )
 
     return JudgedRow(
@@ -459,5 +471,6 @@ __all__ = [
     "judge_answered",
     "judge_row",
     "judge_rows",
+    "preload_judge_prompts",
     "score_context_coverage",
 ]

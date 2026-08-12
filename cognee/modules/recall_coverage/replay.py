@@ -75,6 +75,19 @@ REPLAY_QUERY_TYPE = SearchType.GRAPH_COMPLETION
 # list-shaped context.
 CONTEXT_SEPARATOR = "\n\n"
 
+# Per-row error strings are persisted and returned to API consumers, so they are
+# bounded and class-prefixed rather than raw: a driver's full connection string
+# or an adapter's internal stack detail is diagnostic in the log (which gets the
+# whole exception), not in a report row.
+ERROR_TEXT_MAX_CHARS = 300
+
+
+def error_text(error: Exception) -> str:
+    """Render an exception as the bounded, class-prefixed text a report row carries."""
+    message = str(error).strip()
+    text = f"{type(error).__name__}: {message}" if message else type(error).__name__
+    return text[:ERROR_TEXT_MAX_CHARS]
+
 
 @dataclass(frozen=True)
 class ReplayedRow:
@@ -297,7 +310,7 @@ async def replay_questions(
                     retrieval_context=None,
                     dataset_name=None,
                     payload_count=0,
-                    error=str(error) or type(error).__name__,
+                    error=error_text(error),
                 )
 
     return list(await asyncio.gather(*(_replay_one(question) for question in questions)))
@@ -305,9 +318,11 @@ async def replay_questions(
 
 __all__ = [
     "CONTEXT_SEPARATOR",
+    "ERROR_TEXT_MAX_CHARS",
     "REPLAY_QUERY_TYPE",
     "ReplayUserCache",
     "ReplayedRow",
+    "error_text",
     "flatten_context",
     "replay_question",
     "replay_questions",

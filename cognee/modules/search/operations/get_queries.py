@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any, Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, false, not_, or_, select, true
+from sqlalchemy import ColumnElement, and_, false, func, not_, or_, select, true
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -119,6 +119,44 @@ def session_predicate_for_scope(scope: AgentScope) -> Optional[ColumnElement[boo
     )
 
 
+def _window_terms(
+    user_id: Optional[UUID],
+    since: Optional[datetime],
+    query_types: Optional[Sequence[str]],
+    session_scope: Optional[AgentScope],
+    user_ids: Optional[Sequence[UUID]],
+) -> list[ColumnElement[bool]]:
+    """The WHERE terms one window is defined by, shared by the read and the count."""
+    terms: list[ColumnElement[bool]] = []
+
+    if user_id is not None:
+        terms.append(Query.user_id == user_id)
+
+    # ``user_ids`` scopes the window to the users the caller may analyse — in
+    # practice the caller's tenant members, or the caller alone (see
+    # ``cognee.modules.recall_coverage.repository.visible_user_ids``). The
+    # relational database is shared in OSS deployments (it is never isolated per
+    # dataset — see the multi-tenancy matrix), so "the database is the tenant
+    # boundary" does not hold there, and an unscoped window would read every
+    # unrelated user's question text. ``None`` keeps the unfiltered behaviour
+    # for callers that have established the boundary some other way.
+    if user_ids is not None:
+        terms.append(Query.user_id.in_(tuple(user_ids)))
+
+    if since is not None:
+        terms.append(Query.created_at >= since)
+
+    if query_types:
+        terms.append(Query.query_type.in_(list(query_types)))
+
+    if session_scope is not None:
+        session_predicate = session_predicate_for_scope(session_scope)
+        if session_predicate is not None:
+            terms.append(session_predicate)
+
+    return terms
+
+
 async def get_queries(
     user_id: Optional[UUID] = None,
     limit: Optional[int] = None,
@@ -126,12 +164,15 @@ async def get_queries(
     since: Optional[datetime] = None,
     query_types: Optional[Sequence[str]] = None,
     session_scope: Optional[AgentScope] = None,
+    user_ids: Optional[Sequence[UUID]] = None,
 ) -> list[QueryWindowRow]:
     """Return recalls in the window, newest first.
 
     Every filter is optional and off by default:
 
-    * ``user_id`` — one user's rows. Omitted for a coverage run, see below.
+    * ``user_id`` — one user's rows.
+    * ``user_ids`` — the users whose rows the caller may read at all; see
+      :func:`_window_terms`. A coverage run always passes this.
     * ``since`` — lower bound on ``created_at``, i.e. the age window.
     * ``query_types`` — the stored ``Query.query_type`` strings that count as
       recall. ``None`` or empty means unfiltered.
@@ -150,32 +191,7 @@ async def get_queries(
         Query.user_id,
         Query.dataset_id,
         Query.created_at,
-    )
-
-    # No user filter unless one is asked for. A coverage run is tenant-wide:
-    # "analyse Claude Code" means every user's Claude Code traffic, not only the
-    # caller's, and ``user_id`` is a column on the output for the UI to filter.
-    #
-    # That is safe because THE DATABASE IS THE TENANT BOUNDARY — cloud v2
-    # provisions one Postgres project per tenant, so scanning every row cannot
-    # cross a tenant. Filtering on ``User.tenant_id`` instead would be worse
-    # than redundant: ``create_user`` never populates it, so the window would
-    # come back empty. Caveat for OSS: a self-hosted deployment that puts
-    # several unrelated users in one relational database has no boundary here,
-    # and a coverage run there reads all of their question text.
-    if user_id is not None:
-        statement = statement.where(Query.user_id == user_id)
-
-    if since is not None:
-        statement = statement.where(Query.created_at >= since)
-
-    if query_types:
-        statement = statement.where(Query.query_type.in_(list(query_types)))
-
-    if session_scope is not None:
-        session_predicate = session_predicate_for_scope(session_scope)
-        if session_predicate is not None:
-            statement = statement.where(session_predicate)
+    ).where(*_window_terms(user_id, since, query_types, session_scope, user_ids))
 
     # Newest first: the window is "the last N asks", so a limit must drop the
     # oldest rows, not the newest.
@@ -198,3 +214,28 @@ async def get_queries(
         )
         for row in rows
     ]
+
+
+async def count_queries(
+    user_id: Optional[UUID] = None,
+    *,
+    since: Optional[datetime] = None,
+    query_types: Optional[Sequence[str]] = None,
+    session_scope: Optional[AgentScope] = None,
+    user_ids: Optional[Sequence[UUID]] = None,
+) -> int:
+    """Count the window's rows without materializing them.
+
+    Same filters as :func:`get_queries` (shared via :func:`_window_terms`, so the
+    two cannot drift apart). This is what keeps a capped read honest: when a
+    ``LIMIT`` truncates the fetched rows, the true window size is still one cheap
+    ``COUNT(*)`` away rather than a statement about the sample.
+    """
+    db_engine = get_relational_engine()
+
+    statement = select(func.count(Query.id)).where(
+        *_window_terms(user_id, since, query_types, session_scope, user_ids)
+    )
+
+    async with db_engine.get_async_session() as session:
+        return int((await session.execute(statement)).scalar() or 0)

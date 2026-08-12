@@ -1,7 +1,7 @@
 """add_recall_coverage_tables
 
 Revision ID: c7e9a1b3d5f2
-Revises: e5a7b9c1d3f4
+Revises: a7c3e9f1b5d8
 Create Date: 2026-08-12 00:00:00.000000
 
 Creates the five recall-coverage tables: runs, judged question rows, the
@@ -127,6 +127,12 @@ def _create_topics() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
+        # Backstop for the read-then-write version bump: two concurrent accepts
+        # or deletes computing the same ``max + 1`` fail loudly instead of two
+        # topics silently claiming one version. See the model's __table_args__.
+        sa.UniqueConstraint(
+            "owner_id", "taxonomy_version", name="uq_recall_coverage_topics_owner_version"
+        ),
     )
     op.create_index("ix_recall_coverage_topics_owner_id", "recall_coverage_topics", ["owner_id"])
     op.create_index(

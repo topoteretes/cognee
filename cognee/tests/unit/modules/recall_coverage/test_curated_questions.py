@@ -37,6 +37,7 @@ from cognee.modules.recall_coverage.config import RecallCoverageConfig
 from cognee.modules.recall_coverage.dedup import collapse_asks, dedup_asks
 from cognee.modules.recall_coverage.embedding import normalize_rows
 from cognee.modules.recall_coverage.exceptions import (
+    CuratedQuestionLimitError,
     CuratedQuestionNotFoundError,
     DuplicateCuratedQuestionError,
     EmptyCuratedQuestionError,
@@ -44,6 +45,8 @@ from cognee.modules.recall_coverage.exceptions import (
     UnknownAgentLabelError,
 )
 from cognee.modules.recall_coverage.models import RecallCoverageCuratedQuestion
+from cognee.modules.users.models import User
+from cognee.modules.users.models.Principal import Principal
 from cognee.modules.recall_coverage.types import (
     AgentScope,
     AgentScopeMode,
@@ -123,7 +126,14 @@ async def curated_engine(tmp_path, monkeypatch):
 
     async with engine.engine.begin() as connection:
         await connection.run_sync(
-            Base.metadata.create_all, tables=[RecallCoverageCuratedQuestion.__table__]
+            Base.metadata.create_all,
+            tables=[
+                RecallCoverageCuratedQuestion.__table__,
+                # For the visible_user_ids tests below. User is joined-table
+                # inheritance, so its select needs principals too.
+                Principal.__table__,
+                User.__table__,
+            ],
         )
 
     monkeypatch.setattr(repository, "get_relational_engine", lambda: engine)
@@ -250,6 +260,80 @@ def test_known_label_normalizes_to_itself():
         CuratedScope.AGENT.value, "  claude-code  ", config=_config()
     )
     assert (scope, label) == (CuratedScope.AGENT.value, "claude-code")
+
+
+@pytest.mark.asyncio
+async def test_creation_is_refused_past_the_configured_cap(curated_engine):
+    """The curated set multiplies every future run's replay and judge cost."""
+    user = _user()
+    config = RecallCoverageConfig(_env_file=None, max_curated_questions=2)
+
+    await repository.create_curated_question(
+        user, "Where are the runbooks?", "agent", "claude-code", config=config
+    )
+    await repository.create_curated_question(
+        user, "How do I rotate credentials?", "agent", "claude-code", config=config
+    )
+
+    with pytest.raises(CuratedQuestionLimitError):
+        await repository.create_curated_question(
+            user, "What is the escalation path?", "agent", "claude-code", config=config
+        )
+
+    # Each (owner, scope) bucket is its own budget: the shared set is not
+    # crowded out by one label's list.
+    created = await repository.create_curated_question(
+        user, "What is the escalation path?", "shared", None, config=config
+    )
+    assert created.scope == CuratedScope.SHARED.value
+
+
+# --- visible_user_ids: the boundary of a run ---------------------------------
+
+
+async def _insert_user(engine, user_id, tenant_id):
+    async with engine.engine.begin() as connection:
+        await connection.execute(
+            Principal.__table__.insert().values(id=user_id, type="user", created_at=BASE_TIME)
+        )
+        await connection.execute(
+            User.__table__.insert().values(
+                id=user_id,
+                tenant_id=tenant_id,
+                email=f"{user_id}@example.com",
+                hashed_password="x",
+                is_active=True,
+                is_superuser=False,
+                is_verified=False,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_visible_user_ids_is_the_caller_alone_without_a_tenant(curated_engine):
+    """A tenantless caller analyses only themselves — no users-table read at all."""
+    user = _user()
+
+    assert await repository.visible_user_ids(user) == (user.id,)
+
+
+@pytest.mark.asyncio
+async def test_visible_user_ids_is_the_tenant_membership(curated_engine):
+    """A tenant caller sees the tenant's members and nobody else.
+
+    The relational database is shared in OSS deployments, so this tuple — not
+    the database — is what keeps one tenant's coverage run out of another
+    tenant's question text.
+    """
+    tenant, other_tenant = uuid4(), uuid4()
+    anna, ben, stranger = uuid4(), uuid4(), uuid4()
+    await _insert_user(curated_engine, anna, tenant)
+    await _insert_user(curated_engine, ben, tenant)
+    await _insert_user(curated_engine, stranger, other_tenant)
+
+    visible = await repository.visible_user_ids(SimpleNamespace(id=anna, tenant_id=tenant))
+
+    assert set(visible) == {anna, ben}
 
 
 @pytest.mark.asyncio

@@ -50,6 +50,7 @@ from typing import Any, Mapping, Optional, Sequence, Union
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -61,13 +62,17 @@ from cognee.modules.recall_coverage.aggregate import (
     default_row_order,
     report_order_key,
 )
-from cognee.modules.recall_coverage.config import RecallCoverageConfig
+from cognee.modules.recall_coverage.config import (
+    RecallCoverageConfig,
+    get_recall_coverage_config,
+)
 from cognee.modules.recall_coverage.dedup import Ask, collapse_text_key
 from cognee.modules.recall_coverage.exceptions import (
     CoverageRunNotFoundError,
     CoverageSuggestionNotFoundError,
     CoverageSuggestionNotPendingError,
     CoverageTopicNotFoundError,
+    CuratedQuestionLimitError,
     CuratedQuestionNotFoundError,
     DuplicateCuratedQuestionError,
     EmptyCuratedQuestionError,
@@ -91,6 +96,7 @@ from cognee.modules.recall_coverage.types import (
     RunStatus,
     SuggestionStatus,
 )
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("recall_coverage")
@@ -162,6 +168,31 @@ def curated_owner_ids(user: Any) -> tuple[UUID, ...]:
     if tenant and tenant != user.id:
         owners.append(tenant)
     return tuple(owners)
+
+
+async def visible_user_ids(user: Any) -> tuple[UUID, ...]:
+    """Users whose recall traffic this caller may analyse: their tenant's, or their own.
+
+    The window read, the replay set and the agents overview are all bounded by
+    this. The relational database is **not** a tenant boundary in general — the
+    relational tier is never isolated per dataset, so a self-hosted deployment
+    routinely puts unrelated users in one database — which means "a run covers
+    every row in the database" would read strangers' question text. A caller
+    with a ``tenant_id`` sees their tenant's members; a caller without one sees
+    only themselves, which is also the correct single-user-mode behaviour.
+    """
+    tenant = getattr(user, "tenant_id", None)
+    if not tenant:
+        return (user.id,)
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(select(User.id).where(User.tenant_id == tenant))
+        members = tuple(result.scalars().all())
+
+    # The caller is always visible to themselves, even on a tenant row that has
+    # not been linked back from the users table yet.
+    return members if user.id in members else (user.id, *members)
 
 
 def normalize_curated_scope(
@@ -251,10 +282,20 @@ async def create_curated_question(
     Duplicates are refused rather than merged so the writer learns the question
     is already covered; a silent merge would leave them believing they had added
     something.
+
+    Also refused: a scope bucket already holding ``max_curated_questions`` rows.
+    Every curated question is replicated into one run row per readable dataset
+    and each row is a replay plus up to three judge LLM calls, so the curated
+    set is a per-run cost multiplier that ``max_questions`` does not bound —
+    an uncapped bucket would let one afternoon of pasting build a benchmark
+    nobody can afford to run.
     """
     text = (question_text or "").strip()
     if not text:
         raise EmptyCuratedQuestionError()
+
+    if config is None:
+        config = get_recall_coverage_config()
 
     normalized_scope, label = normalize_curated_scope(scope, agent_label, user=user, config=config)
     owner_id = resolve_curated_owner(user, normalized_scope)
@@ -273,6 +314,15 @@ async def create_curated_question(
         if duplicate_id is not None:
             raise DuplicateCuratedQuestionError(
                 message=f"This curated question already exists in this scope (id {duplicate_id})."
+            )
+
+        if len(existing) >= config.max_curated_questions:
+            raise CuratedQuestionLimitError(
+                message=(
+                    f"This scope already holds {len(existing)} curated questions, the "
+                    f"configured maximum ({config.max_curated_questions}). Delete one "
+                    "first, or raise RECALL_COVERAGE_MAX_CURATED_QUESTIONS."
+                )
             )
 
         row = RecallCoverageCuratedQuestion(
@@ -727,6 +777,12 @@ async def current_taxonomy_version(owner_id: UUID) -> int:
         return await _max_taxonomy_version(session, owner_id)
 
 
+# How often a version bump retries after losing the ``(owner_id, taxonomy_version)``
+# uniqueness race. Each retry re-reads the max inside a fresh transaction, so one
+# retry suffices unless accepts arrive faster than commits complete.
+_VERSION_BUMP_ATTEMPTS = 3
+
+
 async def list_topics(
     owner_ids: Sequence[UUID], *, include_deleted: bool = False
 ) -> list[TopicRecord]:
@@ -797,39 +853,55 @@ async def accept_topic_suggestion(
     owner scope where nothing else would ever be scored against it. The centroid,
     fingerprint and question count are copied verbatim: re-embedding the label
     would put the topic in a different place from the cluster that motivated it.
+
+    The version bump is read-then-write, so two concurrent accepts can compute
+    the same ``max + 1``; the unique constraint on ``(owner_id, taxonomy_version)``
+    turns that from silent divergence into an ``IntegrityError``, and the retry
+    recomputes. A retry that finds the *same* suggestion already decided by the
+    winner correctly falls out of ``_load_suggestion_for_decision`` as a 409.
     """
     db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        suggestion = await _load_suggestion_for_decision(session, suggestion_id, owner_ids)
+    for attempt in range(_VERSION_BUMP_ATTEMPTS):
+        try:
+            async with db_engine.get_async_session() as session:
+                suggestion = await _load_suggestion_for_decision(session, suggestion_id, owner_ids)
 
-        version = await _max_taxonomy_version(session, suggestion.owner_id) + 1
+                version = await _max_taxonomy_version(session, suggestion.owner_id) + 1
 
-        topic = RecallCoverageTopic(
-            owner_id=suggestion.owner_id,
-            label=suggestion.label,
-            centroid=list(suggestion.centroid or []),
-            embedding_model=suggestion.embedding_model,
-            embedding_dimensions=suggestion.embedding_dimensions,
-            seed_question_count=suggestion.question_count or 0,
-            taxonomy_version=version,
-        )
-        session.add(topic)
-        await session.flush()
+                topic = RecallCoverageTopic(
+                    owner_id=suggestion.owner_id,
+                    label=suggestion.label,
+                    centroid=list(suggestion.centroid or []),
+                    embedding_model=suggestion.embedding_model,
+                    embedding_dimensions=suggestion.embedding_dimensions,
+                    seed_question_count=suggestion.question_count or 0,
+                    taxonomy_version=version,
+                )
+                session.add(topic)
+                await session.flush()
 
-        suggestion.status = SuggestionStatus.ACCEPTED.value
-        suggestion.accepted_topic_id = topic.id
+                suggestion.status = SuggestionStatus.ACCEPTED.value
+                suggestion.accepted_topic_id = topic.id
 
-        await session.commit()
-        await session.refresh(topic)
-        await session.refresh(suggestion)
+                await session.commit()
+                await session.refresh(topic)
+                await session.refresh(suggestion)
 
-        logger.debug(
-            "recall_coverage: accepted suggestion %s as topic %s at taxonomy version %s",
-            suggestion_id,
-            topic.id,
-            version,
-        )
-        return _to_topic_record(topic), _to_suggestion_record(suggestion)
+                logger.debug(
+                    "recall_coverage: accepted suggestion %s as topic %s at taxonomy version %s",
+                    suggestion_id,
+                    topic.id,
+                    version,
+                )
+                return _to_topic_record(topic), _to_suggestion_record(suggestion)
+        except IntegrityError:
+            if attempt == _VERSION_BUMP_ATTEMPTS - 1:
+                raise
+            logger.debug(
+                "recall_coverage: taxonomy version collision accepting %s, retrying",
+                suggestion_id,
+            )
+    raise RuntimeError("unreachable: version-bump retry loop exited")  # pragma: no cover
 
 
 async def dismiss_topic_suggestion(
@@ -866,32 +938,48 @@ async def delete_topic(topic_id: UUID, owner_ids: Sequence[UUID]) -> int:
     Deleting an already-deleted topic is idempotent and does **not** bump the
     version again: a retried request must not inflate a number that historical
     runs are compared on.
+
+    Retried on ``IntegrityError`` for the same reason as
+    :func:`accept_topic_suggestion`: the bump is read-then-write, and the unique
+    constraint on ``(owner_id, taxonomy_version)`` is what surfaces the race. A
+    retry that finds the topic already deleted takes the idempotent branch.
     """
     db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        result = await session.execute(
-            select(RecallCoverageTopic).where(
-                RecallCoverageTopic.id == topic_id,
-                RecallCoverageTopic.owner_id.in_(tuple(owner_ids)),
+    for attempt in range(_VERSION_BUMP_ATTEMPTS):
+        try:
+            async with db_engine.get_async_session() as session:
+                result = await session.execute(
+                    select(RecallCoverageTopic).where(
+                        RecallCoverageTopic.id == topic_id,
+                        RecallCoverageTopic.owner_id.in_(tuple(owner_ids)),
+                    )
+                )
+                topic = result.scalar_one_or_none()
+                if topic is None:
+                    raise CoverageTopicNotFoundError()
+
+                if topic.deleted_at is not None:
+                    return await _max_taxonomy_version(session, topic.owner_id)
+
+                version = await _max_taxonomy_version(session, topic.owner_id) + 1
+                topic.deleted_at = _utc_now()
+                topic.taxonomy_version = version
+
+                await session.commit()
+
+                logger.debug(
+                    "recall_coverage: soft-deleted topic %s, taxonomy version now %s",
+                    topic_id,
+                    version,
+                )
+                return version
+        except IntegrityError:
+            if attempt == _VERSION_BUMP_ATTEMPTS - 1:
+                raise
+            logger.debug(
+                "recall_coverage: taxonomy version collision deleting %s, retrying", topic_id
             )
-        )
-        topic = result.scalar_one_or_none()
-        if topic is None:
-            raise CoverageTopicNotFoundError()
-
-        if topic.deleted_at is not None:
-            return await _max_taxonomy_version(session, topic.owner_id)
-
-        version = await _max_taxonomy_version(session, topic.owner_id) + 1
-        topic.deleted_at = _utc_now()
-        topic.taxonomy_version = version
-
-        await session.commit()
-
-        logger.debug(
-            "recall_coverage: soft-deleted topic %s, taxonomy version now %s", topic_id, version
-        )
-        return version
+    raise RuntimeError("unreachable: version-bump retry loop exited")  # pragma: no cover
 
 
 # --- Runs and question rows --------------------------------------------------
@@ -1134,9 +1222,9 @@ async def persist_run_results(
     is accepted here only so a caller that resolved overrides after inserting the
     row can correct it. An empty ``rows`` is a legitimate complete run — an empty
     window completes immediately with ``overall_score: null`` and no questions,
-    which is the *expected* result for every label but ``all`` until
-    ``Query.session_id`` ships, and must read as "nothing asked yet" rather than
-    as a failure.
+    which is the expected result for an agent that asked nothing in the window
+    (and for prefix labels over history that predates ``Query.session_id``), and
+    must read as "nothing asked yet" rather than as a failure.
     """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
@@ -1302,7 +1390,15 @@ async def latest_complete_runs(
 
     Complete only: a pending run has no numbers and a failed one has numbers
     nobody should read, so joining either to an agent row would show a coverage
-    score that no finished run ever produced. Newest first, first wins.
+    score that no finished run ever produced.
+
+    Reduced in SQL, not in Python: a ``MAX(created_at) GROUP BY agent_label``
+    subquery selects the newest run per label before any full row (with its JSON
+    ``params`` and ``summary``) is materialized. An owner who runs coverage
+    daily accumulates thousands of complete rows, and this is read on every
+    agents-overview call. Two runs sharing a label *and* a ``created_at`` both
+    match the join; the ``setdefault`` keeps the id-ordered first, same
+    tie-break as ``list_runs``.
     """
     terms: list[Any] = [
         RecallCoverageRun.owner_id.in_(tuple(owner_ids)),
@@ -1311,10 +1407,25 @@ async def latest_complete_runs(
     if agent_labels:
         terms.append(RecallCoverageRun.agent_label.in_(tuple(agent_labels)))
 
+    newest = (
+        select(
+            RecallCoverageRun.agent_label.label("agent_label"),
+            func.max(RecallCoverageRun.created_at).label("created_at"),
+        )
+        .where(*terms)
+        .group_by(RecallCoverageRun.agent_label)
+        .subquery()
+    )
+
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         result = await session.execute(
             select(RecallCoverageRun)
+            .join(
+                newest,
+                (RecallCoverageRun.agent_label == newest.c.agent_label)
+                & (RecallCoverageRun.created_at == newest.c.created_at),
+            )
             .where(*terms)
             .order_by(RecallCoverageRun.created_at.desc(), RecallCoverageRun.id)
         )
@@ -1451,4 +1562,5 @@ __all__ = [
     "persist_run_results",
     "resolve_curated_owner",
     "runs_in_flight",
+    "visible_user_ids",
 ]

@@ -7,17 +7,17 @@ count is zero. A label that has never been seen is absent from ``GET /agents``
 while remaining a perfectly valid ``agent_label`` on every other route, where it
 answers "nothing asked yet" rather than 404.
 
-Two consequences of ``Query.session_id`` not existing yet, both intended:
+``Query.session_id`` exists and the prefix predicates filter on it for real;
+rows written before the column shipped keep it NULL, so on those history rows
+prefix labels match nothing and ``api`` matches everything. Two label notes:
 
-* every prefix-derived label counts **zero**, because the session predicate is
-  ``false()`` while the column is absent (see
-  ``cognee.modules.search.operations.get_queries.build_session_predicate``), so
-  today this endpoint reports the ``all`` row and nothing else;
 * ``all`` and ``api`` are included as candidates even though neither is minted
-  from a prefix. ``api`` is genuinely traffic-derived (it is the complement of the
-  prefix map), and ``all`` is the aggregate row — the only one with a non-zero
-  count until the column ships, and the one a UI opens on. Its count therefore
-  covers the same rows every other row does; it is the total, not a peer.
+  from a prefix. ``api`` is genuinely traffic-derived (it is the complement of
+  the prefix map), and ``all`` is the aggregate row a UI opens on — its count
+  covers the same rows every other row does; it is the total, not a peer;
+* counts are scoped by ``user_ids`` — the users the caller may analyse, same
+  boundary as the run window — because the relational database is not a tenant
+  boundary and unscoped counts would leak tenant-wide traffic volumes.
 
 Counting is one ``SELECT count(*)`` per candidate label inside a single session,
 rather than one ``GROUP BY``: a group-by would need to express "which label owns
@@ -28,6 +28,7 @@ wins rule that ``resolve_agent_scope`` owns and SQL cannot state.
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Sequence
+from uuid import UUID
 
 from sqlalchemy import func, select
 
@@ -73,12 +74,14 @@ async def agent_window_counts(
     query_types: Optional[Sequence[str]] = None,
     labels: Optional[Sequence[str]] = None,
     config: Optional[RecallCoverageConfig] = None,
+    user_ids: Optional[Sequence[UUID]] = None,
 ) -> list[AgentWindow]:
     """Count window rows per label, busiest first, zero-count labels dropped.
 
     ``since`` and ``query_types`` must be the same window a run would use, or the
     ranking would describe a different population than the runs it is displayed
-    next to.
+    next to. ``user_ids`` must be too — the route passes ``visible_user_ids`` so
+    the counts describe the same users a run would replay, and nobody else's.
     """
     if config is None:
         config = get_recall_coverage_config()
@@ -93,6 +96,8 @@ async def agent_window_counts(
             scope = resolve_agent_scope(label, config=config)
 
             statement = select(func.count(Query.id))
+            if user_ids is not None:
+                statement = statement.where(Query.user_id.in_(tuple(user_ids)))
             if since is not None:
                 statement = statement.where(Query.created_at >= since)
             if query_types:

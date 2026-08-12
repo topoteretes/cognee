@@ -66,6 +66,12 @@ class RecallCoverageConfig(BaseSettings):
     # this number, not by an index (there is no ANN index in this repo).
     max_questions: int = 150
     max_age_days: int = 30
+    # Hard SQL LIMIT on the window fetch itself, far above ``max_questions``
+    # because the collapse needs the raw rows to count retries and fan-outs.
+    # Without it a busy deployment materializes every logged recall in the age
+    # window as Python objects before the truncation runs; with it,
+    # ``recall_row_count`` stays honest via a COUNT(*) when the cap is hit.
+    window_row_cap: int = 50000
 
     # --- Collapse ----------------------------------------------------------
     # Identical text + query_type seen inside this window is one fan-out of a
@@ -100,6 +106,13 @@ class RecallCoverageConfig(BaseSettings):
     max_suggestions_per_run: int = 5
     topic_label_max_chars: int = 60
 
+    # --- Curated questions ---------------------------------------------------
+    # Cap per (owner, scope) bucket, enforced at creation. Curated questions are
+    # a per-run cost multiplier that ``max_questions`` does not bound: each one
+    # is replicated into every readable dataset partition and each row is a
+    # replay plus up to three judge LLM calls.
+    max_curated_questions: int = 100
+
     # --- Replay ------------------------------------------------------------
     replay_top_k: int = 15
     replay_max_concurrent: int = 5
@@ -132,6 +145,13 @@ class RecallCoverageConfig(BaseSettings):
     max_age_days_ceiling: int = 365
     replay_top_k_ceiling: int = 100
     max_concurrent_ceiling: int = 50
+    window_row_cap_ceiling: int = 500000
+    # Retries multiply the cost of every failing LLM call, and the reason/context
+    # sizes multiply prompt tokens and storage per row — all three are
+    # per-request overridable, so all three need a ceiling.
+    judge_max_retries_ceiling: int = 10
+    judge_reason_max_chars_ceiling: int = 4000
+    store_context_max_chars_ceiling: int = 100000
 
     # --- Runs --------------------------------------------------------------
     # How long a pending or running run keeps blocking the next run for the same
@@ -221,6 +241,10 @@ class RecallCoverageConfig(BaseSettings):
             "replay_top_k": self.replay_top_k_ceiling,
             "replay_max_concurrent": self.max_concurrent_ceiling,
             "judge_max_concurrent": self.max_concurrent_ceiling,
+            "window_row_cap": self.window_row_cap_ceiling,
+            "judge_max_retries": self.judge_max_retries_ceiling,
+            "judge_reason_max_chars": self.judge_reason_max_chars_ceiling,
+            "store_context_max_chars": self.store_context_max_chars_ceiling,
         }
 
     def query_types(self) -> list[str]:
@@ -235,6 +259,8 @@ class RecallCoverageConfig(BaseSettings):
         return {
             "max_questions": self.max_questions,
             "max_age_days": self.max_age_days,
+            "window_row_cap": self.window_row_cap,
+            "max_curated_questions": self.max_curated_questions,
             "fanout_window_seconds": self.fanout_window_seconds,
             "retry_cooldown_seconds": self.retry_cooldown_seconds,
             "dedup_threshold": self.dedup_threshold,

@@ -79,8 +79,9 @@ class AgentScopeMode(str, Enum):
     ``NEGATED`` — the ``api`` label: no known prefix matched, or no session at
                   all (``session_id IS NULL``).
     ``ALL``     — no session predicate whatsoever. A first-class permanent mode
-                  ("how is my memory doing overall"), and the only mode that
-                  returns rows until ``Query.session_id`` ships.
+                  ("how is my memory doing overall"). Rows written before
+                  ``Query.session_id`` existed have it NULL, so on those the
+                  prefix modes match nothing and ``api`` matches everything.
     """
 
     PREFIX = "prefix"
@@ -131,6 +132,9 @@ class CoverageParams(BaseModel):
     # Phase 1 — window, collapse, dedup.
     max_questions: int = Field(ge=0)
     max_age_days: int = Field(ge=0)
+    # SQL LIMIT on the raw window fetch; ge=1 because a zero-row fetch is not a
+    # window, it is a run that cannot observe anything.
+    window_row_cap: int = Field(ge=1)
     query_types: list[str]
     fanout_window_seconds: int = Field(ge=0)
     retry_cooldown_seconds: int = Field(ge=0)
