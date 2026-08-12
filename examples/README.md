@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 77 scripts across four folders.
+Runnable example scripts demonstrating cognee end-to-end — 69 scripts across three folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -23,11 +23,9 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 37 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 24 |
-| [`pocs/`](pocs/) | Research-grade proofs of concept | 7 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
-features, pocs test ideas.** See [Contributing](#-contributing-a-new-example) for the precise
-category rules.
+features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
 
 ## 📘 `guides/` — one feature per script
 
@@ -166,17 +164,6 @@ Every demo lives in a topic folder.
 | [`user_permissions_and_access_control_example.py`](demos/permissions/user_permissions_and_access_control_example.py) | The full ACL surface across users, roles, tenants |
 | [`data_access_control_example.py`](demos/permissions/data_access_control_example.py) | Retrieval filtered by ACL, `PermissionDeniedError` paths |
 
-## 🧪 `pocs/` — research, not documentation
-
-Experiment drivers and their library modules for features that don't exist yet. Conventions
-evolve faster here than in the other folders.
-
-| Script | Demonstrates |
-|---|---|
-| [`disambiguation/`](pocs/disambiguation/) | Entity disambiguation (3 scripts) |
-| [`post_extraction_canonicalization/`](pocs/post_extraction_canonicalization/) | Canonicalizing entities after extraction (2 scripts) |
-| [`prefetch_disambiguation/`](pocs/prefetch_disambiguation/) | Prefetching candidates before disambiguation (2 scripts) |
-
 ## ⚙️ Running an example
 
 ```bash
@@ -217,8 +204,8 @@ Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `ingestion_and
 their own `data/`. If your demo really demonstrates one feature and its length is padding,
 it's a guide that grew — trim it.
 
-**`pocs/`** — experiment drivers for cognee developers evaluating an approach. Exempt from the
-category tests above.
+Research-grade proofs of concept don't belong in `examples/` — keep experiment drivers on a
+branch or in the issue that tracks the research.
 
 Then: make sure it runs with `uv run python <path>` after `uv sync` and a configured `.env`,
 and add a row to the matching table in this README.
