@@ -147,7 +147,7 @@ async def search(
     # actually searched — dataset_ids=None means "every dataset the user can
     # read". Only the completion text is stored, never the raw result_objects,
     # which run 50-100 KB each and would grow the DB without bound.
-    await log_search_history(query_text, query_type.value, user.id, search_results)
+    await log_search_history(query_text, query_type.value, user.id, search_results, session_id)
 
     return _backwards_compatible_search_results(search_results, verbose)
 

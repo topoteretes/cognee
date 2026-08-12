@@ -656,7 +656,9 @@ async def recall(
             # because it calls authorized_search() directly and skips the
             # logging that search() wraps around it. Agents recall through this
             # endpoint, so their questions were absent from history entirely.
-            await log_search_history(query_text, local_query_type.value, user.id, graph_results)
+            await log_search_history(
+                query_text, local_query_type.value, user.id, graph_results, session_id
+            )
 
             tagged = []
             for r in graph_results:

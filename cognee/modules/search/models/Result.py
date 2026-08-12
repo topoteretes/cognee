@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, DateTime, Text, UUID
+from sqlalchemy import Column, DateTime, String, Text, UUID
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -16,6 +16,10 @@ class Result(Base):
     # Mirrors ``Query.dataset_id`` for the query this result answers, so
     # history can be filtered by dataset without joining back to queries.
     dataset_id = Column(UUID, index=True, nullable=True)
+
+    # Mirrors ``Query.session_id`` for the query this result answers, so
+    # history can be filtered by session without joining back to queries.
+    session_id = Column(String, index=True, nullable=True)
 
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
