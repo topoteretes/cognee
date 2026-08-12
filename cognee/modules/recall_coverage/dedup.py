@@ -188,16 +188,13 @@ def collapse_asks(
 
         fanout_key = (text_key, row.query_type, row.user_id)
         fanout = open_fanout.get(fanout_key)
-        in_fanout_window = (
-            fanout is not None
-            and _seconds_between(fanout[1], row.created_at) <= fanout_window_seconds
-        )
-        if fanout is not None and in_fanout_window:
-            fanout_group_id = fanout[0]
-            open_fanout[fanout_key] = (fanout_group_id, min(fanout[1], row.created_at))
+        if fanout is None:
+            fanout_group_id, group_first_seen = uuid4(), row.created_at
+        elif _seconds_between(fanout[1], row.created_at) <= fanout_window_seconds:
+            fanout_group_id, group_first_seen = fanout[0], min(fanout[1], row.created_at)
         else:
-            fanout_group_id = uuid4()
-            open_fanout[fanout_key] = (fanout_group_id, row.created_at)
+            fanout_group_id, group_first_seen = uuid4(), row.created_at
+        open_fanout[fanout_key] = (fanout_group_id, group_first_seen)
 
         cooldown_key = (text_key, row.user_id, row.dataset_id)
         open_index = open_ask.get(cooldown_key)
@@ -300,10 +297,13 @@ def _canonical_member(asks: Sequence[Ask], members: Sequence[int]) -> int:
     if curated:
         return curated[0]
 
-    return min(
-        members,
-        key=lambda index: (asks[index].first_seen is None, asks[index].first_seen),
-    )
+    dated = [index for index in members if asks[index].first_seen is not None]
+    if not dated:
+        # Only reachable for observed asks with no timestamp, which collapse never
+        # produces; fall back to input order rather than comparing None to None.
+        return members[0]
+
+    return min(dated, key=lambda index: asks[index].first_seen)
 
 
 def dedup_asks(
