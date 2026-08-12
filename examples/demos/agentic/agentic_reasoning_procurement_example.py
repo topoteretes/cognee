@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 import asyncio
+from pathlib import Path
 import logging
 import os
 
@@ -25,78 +26,16 @@ class ProcurementMemorySystem:
         """Load and store procurement data in memory"""
 
         # Procurement system dummy data
-        vendor_conversation_text_techsupply = """
-        Assistant: Hello! This is Sarah from TechSupply Solutions.
-        Thanks for reaching out for your IT procurement needs.
+        data_dir = Path(__file__).parent / "agentic_reasoning_procurement_example_data"
+        vendor_conversation_text_techsupply = (data_dir / "techsupply_conversation.txt").read_text()
 
-        User: We're looking to procure 50 high-performance enterprise laptops.
-        Specs: Intel i7, 16GB RAM, 512GB SSD, dedicated graphics card.
-        Budget: $80,000. What models do you have?
+        vendor_conversation_text_office_solutions = (
+            data_dir / "office_solutions_conversation.txt"
+        ).read_text()
 
-        Assistant: TechSupply Solutions can offer Dell Precision 5570 ($1,450) and Lenovo ThinkPad P1 ($1,550).
-        Both come with a 3-year warranty. Delivery: 2–3 weeks (Dell), 3–4 weeks (Lenovo).
+        previous_purchases_text = (data_dir / "purchase_history.txt").read_text()
 
-        User: Do you provide bulk discounts? We're planning another 200 units next quarter.
-
-        Assistant: Yes! Orders over $50,000 get 8% off.
-        So for your current order:
-        - Dell = $1,334 each ($66,700 total)
-        - Lenovo = $1,426 each ($71,300 total)
-
-        And for 200 units next quarter, we can offer 12% off with flexible delivery.
-        """
-
-        vendor_conversation_text_office_solutions = """
-        Assistant: Hi, this is Martin from vendor Office Solutions. How can we assist you?
-
-        User: We need 50 laptops for our engineers.
-        Specs: i7 CPU, 16GB RAM, 512GB SSD, dedicated GPU.
-        We can spend up to $80,000. Can you meet this?
-
-        Assistant: Office Solutions can offer HP ZBook Power G9 for $1,600 each.
-        Comes with 2-year warranty, delivery time is 4–5 weeks.
-
-        User: That's a bit long — any options to speed it up?
-
-        Assistant: We can expedite for $75 per unit, bringing delivery to 3–4 weeks.
-        Also, for orders over $60,000 we give 6% off.
-
-        So:
-        - Base price = $1,600 → $1,504 with discount
-        - Expedited price = $1,579
-
-        User: Understood. Any room for better warranty terms?
-
-        Assistant: We’re working on adding a 3-year warranty option next quarter for enterprise clients.
-        """
-
-        previous_purchases_text = """
-        Previous Purchase Records:
-        1. Vendor: TechSupply Solutions
-           Item: Desktop computers - 25 units
-           Amount: $35,000
-           Date: 2024-01-15
-           Performance: Excellent delivery, good quality, delivered 2 days early
-           Rating: 5/5
-           Notes: Responsive support team, competitive pricing
-
-        2. Vendor: Office Solutions
-           Item: Office furniture
-           Amount: $12,000
-           Date: 2024-02-20
-           Performance: Delayed delivery by 1 week, average quality
-           Rating: 2/5
-           Notes: Poor communication, but acceptable product quality
-        """
-
-        procurement_preferences_text = """
-        Procurement Policies and Preferences:
-        1. Preferred vendors must have 3+ year warranty coverage
-        2. Maximum delivery time: 30 days for non-critical items
-        3. Bulk discount requirements: minimum 5% for orders over $50,000
-        4. Prioritize vendors with sustainable/green practices
-        5. Vendor rating system: require minimum 4/5 rating for new contracts
-        """
+        procurement_preferences_text = (data_dir / "procurement_policies.txt").read_text()
 
         # Initializing and pruning databases
         await cognee.forget(everything=True)
