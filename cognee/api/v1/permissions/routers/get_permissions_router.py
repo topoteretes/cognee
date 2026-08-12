@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 
 from cognee import __version__ as cognee_version
 from cognee.modules.users.tenants.methods.get_tenant_roles import (
@@ -24,6 +25,11 @@ from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.models import Role
+from cognee.modules.users.permissions.methods import (
+    get_principal_datasets as method_get_principal_datasets,
+)
 
 
 class SelectTenantDTO(InDTO):
@@ -138,6 +144,68 @@ def get_permissions_router() -> APIRouter:
 
         return JSONResponse(
             status_code=200, content={"message": "Permission revoked from principal"}
+        )
+
+    @permissions_router.get("/principals/{principal_id}/datasets")
+    async def get_principal_datasets(
+        principal_id: UUID,
+        permission_name: str = Query(
+            "read",
+            examples=["read"],
+            description="Permission to read back. One of 'read', 'write', 'delete', 'share'.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List datasets granted to a principal.
+
+        Teams are roles, and a role is a principal. This endpoint exposes the
+        existing principal-to-datasets permission lookup for team pages. The
+        caller must be allowed to see the role in their current tenant: role
+        members can list their own team, while tenant user managers can list
+        any team in the tenant.
+
+        ## Path Parameters
+        - **principal_id** (UUID): The role/principal UUID.
+
+        ## Request Parameters
+        - **permission_name** (str): Permission to list. Defaults to "read".
+
+        ## Response
+        Returns a JSON list of dataset objects the principal has that permission on.
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/permissions/principals/{str(principal_id)}/datasets",
+                "principal_id": str(principal_id),
+                "permission_name": permission_name,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        # Reuse the role visibility check used by the members endpoint. It
+        # scopes the role to the caller's tenant and authorizes members/admins.
+        await method_get_users_in_roles(
+            tenant_id=user.tenant_id,
+            role_id=principal_id,
+            user=user,
+        )
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            role = (
+                await session.execute(
+                    select(Role).where(Role.id == principal_id, Role.tenant_id == user.tenant_id)
+                )
+            ).scalar_one()
+
+        datasets = await method_get_principal_datasets(role, permission_name)
+
+        return JSONResponse(
+            status_code=200,
+            content=[dataset.to_json() for dataset in datasets],
         )
 
     @permissions_router.post("/roles")
