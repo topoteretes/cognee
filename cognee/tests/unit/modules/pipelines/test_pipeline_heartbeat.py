@@ -357,3 +357,81 @@ async def test_heartbeat_does_not_touch_other_runs(monkeypatch, tmp_path, write_
 
         assert (await _fetch(engine, beating_run_id))[0].last_heartbeat_at is not None
         assert (await _fetch(engine, other_run_id))[0].last_heartbeat_at is None
+
+
+# --------------------------------------------------------------------------
+# End to end: the hook and the writer have to meet on the row run_tasks made.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_stamps_the_row_it_created(monkeypatch, tmp_path, write_every_time):
+    """Joins the two halves the other tests cover separately.
+
+    Everything about the run record is real here: run_tasks calls
+    log_pipeline_run_start, which writes the STARTED row, and the heartbeat has
+    to land on that same row via ctx.pipeline_run_id. Only the graph layer is
+    stubbed, since run_tasks touches it solely to probe for push_to_s3.
+    """
+    import importlib
+    from types import SimpleNamespace
+
+    from cognee.modules.data.models import Dataset
+    from cognee.modules.pipelines.tasks.task import Task
+
+    run_tasks_mod = importlib.import_module("cognee.modules.pipelines.operations.run_tasks")
+    start_mod = importlib.import_module(
+        "cognee.modules.pipelines.operations.log_pipeline_run_start"
+    )
+    complete_mod = importlib.import_module(
+        "cognee.modules.pipelines.operations.log_pipeline_run_complete"
+    )
+
+    async with sqlite_engine(tmp_path) as engine:
+        # Each module resolved get_relational_engine at import time.
+        for module in (run_tasks_mod, start_mod, complete_mod, heartbeat_module):
+            monkeypatch.setattr(module, "get_relational_engine", lambda: engine)
+
+        @asynccontextmanager
+        async def _no_op_context(*_args, **_kwargs):
+            yield
+
+        async def _fake_graph_engine():
+            return SimpleNamespace()
+
+        monkeypatch.setattr(run_tasks_mod, "set_database_global_context_variables", _no_op_context)
+        monkeypatch.setattr(run_tasks_mod, "get_graph_engine", _fake_graph_engine)
+
+        owner_id = uuid4()
+        dataset_id = uuid4()
+        async with engine.get_async_session() as session:
+            session.add(Dataset(id=dataset_id, name="heartbeat-e2e", owner_id=owner_id))
+            await session.commit()
+
+        async def emit(items):
+            for item in items:
+                yield item
+
+        async def square(values):
+            yield [value * value for value in values]
+
+        run_ids = []
+        async for run_info in run_tasks_mod.run_tasks(
+            tasks=[Task(emit), Task(square)],
+            dataset_id=dataset_id,
+            data=[1, 2, 3],
+            user=SimpleNamespace(id=owner_id, tenant_id=None, email="e2e@test"),
+            pipeline_name="heartbeat_e2e_pipeline",
+        ):
+            run_ids.append(run_info.pipeline_run_id)
+
+        rows = {row.status: row for row in await _fetch(engine, run_ids[0])}
+
+        started = rows[PipelineRunStatus.DATASET_PROCESSING_STARTED]
+        assert started.last_heartbeat_at is not None, (
+            "run_tasks completed tasks but never stamped its own STARTED row"
+        )
+        assert started.last_heartbeat_at >= started.created_at
+
+        completed = rows[PipelineRunStatus.DATASET_PROCESSING_COMPLETED]
+        assert completed.last_heartbeat_at is None, "only the STARTED row should be stamped"
