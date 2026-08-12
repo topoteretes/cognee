@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
 from cognee.modules.recall_coverage.agent_scope import resolve_agent_scope
+from cognee.modules.recall_coverage.aggregate import PERCENT
 from cognee.modules.recall_coverage.agents import agent_window_counts
 from cognee.modules.recall_coverage.config import (
     RecallCoverageConfig,
@@ -265,7 +266,13 @@ class CuratedQuestionItem(BaseModel):
 
 
 class BenchmarkMatrixCell(BaseModel):
-    """One datasets x agents cell over shared curated rows only."""
+    """One datasets x agents cell over shared curated rows only.
+
+    ``judge_score_max`` is the scale **this cell's run** executed under, which is
+    what ``score_pct`` is a percentage of. It is per cell rather than per matrix
+    because two labels' latest runs can have used different scales, and a run is
+    read on the scale that produced it.
+    """
 
     agent_label: str
     run_id: str
@@ -274,11 +281,17 @@ class BenchmarkMatrixCell(BaseModel):
     question_count: int = 0
     scored_question_count: int = 0
     avg_score: Optional[float] = None
+    judge_score_max: Optional[int] = None
     score_pct: Optional[float] = None
 
 
 class BenchmarkMatrix(BaseModel):
-    """The benchmark matrix: which agent answers which dataset's questions."""
+    """The benchmark matrix: which agent answers which dataset's questions.
+
+    The top-level ``judge_score_max`` is the **deployment's current** scale, i.e.
+    what a run started now would use. Each cell carries the scale of the run it
+    came from; those are the denominators behind ``score_pct``.
+    """
 
     judge_score_max: int
     agent_labels: list[str] = Field(default_factory=list)
@@ -456,11 +469,11 @@ def _curated_item(question: CuratedQuestion) -> CuratedQuestionItem:
 
 
 def _matrix_cell(cell: BenchmarkCell, *, judge_score_max: int) -> BenchmarkMatrixCell:
-    """One cell, with the percentage of ``judge_score_max`` alongside the mean."""
+    """One cell, with the percentage of its own run's ``judge_score_max``."""
     score_pct = (
         None
         if cell.avg_score is None or judge_score_max <= 0
-        else (cell.avg_score / judge_score_max) * 100.0
+        else (cell.avg_score / judge_score_max) * PERCENT
     )
     return BenchmarkMatrixCell(
         agent_label=cell.agent_label,
@@ -470,7 +483,28 @@ def _matrix_cell(cell: BenchmarkCell, *, judge_score_max: int) -> BenchmarkMatri
         question_count=cell.question_count,
         scored_question_count=cell.scored_question_count,
         avg_score=cell.avg_score,
+        judge_score_max=judge_score_max,
         score_pct=score_pct,
+    )
+
+
+def _run_judge_score_max(run: RunRecord, default: int) -> int:
+    """The judge scale one run executed under, out of its frozen ``params``.
+
+    ``params`` is frozen on the run row precisely so a historical run stays
+    readable after the deployment's defaults move (spec section 14). Dividing a
+    stored mean by *today's* default instead would restate it silently: a run
+    judged 0..10 whose cell averages 8 reports 160% against a default of 5, and a
+    matrix mixing two labels whose runs used different scales would compare
+    numbers that are not on the same axis. The default is the fallback for a run
+    with no snapshot, which only pre-dates this column.
+    """
+    params = run.params if isinstance(run.params, dict) else {}
+    value = params.get("judge_score_max")
+    return (
+        int(value)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        else default
     )
 
 
@@ -546,7 +580,9 @@ def get_recall_coverage_router() -> APIRouter:
             default=None, description="Narrow the list to one agent label."
         ),
         limit: Optional[int] = Query(
-            default=None, description="Newest N runs. Defaults to runs_list_default_limit."
+            default=None,
+            ge=1,
+            description="Newest N runs. Defaults to runs_list_default_limit.",
         ),
         user: User = Depends(get_authenticated_user),
     ) -> list[RunInfo]:
@@ -594,6 +630,7 @@ def get_recall_coverage_router() -> APIRouter:
     async def list_agents(
         limit: Optional[int] = Query(
             default=None,
+            ge=1,
             description="Top N by window traffic. Defaults to agents_list_default_limit.",
         ),
         user: User = Depends(get_authenticated_user),
@@ -811,13 +848,21 @@ def get_recall_coverage_router() -> APIRouter:
         latest = await latest_complete_runs(_owner_scope(user), labels or None)
         run_ids = {label: run.id for label, run in latest.items()}
 
-        judge_score_max = build_params(None, config).judge_score_max
+        # Each cell is converted on the scale its own run executed under, never on
+        # the deployment's current default. See :func:`_run_judge_score_max`.
+        current_judge_score_max = build_params(None, config).judge_score_max
+        scales = {
+            run.id: _run_judge_score_max(run, current_judge_score_max) for run in latest.values()
+        }
         cells = await benchmark_cells(run_ids)
 
         return BenchmarkMatrix(
-            judge_score_max=judge_score_max,
+            judge_score_max=current_judge_score_max,
             agent_labels=sorted(run_ids),
-            cells=[_matrix_cell(cell, judge_score_max=judge_score_max) for cell in cells],
+            cells=[
+                _matrix_cell(cell, judge_score_max=scales.get(cell.run_id, current_judge_score_max))
+                for cell in cells
+            ],
         )
 
     return router

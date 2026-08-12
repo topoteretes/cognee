@@ -93,6 +93,7 @@ def _row(
     user_id=OWNER_ID,
     dataset_id=DATASET_ID,
     topic_id=TOPIC_ID,
+    topic_label="Runbooks",
     judge_score=4,
     source=QuestionSource.OBSERVED.value,
 ) -> CoverageRow:
@@ -106,7 +107,7 @@ def _row(
         was_asked=source == QuestionSource.OBSERVED.value,
         curated_question_id=None if source == QuestionSource.OBSERVED.value else uuid4(),
         topic_id=topic_id,
-        topic_label="Runbooks" if topic_id else SINK_TOPIC_LABEL,
+        topic_label=topic_label if topic_id else SINK_TOPIC_LABEL,
         answer="They live in infra-docs.",
         judge_score=judge_score,
         judge_answered=None if judge_score is None else judge_score > 0,
@@ -368,6 +369,50 @@ def test_a_sink_row_reports_the_wire_literal_other(report_client):
     assert {row["topic_label"] for row in sink_rows} == {SINK_TOPIC_LABEL}
     # The stored value is NULL; "other" only ever exists on the wire.
     assert all(row["topic_id"] != "None" for row in body["questions"])
+
+
+def test_a_row_with_a_real_topic_is_never_labelled_other(client, monkeypatch):
+    """The label map is the frozen summary, so a topic missing from it is unnameable.
+
+    A topic whose only rows are curated has no observed rows to average, but it
+    still received rows — and a response pairing a real ``topic_id`` with
+    ``"Other"`` contradicts itself: one UI groups the row under Billing, another
+    files it under a sink whose ``question_count`` is 0.
+    """
+    speculative = uuid4()
+    rows = [
+        _row(text="observed", judge_score=4),
+        _row(
+            text="curated only",
+            source=QuestionSource.CURATED.value,
+            topic_id=speculative,
+            topic_label="Billing & invoices",
+        ),
+    ]
+    run = _complete_run(rows)
+    records = [_record(row) for row in rows]
+
+    async def fake_get_run(run_id, owner_ids):
+        return run
+
+    async def fake_questions(run_id):
+        return records
+
+    monkeypatch.setattr(router_module, "get_run", fake_get_run)
+    monkeypatch.setattr(router_module, "load_run_questions", fake_questions)
+
+    body = client.get(f"/api/v1/recall-coverage/runs/{RUN_ID}").json()
+    curated = next(row for row in body["questions"] if row["question_text"] == "curated only")
+
+    assert curated["topic_id"] == str(speculative)
+    assert curated["topic_label"] == "Billing & invoices"
+    # And the topic is in the frozen breakdown, with no observed rows to average.
+    cell = next(cell for cell in body["topics"] if cell["topic_id"] == str(speculative))
+    assert (cell["label"], cell["question_count"], cell["avg_score"]) == (
+        "Billing & invoices",
+        0,
+        None,
+    )
 
 
 def test_a_run_in_another_owner_scope_is_404_not_403(report_client):
@@ -930,8 +975,72 @@ def test_the_summary_matrix_is_datasets_by_agents_over_shared_curated_rows(clien
     assert body["cells"][0]["avg_score"] == 2.5
     # 2.5 out of 5.
     assert body["cells"][0]["score_pct"] == 50.0
+    assert body["cells"][0]["judge_score_max"] == 5
     assert "score_pct" in body["cells"][0]
     assert "scorePct" not in body["cells"][0]
+
+
+def test_each_matrix_cell_is_a_percentage_of_its_own_runs_scale(client, monkeypatch):
+    """A run judged 0..10 must not be restated against today's default of 5.
+
+    ``params`` is frozen on the run row so a historical run stays readable after
+    the deployment's defaults move; dividing its mean by the live default would
+    report a cell averaging 8 out of 10 as 160%, and would put two labels whose
+    runs used different scales on one axis.
+    """
+    ten_point = _complete_run([_row()], run_id=RUN_ID, agent_label=AGENT_LABEL)
+    ten_point = RunRecord(**{**ten_point.__dict__, "params": {"judge_score_max": 10}})
+    codex_run_id = uuid4()
+
+    async def fake_latest(owner_ids, agent_labels=None):
+        return {
+            AGENT_LABEL: ten_point,
+            "codex": _complete_run([_row()], run_id=codex_run_id, agent_label="codex"),
+        }
+
+    async def fake_cells(run_ids_by_label):
+        return [
+            BenchmarkCell(
+                agent_label=AGENT_LABEL,
+                run_id=RUN_ID,
+                dataset_id=DATASET_ID,
+                dataset_name="infra-docs",
+                question_count=2,
+                scored_question_count=2,
+                avg_score=8.0,
+            ),
+            BenchmarkCell(
+                agent_label="codex",
+                run_id=codex_run_id,
+                dataset_id=DATASET_ID,
+                dataset_name="infra-docs",
+                question_count=2,
+                scored_question_count=2,
+                avg_score=4.0,
+            ),
+        ]
+
+    monkeypatch.setattr(router_module, "latest_complete_runs", fake_latest)
+    monkeypatch.setattr(router_module, "benchmark_cells", fake_cells)
+
+    body = client.get("/api/v1/recall-coverage/summary").json()
+    by_label = {cell["agent_label"]: cell for cell in body["cells"]}
+
+    # 8 of 10, not 160% of 5.
+    assert by_label[AGENT_LABEL]["judge_score_max"] == 10
+    assert by_label[AGENT_LABEL]["score_pct"] == 80.0
+    # The other label's run used the deployment default, and keeps it.
+    assert by_label["codex"]["judge_score_max"] == 5
+    assert by_label["codex"]["score_pct"] == 80.0
+    # The matrix still reports what a run started now would use.
+    assert body["judge_score_max"] == 5
+
+
+@pytest.mark.parametrize("path", ["runs", "agents"])
+def test_a_non_positive_limit_is_422_rather_than_a_negative_sql_limit(client, path):
+    """``LIMIT -1`` is "no limit" on SQLite and an error on Postgres."""
+    assert client.get(f"/api/v1/recall-coverage/{path}", params={"limit": -1}).status_code == 422
+    assert client.get(f"/api/v1/recall-coverage/{path}", params={"limit": 0}).status_code == 422
 
 
 def test_the_summary_matrix_404s_on_an_unknown_label(client, monkeypatch):
