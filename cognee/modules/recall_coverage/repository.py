@@ -9,7 +9,10 @@ the same ``questions[]`` with ``source = "curated"``.
 Topics and topic suggestions are **owner-scoped**, never per-agent and never
 per-dataset: one taxonomy across all of an owner's agents is what makes "Codex
 4.2 on Billing, Claude Code 2.1 on Billing" a sentence at all. ``agent_label`` on
-a suggestion is provenance ("this came out of the Codex run"), never scope.
+a suggestion is provenance ("this came out of the Codex run"), never scope. Their
+lifecycle is **accept, delete, dismiss and nothing else**, with
+``taxonomy_version`` monotone per owner — see the section comment above
+:func:`parse_topic_id`.
 
 Three things in here are easy to get wrong and are load-bearing:
 
@@ -43,10 +46,10 @@ it is.
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -62,10 +65,14 @@ from cognee.modules.recall_coverage.config import RecallCoverageConfig
 from cognee.modules.recall_coverage.dedup import Ask, collapse_text_key
 from cognee.modules.recall_coverage.exceptions import (
     CoverageRunNotFoundError,
+    CoverageSuggestionNotFoundError,
+    CoverageSuggestionNotPendingError,
+    CoverageTopicNotFoundError,
     CuratedQuestionNotFoundError,
     DuplicateCuratedQuestionError,
     EmptyCuratedQuestionError,
     InvalidCuratedQuestionScopeError,
+    SinkTopicNotEditableError,
 )
 from cognee.modules.recall_coverage.models import (
     RecallCoverageCuratedQuestion,
@@ -75,6 +82,7 @@ from cognee.modules.recall_coverage.models import (
     RecallCoverageTopicSuggestion,
 )
 from cognee.modules.recall_coverage.types import (
+    SINK_TOPIC_ID,
     AgentScope,
     CoverageParams,
     CuratedScope,
@@ -471,6 +479,15 @@ class TopicRecord:
     embedding_dimensions: int
     seed_question_count: int = 0
     taxonomy_version: int = 0
+    # Soft delete. A deleted topic keeps its row so ``taxonomy_version`` stays
+    # monotone and historical runs keep resolving their topic ids; its questions
+    # fall back to the sink on the next run rather than disappearing.
+    deleted_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
 
 @dataclass(frozen=True)
@@ -521,6 +538,8 @@ def _to_topic_record(row: RecallCoverageTopic) -> TopicRecord:
         embedding_dimensions=row.embedding_dimensions,
         seed_question_count=row.seed_question_count or 0,
         taxonomy_version=row.taxonomy_version or 0,
+        deleted_at=row.deleted_at,
+        created_at=row.created_at,
     )
 
 
@@ -634,6 +653,235 @@ async def create_topic_suggestions(
         for row in rows:
             await session.refresh(row)
         return [_to_suggestion_record(row) for row in rows]
+
+
+# --- Topic lifecycle: accept, delete, dismiss --------------------------------
+#
+# Those three and nothing else. There is deliberately no rename, no merge and no
+# split, and hence no ``merged_into_id`` column: a topic id is the join key a
+# score trend is carried on, so an operation that silently changes what an id
+# means — a merge above all — would rewrite history that looks unchanged.
+# Renaming is the same problem in miniature, since every historical run froze the
+# label it reported. Delete a topic and accept a new suggestion instead: the trend
+# then visibly starts over, which is the truth.
+#
+# ``taxonomy_version`` is monotone per owner. It is derived from
+# ``max(taxonomy_version)`` over **all** of the owner's topics, deleted included,
+# and both accept and delete stamp the bumped value onto the row they touch. That
+# is what soft delete buys: a hard delete would drop the highest version with the
+# row, the next accept would reuse a number a historical run already reported, and
+# two runs claiming version 4 would be scored against different taxonomies.
+
+
+def parse_topic_id(value: Union[str, UUID]) -> UUID:
+    """Turn a path-parameter topic id into a UUID, or raise the right error.
+
+    The sink is the wire literal ``"other"`` and not a row, so asking to delete it
+    is a 422 rather than a 404: the id is real and recognised, it just does not
+    name something that can be modified. Anything else unparseable is a 404 — it
+    names nothing, and reporting *why* it is malformed tells a caller nothing they
+    can act on.
+    """
+    if isinstance(value, UUID):
+        return value
+
+    text = str(value or "").strip()
+    if text.casefold() == SINK_TOPIC_ID:
+        raise SinkTopicNotEditableError()
+
+    try:
+        return UUID(text)
+    except (ValueError, AttributeError, TypeError):
+        raise CoverageTopicNotFoundError(message=f"Recall coverage topic not found: {text!r}")
+
+
+async def _max_taxonomy_version(session: Any, owner_id: UUID) -> int:
+    """The owner's highest taxonomy version, counting deleted topics.
+
+    Counting deleted topics is the whole point of the soft delete; see the section
+    comment above. ``0`` for an owner with no topics at all, which is also what a
+    run stamps before the first suggestion is accepted.
+    """
+    result = await session.execute(
+        select(func.max(RecallCoverageTopic.taxonomy_version)).where(
+            RecallCoverageTopic.owner_id == owner_id
+        )
+    )
+    return int(result.scalar() or 0)
+
+
+async def current_taxonomy_version(owner_id: UUID) -> int:
+    """The version a run records as the taxonomy it was scored against."""
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        return await _max_taxonomy_version(session, owner_id)
+
+
+async def list_topics(
+    owner_ids: Sequence[UUID], *, include_deleted: bool = False
+) -> list[TopicRecord]:
+    """The owner scope's topics, oldest first, deleted ones only when asked for.
+
+    Same order as :func:`load_active_topics` (``created_at`` then ``id``) so the
+    list a reviewer sees is the order the assignment matmul used. No
+    ``agent_label`` filter exists to offer: one taxonomy serves all of an owner's
+    agents, which is what makes two agents' per-topic scores comparable.
+    """
+    terms: list[Any] = [RecallCoverageTopic.owner_id.in_(tuple(owner_ids))]
+    if not include_deleted:
+        terms.append(RecallCoverageTopic.deleted_at.is_(None))
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageTopic)
+            .where(*terms)
+            .order_by(RecallCoverageTopic.created_at, RecallCoverageTopic.id)
+        )
+        return [_to_topic_record(row) for row in result.scalars().all()]
+
+
+async def _load_suggestion_for_decision(
+    session: Any, suggestion_id: UUID, owner_ids: Sequence[UUID]
+) -> RecallCoverageTopicSuggestion:
+    """A pending suggestion in the caller's owner scope, or the matching error.
+
+    404 on an id that is not in scope (never 403 — that would confirm someone
+    else's suggestion with this id exists) and 409 on one that has already been
+    decided. Re-accepting is refused rather than treated as idempotent because it
+    would mint a *second* topic id for the same cluster, and two ids for one theme
+    split its trend in half.
+    """
+    result = await session.execute(
+        select(RecallCoverageTopicSuggestion).where(
+            RecallCoverageTopicSuggestion.id == suggestion_id,
+            RecallCoverageTopicSuggestion.owner_id.in_(tuple(owner_ids)),
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise CoverageSuggestionNotFoundError()
+
+    if row.status != SuggestionStatus.PENDING.value:
+        raise CoverageSuggestionNotPendingError(
+            message=(
+                f"This topic suggestion is already {row.status}; only a pending "
+                "suggestion can be accepted or dismissed."
+            )
+        )
+    return row
+
+
+async def accept_topic_suggestion(
+    suggestion_id: UUID, owner_ids: Sequence[UUID]
+) -> tuple[TopicRecord, SuggestionRecord]:
+    """Mint the topic a suggestion described, in one transaction.
+
+    **This call is where a topic id comes from.** The suggestion carried none
+    precisely so that the id is created by a human decision and then never moves:
+    every later run assigns questions to that id, and the per-topic score trend is
+    keyed on it.
+
+    The topic inherits the suggestion's owner rather than the caller's, so a
+    tenant peer accepting a suggestion cannot fork the taxonomy into a second
+    owner scope where nothing else would ever be scored against it. The centroid,
+    fingerprint and question count are copied verbatim: re-embedding the label
+    would put the topic in a different place from the cluster that motivated it.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        suggestion = await _load_suggestion_for_decision(session, suggestion_id, owner_ids)
+
+        version = await _max_taxonomy_version(session, suggestion.owner_id) + 1
+
+        topic = RecallCoverageTopic(
+            owner_id=suggestion.owner_id,
+            label=suggestion.label,
+            centroid=list(suggestion.centroid or []),
+            embedding_model=suggestion.embedding_model,
+            embedding_dimensions=suggestion.embedding_dimensions,
+            seed_question_count=suggestion.question_count or 0,
+            taxonomy_version=version,
+        )
+        session.add(topic)
+        await session.flush()
+
+        suggestion.status = SuggestionStatus.ACCEPTED.value
+        suggestion.accepted_topic_id = topic.id
+
+        await session.commit()
+        await session.refresh(topic)
+        await session.refresh(suggestion)
+
+        logger.debug(
+            "recall_coverage: accepted suggestion %s as topic %s at taxonomy version %s",
+            suggestion_id,
+            topic.id,
+            version,
+        )
+        return _to_topic_record(topic), _to_suggestion_record(suggestion)
+
+
+async def dismiss_topic_suggestion(
+    suggestion_id: UUID, owner_ids: Sequence[UUID]
+) -> SuggestionRecord:
+    """Refuse a suggestion, permanently and across every agent label.
+
+    No taxonomy version bump: nothing about the taxonomy changed, so a run scored
+    before and after this call was scored against the same topics. The row is kept
+    rather than deleted because it *is* the record of the decision — the
+    re-proposal guard reads dismissed suggestions to keep the same dense sink
+    cluster from being proposed again on every run, on every agent.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        suggestion = await _load_suggestion_for_decision(session, suggestion_id, owner_ids)
+        suggestion.status = SuggestionStatus.DISMISSED.value
+        await session.commit()
+        await session.refresh(suggestion)
+        return _to_suggestion_record(suggestion)
+
+
+async def delete_topic(topic_id: UUID, owner_ids: Sequence[UUID]) -> int:
+    """Soft-delete a topic and return the owner's new taxonomy version.
+
+    Soft because a hard delete would take three things with it: the monotonicity
+    of ``taxonomy_version`` (see the section comment), the ability of a historical
+    run to resolve the ``topic_id`` on its own question rows, and the audit trail
+    of a taxonomy that was edited. The topic's questions are **never** deleted —
+    the next run simply finds no active topic for them and they land in the sink,
+    which is exactly the "your taxonomy is missing something" signal the sink
+    exists to give.
+
+    Deleting an already-deleted topic is idempotent and does **not** bump the
+    version again: a retried request must not inflate a number that historical
+    runs are compared on.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageTopic).where(
+                RecallCoverageTopic.id == topic_id,
+                RecallCoverageTopic.owner_id.in_(tuple(owner_ids)),
+            )
+        )
+        topic = result.scalar_one_or_none()
+        if topic is None:
+            raise CoverageTopicNotFoundError()
+
+        if topic.deleted_at is not None:
+            return await _max_taxonomy_version(session, topic.owner_id)
+
+        version = await _max_taxonomy_version(session, topic.owner_id) + 1
+        topic.deleted_at = _utc_now()
+        topic.taxonomy_version = version
+
+        await session.commit()
+
+        logger.debug(
+            "recall_coverage: soft-deleted topic %s, taxonomy version now %s", topic_id, version
+        )
+        return version
 
 
 # --- Runs and question rows --------------------------------------------------
@@ -1026,16 +1274,21 @@ __all__ = [
     "SuggestionDraft",
     "SuggestionRecord",
     "TopicRecord",
+    "accept_topic_suggestion",
     "create_curated_question",
     "create_run",
     "create_topic_suggestions",
     "curated_asks",
     "curated_owner_ids",
+    "current_taxonomy_version",
     "delete_curated_question",
+    "delete_topic",
+    "dismiss_topic_suggestion",
     "fail_run",
     "get_run",
     "list_curated_questions",
     "list_runs",
+    "list_topics",
     "load_active_topics",
     "load_curated_asks",
     "load_curated_questions_for_scope",
@@ -1044,6 +1297,7 @@ __all__ = [
     "load_settled_suggestions",
     "mark_run_running",
     "normalize_curated_scope",
+    "parse_topic_id",
     "persist_run_results",
     "resolve_curated_owner",
     "runs_in_flight",
