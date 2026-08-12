@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 from uuid import UUID
 
+from cognee.tasks.ingestion.exceptions import LabelCountMismatchError
+
 
 @dataclass
 class DataItem:
@@ -22,13 +24,13 @@ def pair_labels_with_data(
     must match the item count — a partial list is ambiguous.
 
     Raises:
-        ValueError: If any label is provided and the counts differ.
+        LabelCountMismatchError: If any label is provided and the counts differ.
     """
     normalized = [(entry or None) for entry in (labels or [])]
     if not any(normalized):
         return data
     if len(normalized) != len(data or []):
-        raise ValueError(
+        raise LabelCountMismatchError(
             f"Provide one label per uploaded file: got {len(normalized)} labels "
             f"for {len(data or [])} files."
         )

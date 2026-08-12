@@ -310,11 +310,9 @@ def get_remember_router() -> APIRouter:
             )
 
         # Labels ride on DataItems, which ingestion unwraps to store each
-        # label on its file's Data record.
-        try:
-            data = pair_labels_with_data(data, label)
-        except ValueError as error:
-            raise HTTPException(status_code=400, detail=str(error))
+        # label on its file's Data record. A count mismatch raises
+        # LabelCountMismatchError (400), returned by the global handler.
+        data = pair_labels_with_data(data, label)
 
         if content_type == "cogx-archive":
             if not data:

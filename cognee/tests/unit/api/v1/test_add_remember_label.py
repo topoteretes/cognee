@@ -139,7 +139,7 @@ def test_add_rejects_label_count_mismatch(client, files, labels):
         )
 
         assert response.status_code == 400
-        assert "one label per uploaded file" in response.json()["error"]
+        assert "one label per uploaded file" in response.json()["detail"]
         mock_add.assert_not_awaited()
 
 

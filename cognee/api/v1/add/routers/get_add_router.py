@@ -134,14 +134,9 @@ def get_add_router() -> APIRouter:
             )
 
         # Labels ride on DataItems, which ingestion unwraps to store each
-        # label on its file's Data record.
-        try:
-            data = pair_labels_with_data(data, label)
-        except ValueError as error:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ErrorResponse(error=str(error)).model_dump(),
-            )
+        # label on its file's Data record. A count mismatch raises
+        # LabelCountMismatchError (400), returned by the global handler.
+        data = pair_labels_with_data(data, label)
 
         try:
             add_run = await cognee_add(
