@@ -6,6 +6,7 @@ from datetime import datetime
 from operator import itemgetter
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -153,9 +154,16 @@ class TemporalRetriever(GraphCompletionRetriever):
         vector_engine = unified.vector
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
-        vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=self.top_k
-        )
+        try:
+            vector_search_results = await vector_engine.search(
+                collection_name="Event_name", query_vector=query_vector, limit=self.top_k
+            )
+        except CollectionNotFoundError:
+            # A dataset without temporal events is a legitimate state — it
+            # contributes zero results; get_context_from_objects then falls
+            # back to the triplet path instead of aborting the search.
+            logger.info("Event_name collection not found; returning no vector results")
+            vector_search_results = []
 
         return {"relevant_events": relevant_events, "vector_search_results": vector_search_results}
 

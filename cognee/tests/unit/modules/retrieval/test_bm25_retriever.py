@@ -119,3 +119,17 @@ async def test_no_match_query_returns_zero_scored_chunks():
     # LexicalRetriever still returns top_k payloads for a no-match query; all score 0.0.
     assert len(results) == 2
     assert all(score == 0.0 for _, score in results)
+
+
+@pytest.mark.asyncio
+async def test_empty_corpus_returns_no_results():
+    """A dataset with zero DocumentChunk nodes is a legitimate state (e.g. a
+    route that stores rows instead of chunks, or added-but-not-cognified
+    data): lexical search returns zero results instead of raising NoDataError
+    and aborting a multi-dataset search."""
+    retriever = BM25ChunksRetriever(top_k=3, with_scores=True)
+
+    with _patch_graph({}):
+        results = await retriever.get_retrieved_objects("anything")
+
+    assert results == []

@@ -112,6 +112,11 @@ async def test_cross_dataset_search_survives_missing_collections(mixed_datasets)
     rag_results = await cognee.search(query_type=SearchType.RAG_COMPLETION, query_text="Zorblatt")
     assert rag_results, "RAG completion must survive the bare dataset"
 
+    lexical_results = await cognee.search(
+        query_type=SearchType.CHUNKS_LEXICAL, query_text="Zorblatt"
+    )
+    assert lexical_results, "lexical chunk search must survive the bare dataset"
+
 
 @pytest.mark.asyncio
 async def test_search_on_collectionless_dataset_returns_empty(mixed_datasets):
@@ -122,3 +127,8 @@ async def test_search_on_collectionless_dataset_returns_empty(mixed_datasets):
     )
     # The per-dataset envelope survives; its search_result is simply empty.
     assert all(entry["search_result"] == [] for entry in results), results
+
+    lexical = await cognee.search(
+        query_type=SearchType.CHUNKS_LEXICAL, query_text="anything", datasets=[BARE_DATASET]
+    )
+    assert all(entry["search_result"] == [] for entry in lexical), lexical

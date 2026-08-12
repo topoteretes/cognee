@@ -742,3 +742,36 @@ async def test_extract_time_from_query_with_none_values():
 
     assert time_from is None
     assert time_to is None
+
+
+@pytest.mark.asyncio
+async def test_missing_event_collection_is_empty_results(mock_graph_engine, mock_vector_engine):
+    """A dataset without temporal events (no Event_name collection) must not
+    abort the search: vector results are empty and context falls back to the
+    triplet path."""
+    from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+        CollectionNotFoundError,
+    )
+
+    retriever = TemporalRetriever(top_k=5)
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {"events": [{"id": "e1", "description": "Event 1"}]}
+    ]
+    mock_vector_engine.search.side_effect = CollectionNotFoundError("Event_name missing")
+
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
+    ):
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+
+    assert objects["vector_search_results"] == []

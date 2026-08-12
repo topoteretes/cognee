@@ -81,10 +81,10 @@ class LexicalRetriever(BaseRetriever):
                     except Exception as e:
                         logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
 
-            if chunk_count == 0:
-                logger.error("Initialization completed but no valid chunks were loaded.")
-                raise NoDataError("No valid chunks loaded during initialization.")
-
+            # A dataset without DocumentChunk nodes is a legitimate state
+            # (e.g. a route that stores rows instead of chunks, or data that
+            # was added but never cognified) — searches over an empty corpus
+            # return zero results instead of aborting a multi-dataset search.
             self._initialized = True
             logger.info("Initialized with %d document chunks", len(self.chunks))
 
