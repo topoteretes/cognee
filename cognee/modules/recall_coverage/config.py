@@ -119,6 +119,16 @@ class RecallCoverageConfig(BaseSettings):
     sink_share_alert: float = Field(default=0.30, ge=0.0, le=1.0)
     sink_cluster_alert_size: int = 10
 
+    # --- Runs --------------------------------------------------------------
+    # How long a pending or running run keeps blocking the next run for the same
+    # (owner, agent_label). A run is minutes of LLM calls, so a row still in
+    # flight after this lost its process: a pod rescheduled mid-run leaves the
+    # row at "running" for ever, and with no age bound the 409 guard would refuse
+    # every later run for that pair with no way out — there is no cancel or
+    # delete route, so the only fix would be manual SQL. The stale row is left
+    # alone rather than marked failed: nobody knows how it ended.
+    run_stale_after_seconds: int = 3600
+
     # --- Read endpoints ----------------------------------------------------
     runs_list_default_limit: int = 20
     # "I don't show 10, only show the top five."
@@ -198,6 +208,7 @@ class RecallCoverageConfig(BaseSettings):
             "min_scored_questions_per_topic": self.min_scored_questions_per_topic,
             "sink_share_alert": self.sink_share_alert,
             "sink_cluster_alert_size": self.sink_cluster_alert_size,
+            "run_stale_after_seconds": self.run_stale_after_seconds,
             "runs_list_default_limit": self.runs_list_default_limit,
             "agents_list_default_limit": self.agents_list_default_limit,
             "agent_label_granularity": self.agent_label_granularity,

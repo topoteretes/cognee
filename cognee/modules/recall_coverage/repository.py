@@ -45,7 +45,7 @@ it is.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional, Sequence, Union
 from uuid import UUID
 
@@ -1242,24 +1242,37 @@ async def list_runs(
         return [_to_run_record(row) for row in result.scalars().all()]
 
 
-async def runs_in_flight(owner_id: UUID, agent_label: str) -> list[RunRecord]:
+async def runs_in_flight(
+    owner_id: UUID, agent_label: str, *, stale_after_seconds: Optional[int] = None
+) -> list[RunRecord]:
     """Pending or running runs for this ``(owner_id, agent_label)``, newest first.
 
     The 409 guard's input. Scoped to the single owner rather than to
     ``curated_owner_ids``: a run is started by one caller and paid for by them, so
     a teammate's run must not block theirs — unlike curated questions, where the
     shared benchmark set is deliberately maintained by anyone in the tenant.
+
+    ``stale_after_seconds`` bounds how long a row keeps blocking. Status alone is
+    not liveness: the background task lives in one process, so a pod rescheduled
+    mid-run leaves ``running`` on the row for ever and an unbounded guard would
+    then 409 every later run for that pair — with no cancel or delete route, the
+    only recovery would be manual SQL. ``None`` keeps the unbounded behaviour, for
+    callers that want to see the row whatever its age.
     """
+    terms: list[Any] = [
+        RecallCoverageRun.owner_id == owner_id,
+        RecallCoverageRun.agent_label == agent_label,
+        RecallCoverageRun.status.in_((RunStatus.PENDING.value, RunStatus.RUNNING.value)),
+    ]
+    if stale_after_seconds is not None and stale_after_seconds > 0:
+        terms.append(
+            RecallCoverageRun.created_at >= _utc_now() - timedelta(seconds=stale_after_seconds)
+        )
+
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         result = await session.execute(
-            select(RecallCoverageRun)
-            .where(
-                RecallCoverageRun.owner_id == owner_id,
-                RecallCoverageRun.agent_label == agent_label,
-                RecallCoverageRun.status.in_((RunStatus.PENDING.value, RunStatus.RUNNING.value)),
-            )
-            .order_by(RecallCoverageRun.created_at.desc())
+            select(RecallCoverageRun).where(*terms).order_by(RecallCoverageRun.created_at.desc())
         )
         return [_to_run_record(row) for row in result.scalars().all()]
 

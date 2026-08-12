@@ -20,7 +20,7 @@ embedding engine, no network.
 """
 
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -523,6 +523,41 @@ async def test_runs_in_flight_is_per_label_and_per_owner(run_engine):
     await repository.create_run(other_owner, AGENT_LABEL, params=_params())
 
     assert await repository.runs_in_flight(owner_id, AGENT_LABEL) == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_killed_in_flight_stops_blocking_after_the_staleness_bound(run_engine):
+    """Status is not liveness: the task lives in one process, the row outlives it.
+
+    A pod rescheduled mid-run leaves ``running`` on the row for ever, and there is
+    no cancel or delete route — so without an age bound the 409 guard would refuse
+    every later run for that ``(owner, agent_label)`` until somebody ran SQL.
+    """
+    owner_id = uuid4()
+
+    killed = await repository.create_run(owner_id, AGENT_LABEL, params=_params())
+    await repository.mark_run_running(killed.id)
+
+    # Backdate the row the way a rescheduled pod would leave it.
+    async with run_engine.get_async_session() as session:
+        row = (
+            await session.execute(
+                select(RecallCoverageRun).where(RecallCoverageRun.id == killed.id)
+            )
+        ).scalar_one()
+        row.created_at = datetime.now(timezone.utc) - timedelta(hours=6)
+        await session.commit()
+
+    # Unbounded, it still blocks; bounded, it does not.
+    assert [run.id for run in await repository.runs_in_flight(owner_id, AGENT_LABEL)] == [killed.id]
+    assert (await repository.runs_in_flight(owner_id, AGENT_LABEL, stale_after_seconds=3600)) == []
+
+    # A run that started a moment ago still blocks under the same bound.
+    fresh = await repository.create_run(owner_id, AGENT_LABEL, params=_params())
+    assert [
+        run.id
+        for run in await repository.runs_in_flight(owner_id, AGENT_LABEL, stale_after_seconds=3600)
+    ] == [fresh.id]
 
 
 # --- counters ----------------------------------------------------------------

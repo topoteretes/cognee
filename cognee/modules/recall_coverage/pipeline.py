@@ -137,7 +137,10 @@ async def start_recall_coverage_run(
     The guard is per ``(owner, agent_label)``. Per owner because a run is started
     and paid for by one caller, so a teammate's run must not block theirs; per
     label because analysing Codex and Claude Code at the same time is legitimate —
-    they are different windows over the same taxonomy.
+    they are different windows over the same taxonomy. And it is bounded by
+    ``run_stale_after_seconds``, because status is not liveness: the background
+    task lives in one process, so a pod rescheduled mid-run would otherwise leave
+    ``running`` on the row for ever and 409 every later run for that pair.
     """
     if config is None:
         config = get_recall_coverage_config()
@@ -145,7 +148,9 @@ async def start_recall_coverage_run(
     scope = resolve_agent_scope(agent_label, user=user, config=config)
     coverage_params = build_params(params, config)
 
-    in_flight = await runs_in_flight(user.id, scope.label)
+    in_flight = await runs_in_flight(
+        user.id, scope.label, stale_after_seconds=config.run_stale_after_seconds
+    )
     if in_flight:
         raise CoverageRunInFlightError(
             message=(
@@ -165,6 +170,22 @@ async def start_recall_coverage_run(
     return run
 
 
+def _release_run_task(task: asyncio.Task) -> None:
+    """Unanchor a finished run and retrieve its exception.
+
+    ``run_recall_coverage`` has already logged the failure and marked the row
+    ``failed`` by the time this runs, but an exception nobody retrieves also makes
+    asyncio emit its own "Task exception was never retrieved" when the task is
+    collected — a second, context-free traceback for a failure that was handled.
+    """
+    _BACKGROUND_RUN_TASKS.discard(task)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.debug("recall_coverage: background run task ended with %r", error)
+
+
 def schedule_recall_coverage_run(
     run_id: UUID,
     scope: AgentScope,
@@ -175,7 +196,7 @@ def schedule_recall_coverage_run(
     """Fire the run off in the background, anchored against garbage collection."""
     task = asyncio.create_task(run_recall_coverage(run_id, scope, user_id, params=params))
     _BACKGROUND_RUN_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_RUN_TASKS.discard)
+    task.add_done_callback(_release_run_task)
     return task
 
 
