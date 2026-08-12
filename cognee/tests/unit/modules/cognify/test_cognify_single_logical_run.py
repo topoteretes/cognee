@@ -155,7 +155,7 @@ async def test_run_tasks_resolver_shares_one_run_lifecycle(monkeypatch, runner_p
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _fake_item_run)
 
     events = []
-    async for event in run_tasks_module.run_tasks.__wrapped__(
+    async for event in run_tasks_module.run_tasks(
         tasks=lambda item: "DLT_TASKS" if item.startswith("m") else "STANDARD_TASKS",
         dataset_id=dataset.id,
         data=["m1", "m2", "r1"],
@@ -193,7 +193,7 @@ async def test_run_tasks_validates_each_distinct_resolved_list_once(monkeypatch,
     monkeypatch.setattr(run_tasks_module, "validate_pipeline_tasks", validated.append)
 
     list_a, list_b = ["A"], ["B"]
-    async for _ in run_tasks_module.run_tasks.__wrapped__(
+    async for _ in run_tasks_module.run_tasks(
         tasks=lambda item: list_a if item == "3" else list_b,
         dataset_id=dataset.id,
         data=["1", "2", "3"],

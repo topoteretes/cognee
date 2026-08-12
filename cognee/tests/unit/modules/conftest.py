@@ -1,8 +1,8 @@
 """Shared fixtures for pipeline-runner unit tests.
 
-The run_tasks / run_tasks_distributed generators need the same mock plumbing
-everywhere they are driven directly: a relational session that returns the
-dataset, a no-op database context, and captured run-lifecycle log calls.
+The run_tasks generator needs the same mock plumbing everywhere it is driven
+directly: a relational session that returns the dataset, a no-op database
+context, and captured run-lifecycle log calls.
 """
 
 from types import SimpleNamespace

@@ -149,7 +149,7 @@ async def test_run_tasks_copies_extras_per_item(monkeypatch, runner_plumbing):
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _fake_item_run)
 
     caller_extras = {"score_multiplier": 3}
-    async for _ in run_tasks_module.run_tasks.__wrapped__(
+    async for _ in run_tasks_module.run_tasks(
         tasks="TASKS",
         dataset_id=dataset.id,
         data=["item_a", "item_b"],
