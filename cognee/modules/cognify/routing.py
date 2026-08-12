@@ -6,7 +6,8 @@ lists), the dry-run estimator (so cost estimates can never drift from
 execution), and, via document_class_for, classification itself.
 
 The routing fact is written onto each Data record at add time
-(external_metadata / extension); this module only reads it.
+(system_metadata / extension); this module only reads it. User-writable
+external_metadata is never consulted.
 """
 
 from enum import Enum

@@ -481,7 +481,7 @@ async def _chunks_from_data_items(
 
     Uses the same routing policy as execution (cognify_route_for), so the
     estimate cannot drift from what cognify actually runs. Manifest chunk
-    counts come from external_metadata["row_count"] — a dry run never opens
+    counts come from system_metadata["row_count"] — a dry run never opens
     a (potentially multi-GB) manifest file.
     """
     from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
@@ -491,13 +491,13 @@ async def _chunks_from_data_items(
     for data_item in data_items:
         route = cognify_route_for(data_item)
         if route is CognifyRoute.DLT_SOURCE:
-            external_metadata = data_item.external_metadata
+            system_metadata = data_item.system_metadata
             row_count = (
-                external_metadata.get("row_count") if isinstance(external_metadata, dict) else None
+                system_metadata.get("row_count") if isinstance(system_metadata, dict) else None
             )
             if row_count is None:
                 logger.warning(
-                    "DLT manifest %s has no row_count in external_metadata; "
+                    "DLT manifest %s has no row_count in system_metadata; "
                     "counting 0 skipped chunks for it.",
                     data_item.id,
                 )

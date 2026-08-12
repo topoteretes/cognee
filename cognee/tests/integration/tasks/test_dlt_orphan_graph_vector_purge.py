@@ -156,7 +156,7 @@ async def _dlt_pks(dataset):
     rows = await get_dataset_data(dataset.id)
     pks = []
     for d in rows:
-        ext = d.external_metadata if isinstance(d.external_metadata, dict) else {}
+        ext = d.system_metadata if isinstance(d.system_metadata, dict) else {}
         if ext.get("source") == "dlt_source":
             manifest = await load_dlt_manifest(d.raw_data_location)
             pks.extend(row["primary_key_value"] for row in manifest.get("rows", []))

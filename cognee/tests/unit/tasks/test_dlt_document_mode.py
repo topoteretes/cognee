@@ -2,7 +2,7 @@
 
 A dlt source opts into the "document" ingestion path (LLM entity extraction)
 by setting ``DOCUMENT_SOURCE_ATTR`` on itself; resolve_dlt_sources then tags its
-rows ``external_metadata["source"] = <tag>`` (NOT "dlt"), so ``is_dlt_sourced``
+rows ``system_metadata["source"] = <tag>`` (NOT "dlt"), so ``is_dlt_sourced``
 returns False and classify_documents routes them to TextDocument/cognify rather
 than the deterministic manifest schema path. These tests exercise that seam
 with plain objects — no connector, no database, no LLM.
@@ -54,10 +54,10 @@ def test_build_document_data_item_tags_a_non_dlt_source():
     item = _build_document_data_item(row, data_id, "notion")
 
     # source != "dlt" is the whole point: it routes the row through cognify.
-    assert item.external_metadata["source"] == "notion"
-    assert is_dlt_sourced(item.external_metadata) is False
-    assert item.external_metadata["url"] == "https://example.com/p1"
-    assert item.external_metadata["external_id"] == "p1"
+    assert item.system_metadata["source"] == "notion"
+    assert is_dlt_sourced(item.system_metadata) is False
+    assert item.system_metadata["url"] == "https://example.com/p1"
+    assert item.system_metadata["external_id"] == "p1"
     assert item.data_id == data_id
     # title becomes an H1 prefixed to the content body.
     assert item.data.startswith("# My Page")
@@ -71,5 +71,5 @@ def test_build_document_data_item_without_title_is_just_content():
     )
     item = _build_document_data_item(row, uuid5(NAMESPACE_OID, "x"), "wiki")
     assert item.data == "plain body"
-    assert item.external_metadata["source"] == "wiki"
-    assert item.external_metadata["title"] is None
+    assert item.system_metadata["source"] == "wiki"
+    assert item.system_metadata["title"] is None

@@ -121,12 +121,14 @@ async def ingest_data(
             underlying_data = data_item
             item_data_id = None
             item_external_metadata = None
+            item_system_metadata = None
 
             if isinstance(data_item, DataItem):
                 underlying_data = data_item.data
                 current_label = data_item.label
                 item_data_id = data_item.data_id
                 item_external_metadata = data_item.external_metadata
+                item_system_metadata = data_item.system_metadata
 
             # Retrieve cached intermediate results from pre-loop to avoid re-processing
             cached = precomputed_items.get(id(data_item), {})
@@ -186,6 +188,8 @@ async def ingest_data(
                 data_point.raw_content_hash = storage_file_metadata["content_hash"]
                 data_point.data_size = original_file_metadata["file_size"]
                 data_point.external_metadata = ext_metadata
+                if item_system_metadata is not None:
+                    data_point.system_metadata = item_system_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
                 data_point.label = current_label
@@ -217,6 +221,7 @@ async def ingest_data(
                     content_hash=original_file_metadata["content_hash"],
                     raw_content_hash=storage_file_metadata["content_hash"],
                     external_metadata=ext_metadata,
+                    system_metadata=item_system_metadata,
                     node_set=json.dumps(node_set) if node_set else None,
                     data_size=original_file_metadata["file_size"],
                     tenant_id=user.tenant_id if user.tenant_id else None,

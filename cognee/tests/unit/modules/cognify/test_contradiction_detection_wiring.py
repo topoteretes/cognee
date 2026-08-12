@@ -142,7 +142,7 @@ class TestRememberInheritsTheFlag:
                 # cognify passes a per-item resolver as ``tasks``; resolve a
                 # plain text item to obtain the standard list.
                 resolved = (
-                    tasks_arg(SimpleNamespace(external_metadata=None, extension="txt"))
+                    tasks_arg(SimpleNamespace(system_metadata=None, extension="txt"))
                     if callable(tasks_arg)
                     else tasks_arg
                 )

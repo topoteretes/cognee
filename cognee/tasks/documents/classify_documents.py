@@ -101,7 +101,9 @@ def update_node_set(document):
 
 def document_class_for(data_item) -> type[Document]:
     """The document class a data item classifies to. Pure — reads only fields
-    already on the record (external_metadata, extension); no I/O, no config.
+    already on the record (system_metadata, extension); no I/O, no config.
+    User-writable external_metadata is deliberately never consulted, so users
+    cannot steer records into (or out of) the DLT route.
 
     Single source of truth for the dispatch: classify_documents builds
     instances from it, and cognify routing (modules/cognify/routing.py)
@@ -116,7 +118,7 @@ def document_class_for(data_item) -> type[Document]:
         # fail loudly instead. Delete such records or re-add the source.
         raise ValueError(
             f"Data item {getattr(data_item, 'id', '?')} is a pre-manifest per-row DLT "
-            "record (external_metadata.source == 'dlt'), which is no longer supported. "
+            "record (system_metadata.source == 'dlt'), which is no longer supported. "
             "Delete it or re-add the DLT source to ingest it as a manifest."
         )
     extension = (data_item.extension or "").lower()

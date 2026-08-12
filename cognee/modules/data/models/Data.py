@@ -27,6 +27,10 @@ class Data(Base):
     content_hash = Column(String)
     raw_content_hash = Column(String)
     external_metadata = Column(JSON)
+    # System-derived metadata (DLT source stamps used for pipeline routing,
+    # purge scoping, and orphan cleanup). Owned by cognee and never
+    # user-writable — external_metadata is the user's free-form field.
+    system_metadata = Column(JSON, nullable=True)
     # Store NodeSet as JSON list of strings
     node_set = Column(JSON, nullable=True)
     # MutableDict allows SQLAlchemy to notice key-value pair changes, without it changing a value for a key
