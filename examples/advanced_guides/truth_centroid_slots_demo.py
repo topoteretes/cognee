@@ -1,6 +1,6 @@
 """How truth-subspace reranking works underneath: centroid slots, epochs, and rebuilds.
 
-Goes a level deeper than ``examples/demos/feedback/truth_subspace_reranking_demo.py``, which
+Goes a level deeper than ``examples/guides/truth_subspace_reranking.py``, which
 shows what truth-subspace weighting does to ranking. This script shows the mechanism — the
 deterministic centroid slots and their epochs, including rebuilds that keep anchors current
 across learning batches. Both are covered by the "Truth subspace re-ranking" guide in

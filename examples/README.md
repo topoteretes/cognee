@@ -20,9 +20,9 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 36 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 37 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
-| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 26 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept | 7 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
@@ -50,6 +50,7 @@ category rules.
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
+| [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
 | [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval |
@@ -108,7 +109,7 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
 | [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
-| [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `demos/feedback/truth_subspace_reranking_demo.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
+| [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
 
 ## 🎯 `demos/` — features combined into use cases
 
@@ -133,7 +134,6 @@ Every demo lives in a topic folder.
 |---|---|
 | [`contradiction_feedback_demo.py`](demos/feedback/contradiction_feedback_demo.py) | Contradiction detection + feedback, visualized step by step |
 | [`feedback_score_shifting_example.py`](demos/feedback/feedback_score_shifting_example.py) | Feedback nudging retrieval scores, with a beta sweep |
-| [`truth_subspace_reranking_demo.py`](demos/feedback/truth_subspace_reranking_demo.py) | Learned preferences reranking results (truth subspace) |
 | [`skill_feedback_loop/`](demos/feedback/skill_feedback_loop/) | Skills scored, improved, and re-applied in a loop |
 
 ### [`ingestion_and_migration/`](demos/ingestion_and_migration/) — getting external data in
