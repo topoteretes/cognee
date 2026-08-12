@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 70 scripts across three folders.
+Runnable example scripts demonstrating cognee end-to-end — 69 scripts across three folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -20,7 +20,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 37 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 36 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
 
@@ -91,7 +91,6 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
 | [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
 | [`s3_storage.py`](guides/s3_storage.py) | Your S3 bucket + AWS credentials |
-| [`langfuse_telemetry.py`](guides/langfuse_telemetry.py) | Langfuse account + API keys |
 | [`start_local_ui_frontend_example.py`](guides/start_local_ui_frontend_example.py) | Built frontend; blocks until Ctrl-C |
 
 ## 🎓 `advanced_guides/` — the same topic, deeper
