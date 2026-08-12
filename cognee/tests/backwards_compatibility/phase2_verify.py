@@ -91,6 +91,15 @@ Loren Ipsum Dolor sit amet, Lorem ipsum.
 DATASET = "lorem_ipsum"
 SEARCH_QUERY = "What is Lorem Ipsum and where does it come from?"
 
+# DLT takeover checks — markers must stay in sync with phase1_seed.py.
+DLT_COMPAT_DATASET = "dlt_compat"
+DLT_COMPAT_SOURCE = "compat_widgets"
+DLT_COMPAT_ROWS = [
+    {"id": "1", "name": "anemometer", "shelf": "north"},
+    {"id": "2", "name": "barometer", "shelf": "east"},
+    {"id": "3", "name": "hygrometer", "shelf": "south"},
+]
+
 # Session takeover checks — markers must stay in sync with phase1_seed.py.
 COMPAT_SESSION_ID = "compat_session"
 SESSION_FACT_1_MARKER = "Anton Zorman"
@@ -427,6 +436,111 @@ async def _verify_session_takeover(stage: str) -> None:
     )
 
 
+async def _verify_dlt_takeover(stage: str) -> None:
+    """Verify the documented upgrade path for legacy per-row DLT data.
+
+    Phase 1 (legacy tag) ingested a dlt source as one Data record per row with
+    a ``source == "dlt"`` stamp. The current branch must:
+
+    A. have MIGRATED the stamp: it lives in system_metadata now, and the
+       user-owned external_metadata no longer carries it;
+    B. refuse to cognify the legacy rows — the tombstone fails loudly instead
+       of silently LLM-processing structured rows;
+    C. convert on re-add: adding the same-named source ingests it as ONE
+       manifest record, and the orphan sweep retires every legacy per-row
+       record ("legacy records are always migrated away");
+    D. cognify the manifest cleanly, leaving one DltRow node per row in the
+       dataset's graph.
+    """
+    print(f"\n[{stage}] Verifying legacy DLT data takeover")
+
+    import dlt
+
+    from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest, is_dlt_sourced
+
+    user = await get_default_user()
+    datasets = await get_datasets_by_name([DLT_COMPAT_DATASET], user.id)
+    if not datasets:
+        _fail(f"[{stage}] dataset '{DLT_COMPAT_DATASET}' not found — Phase 1 DLT seeding broke.")
+    dataset = datasets[0]
+
+    # A: stamps migrated into system_metadata, out of external_metadata.
+    records = await get_dataset_data(dataset.id)
+    legacy = [r for r in records if is_dlt_sourced(r)]
+    if len(legacy) < len(DLT_COMPAT_ROWS):
+        _fail(
+            f"[{stage}] expected >= {len(DLT_COMPAT_ROWS)} legacy DLT records with "
+            f"system_metadata.source == 'dlt', found {len(legacy)} — the "
+            "system_metadata migration did not move the stamps."
+        )
+    still_stamped = [
+        r
+        for r in legacy
+        if isinstance(r.external_metadata, dict) and r.external_metadata.get("source") == "dlt"
+    ]
+    if still_stamped:
+        _fail(
+            f"[{stage}] {len(still_stamped)} record(s) still carry the DLT stamp in "
+            "external_metadata — the migration must move it, not copy it."
+        )
+    print(f"  [dlt] {len(legacy)} legacy per-row record(s), stamps in system_metadata — OK")
+
+    # B: the tombstone must reject cognifying legacy rows, loudly.
+    tombstone_fired = False
+    try:
+        run_info = await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
+        statuses = list(run_info.values()) if isinstance(run_info, dict) else [run_info]
+        tombstone_fired = any("Errored" in type(status).__name__ for status in statuses)
+    except Exception as error:
+        tombstone_fired = "no longer supported" in str(error)
+        if not tombstone_fired:
+            raise
+    if not tombstone_fired:
+        _fail(
+            f"[{stage}] cognify over legacy per-row DLT records completed cleanly — "
+            "the tombstone must fail loudly instead."
+        )
+    print("  [dlt] cognify on legacy rows failed loudly (tombstone) — OK")
+
+    # C: re-adding the same-named source converts to the manifest model and
+    # the orphan sweep retires the legacy rows.
+    @dlt.resource(name=DLT_COMPAT_SOURCE, primary_key="id", write_disposition="replace")
+    def compat_widgets():
+        yield from DLT_COMPAT_ROWS
+
+    await cognee.add([compat_widgets()], dataset_name=DLT_COMPAT_DATASET)
+
+    records = await get_dataset_data(dataset.id)
+    manifests = [r for r in records if is_dlt_source_manifest(r)]
+    remaining_legacy = [r for r in records if is_dlt_sourced(r)]
+    if len(manifests) != 1:
+        _fail(f"[{stage}] expected exactly 1 manifest record after re-add, got {len(manifests)}.")
+    if remaining_legacy:
+        _fail(
+            f"[{stage}] {len(remaining_legacy)} legacy per-row record(s) survived the re-add — "
+            "the orphan sweep must retire them."
+        )
+    manifest_meta = manifests[0].system_metadata
+    if manifest_meta.get("source_name") != DLT_COMPAT_SOURCE or manifest_meta.get(
+        "row_count"
+    ) != len(DLT_COMPAT_ROWS):
+        _fail(f"[{stage}] manifest system_metadata is wrong: {manifest_meta}")
+    print("  [dlt] re-add converted to 1 manifest, legacy rows swept — OK")
+
+    # D: cognify runs cleanly now and emits one DltRow node per row.
+    await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
+    dataset_rows = await get_dataset_databases()
+    owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
+    node_ids, props_by_id, _ = await _snapshot_dataset_graph(dataset.id, owner_by_dataset)
+    dlt_rows = [nid for nid in node_ids if props_by_id[nid].get("type") == "DltRow"]
+    if len(dlt_rows) != len(DLT_COMPAT_ROWS):
+        _fail(
+            f"[{stage}] expected {len(DLT_COMPAT_ROWS)} DltRow node(s) after manifest "
+            f"cognify, found {len(dlt_rows)}."
+        )
+    print(f"  [dlt] manifest cognified: {len(dlt_rows)} DltRow node(s) in the graph — OK")
+
+
 async def _verify_delete(stage: str) -> None:
     """Hard-delete documents one by one, checking the graph after each.
 
@@ -577,9 +691,13 @@ async def main():
     # A missing legacy session hard-fails: the pin never goes below v1.2.0.
     await _verify_session_takeover("Step 4 — session persistence takeover")
 
-    # ── Step 5: migrated data must be deletable (ledger-driven hard delete) ───
-    # Destructive on purpose, so it runs last.
-    await _verify_delete("Step 5 — delete migrated data")
+    # ── Step 5: legacy DLT data must migrate, tombstone, and convert ──────────
+    await _verify_dlt_takeover("Step 5 — legacy DLT takeover")
+
+    # ── Step 6: migrated data must be deletable (ledger-driven hard delete) ───
+    # Destructive on purpose, so it runs last. Includes the DLT manifest from
+    # Step 5 — the graph must end completely empty.
+    await _verify_delete("Step 6 — delete migrated data")
 
     print("\nAll Phase 2 checks passed.")
 
