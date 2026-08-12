@@ -84,6 +84,7 @@ from cognee.modules.recall_coverage.models import (
 from cognee.modules.recall_coverage.types import (
     SINK_TOPIC_ID,
     AgentScope,
+    AgentScopeMode,
     CoverageParams,
     CuratedScope,
     QuestionSource,
@@ -343,8 +344,17 @@ async def load_curated_questions_for_scope(
     Takes the resolved :class:`AgentScope` rather than a label string, like
     everything else the pipeline calls, so an unvalidated label cannot reach a
     query.
+
+    An ``all`` run loads **every** agent-scoped row rather than the rows labelled
+    with the literal ``"all"``. ``all`` is "no session predicate at all — every
+    recall in the window regardless of session" (spec section 1), so the curated
+    half has to mean every agent too. Narrowing on the label there would leave a
+    question added for ``claude-code`` out of the default run — the only mode that
+    returns rows until ``Query.session_id`` ships — with nothing to tell the
+    writer their question was silently out of scope.
     """
-    return await list_curated_questions(user, agent_label=scope.label)
+    label = None if scope.mode is AgentScopeMode.ALL else scope.label
+    return await list_curated_questions(user, agent_label=label)
 
 
 async def delete_curated_question(user: Any, question_id: UUID) -> None:

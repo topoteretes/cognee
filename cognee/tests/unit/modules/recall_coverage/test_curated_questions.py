@@ -324,6 +324,28 @@ async def test_load_for_scope_takes_the_agent_scope_not_a_label_string(curated_e
     assert {row.id for row in loaded} == {mine.id, shared.id}
 
 
+@pytest.mark.asyncio
+async def test_an_all_run_loads_every_agent_scoped_curated_question(curated_engine):
+    """``all`` is every session, so it is every agent's curated rows too.
+
+    Narrowing on the label would filter for rows labelled with the literal
+    ``"all"``, which nothing mints — so a question added for ``claude-code`` would
+    never enter the default run, the only mode that returns rows until
+    ``Query.session_id`` ships, and the writer would get no signal.
+    """
+    user = _user()
+
+    claude = await _create(user, RUNBOOKS, agent_label="claude-code")
+    codex = await _create(user, CREDENTIALS, agent_label="codex")
+    shared = await _create(user, "Who owns billing?", scope=CuratedScope.SHARED.value)
+
+    loaded = await repository.load_curated_questions_for_scope(
+        user, AgentScope(label="all", prefixes=(), mode=AgentScopeMode.ALL)
+    )
+
+    assert {row.id for row in loaded} == {claude.id, codex.id, shared.id}
+
+
 # --- Replication into dataset partitions ------------------------------------
 
 
