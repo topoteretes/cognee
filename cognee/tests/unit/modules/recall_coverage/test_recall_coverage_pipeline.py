@@ -582,6 +582,44 @@ async def test_an_unknown_parameter_is_rejected_rather_than_ignored(coverage_eng
 
 
 @pytest.mark.asyncio
+async def test_an_override_above_its_ceiling_is_rejected(coverage_engine, monkeypatch):
+    """The field bounds stop meaningless runs; the ceilings stop unaffordable ones.
+
+    ``POST /runs`` takes per-run overrides, so without a ceiling any authenticated
+    caller can ask for a 200000-row window — a 200000 x 200000 similarity matrix
+    before an LLM call — or a semaphore of 50000, and the ``(owner, agent_label)``
+    guard bounds neither labels nor owners.
+    """
+    caller = _user()
+    monkeypatch.setattr(pipeline, "schedule_recall_coverage_run", lambda *a, **k: None)
+    ceilings = _config().override_ceilings()
+
+    for name, ceiling in ceilings.items():
+        with pytest.raises(InvalidCoverageParamsError):
+            await pipeline.start_recall_coverage_run(
+                caller, None, params={name: ceiling + 1}, config=_config()
+            )
+
+    assert await repository.list_runs([caller.id]) == []
+
+    # At the ceiling is a legitimate, if large, run.
+    run = await pipeline.start_recall_coverage_run(
+        caller,
+        None,
+        params={"max_questions": ceilings["max_questions"]},
+        config=_config(),
+    )
+    assert run.params["max_questions"] == ceilings["max_questions"]
+
+
+def test_a_deployment_default_above_a_ceiling_is_the_operators_business():
+    """Ceilings bound requests, not the deployment that set the defaults."""
+    generous = RecallCoverageConfig(_env_file=None, max_questions=100_000)
+
+    assert pipeline.build_params(None, generous).max_questions == 100_000
+
+
+@pytest.mark.asyncio
 async def test_overrides_are_snapshotted_onto_the_run_row(coverage_engine, monkeypatch):
     caller = _user()
     monkeypatch.setattr(pipeline, "schedule_recall_coverage_run", lambda *a, **k: None)

@@ -119,6 +119,20 @@ class RecallCoverageConfig(BaseSettings):
     sink_share_alert: float = Field(default=0.30, ge=0.0, le=1.0)
     sink_cluster_alert_size: int = 10
 
+    # --- Ceilings on per-request overrides ---------------------------------
+    # ``POST /runs`` takes per-run parameter overrides, and the cost knobs are
+    # among them: the window size, the age window, the retrieval depth and the two
+    # concurrency limits each bill LLM calls or hold memory. Without an upper
+    # bound any authenticated caller can ask for a run nobody would start —
+    # ``max_questions = 200000`` is a 200000 x 200000 similarity matrix before a
+    # single LLM call — and the ``(owner, agent_label)`` in-flight guard bounds
+    # neither the labels nor the owners. These bound a *request*; the deployment's
+    # own defaults above are trusted and are not checked against them.
+    max_questions_ceiling: int = 1000
+    max_age_days_ceiling: int = 365
+    replay_top_k_ceiling: int = 100
+    max_concurrent_ceiling: int = 50
+
     # --- Runs --------------------------------------------------------------
     # How long a pending or running run keeps blocking the next run for the same
     # (owner, agent_label). A run is minutes of LLM calls, so a row still in
@@ -176,6 +190,24 @@ class RecallCoverageConfig(BaseSettings):
             prefix_map[label] = prefixes
         return prefix_map
 
+    def override_ceilings(self) -> dict[str, int]:
+        """The most a single request may ask for, per overridable cost parameter.
+
+        Only the parameters whose value costs money or memory are listed: the
+        thresholds are already bounded to ``0..1`` by their own fields, and a
+        request cannot make a run expensive by moving one. One shared ceiling
+        covers both concurrency limits — they bound the same thing, in-flight
+        calls, and a deployment that raises one has no reason to keep the other
+        low.
+        """
+        return {
+            "max_questions": self.max_questions_ceiling,
+            "max_age_days": self.max_age_days_ceiling,
+            "replay_top_k": self.replay_top_k_ceiling,
+            "replay_max_concurrent": self.max_concurrent_ceiling,
+            "judge_max_concurrent": self.max_concurrent_ceiling,
+        }
+
     def query_types(self) -> list[str]:
         """Search types that count as recall, as the strings stored in ``queries``.
 
@@ -209,6 +241,7 @@ class RecallCoverageConfig(BaseSettings):
             "sink_share_alert": self.sink_share_alert,
             "sink_cluster_alert_size": self.sink_cluster_alert_size,
             "run_stale_after_seconds": self.run_stale_after_seconds,
+            "override_ceilings": self.override_ceilings(),
             "runs_list_default_limit": self.runs_list_default_limit,
             "agents_list_default_limit": self.agents_list_default_limit,
             "agent_label_granularity": self.agent_label_granularity,

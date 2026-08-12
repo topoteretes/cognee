@@ -168,11 +168,19 @@ class CoverageParams(BaseModel):
         omitted so importing this module stays cheap. Unknown override keys
         raise (``extra="forbid"``) instead of being silently dropped, which
         would let a typo'd request parameter look accepted.
+
+        An override above its configured ceiling raises too — see
+        :meth:`RecallCoverageConfig.override_ceilings`. The field bounds on this
+        class only stop values that make a run *meaningless* (a cosine threshold of
+        4.2); they say nothing about a value that makes one unaffordable, and every
+        cost knob is overridable by any authenticated caller.
         """
         if config is None:
             from cognee.modules.recall_coverage.config import get_recall_coverage_config
 
             config = get_recall_coverage_config()
+
+        cls._reject_overrides_above_ceiling(config, overrides)
 
         values: dict[str, Any] = {
             name: getattr(config, name) for name in cls.model_fields if name != "query_types"
@@ -180,3 +188,27 @@ class CoverageParams(BaseModel):
         values["query_types"] = config.query_types()
         values.update(overrides)
         return cls(**values)
+
+    @staticmethod
+    def _reject_overrides_above_ceiling(config: Any, overrides: dict[str, Any]) -> None:
+        """Refuse a request asking for more than the deployment allows one run.
+
+        Checked against the **overrides only**: the deployment's own defaults are
+        trusted, so raising ``RECALL_COVERAGE_MAX_QUESTIONS`` past the ceiling is an
+        operator's decision and not a rejected request.
+        """
+        ceilings = getattr(config, "override_ceilings", None)
+        if ceilings is None:
+            return
+
+        bounds = ceilings()
+        exceeded = [
+            f"{name}={value} exceeds the configured ceiling of {bounds[name]}"
+            for name, value in overrides.items()
+            if name in bounds
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > bounds[name]
+        ]
+        if exceeded:
+            raise ValueError("; ".join(sorted(exceeded)))
