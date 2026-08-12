@@ -45,6 +45,16 @@ def get_add_router() -> APIRouter:
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
+        label: Optional[List[EmptyExampleStr]] = Form(
+            default=None,
+            examples=[[]],
+            description=(
+                "Per-file labels, paired positionally: the Nth label applies to the Nth "
+                "uploaded file, so provide one entry per file (leave an entry empty to "
+                "skip labeling that file). Stored on each file's data record and returned "
+                "when listing dataset data."
+            ),
+        ),
         datasetName: Optional[str] = Form(
             default=None,
             examples=["default_dataset"],
@@ -62,16 +72,6 @@ def get_add_router() -> APIRouter:
             ),
         ),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
-        label: Optional[List[EmptyExampleStr]] = Form(
-            default=None,
-            examples=[[]],
-            description=(
-                "Per-file labels, paired positionally: the Nth label applies to the Nth "
-                "uploaded file, so provide one entry per file (leave an entry empty to "
-                "skip labeling that file). Stored on each file's data record and returned "
-                "when listing dataset data."
-            ),
-        ),
         run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
@@ -87,13 +87,13 @@ def get_add_router() -> APIRouter:
           - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)
           - GitHub repository URLs (will be cloned and processed)
           - Regular file uploads
+        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
+                 uploaded files (one entry per file; an empty entry skips that file).
+                 Stored on each file's data record.
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
-        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
-                 uploaded files (one entry per file; an empty entry skips that file).
-                 Stored on each file's data record.
         - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.

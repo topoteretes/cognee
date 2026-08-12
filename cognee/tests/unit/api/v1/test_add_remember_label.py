@@ -95,15 +95,21 @@ def test_add_empty_label_entry_skips_that_file(client):
         assert [item.data.filename for item in sent] == ["first.txt", "second.txt"]
 
 
-def test_add_without_labels_passes_uploads_through(client):
+@pytest.mark.parametrize(
+    "label_form",
+    # Swagger UI submits untouched array entries as ""; plain clients omit
+    # the field entirely. Both must behave as "no labels".
+    [{"label": ["", ""]}, {}],
+    ids=["empty_entries", "field_omitted"],
+)
+def test_add_without_labels_passes_uploads_through(client, label_form):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         mock_add.return_value = pipeline_run_completed()
 
         response = client.post(
             "/api/v1/add",
             files=UPLOADS,
-            # Swagger UI submits untouched array entries as "".
-            data={"datasetName": "test_dataset", "label": ["", ""]},
+            data={"datasetName": "test_dataset", **label_form},
         )
 
         assert response.status_code == 200
@@ -144,7 +150,12 @@ def test_remember_pairs_each_label_with_its_upload(client):
         assert [item.data.filename for item in sent] == ["first.txt", "second.txt"]
 
 
-def test_remember_without_labels_passes_uploads_through(client):
+@pytest.mark.parametrize(
+    "label_form",
+    [{"label": [""]}, {}],
+    ids=["empty_entries", "field_omitted"],
+)
+def test_remember_without_labels_passes_uploads_through(client, label_form):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = SimpleNamespace(
             status="completed", to_dict=lambda: {"status": "completed"}
@@ -153,7 +164,7 @@ def test_remember_without_labels_passes_uploads_through(client):
         response = client.post(
             "/api/v1/remember",
             files=UPLOADS[:1],
-            data={"datasetName": "test_dataset", "label": [""]},
+            data={"datasetName": "test_dataset", **label_form},
         )
 
         assert response.status_code == 200

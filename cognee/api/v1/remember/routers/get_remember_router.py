@@ -114,6 +114,17 @@ def get_remember_router() -> APIRouter:
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
+        label: Optional[List[EmptyExampleStr]] = Form(
+            default=None,
+            examples=[[]],
+            description=(
+                "Per-file labels, paired positionally: the Nth label applies to the Nth "
+                "uploaded file, so provide one entry per file (leave an entry empty to "
+                "skip labeling that file). Stored on each file's data record during "
+                "ingestion. Only supported for normal ingestion — rejected when combined "
+                "with session_id or content_type, whose storage paths carry no data records."
+            ),
+        ),
         datasetName: Optional[str] = Form(
             default=None,
             examples=["default_dataset"],
@@ -143,17 +154,6 @@ def get_remember_router() -> APIRouter:
                 "groups). Extracted graph nodes are linked to these sets, and recall/search "
                 "can later be restricted to them via their node_name parameter. Leave empty "
                 "to skip tagging."
-            ),
-        ),
-        label: Optional[List[EmptyExampleStr]] = Form(
-            default=None,
-            examples=[[]],
-            description=(
-                "Per-file labels, paired positionally: the Nth label applies to the Nth "
-                "uploaded file, so provide one entry per file (leave an entry empty to "
-                "skip labeling that file). Stored on each file's data record during "
-                "ingestion. Only supported for normal ingestion — rejected when combined "
-                "with session_id or content_type, whose storage paths carry no data records."
             ),
         ),
         run_in_background: Optional[bool] = Form(
@@ -253,6 +253,10 @@ def get_remember_router() -> APIRouter:
 
         ## Request Parameters
         - **data** (List[UploadFile]): Files to upload and process.
+        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
+          uploaded files (one entry per file; an empty entry skips that file). Stored on
+          each file's data record. Normal ingestion only — rejected with session_id or
+          content_type.
         - **datasetName** (Optional[str]): Name of the target dataset.
         - **datasetId** (Optional[UUID]): UUID of an existing dataset.
         - **session_id** (Optional[str]): Session to attribute this memory to. When set,
@@ -260,10 +264,6 @@ def get_remember_router() -> APIRouter:
           background; the session is tracked in the sessions dashboard. When omitted,
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
-        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
-          uploaded files (one entry per file; an empty entry skips that file). Stored on
-          each file's data record. Normal ingestion only — rejected with session_id or
-          content_type.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
