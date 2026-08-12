@@ -1,0 +1,7 @@
+QUESTION
+{{ question }}
+
+CONTEXT
+{{ context }}
+
+Answer the question using only the context above.

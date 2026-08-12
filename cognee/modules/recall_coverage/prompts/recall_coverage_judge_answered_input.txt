@@ -1,0 +1,8 @@
+QUESTION
+{{ question }}
+
+ANSWER
+{{ answer }}
+
+Did the answer respond to the question? Explain in at most
+{{ reason_max_chars }} characters, then give the verdict.

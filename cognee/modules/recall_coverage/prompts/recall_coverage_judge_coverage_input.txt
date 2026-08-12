@@ -1,0 +1,13 @@
+QUESTION
+{{ question }}
+
+RETRIEVED CONTEXT
+{{ context }}
+
+Score from {{ min_score }} to {{ max_score }} how much of what is needed to
+answer the question is present in the retrieved context above.
+{{ min_score }} means the context contains nothing that helps answer it.
+{{ max_score }} means the context contains everything needed to answer it fully.
+
+Explain in at most {{ reason_max_chars }} characters which parts of what the
+question needs are present and which are missing, then give the score.
