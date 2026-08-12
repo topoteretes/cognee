@@ -26,6 +26,7 @@ matrix is the vector for ``texts[i]``. A shifted row does not fail, it silently
 attributes one question's meaning to another.
 """
 
+from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
 import numpy as np
@@ -34,6 +35,42 @@ from cognee.modules.recall_coverage.exceptions import DegenerateEmbeddingError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("recall_coverage")
+
+
+@dataclass(frozen=True)
+class EmbeddingFingerprint:
+    """Which embedding space a stored vector lives in.
+
+    Persisted alongside every topic and suggestion centroid, because a cosine
+    similarity between two different embedding spaces is not a small error — it
+    is a confident number about nothing. A run whose live engine disagrees with a
+    stored centroid therefore fails (see
+    :func:`cognee.modules.recall_coverage.assign.require_matching_fingerprint`)
+    rather than re-embedding the topic behind the operator's back, which would
+    silently reset the score trend that stable topic ids exist to carry.
+    """
+
+    model: str
+    dimensions: int
+
+
+def engine_fingerprint(engine: Any) -> EmbeddingFingerprint:
+    """The fingerprint of the live embedding engine.
+
+    Every in-tree engine sets ``.model`` and answers ``get_vector_size()``. An
+    engine that names neither yields ``("", 0)``, which then only compares equal
+    to centroids stored under the same blank fingerprint — consistent, and never
+    a comparison across two spaces that both claim to be unknown.
+    """
+    model = str(getattr(engine, "model", "") or "")
+
+    try:
+        dimensions = int(engine.get_vector_size())
+    except Exception as error:  # pragma: no cover - engine-specific
+        logger.debug("recall_coverage: engine did not report a vector size: %s", error)
+        dimensions = int(getattr(engine, "dimensions", 0) or 0)
+
+    return EmbeddingFingerprint(model=model, dimensions=max(dimensions, 0))
 
 
 def unique_text_plan(texts: Sequence[str]) -> tuple[list[str], list[int]]:

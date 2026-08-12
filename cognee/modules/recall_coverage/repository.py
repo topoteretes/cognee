@@ -1,10 +1,15 @@
-"""Persistence for recall coverage. Currently the curated-question CRUD.
+"""Persistence for recall coverage: curated questions, topics and suggestions.
 
-Spec section 4. A curated question is one a human typed that memory *should*
-answer, whether or not any agent asked it. It is deliberately **not** a separate
-report: curated questions enter the same window, the same dedup, the same replay
-and the same judge as observed traffic, and come back in the same ``questions[]``
-with ``source = "curated"``.
+Spec sections 2 (phase 2) and 4. A curated question is one a human typed that
+memory *should* answer, whether or not any agent asked it. It is deliberately
+**not** a separate report: curated questions enter the same window, the same
+dedup, the same replay and the same judge as observed traffic, and come back in
+the same ``questions[]`` with ``source = "curated"``.
+
+Topics and topic suggestions are **owner-scoped**, never per-agent and never
+per-dataset: one taxonomy across all of an owner's agents is what makes "Codex
+4.2 on Billing, Claude Code 2.1 on Billing" a sentence at all. ``agent_label`` on
+a suggestion is provenance ("this came out of the Codex run"), never scope.
 
 Three things in here are easy to get wrong and are load-bearing:
 
@@ -47,11 +52,16 @@ from cognee.modules.recall_coverage.exceptions import (
     EmptyCuratedQuestionError,
     InvalidCuratedQuestionScopeError,
 )
-from cognee.modules.recall_coverage.models import RecallCoverageCuratedQuestion
+from cognee.modules.recall_coverage.models import (
+    RecallCoverageCuratedQuestion,
+    RecallCoverageTopic,
+    RecallCoverageTopicSuggestion,
+)
 from cognee.modules.recall_coverage.types import (
     AgentScope,
     CuratedScope,
     QuestionSource,
+    SuggestionStatus,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -218,9 +228,7 @@ async def create_curated_question(
     if not text:
         raise EmptyCuratedQuestionError()
 
-    normalized_scope, label = normalize_curated_scope(
-        scope, agent_label, user=user, config=config
-    )
+    normalized_scope, label = normalize_curated_scope(scope, agent_label, user=user, config=config)
     owner_id = resolve_curated_owner(user, normalized_scope)
 
     db_engine = get_relational_engine()
@@ -236,10 +244,7 @@ async def create_curated_question(
         duplicate_id = _duplicate_of(text, existing)
         if duplicate_id is not None:
             raise DuplicateCuratedQuestionError(
-                message=(
-                    "This curated question already exists in this scope "
-                    f"(id {duplicate_id})."
-                )
+                message=f"This curated question already exists in this scope (id {duplicate_id})."
             )
 
         row = RecallCoverageCuratedQuestion(
@@ -427,15 +432,207 @@ async def load_curated_asks(
     return curated_asks(curated, user_id=user.id, dataset_ids=list(dataset_ids))
 
 
+# --- Topics and topic suggestions -------------------------------------------
+
+
+@dataclass(frozen=True)
+class TopicRecord:
+    """One active topic, detached from the session that read it.
+
+    ``centroid`` is a tuple rather than a list so the record stays immutable all
+    the way into the matmul: a phase that mutated a centroid in place would
+    change what later runs are scored against without touching the database.
+    """
+
+    id: UUID
+    owner_id: UUID
+    label: str
+    centroid: tuple[float, ...]
+    embedding_model: str
+    embedding_dimensions: int
+    seed_question_count: int = 0
+    taxonomy_version: int = 0
+
+
+@dataclass(frozen=True)
+class SuggestionRecord:
+    """One topic suggestion, detached from the session that read it."""
+
+    id: UUID
+    owner_id: UUID
+    label: str
+    centroid: tuple[float, ...]
+    embedding_model: str
+    embedding_dimensions: int
+    question_count: int
+    cohesion: Optional[float]
+    status: str
+    agent_label: Optional[str] = None
+    run_id: Optional[UUID] = None
+    accepted_topic_id: Optional[UUID] = None
+    created_at: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class SuggestionDraft:
+    """A suggestion about to be written. Always lands as ``pending``.
+
+    The topic id is minted on accept, not here — that is what makes an accepted
+    topic id stable across runs, and it is why this carries no id of its own.
+    """
+
+    owner_id: UUID
+    label: str
+    centroid: tuple[float, ...]
+    embedding_model: str
+    embedding_dimensions: int
+    question_count: int
+    cohesion: Optional[float] = None
+    agent_label: Optional[str] = None
+    run_id: Optional[UUID] = None
+
+
+def _to_topic_record(row: RecallCoverageTopic) -> TopicRecord:
+    return TopicRecord(
+        id=row.id,
+        owner_id=row.owner_id,
+        label=row.label,
+        centroid=tuple(float(value) for value in (row.centroid or ())),
+        embedding_model=row.embedding_model,
+        embedding_dimensions=row.embedding_dimensions,
+        seed_question_count=row.seed_question_count or 0,
+        taxonomy_version=row.taxonomy_version or 0,
+    )
+
+
+def _to_suggestion_record(row: RecallCoverageTopicSuggestion) -> SuggestionRecord:
+    return SuggestionRecord(
+        id=row.id,
+        owner_id=row.owner_id,
+        label=row.label,
+        centroid=tuple(float(value) for value in (row.centroid or ())),
+        embedding_model=row.embedding_model,
+        embedding_dimensions=row.embedding_dimensions,
+        question_count=row.question_count or 0,
+        cohesion=row.cohesion,
+        status=row.status,
+        agent_label=row.agent_label,
+        run_id=row.run_id,
+        accepted_topic_id=row.accepted_topic_id,
+        created_at=row.created_at,
+    )
+
+
+async def load_active_topics(owner_id: UUID) -> list[TopicRecord]:
+    """Every topic the owner has accepted and not deleted, oldest first.
+
+    Owner-scoped with **no ``agent_label`` filter**: one taxonomy serves all of an
+    owner's agents, so a Codex run and a Claude Code run are scored against the
+    same topics and their per-topic scores are comparable. Deleted topics are
+    excluded (soft delete keeps ``taxonomy_version`` monotone), and their
+    questions fall back to the sink on the next run rather than disappearing.
+
+    Ordered by ``created_at`` then ``id`` so the centroid matrix — and therefore
+    which topic wins an exact similarity tie — is stable between runs.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageTopic)
+            .where(
+                RecallCoverageTopic.owner_id == owner_id,
+                RecallCoverageTopic.deleted_at.is_(None),
+            )
+            .order_by(RecallCoverageTopic.created_at, RecallCoverageTopic.id)
+        )
+        return [_to_topic_record(row) for row in result.scalars().all()]
+
+
+async def load_settled_suggestions(owner_id: UUID) -> list[SuggestionRecord]:
+    """The owner's accepted and dismissed suggestions — the re-proposal guard's input.
+
+    Owner-scoped and label-blind on purpose: dismissing a suggestion is a
+    statement about the owner's taxonomy, so it must also suppress the same theme
+    on another agent's run. ``pending`` rows are excluded — an undecided
+    suggestion is not a decision, so re-surfacing the same theme is legitimate.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageTopicSuggestion)
+            .where(
+                RecallCoverageTopicSuggestion.owner_id == owner_id,
+                RecallCoverageTopicSuggestion.status.in_(
+                    (SuggestionStatus.ACCEPTED.value, SuggestionStatus.DISMISSED.value)
+                ),
+            )
+            .order_by(RecallCoverageTopicSuggestion.created_at)
+        )
+        return [_to_suggestion_record(row) for row in result.scalars().all()]
+
+
+async def load_pending_suggestions(owner_id: UUID) -> list[SuggestionRecord]:
+    """The owner's undecided suggestions, newest first. The review queue."""
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageTopicSuggestion)
+            .where(
+                RecallCoverageTopicSuggestion.owner_id == owner_id,
+                RecallCoverageTopicSuggestion.status == SuggestionStatus.PENDING.value,
+            )
+            .order_by(RecallCoverageTopicSuggestion.created_at.desc())
+        )
+        return [_to_suggestion_record(row) for row in result.scalars().all()]
+
+
+async def create_topic_suggestions(
+    drafts: Sequence[SuggestionDraft],
+) -> list[SuggestionRecord]:
+    """Write ``pending`` suggestion rows, in one transaction, in draft order."""
+    if not drafts:
+        return []
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        rows = [
+            RecallCoverageTopicSuggestion(
+                owner_id=draft.owner_id,
+                agent_label=draft.agent_label,
+                run_id=draft.run_id,
+                label=draft.label,
+                centroid=list(draft.centroid),
+                embedding_model=draft.embedding_model,
+                embedding_dimensions=draft.embedding_dimensions,
+                question_count=draft.question_count,
+                cohesion=draft.cohesion,
+                status=SuggestionStatus.PENDING.value,
+            )
+            for draft in drafts
+        ]
+        session.add_all(rows)
+        await session.commit()
+        for row in rows:
+            await session.refresh(row)
+        return [_to_suggestion_record(row) for row in rows]
+
+
 __all__ = [
     "CuratedQuestion",
+    "SuggestionDraft",
+    "SuggestionRecord",
+    "TopicRecord",
     "create_curated_question",
+    "create_topic_suggestions",
     "curated_asks",
     "curated_owner_ids",
     "delete_curated_question",
     "list_curated_questions",
+    "load_active_topics",
     "load_curated_asks",
     "load_curated_questions_for_scope",
+    "load_pending_suggestions",
+    "load_settled_suggestions",
     "normalize_curated_scope",
     "resolve_curated_owner",
 ]
