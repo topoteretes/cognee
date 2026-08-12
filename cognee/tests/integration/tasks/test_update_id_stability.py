@@ -142,6 +142,34 @@ async def _doc_chunks(graph, document_id) -> dict:
     return {str(node.get("id")): node for node in await graph.get_nodes(chunk_ids)}
 
 
+async def _vector_payload_document_ids(vector_engine, chunk_ids: list) -> set:
+    """The distinct document_id payload scalars on the chunks' vector rows.
+
+    Backend-aware like the migrations' own vector helpers: LanceDB rows are
+    read through the table query API, PGVector through SQLAlchemy.
+    """
+    if vector_engine.__class__.__name__ == "PGVectorAdapter":
+        from sqlalchemy import select as sql_select
+
+        table = await vector_engine.get_table("DocumentChunk_text")
+        async with vector_engine.get_async_session() as session:
+            payloads = [
+                row.payload or {}
+                for row in (
+                    await session.execute(
+                        sql_select(table.c.payload).where(table.c.id.in_(chunk_ids))
+                    )
+                ).all()
+            ]
+    else:
+        table = await vector_engine.get_collection("DocumentChunk_text")
+        escaped = [chunk_id.replace("'", "''") for chunk_id in chunk_ids]
+        where = "id IN ({})".format(", ".join(f"'{chunk_id}'" for chunk_id in escaped))
+        payloads = [row.get("payload") or {} for row in await table.query().where(where).to_list()]
+    assert len(payloads) == len(chunk_ids), "every chunk has exactly one vector row"
+    return {str(payload.get("document_id")) for payload in payloads}
+
+
 async def _assert_stack_under_id(graph, vector_engine, document_id, expected_text_marker: str):
     """The graph document, its chunks, and their vector payloads all key to id."""
     assert await graph.get_node(str(document_id)) is not None, "graph doc node under the data_id"
@@ -155,13 +183,8 @@ async def _assert_stack_under_id(graph, vector_engine, document_id, expected_tex
         f"updated content ({expected_text_marker}) is in the graph chunks"
     )
 
-    table = await vector_engine.get_collection("DocumentChunk_text")
-    escaped = [chunk_id.replace("'", "''") for chunk_id in chunks]
-    where = "id IN ({})".format(", ".join(f"'{chunk_id}'" for chunk_id in escaped))
-    rows = await table.query().where(where).to_list()
-    assert len(rows) == len(chunks), "every chunk has exactly one vector row"
-    for row in rows:
-        assert str((row.get("payload") or {}).get("document_id")) == str(document_id)
+    payload_document_ids = await _vector_payload_document_ids(vector_engine, list(chunks))
+    assert payload_document_ids == {str(document_id)}, "vector payloads cite the data_id"
     return chunk_texts
 
 

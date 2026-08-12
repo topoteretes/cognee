@@ -173,13 +173,31 @@ async def _doc_chunk_ids(graph, document_id) -> list:
 
 
 async def _vector_payload_document_ids(vector_engine, chunk_ids: list) -> set:
-    """The distinct document_id payload scalars on the chunks' vector rows."""
-    table = await vector_engine.get_collection("DocumentChunk_text")
-    escaped = [chunk_id.replace("'", "''") for chunk_id in chunk_ids]
-    where = "id IN ({})".format(", ".join(f"'{chunk_id}'" for chunk_id in escaped))
-    rows = await table.query().where(where).to_list()
-    assert len(rows) == len(chunk_ids), "every chunk has exactly one vector row"
-    return {str((row.get("payload") or {}).get("document_id")) for row in rows}
+    """The distinct document_id payload scalars on the chunks' vector rows.
+
+    Backend-aware like the migrations' own vector helpers: LanceDB rows are
+    read through the table query API, PGVector through SQLAlchemy.
+    """
+    if vector_engine.__class__.__name__ == "PGVectorAdapter":
+        from sqlalchemy import select as sql_select
+
+        table = await vector_engine.get_table("DocumentChunk_text")
+        async with vector_engine.get_async_session() as session:
+            payloads = [
+                row.payload or {}
+                for row in (
+                    await session.execute(
+                        sql_select(table.c.payload).where(table.c.id.in_(chunk_ids))
+                    )
+                ).all()
+            ]
+    else:
+        table = await vector_engine.get_collection("DocumentChunk_text")
+        escaped = [chunk_id.replace("'", "''") for chunk_id in chunk_ids]
+        where = "id IN ({})".format(", ".join(f"'{chunk_id}'" for chunk_id in escaped))
+        payloads = [row.get("payload") or {} for row in await table.query().where(where).to_list()]
+    assert len(payloads) == len(chunk_ids), "every chunk has exactly one vector row"
+    return {str(payload.get("document_id")) for payload in payloads}
 
 
 def test_rekey_fork_migration_end_to_end(rekey_env):
