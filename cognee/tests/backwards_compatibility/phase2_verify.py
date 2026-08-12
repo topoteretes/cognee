@@ -359,6 +359,61 @@ async def _ledger_expectations(data_id, dataset_id, scope_to_dataset: bool):
     return doc_nodes - other_nodes, doc_edges - other_edges
 
 
+async def _graph_provenance_expectations(graph_engine, dataset_id, data_id):
+    """Ownership expectations read from in-graph provenance columns.
+
+    Graph-provenance datasets deliberately have no relational-ledger rows
+    (no dual tracking), so the delete oracle must read the same columns the
+    delete itself uses: a node/edge is expected to disappear only when this
+    document's source ref is its SOLE owner.
+    """
+    from cognee.infrastructure.databases.provenance.source_refs import make_source_ref_key
+
+    key = make_source_ref_key(dataset_id, data_id)
+
+    def _refs(raw) -> set:
+        return {ref for ref in (raw or "").split("|") if ref}
+
+    node_rows = await graph_engine.query("MATCH (n:Node) RETURN n.id, n.source_ref_keys")
+    solely_nodes = {str(node_id) for node_id, raw in node_rows if _refs(raw) == {key}}
+
+    edge_rows = await graph_engine.query(
+        "MATCH (a:Node)-[r:EDGE]->(b:Node) "
+        "RETURN a.id, b.id, r.relationship_name, r.source_ref_keys"
+    )
+    solely_edges = {
+        (str(source), str(target), str(rel))
+        for source, target, rel, raw in edge_rows
+        if _refs(raw) == {key}
+    }
+    return solely_nodes, solely_edges
+
+
+async def _expectations_for(data_id, dataset_id, owner_by_dataset):
+    """Delete-ownership oracle matching the dataset's provenance mode.
+
+    The lorem dataset (non-empty legacy graph) stays on the relational
+    ledger; the dlt_compat dataset's graph was empty after the legacy sweep,
+    so the current branch marked it graph-provenance — its ownership lives
+    in the graph columns, not the ledger.
+    """
+    from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+
+    if owner_by_dataset is None:
+        graph_engine = await get_graph_engine()
+        if await stores_provenance_in_graph(graph_engine):
+            return await _graph_provenance_expectations(graph_engine, dataset_id, data_id)
+    else:
+        async with set_database_global_context_variables(dataset_id, owner_by_dataset[dataset_id]):
+            graph_engine = await get_graph_engine()
+            if await stores_provenance_in_graph(graph_engine):
+                return await _graph_provenance_expectations(graph_engine, dataset_id, data_id)
+
+    return await _ledger_expectations(
+        data_id, dataset_id, scope_to_dataset=owner_by_dataset is not None
+    )
+
+
 async def _session_data_items(user):
     datasets = await get_datasets_by_name([DATASET], user.id)
     return await get_dataset_data(datasets[0].id)
@@ -575,8 +630,8 @@ async def _verify_delete(stage: str) -> None:
     owner_by_dataset = {row.dataset_id: row.owner_id for row in dataset_rows} or None
 
     for index, (data_id, dataset_id) in enumerate(pairs, start=1):
-        expected_gone_nodes, expected_gone_edges = await _ledger_expectations(
-            data_id, dataset_id, scope_to_dataset=owner_by_dataset is not None
+        expected_gone_nodes, expected_gone_edges = await _expectations_for(
+            data_id, dataset_id, owner_by_dataset
         )
         before_nodes, before_props, before_edges = await _snapshot_dataset_graph(
             dataset_id, owner_by_dataset
