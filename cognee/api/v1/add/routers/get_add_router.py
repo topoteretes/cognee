@@ -8,7 +8,11 @@ from pydantic import WithJsonSchema
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.tasks.ingestion.data_item import pair_labels_with_data, parse_labels
+from cognee.tasks.ingestion.data_item import (
+    pair_labels_with_data,
+    parse_external_metadata,
+    parse_labels,
+)
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -52,6 +56,18 @@ def get_add_router() -> APIRouter:
                 "and returned when listing dataset data."
             ),
         ),
+        external_metadata: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "JSON array of per-file metadata objects, e.g. "
+                '[{"source": "crm", "ticket": 42}, null]. Paired positionally like labels: '
+                "the Nth entry applies to the Nth uploaded file (null or {} skips that "
+                "file), and one entry per file is required when any is given. Merged into "
+                "the file's stored external_metadata (your keys win over loader-derived "
+                "ones; 'node_set' is reserved) and returned when listing dataset data."
+            ),
+        ),
         datasetName: Optional[str] = Form(
             default=None,
             examples=["default_dataset"],
@@ -88,6 +104,10 @@ def get_add_router() -> APIRouter:
                  ["finance", "people", ""], paired positionally with the uploaded files
                  (one entry per file; an empty entry skips that file). Stored on each
                  file's data record.
+        - **external_metadata** (Optional[str]): JSON array of per-file metadata objects,
+                 e.g. [{"source": "crm"}, null], paired positionally with the uploaded
+                 files (one entry per file; null or {} skips that file). Merged into each
+                 file's stored external_metadata.
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
@@ -131,10 +151,12 @@ def get_add_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        # Labels ride on DataItems, which ingestion unwraps to store each
-        # label on its file's Data record. Invalid JSON or a count mismatch
-        # raises a CogneeApiError (400), returned by the global handler.
-        data = pair_labels_with_data(data, parse_labels(labels))
+        # Labels and metadata ride on DataItems, which ingestion unwraps to
+        # store them on each file's Data record. Invalid JSON or a count
+        # mismatch raises a CogneeApiError (400), returned by the global handler.
+        data = pair_labels_with_data(
+            data, parse_labels(labels), parse_external_metadata(external_metadata)
+        )
 
         try:
             add_run = await cognee_add(

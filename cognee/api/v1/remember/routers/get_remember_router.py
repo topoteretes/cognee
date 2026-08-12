@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field, WithJsonSchema
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.tasks.ingestion.data_item import pair_labels_with_data, parse_labels
+from cognee.tasks.ingestion.data_item import (
+    pair_labels_with_data,
+    parse_external_metadata,
+    parse_labels,
+)
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
@@ -126,6 +130,19 @@ def get_remember_router() -> APIRouter:
                 "during ingestion. Only supported for normal ingestion — rejected when "
                 "combined with session_id or content_type, whose storage paths carry no "
                 "data records."
+            ),
+        ),
+        external_metadata: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "JSON array of per-file metadata objects, e.g. "
+                '[{"source": "crm", "ticket": 42}, null]. Paired positionally like labels: '
+                "the Nth entry applies to the Nth uploaded file (null or {} skips that "
+                "file), and one entry per file is required when any is given. Merged into "
+                "the file's stored external_metadata (your keys win over loader-derived "
+                "ones; 'node_set' is reserved). Only supported for normal ingestion — "
+                "rejected when combined with session_id or content_type."
             ),
         ),
         datasetName: Optional[str] = Form(
@@ -260,6 +277,11 @@ def get_remember_router() -> APIRouter:
           ["finance", "people", ""], paired positionally with the uploaded files (one
           entry per file; an empty entry skips that file). Stored on each file's data
           record. Normal ingestion only — rejected with session_id or content_type.
+        - **external_metadata** (Optional[str]): JSON array of per-file metadata objects,
+          e.g. [{"source": "crm"}, null], paired positionally with the uploaded files
+          (one entry per file; null or {} skips that file). Merged into each file's
+          stored external_metadata. Normal ingestion only — rejected with session_id
+          or content_type.
         - **datasetName** (Optional[str]): Name of the target dataset.
         - **datasetId** (Optional[UUID]): UUID of an existing dataset.
         - **session_id** (Optional[str]): Session to attribute this memory to. When set,
@@ -299,26 +321,29 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        # Invalid JSON raises InvalidLabelsError (400) via the global handler.
+        # Invalid JSON raises a CogneeApiError (400) via the global handler.
         parsed_labels = parse_labels(labels)
+        parsed_metadata = parse_external_metadata(external_metadata)
 
-        # Labels live on the Data records that normal add+cognify ingestion
-        # creates. The session-cache, skills, and archive paths never create
-        # those records, so a label there would be silently dropped — reject it
+        # Labels and metadata live on the Data records that normal add+cognify
+        # ingestion creates. The session-cache, skills, and archive paths never
+        # create those records, so they would be silently dropped — reject
         # instead.
-        if any(parsed_labels or []) and (session_id or content_type):
+        if (any(parsed_labels or []) or any(entry for entry in (parsed_metadata or []))) and (
+            session_id or content_type
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "labels is only supported for normal ingestion — "
-                    "remove session_id and content_type to use it."
+                    "labels and external_metadata are only supported for normal ingestion — "
+                    "remove session_id and content_type to use them."
                 ),
             )
 
-        # Labels ride on DataItems, which ingestion unwraps to store each
-        # label on its file's Data record. A count mismatch raises
-        # LabelCountMismatchError (400), returned by the global handler.
-        data = pair_labels_with_data(data, parsed_labels)
+        # Labels and metadata ride on DataItems, which ingestion unwraps to
+        # store them on each file's Data record. A count mismatch raises a
+        # CogneeApiError (400), returned by the global handler.
+        data = pair_labels_with_data(data, parsed_labels, parsed_metadata)
 
         if content_type == "cogx-archive":
             if not data:

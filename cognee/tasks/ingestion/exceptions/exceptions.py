@@ -60,3 +60,25 @@ class InvalidLabelsError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
+
+
+class InvalidExternalMetadataError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = (
+            'external_metadata must be a JSON array of objects, e.g. [{"source": "crm"}, null].'
+        ),
+        name: str = "InvalidExternalMetadataError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class ExternalMetadataCountMismatchError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = "external_metadata count does not match data item count.",
+        name: str = "ExternalMetadataCountMismatchError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
