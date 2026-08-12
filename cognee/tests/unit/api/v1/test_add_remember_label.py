@@ -1,9 +1,11 @@
 """The add and remember endpoints accept `labels` and `external_metadata` form fields.
 
-Each field is a single JSON-encoded array (e.g. '["finance", ""]' or
-'[{"source": "crm"}, null]') because multipart clients — Swagger UI included —
-cannot reliably repeat array form fields (swagger-api/swagger-ui#10221
-serializes repeated entries into one comma-joined part). Entries pair
+Each field is a single part because multipart clients — Swagger UI included —
+cannot reliably repeat array form fields (swagger-api/swagger-ui#10221).
+`labels` accepts a JSON array ('["finance", ""]') or the comma-separated form
+("finance,") that Swagger UI produces when a JSON array of strings is typed
+into the field; `external_metadata` is a JSON array of objects
+('[{"source": "crm"}, null]'), which Swagger transmits intact. Entries pair
 positionally: the Nth entry applies to the Nth file, and an empty entry
 ("" / null / {}) skips that file. When any entry is given, each upload is
 wrapped in a DataItem before it reaches the add/remember pipeline; ingestion
@@ -146,26 +148,43 @@ def test_add_rejects_label_count_mismatch(client, files, labels):
         mock_add.assert_not_awaited()
 
 
+def test_add_rejects_json_labels_with_non_string_entries(client):
+    with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
+        response = client.post(
+            "/api/v1/add",
+            files=UPLOADS,
+            data={"datasetName": "test_dataset", "labels": "[1, 2]"},
+        )
+
+        assert response.status_code == 400
+        assert "JSON array of strings" in response.json()["detail"]
+        mock_add.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     "labels,expected",
     [
-        ("finance", "not valid JSON"),
-        ('"finance"', "JSON array of strings"),
-        ("[1, 2]", "JSON array of strings"),
+        # Swagger UI rewrites a typed JSON array of strings into exactly this
+        # comma-joined form (captured from swagger-ui 5) — it must keep working.
+        ("finance,engineering", ["finance", "engineering"]),
+        ("finance,", ["finance", None]),
+        ("finance, engineering", ["finance", "engineering"]),
     ],
-    ids=["bare_string", "json_string_not_array", "non_string_entries"],
+    ids=["swagger_csv", "swagger_csv_trailing_empty", "csv_with_spaces"],
 )
-def test_add_rejects_malformed_labels(client, labels, expected):
+def test_add_accepts_comma_separated_labels(client, labels, expected):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
+        mock_add.return_value = pipeline_run_completed()
+
         response = client.post(
             "/api/v1/add",
             files=UPLOADS,
             data={"datasetName": "test_dataset", "labels": labels},
         )
 
-        assert response.status_code == 400
-        assert expected in response.json()["detail"]
-        mock_add.assert_not_awaited()
+        assert response.status_code == 200
+        sent = mock_add.call_args.args[0]
+        assert [item.label for item in sent] == expected
 
 
 def test_remember_pairs_each_label_with_its_upload(client):

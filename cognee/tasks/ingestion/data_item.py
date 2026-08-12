@@ -20,32 +20,32 @@ class DataItem:
 
 
 def parse_labels(labels: Optional[str]) -> Optional[List[Optional[str]]]:
-    """Parse the ``labels`` form field: a JSON array of per-file label strings.
+    """Parse the ``labels`` form field into per-file label entries.
 
-    The wire format is a single JSON-encoded string because multipart clients
-    cannot reliably repeat array form fields — Swagger UI serializes repeated
-    entries into one comma-joined part (swagger-api/swagger-ui#10221), which
-    silently corrupts per-file pairing. A single string part survives every
-    client verbatim.
+    The canonical format is a JSON array of strings ('["finance", "people", ""]'),
+    sent as one part because multipart clients cannot reliably repeat array
+    form fields (swagger-api/swagger-ui#10221). The comma-separated form
+    ("finance,people,") is accepted equivalently because Swagger UI rewrites a
+    typed JSON array of strings into exactly that before sending. Any value
+    that does not parse as a JSON array is read as comma-separated, so a label
+    cannot contain a comma unless the client sends real JSON.
 
-    Returns None when the field is absent or blank. Entries may be strings or
-    null; anything else is rejected.
+    Returns None when the field is absent or blank.
 
     Raises:
-        InvalidLabelsError: If the value is not valid JSON or not an array of
-            strings/nulls.
+        InvalidLabelsError: If a JSON array contains non-string entries.
     """
     if labels is None or not labels.strip():
         return None
     try:
         parsed = json.loads(labels)
-    except json.JSONDecodeError as error:
-        raise InvalidLabelsError(f"labels is not valid JSON: {error}")
-    if not isinstance(parsed, list) or not all(
-        entry is None or isinstance(entry, str) for entry in parsed
-    ):
-        raise InvalidLabelsError()
-    return parsed
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        if not all(entry is None or isinstance(entry, str) for entry in parsed):
+            raise InvalidLabelsError()
+        return parsed
+    return [segment.strip() for segment in labels.split(",")]
 
 
 def parse_external_metadata(

@@ -48,12 +48,13 @@ def get_add_router() -> APIRouter:
             default=None,
             examples=[""],
             description=(
-                'JSON array of per-file labels, e.g. ["finance", "people", ""]. Paired '
-                "positionally: the Nth label applies to the Nth uploaded file, so provide "
-                "one entry per file (an empty entry skips that file). Sent as a single "
-                "JSON string because multipart clients — Swagger UI included — cannot "
-                "reliably repeat array form fields. Stored on each file's data record "
-                "and returned when listing dataset data."
+                'Per-file labels, e.g. ["finance", "people", ""] — the Nth label applies '
+                "to the Nth uploaded file, one entry per file, an empty entry skips that "
+                'file. The comma-separated form "finance,people," is accepted '
+                "equivalently (it is what Swagger UI sends when you type a JSON array "
+                "here), so labels cannot contain commas unless the client sends real "
+                "JSON. Stored on each file's data record and returned when listing "
+                "dataset data."
             ),
         ),
         external_metadata: Optional[str] = Form(
