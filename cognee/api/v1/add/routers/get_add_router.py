@@ -23,6 +23,11 @@ logger = get_logger()
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
+# Swagger UI prefills newly added array items from the ITEM-level example;
+# without one it inserts the literal "string". An empty item example keeps
+# "Add item" runnable (empty entries mean "no label for this file").
+EmptyExampleStr = Annotated[str, WithJsonSchema({"type": "string", "example": ""})]
+
 
 def get_add_router() -> APIRouter:
     router = APIRouter()
@@ -57,13 +62,14 @@ def get_add_router() -> APIRouter:
             ),
         ),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
-        label: Optional[str] = Form(
+        label: Optional[List[EmptyExampleStr]] = Form(
             default=None,
-            examples=[""],
+            examples=[[]],
             description=(
-                "Label to attach to every item uploaded in this request. Stored on each "
-                "item's data record and returned when listing dataset data. Leave empty "
-                "for no label."
+                "Per-file labels, paired positionally: the Nth label applies to the Nth "
+                "uploaded file, so provide one entry per file (leave an entry empty to "
+                "skip labeling that file). Stored on each file's data record and returned "
+                "when listing dataset data."
             ),
         ),
         run_in_background: Optional[bool] = Form(default=False),
@@ -85,8 +91,9 @@ def get_add_router() -> APIRouter:
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
-        - **label** (Optional[str]): Label attached to every item uploaded in this request,
-                 stored on each item's data record.
+        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
+                 uploaded files (one entry per file; an empty entry skips that file).
+                 Stored on each file's data record.
         - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.
@@ -126,11 +133,22 @@ def get_add_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        # Swagger UI submits untouched optional fields as "" — treat that as no
-        # label. A label wraps each upload in a DataItem, which ingestion unwraps
-        # to store the label on the item's Data record.
-        if label and data:
-            data = [DataItem(data=item, label=label) for item in data]
+        # Swagger UI submits untouched array entries as "" — normalize to None.
+        labels = [(entry or None) for entry in (label or [])]
+        if any(labels):
+            if len(labels) != len(data or []):
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content=ErrorResponse(
+                        error=(
+                            f"Provide one label per uploaded file: got {len(labels)} labels "
+                            f"for {len(data or [])} files."
+                        ),
+                    ).model_dump(),
+                )
+            # Labels ride on DataItems, which ingestion unwraps to store each
+            # label on its file's Data record.
+            data = [DataItem(data=item, label=lab) for item, lab in zip(data, labels)]
 
         try:
             add_run = await cognee_add(

@@ -1,11 +1,13 @@
-"""The add and remember endpoints accept a `label` form field for uploads.
+"""The add and remember endpoints accept per-file `label` form entries.
 
-A provided label wraps each upload in a DataItem before it reaches the
-add/remember pipeline; ingestion unwraps the DataItem and stores the label
-on the item's Data record. Without a label the uploads pass through
-unchanged. On remember, a label is rejected when combined with session_id
-or content_type — those storage paths never create Data records, so the
-label would be silently dropped.
+Labels pair positionally with the uploaded files: the Nth label applies to
+the Nth file, and an empty entry skips that file. When any label is given,
+each upload is wrapped in a DataItem before it reaches the add/remember
+pipeline; ingestion unwraps the DataItem and stores the label on the file's
+Data record. Without labels the uploads pass through unchanged. A label
+count that doesn't match the file count is rejected, as is a label combined
+with session_id or content_type on remember — those storage paths never
+create Data records, so the label would be silently dropped.
 """
 
 import importlib
@@ -60,32 +62,48 @@ UPLOADS = [
 ]
 
 
-def test_add_with_label_wraps_uploads_in_data_items(client):
+def test_add_pairs_each_label_with_its_upload(client):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         mock_add.return_value = pipeline_run_completed()
 
         response = client.post(
             "/api/v1/add",
             files=UPLOADS,
-            data={"datasetName": "test_dataset", "label": "quarterly-report"},
+            data={"datasetName": "test_dataset", "label": ["finance", "engineering"]},
         )
 
         assert response.status_code == 200
         sent = mock_add.call_args.args[0]
         assert [type(item) for item in sent] == [DataItem, DataItem]
-        assert [item.label for item in sent] == ["quarterly-report", "quarterly-report"]
+        assert [item.label for item in sent] == ["finance", "engineering"]
         assert [item.data.filename for item in sent] == ["first.txt", "second.txt"]
 
 
-def test_add_without_label_passes_uploads_through(client):
+def test_add_empty_label_entry_skips_that_file(client):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         mock_add.return_value = pipeline_run_completed()
 
         response = client.post(
             "/api/v1/add",
-            files=UPLOADS[:1],
-            # Swagger UI submits untouched optional fields as "".
-            data={"datasetName": "test_dataset", "label": ""},
+            files=UPLOADS,
+            data={"datasetName": "test_dataset", "label": ["finance", ""]},
+        )
+
+        assert response.status_code == 200
+        sent = mock_add.call_args.args[0]
+        assert [item.label for item in sent] == ["finance", None]
+        assert [item.data.filename for item in sent] == ["first.txt", "second.txt"]
+
+
+def test_add_without_labels_passes_uploads_through(client):
+    with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
+        mock_add.return_value = pipeline_run_completed()
+
+        response = client.post(
+            "/api/v1/add",
+            files=UPLOADS,
+            # Swagger UI submits untouched array entries as "".
+            data={"datasetName": "test_dataset", "label": ["", ""]},
         )
 
         assert response.status_code == 200
@@ -94,7 +112,20 @@ def test_add_without_label_passes_uploads_through(client):
         assert sent[0].filename == "first.txt"
 
 
-def test_remember_with_label_wraps_uploads_in_data_items(client):
+def test_add_rejects_label_count_mismatch(client):
+    with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
+        response = client.post(
+            "/api/v1/add",
+            files=UPLOADS,
+            data={"datasetName": "test_dataset", "label": ["finance"]},
+        )
+
+        assert response.status_code == 400
+        assert "one label per uploaded file" in response.json()["error"]
+        mock_add.assert_not_awaited()
+
+
+def test_remember_pairs_each_label_with_its_upload(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = SimpleNamespace(
             status="completed", to_dict=lambda: {"status": "completed"}
@@ -103,17 +134,17 @@ def test_remember_with_label_wraps_uploads_in_data_items(client):
         response = client.post(
             "/api/v1/remember",
             files=UPLOADS,
-            data={"datasetName": "test_dataset", "label": "quarterly-report"},
+            data={"datasetName": "test_dataset", "label": ["finance", "engineering"]},
         )
 
         assert response.status_code == 200
         sent = mock_remember.call_args.args[0]
         assert [type(item) for item in sent] == [DataItem, DataItem]
-        assert [item.label for item in sent] == ["quarterly-report", "quarterly-report"]
+        assert [item.label for item in sent] == ["finance", "engineering"]
         assert [item.data.filename for item in sent] == ["first.txt", "second.txt"]
 
 
-def test_remember_without_label_passes_uploads_through(client):
+def test_remember_without_labels_passes_uploads_through(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = SimpleNamespace(
             status="completed", to_dict=lambda: {"status": "completed"}
@@ -122,12 +153,25 @@ def test_remember_without_label_passes_uploads_through(client):
         response = client.post(
             "/api/v1/remember",
             files=UPLOADS[:1],
-            data={"datasetName": "test_dataset", "label": ""},
+            data={"datasetName": "test_dataset", "label": [""]},
         )
 
         assert response.status_code == 200
         sent = mock_remember.call_args.args[0]
         assert not any(isinstance(item, DataItem) for item in sent)
+
+
+def test_remember_rejects_label_count_mismatch(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        response = client.post(
+            "/api/v1/remember",
+            files=UPLOADS,
+            data={"datasetName": "test_dataset", "label": ["finance"]},
+        )
+
+        assert response.status_code == 400
+        assert "one label per uploaded file" in response.json()["detail"]
+        mock_remember.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -140,7 +184,7 @@ def test_remember_rejects_label_outside_normal_ingestion(client, extra_form):
         response = client.post(
             "/api/v1/remember",
             files=UPLOADS[:1],
-            data={"datasetName": "test_dataset", "label": "quarterly-report", **extra_form},
+            data={"datasetName": "test_dataset", "label": ["finance"], **extra_form},
         )
 
         assert response.status_code == 400

@@ -145,14 +145,15 @@ def get_remember_router() -> APIRouter:
                 "to skip tagging."
             ),
         ),
-        label: Optional[str] = Form(
+        label: Optional[List[EmptyExampleStr]] = Form(
             default=None,
-            examples=[""],
+            examples=[[]],
             description=(
-                "Label to attach to every uploaded file in this request, stored on each "
-                "file's data record during ingestion. Only supported for normal ingestion "
-                "— rejected when combined with session_id or content_type, whose storage "
-                "paths carry no data records. Leave empty for no label."
+                "Per-file labels, paired positionally: the Nth label applies to the Nth "
+                "uploaded file, so provide one entry per file (leave an entry empty to "
+                "skip labeling that file). Stored on each file's data record during "
+                "ingestion. Only supported for normal ingestion — rejected when combined "
+                "with session_id or content_type, whose storage paths carry no data records."
             ),
         ),
         run_in_background: Optional[bool] = Form(
@@ -259,8 +260,10 @@ def get_remember_router() -> APIRouter:
           background; the session is tracked in the sessions dashboard. When omitted,
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
-        - **label** (Optional[str]): Label attached to every uploaded file, stored on each
-          file's data record. Normal ingestion only — rejected with session_id or content_type.
+        - **label** (Optional[List[str]]): Per-file labels, paired positionally with the
+          uploaded files (one entry per file; an empty entry skips that file). Stored on
+          each file's data record. Normal ingestion only — rejected with session_id or
+          content_type.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
@@ -293,18 +296,30 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        # A label lives on the Data records that normal add+cognify ingestion
+        # Swagger UI submits untouched array entries as "" — normalize to None.
+        labels = [(entry or None) for entry in (label or [])]
+
+        # Labels live on the Data records that normal add+cognify ingestion
         # creates. The session-cache, skills, and archive paths never create
         # those records, so a label there would be silently dropped — reject it
         # instead.
-        if label and (session_id or content_type):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "label is only supported for normal ingestion — "
-                    "remove session_id and content_type to use it."
-                ),
-            )
+        if any(labels):
+            if session_id or content_type:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "label is only supported for normal ingestion — "
+                        "remove session_id and content_type to use it."
+                    ),
+                )
+            if len(labels) != len(data or []):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Provide one label per uploaded file: got {len(labels)} labels "
+                        f"for {len(data or [])} files."
+                    ),
+                )
 
         if content_type == "cogx-archive":
             if not data:
@@ -378,10 +393,10 @@ def get_remember_router() -> APIRouter:
                     }
                 }
 
-            # A label wraps each upload in a DataItem, which ingestion unwraps
-            # to store the label on the file's Data record.
-            if label and data:
-                data = [DataItem(data=item, label=label) for item in data]
+            # Labels ride on DataItems, which ingestion unwraps to store each
+            # label on its file's Data record.
+            if any(labels):
+                data = [DataItem(data=item, label=lab) for item, lab in zip(data, labels)]
 
             result = await cognee_remember(
                 data,
