@@ -959,9 +959,14 @@ class QuestionRecord:
     impact: Optional[float]
 
     @property
-    def is_observed(self) -> bool:
-        """Read by :func:`report_order_key`, which pins curated rows to the top."""
-        return self.source == QuestionSource.OBSERVED.value
+    def is_curated(self) -> bool:
+        """Read by :func:`report_order_key`, which pins curated rows to the top.
+
+        Provenance, like :attr:`aggregate.CoverageRow.is_curated`: a row that was
+        both curated and asked (``was_asked`` with ``source = "curated"``) is
+        pinned, and still counts as demand everywhere the aggregates look.
+        """
+        return self.source == QuestionSource.CURATED.value
 
 
 def _to_run_record(row: RecallCoverageRun) -> RunRecord:

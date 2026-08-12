@@ -321,6 +321,7 @@ async def run_recall_coverage(
             replayed,
             judged,
             judge_score_max=params.judge_score_max,
+            store_context_max_chars=params.store_context_max_chars,
             shared_curated_ids=shared_curated_ids,
             dataset_names=dataset_names,
         )

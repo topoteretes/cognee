@@ -384,16 +384,23 @@ async def test_zero_payloads_is_an_empty_context_not_an_error():
 
 
 @pytest.mark.asyncio
-async def test_context_is_truncated_to_store_context_max_chars():
+async def test_the_replay_carries_the_whole_context_whatever_the_storage_bound_is():
+    """``store_context_max_chars`` bounds the *column*, never what the judge sees.
+
+    Truncating here would make a storage knob decide the coverage score — and at
+    ``0`` would score every row 0 with no LLM call, reporting "memory answered
+    nothing" as a measurement. The bound is applied by ``build_rows``.
+    """
     search = _RecordingSearch(payloads=[_payload("x" * 500)])
     rows = await replay_questions(
         [_question()],
-        params=_params(store_context_max_chars=100),
+        params=_params(store_context_max_chars=0),
         user_cache=ReplayUserCache(loader=lambda user_id: _resolved(SimpleNamespace(id=user_id))),
         search=search,
     )
 
-    assert rows[0].retrieval_context == "x" * 100
+    assert rows[0].retrieval_context == "x" * 500
+    assert rows[0].has_context
 
 
 @pytest.mark.asyncio
@@ -500,7 +507,6 @@ async def test_replay_question_is_usable_on_its_own():
         _question(user_id=user.id),
         user,
         replay_top_k=15,
-        store_context_max_chars=4000,
         search=search,
     )
 

@@ -36,6 +36,7 @@ from cognee.modules.recall_coverage.aggregate import (
     default_row_order,
     reconciles,
     row_impact,
+    run_counters,
     summarize,
     topic_breakdown,
     user_breakdown,
@@ -79,12 +80,18 @@ def _row(
     judge_score=3,
     occurrence_count=1,
     source: str = QuestionSource.OBSERVED.value,
+    was_asked=None,
     is_shared_curated: bool = False,
     text: str = "Where are the runbooks?",
     error=None,
     judge_score_max: int = 5,
 ) -> CoverageRow:
-    """One aggregated row, with the impact the formula would have given it."""
+    """One aggregated row, with the impact the formula would have given it.
+
+    ``was_asked`` defaults to "observed rows were asked, curated ones were not";
+    pass it explicitly for the third case dedup produces — a curated question that
+    merged into real traffic, which is ``source = "curated"`` *and* asked.
+    """
     return CoverageRow(
         question_text=text,
         user_id=user_id,
@@ -92,7 +99,7 @@ def _row(
         dataset_name=dataset_name,
         question_group_id=uuid4(),
         source=source,
-        was_asked=source == QuestionSource.OBSERVED.value,
+        was_asked=(source == QuestionSource.OBSERVED.value) if was_asked is None else was_asked,
         curated_question_id=None if source == QuestionSource.OBSERVED.value else uuid4(),
         topic_id=topic_id,
         topic_label=SINK_TOPIC_LABEL if topic_id is None else topic_label,
@@ -316,8 +323,8 @@ def test_the_breakdowns_still_reconcile_with_a_sink_and_unscored_rows():
     assert None in {dataset.dataset_id for dataset in summary.datasets}
 
 
-def test_curated_rows_are_absent_from_every_breakdown():
-    """Curated rows are in the table and in no ``GROUP BY``."""
+def test_a_never_asked_curated_row_is_absent_from_every_breakdown():
+    """A curated row nobody has asked is in the table and in no ``GROUP BY``."""
     params = _params(min_scored_questions_per_topic=1)
     rows = _balanced_rows() + [
         _row(source=QuestionSource.CURATED.value, judge_score=5, occurrence_count=0, text="cur"),
@@ -332,6 +339,112 @@ def test_curated_rows_are_absent_from_every_breakdown():
     assert summary.overall_score == pytest.approx(2.5)
     assert sum(topic.question_count for topic in summary.topics) == 6
     assert sum(user.question_count for user in summary.users) == 6
+
+
+def test_a_curated_question_that_merged_with_traffic_still_counts_as_demand():
+    """Curating a badly-answered question must not delete it from the headline.
+
+    ``dedup_asks`` marks a whole cluster ``source = "curated"`` as soon as one
+    member is curated, keeping ``was_asked`` and that partition's
+    ``occurrence_count``. Grouping the breakdowns on the source instead of on
+    ``was_asked`` would drop those genuinely asked rows out of every mean — so
+    anyone able to POST /curated-questions could move ``overall_score`` by naming
+    questions they know score badly, which is the gameability spec section 4
+    forbids, from the other direction.
+    """
+    params = _params(min_scored_questions_per_topic=1)
+    badly = _row(judge_score=1, occurrence_count=3, text="Where do escalations go?")
+    well = _row(judge_score=5, occurrence_count=1, text="Where is the billing runbook?")
+
+    before = summarize([badly, well], params=params)
+    after = summarize(
+        [
+            # The same ask, after a human curated matching text: one row, merged.
+            _row(
+                source=QuestionSource.CURATED.value,
+                was_asked=True,
+                judge_score=1,
+                occurrence_count=3,
+                text="Where do escalations go?",
+            ),
+            well,
+        ],
+        params=params,
+    )
+
+    assert before.overall_score == pytest.approx(3.0)
+    assert after.overall_score == pytest.approx(3.0)
+    assert after.observed_question_count == 2
+    # Both counters describe it: it was asked, and a human wrote its text.
+    assert after.curated_question_count == 1
+    assert [topic.question_count for topic in after.topics] == [2]
+    assert sum(dataset.question_count for dataset in after.datasets) == 2
+    assert sum(user.question_count for user in after.users) == 2
+    assert reconciles(after)
+
+
+def test_a_merged_curated_row_is_still_pinned_above_observed_rows():
+    """The pin is on the source; the aggregates are on ``was_asked``."""
+    merged = _row(
+        source=QuestionSource.CURATED.value, was_asked=True, judge_score=5, occurrence_count=1
+    )
+    observed = _row(judge_score=0, occurrence_count=9, text="asked a lot, answered never")
+
+    assert default_row_order([observed, merged]) == [merged, observed]
+
+
+def test_a_topic_whose_only_rows_are_curated_is_still_listed_and_named():
+    """Otherwise the report returns a real ``topic_id`` labelled ``"Other"``.
+
+    ``topics[]`` is the only place the frozen summary carries topic labels, so a
+    topic missing from it cannot be named by the read endpoint at all.
+    """
+    params = _params(min_scored_questions_per_topic=1)
+    speculative = uuid4()
+    rows = _balanced_rows() + [
+        _row(
+            source=QuestionSource.CURATED.value,
+            occurrence_count=0,
+            topic_id=speculative,
+            topic_label="Billing & invoices",
+            judge_score=4,
+            text="cur",
+        )
+    ]
+
+    summary = summarize(rows, params=params)
+    cell = next(topic for topic in summary.topics if topic.topic_id == speculative)
+
+    assert cell.label == "Billing & invoices"
+    # The counts and the mean are over observed rows, and this topic has none.
+    assert (cell.question_count, cell.scored_question_count, cell.avg_score) == (0, 0, None)
+    assert summary.overall_score == pytest.approx(2.5)
+    assert reconciles(summary)
+
+
+def test_topic_count_agrees_with_the_topics_the_summary_reports():
+    """One denominator: a counter that disagrees with its own breakdown is a bug."""
+    params = _params(min_scored_questions_per_topic=1)
+    rows = _balanced_rows() + [
+        _row(
+            source=QuestionSource.CURATED.value,
+            occurrence_count=0,
+            topic_id=uuid4(),
+            topic_label="Billing & invoices",
+            judge_score=4,
+            text="cur",
+        )
+    ]
+
+    counters = run_counters(
+        rows,
+        recall_row_count=11,
+        distinct_ask_count=6,
+        collapsed_retry_count=5,
+        taxonomy_version=4,
+    )
+
+    assert counters.topic_count == len(summarize(rows, params=params).topics)
 
 
 # --- benchmark_score_pct -----------------------------------------------------
@@ -630,6 +743,35 @@ def test_build_rows_prefers_the_resolved_dataset_name_over_the_replays():
     assert rows[0].judge_score is None
     assert rows[0].impact is None
     assert rows[0].error == "boom"
+
+
+def test_build_rows_bounds_the_stored_context_but_not_the_judged_one():
+    """``store_context_max_chars`` is a column bound, applied at persistence time.
+
+    The score in the same row was computed over the whole context (see the judge's
+    own guard), so the truncation here is an excerpt of the evidence and never the
+    evidence itself. At ``0`` the column is NULL and the score is untouched.
+    """
+    question = _deduped("q")
+    sink = TopicAssignment(topic_id=None, topic_label=SINK_TOPIC_LABEL, similarity=0.0)
+    replayed = ReplayedRow(retrieval_context="x" * 500, dataset_name=None, payload_count=1)
+    judged = JudgedRow(judge_score=4, judge_answered=True, answer="a")
+
+    def _row_with(limit):
+        return build_rows(
+            [question],
+            [sink],
+            [replayed],
+            [judged],
+            judge_score_max=5,
+            store_context_max_chars=limit,
+        )[0]
+
+    assert _row_with(100).retrieval_context == "x" * 100
+    assert _row_with(None).retrieval_context == "x" * 500
+    assert _row_with(0).retrieval_context is None
+    # The score is the judge's, whatever the column keeps.
+    assert {_row_with(limit).judge_score for limit in (0, 100, None)} == {4}
 
 
 def test_build_rows_refuses_misaligned_inputs():

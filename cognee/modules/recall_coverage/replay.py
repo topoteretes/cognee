@@ -77,6 +77,13 @@ class ReplayedRow:
     in either case; ``error`` is what distinguishes them. A row with an ``error``
     is never judged — its scores stay NULL, because "we could not ask" is not
     evidence that memory could not answer.
+
+    The context is carried here **whole**. ``store_context_max_chars`` is a
+    persistence bound (spec section 11) and is applied on the way to the column by
+    :func:`cognee.modules.recall_coverage.aggregate.build_rows`; truncating here
+    would hand the judge a cut-off context and make a storage knob decide the
+    coverage score — at ``0`` it would score every row 0 with no LLM call and
+    report that as "memory answered nothing".
     """
 
     retrieval_context: Optional[str]
@@ -170,7 +177,6 @@ async def replay_question(
     user: Any,
     *,
     replay_top_k: int,
-    store_context_max_chars: int,
     search: Optional[Callable[..., Awaitable[Any]]] = None,
 ) -> ReplayedRow:
     """Retrieve context for one question row, as ``user``.
@@ -207,7 +213,9 @@ async def replay_question(
     joined = CONTEXT_SEPARATOR.join(part for part in parts if part)
 
     return ReplayedRow(
-        retrieval_context=joined[:store_context_max_chars] or None,
+        # Whole, not truncated: this is what the judge scores. The storage bound is
+        # applied where the row is built for the column.
+        retrieval_context=joined or None,
         # Only meaningful when the row resolved to exactly one dataset; a row
         # replayed across everything readable has no single dataset to name, and
         # its ``dataset_id`` is NULL for the same reason.
@@ -247,7 +255,6 @@ async def replay_questions(
                     question,
                     user,
                     replay_top_k=params.replay_top_k,
-                    store_context_max_chars=params.store_context_max_chars,
                     search=search,
                 )
             except Exception as error:

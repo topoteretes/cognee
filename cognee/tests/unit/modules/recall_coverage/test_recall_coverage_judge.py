@@ -172,6 +172,29 @@ async def test_the_coverage_prompt_never_contains_the_answer():
     assert fake.calls.index(COVERAGE) < fake.calls.index(ANSWER)
 
 
+@pytest.mark.asyncio
+async def test_the_judge_scores_the_whole_context_not_a_storage_bounded_excerpt():
+    """``store_context_max_chars`` must not reach the coverage prompt.
+
+    A context whose answer sits past the storage bound would otherwise be scored
+    as a gap that memory in fact covered — the score would move whenever an
+    operator tuned a column size, and at ``0`` every row would score 0.
+    """
+    context = "filler. " * 800 + "ESCALATION goes to the on-call SRE."
+    fake = _FakeLLM(score=5)
+
+    with _patched(fake):
+        row = await judge_row(
+            _question().text,
+            _replayed(context),
+            params=_params(store_context_max_chars=100),
+        )
+
+    coverage_prompt = next(call for call in fake.prompts if call["model"] == COVERAGE)
+    assert "ESCALATION goes to the on-call SRE." in coverage_prompt["text_input"]
+    assert row.judge_score == 5
+
+
 # --------------------------------------------------------------------------
 # The happy path
 # --------------------------------------------------------------------------

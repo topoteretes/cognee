@@ -12,13 +12,17 @@ persistence layer for the sake of six attributes.
 no synthetic scores. Five rules decide *which* rows, and each one exists because
 its absence produces a number that looks right and is not:
 
-* **Curated rows feed nothing except ``benchmark_score_pct``.** A user who could
-  raise ``overall_score`` by adding questions their memory happens to answer
-  would be able to game the headline; a user who could lower it by adding
-  aspirational ones would stop adding them. Only **shared** curated rows — the
-  benchmark set, identical prompts across agents — feed
+* **Never-asked curated rows feed nothing except ``benchmark_score_pct``.** A
+  user who could raise ``overall_score`` by adding questions their memory happens
+  to answer would be able to game the headline; a user who could lower it by
+  adding aspirational ones would stop adding them. Only **shared** curated rows —
+  the benchmark set, identical prompts across agents — feed
   ``benchmark_score_pct``, and agent-scoped curated rows feed no aggregate at
-  all. Every other breakdown here groups **observed** rows only.
+  all. Every other breakdown here groups rows that were **asked**
+  (``was_asked``), which is not the same as ``source == "observed"``: dedup marks
+  a whole cluster ``curated`` as soon as one member is, so grouping on the source
+  would drop genuinely asked traffic out of the headline the moment somebody
+  curates a question resembling it. See :attr:`CoverageRow.is_observed`.
 * **One row set, four groupings.** Topics, the sink, datasets and users are four
   ``GROUP BY``s over the same observed rows, so they reconcile exactly: the
   question counts of each grouping sum to the same total, and the count-weighted
@@ -163,8 +167,36 @@ class CoverageRow:
     is_shared_curated: bool = False
 
     @property
+    def is_curated(self) -> bool:
+        """True when a human wrote this row's text — provenance, not participation.
+
+        Dedup marks a cluster ``source = "curated"`` as soon as one member is
+        curated, so a curated question that landed within ``dedup_threshold`` of
+        real traffic carries this *and* ``was_asked = True`` (spec section 4).
+        This is what pins curated rows to the top of the report and what
+        ``curated_question_count`` counts; it is deliberately not what the
+        breakdowns filter on — see :attr:`is_observed`.
+        """
+        return self.source == QuestionSource.CURATED.value
+
+    @property
     def is_observed(self) -> bool:
-        return self.source == QuestionSource.OBSERVED.value
+        """True when an agent really asked this, whoever wrote the text.
+
+        Tested on ``was_asked`` rather than on ``source``, and that distinction is
+        the whole point. Filtering the breakdowns on the source would delete real,
+        already-counted traffic from ``overall_score`` the moment a human adds a
+        question resembling it: the observed row merges, becomes ``curated`` and
+        drops out of every mean. A user could then move the headline number by
+        naming questions they know score badly — exactly the gameability spec
+        section 4 forbids, arrived at from the opposite direction.
+
+        A merged row was asked N times before the curated text existed and is
+        asked N times after, so it stays in every mean. A purely curated row
+        (``was_asked = False``, ``occurrence_count = 0``) is nobody's demand yet
+        and feeds nothing but ``benchmark_score_pct``.
+        """
+        return self.was_asked
 
     @property
     def is_sink(self) -> bool:
@@ -295,6 +327,11 @@ class CoverageSummary:
     the sink; lose access to a dataset and it would vanish from a run that
     genuinely covered it. Either would reshape a past run and destroy the trend
     that stable topic ids exist to carry.
+
+    ``observed_question_count`` and ``curated_question_count`` answer two
+    different questions — how many rows were asked, and how many a human wrote —
+    so they overlap on a curated question that merged into real traffic and do not
+    have to sum to ``question_row_count``.
     """
 
     overall_score: Optional[float]
@@ -347,6 +384,20 @@ def _scores(rows: Sequence[CoverageRow]) -> list[float]:
     return [float(row.judge_score) for row in rows if row.judge_score is not None]
 
 
+def _stored_context(
+    context: Optional[str], store_context_max_chars: Optional[int]
+) -> Optional[str]:
+    """The judged context, bounded to what the column keeps. NULL, never ``""``.
+
+    The bound is a storage decision and nothing else: the score in the same row was
+    computed over the whole context, so a reader who finds this field cut off is
+    looking at an excerpt of the evidence, not at the evidence the judge saw.
+    """
+    if context is None or store_context_max_chars is None:
+        return context
+    return context[:store_context_max_chars] or None
+
+
 def build_rows(
     questions: Sequence[DedupedQuestion],
     assignments: Sequence[AssignmentLike],
@@ -354,6 +405,7 @@ def build_rows(
     judged: Sequence[JudgedLike],
     *,
     judge_score_max: int,
+    store_context_max_chars: Optional[int] = None,
     shared_curated_ids: Collection[UUID] = (),
     dataset_names: Optional[Mapping[UUID, str]] = None,
 ) -> list[CoverageRow]:
@@ -370,6 +422,12 @@ def build_rows(
     row whose replay failed still has a dataset worth naming. The replay's name is
     the fallback, and it is only ever set when the search resolved to exactly one
     dataset.
+
+    ``store_context_max_chars`` is applied to ``retrieval_context`` **here**, which
+    is the only place it belongs: spec section 11 introduces it as a bound on what
+    the column holds, and the judge has already scored the whole retrieved context
+    by the time these rows are built. Truncating in the replay instead would let a
+    storage knob decide the headline score. ``None`` stores the context whole.
     """
     lengths = {
         "questions": len(questions),
@@ -389,6 +447,7 @@ def build_rows(
     rows: list[CoverageRow] = []
     for question, assignment, replay, verdict in zip(questions, assignments, replayed, judged):
         dataset_name = names.get(question.dataset_id) if question.dataset_id else None
+        stored_context = _stored_context(replay.retrieval_context, store_context_max_chars)
 
         rows.append(
             CoverageRow(
@@ -405,7 +464,7 @@ def build_rows(
                 answer=verdict.answer,
                 judge_score=verdict.judge_score,
                 judge_answered=verdict.judge_answered,
-                retrieval_context=replay.retrieval_context,
+                retrieval_context=stored_context,
                 error=verdict.error,
                 first_asked_at=question.first_asked_at,
                 last_asked_at=question.last_asked_at,
@@ -432,13 +491,14 @@ def report_order_key(row: Any) -> tuple:
     rows last — they carry no impact, so ranking them among the answered ones
     would bury the actual failures.
 
-    Duck-typed on ``is_observed``, ``impact``, ``occurrence_count`` and
+    Duck-typed on ``is_curated``, ``impact``, ``occurrence_count`` and
     ``question_text`` so the write side (:class:`CoverageRow`) and the read side
     (``repository.QuestionRecord``) cannot drift into two different default
-    orders.
+    orders. The pin is on the **source**, not on ``was_asked``: a curated
+    question that merged into real traffic is still the row a human asked for.
     """
     return (
-        row.is_observed,
+        not row.is_curated,
         row.impact is None,
         -(row.impact or 0.0),
         -row.occurrence_count,
@@ -460,15 +520,26 @@ def topic_breakdown(
     ``overall_score`` — below ``min_scored_questions_per_topic`` scored rows. The
     rows still count in ``question_count``: the topic was asked about, we just
     will not put a number on it yet.
+
+    **Every topic that received a row appears**, including one whose only rows are
+    purely curated: it then reports ``question_count: 0`` and ``avg_score: null``,
+    because the counts are over observed rows and nobody has asked it yet. It is
+    listed rather than omitted because this breakdown is the only place the frozen
+    summary carries topic *labels*, so a topic missing from here comes back out of
+    ``GET /runs/{id}`` as a real ``topic_id`` labelled ``"Other"`` — a row that
+    contradicts itself — and makes ``run.topic_count`` disagree with
+    ``len(topics)`` in the same response.
     """
     grouped: dict[UUID, list[CoverageRow]] = {}
     labels: dict[UUID, str] = {}
 
     for row in rows:
-        if not row.is_observed or row.topic_id is None:
+        if row.topic_id is None:
             continue
-        grouped.setdefault(row.topic_id, []).append(row)
+        grouped.setdefault(row.topic_id, [])
         labels.setdefault(row.topic_id, row.topic_label)
+        if row.is_observed:
+            grouped[row.topic_id].append(row)
 
     topics: list[TopicScore] = []
     for topic_id, members in grouped.items():
@@ -687,7 +758,7 @@ def summarize(
         unscoped_ask_share=unscoped_ask_share(rows, distinct_ask_count=distinct_ask_count),
         observed_question_count=len(observed),
         scored_question_count=len(_scores(observed)),
-        curated_question_count=len(rows) - len(observed),
+        curated_question_count=len([row for row in rows if row.is_curated]),
         topics=topics,
         datasets=dataset_breakdown(rows),
         users=user_breakdown(rows),
@@ -755,7 +826,7 @@ def run_counters(
         distinct_ask_count=distinct_ask_count,
         collapsed_retry_count=collapsed_retry_count,
         question_row_count=len(rows),
-        curated_question_count=len([row for row in rows if not row.is_observed]),
+        curated_question_count=len([row for row in rows if row.is_curated]),
         topic_count=len({row.topic_id for row in rows if row.topic_id is not None}),
         dataset_count=len({row.dataset_id for row in rows if row.dataset_id is not None}),
         user_count=len({row.user_id for row in rows}),
