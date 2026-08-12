@@ -1190,10 +1190,6 @@ async def _remember_inner(
     if remaining:
         raise TypeError(f"Unexpected keyword arguments: {', '.join(remaining)}")
 
-    # Cap on concurrently processed data items for both the add and cognify
-    # phases; without this the callees' own (lower) defaults would apply.
-    shared_kwargs.setdefault("data_per_batch", 2000)
-
     # Ensure database is initialized (same as add() does internally).
     # Must run before get_default_user() which queries the DB.
     from cognee.modules.engine.operations.setup import setup
