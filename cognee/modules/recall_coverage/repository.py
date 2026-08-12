@@ -1,6 +1,6 @@
-"""Persistence for recall coverage: curated questions, topics and suggestions.
+"""Persistence for recall coverage: runs, question rows, curated questions, topics.
 
-Spec sections 2 (phase 2) and 4. A curated question is one a human typed that
+Spec sections 2 (phases 2 and 4) and 4. A curated question is one a human typed that
 memory *should* answer, whether or not any agent asked it. It is deliberately
 **not** a separate report: curated questions enter the same window, the same
 dedup, the same replay and the same judge as observed traffic, and come back in
@@ -32,10 +32,17 @@ Three things in here are easy to get wrong and are load-bearing:
 Id-keyed lookups filter on **both** id and owner scope and raise 404 on a
 mismatch — never 403, which would confirm that someone else's row with that id
 exists.
+
+The run half (phase 4 step 14) is the only writer of ``recall_coverage_runs`` and
+``recall_coverage_questions``. A run's rows and its frozen ``summary`` are written
+in **one** transaction by :func:`persist_run_results`: a run whose rows landed but
+whose summary did not would report ``overall_score: null`` over a table full of
+scores, which reads as "memory answered nothing" rather than as the partial write
+it is.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 from uuid import UUID
 
@@ -44,9 +51,17 @@ from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.recall_coverage.agent_scope import resolve_agent_scope
+from cognee.modules.recall_coverage.aggregate import (
+    CoverageRow,
+    CoverageSummary,
+    RunCounters,
+    default_row_order,
+    report_order_key,
+)
 from cognee.modules.recall_coverage.config import RecallCoverageConfig
 from cognee.modules.recall_coverage.dedup import Ask, collapse_text_key
 from cognee.modules.recall_coverage.exceptions import (
+    CoverageRunNotFoundError,
     CuratedQuestionNotFoundError,
     DuplicateCuratedQuestionError,
     EmptyCuratedQuestionError,
@@ -54,13 +69,17 @@ from cognee.modules.recall_coverage.exceptions import (
 )
 from cognee.modules.recall_coverage.models import (
     RecallCoverageCuratedQuestion,
+    RecallCoverageQuestion,
+    RecallCoverageRun,
     RecallCoverageTopic,
     RecallCoverageTopicSuggestion,
 )
 from cognee.modules.recall_coverage.types import (
     AgentScope,
+    CoverageParams,
     CuratedScope,
     QuestionSource,
+    RunStatus,
     SuggestionStatus,
 )
 from cognee.shared.logging_utils import get_logger
@@ -617,22 +636,415 @@ async def create_topic_suggestions(
         return [_to_suggestion_record(row) for row in rows]
 
 
+# --- Runs and question rows --------------------------------------------------
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """One coverage run, detached from the session that read it.
+
+    ``summary`` is the frozen report (see
+    :class:`cognee.modules.recall_coverage.aggregate.CoverageSummary`) on a
+    complete run, ``{"error": ...}`` on a failed one, and ``None`` before the run
+    finished. ``params`` is the :class:`CoverageParams` snapshot it executed
+    under, so a historical run stays readable after the deployment's defaults
+    move.
+    """
+
+    id: UUID
+    agent_label: str
+    owner_id: UUID
+    status: str
+    params: Optional[dict]
+    summary: Optional[dict]
+    finished_at: Optional[datetime]
+    recall_row_count: int = 0
+    distinct_ask_count: int = 0
+    collapsed_retry_count: int = 0
+    question_row_count: int = 0
+    curated_question_count: int = 0
+    topic_count: int = 0
+    dataset_count: int = 0
+    user_count: int = 0
+    taxonomy_version: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @property
+    def is_in_flight(self) -> bool:
+        """Pending or running: what the ``(owner, agent_label)`` 409 guard tests."""
+        return self.status in (RunStatus.PENDING.value, RunStatus.RUNNING.value)
+
+
+@dataclass(frozen=True)
+class QuestionRecord:
+    """One persisted question row, detached from the session that read it.
+
+    ``topic_id`` is ``None`` for the sink — the wire literal ``"other"`` is
+    produced by the DTO, never stored — so a reader must test the id and not the
+    string.
+    """
+
+    id: UUID
+    run_id: UUID
+    question_group_id: Optional[UUID]
+    user_id: UUID
+    dataset_id: Optional[UUID]
+    dataset_name: Optional[str]
+    question_text: str
+    source: str
+    was_asked: bool
+    curated_question_id: Optional[UUID]
+    answer: Optional[str]
+    judge_score: Optional[int]
+    judge_answered: Optional[bool]
+    retrieval_context: Optional[str]
+    error: Optional[str]
+    topic_id: Optional[UUID]
+    first_asked_at: Optional[datetime]
+    last_asked_at: Optional[datetime]
+    occurrence_count: int
+    impact: Optional[float]
+
+    @property
+    def is_observed(self) -> bool:
+        """Read by :func:`report_order_key`, which pins curated rows to the top."""
+        return self.source == QuestionSource.OBSERVED.value
+
+
+def _to_run_record(row: RecallCoverageRun) -> RunRecord:
+    return RunRecord(
+        id=row.id,
+        agent_label=row.agent_label,
+        owner_id=row.owner_id,
+        status=row.status,
+        params=row.params,
+        summary=row.summary,
+        finished_at=row.finished_at,
+        recall_row_count=row.recall_row_count or 0,
+        distinct_ask_count=row.distinct_ask_count or 0,
+        collapsed_retry_count=row.collapsed_retry_count or 0,
+        question_row_count=row.question_row_count or 0,
+        curated_question_count=row.curated_question_count or 0,
+        topic_count=row.topic_count or 0,
+        dataset_count=row.dataset_count or 0,
+        user_count=row.user_count or 0,
+        taxonomy_version=row.taxonomy_version or 0,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _to_question_record(row: RecallCoverageQuestion) -> QuestionRecord:
+    return QuestionRecord(
+        id=row.id,
+        run_id=row.run_id,
+        question_group_id=row.question_group_id,
+        user_id=row.user_id,
+        dataset_id=row.dataset_id,
+        dataset_name=row.dataset_name,
+        question_text=row.question_text,
+        source=row.source,
+        was_asked=bool(row.was_asked),
+        curated_question_id=row.curated_question_id,
+        answer=row.answer,
+        judge_score=row.judge_score,
+        judge_answered=row.judge_answered,
+        retrieval_context=row.retrieval_context,
+        error=row.error,
+        topic_id=row.topic_id,
+        first_asked_at=row.first_asked_at,
+        last_asked_at=row.last_asked_at,
+        occurrence_count=row.occurrence_count or 0,
+        impact=row.impact,
+    )
+
+
+def _question_model(run_id: UUID, row: CoverageRow) -> RecallCoverageQuestion:
+    """Map one aggregated row onto its ORM row.
+
+    ``topic_label`` and ``is_shared_curated`` are deliberately not persisted: the
+    label lives on the topic row (and "Other" is not a row at all), and shared
+    membership is a property of the curated question, reachable through
+    ``curated_question_id``. Storing either would let a run's copy drift from the
+    thing it describes.
+    """
+    return RecallCoverageQuestion(
+        run_id=run_id,
+        question_group_id=row.question_group_id,
+        user_id=row.user_id,
+        dataset_id=row.dataset_id,
+        dataset_name=row.dataset_name,
+        question_text=row.question_text,
+        source=row.source,
+        was_asked=row.was_asked,
+        curated_question_id=row.curated_question_id,
+        answer=row.answer,
+        judge_score=row.judge_score,
+        judge_answered=row.judge_answered,
+        retrieval_context=row.retrieval_context,
+        error=row.error,
+        topic_id=row.topic_id,
+        first_asked_at=row.first_asked_at,
+        last_asked_at=row.last_asked_at,
+        occurrence_count=row.occurrence_count,
+        impact=row.impact,
+    )
+
+
+async def create_run(
+    owner_id: UUID,
+    agent_label: str,
+    *,
+    params: Optional[CoverageParams] = None,
+    taxonomy_version: int = 0,
+) -> RunRecord:
+    """Insert a ``pending`` run row and return it.
+
+    Written **before** the coroutine is scheduled so the row is what the in-flight
+    guard sees and what the 202 response reports: a run that existed only inside a
+    task would be invisible to the guard, and two concurrent requests would both
+    start replaying and judging the same window at full LLM cost.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        row = RecallCoverageRun(
+            owner_id=owner_id,
+            agent_label=agent_label,
+            status=RunStatus.PENDING.value,
+            params=params.model_dump(mode="json") if params is not None else None,
+            taxonomy_version=taxonomy_version,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _to_run_record(row)
+
+
+async def _load_run(session: Any, run_id: UUID) -> RecallCoverageRun:
+    """The run row inside an open session, for the writers only.
+
+    Deliberately not owner-filtered: its three callers are the pipeline's own
+    status transitions, driven by a ``run_id`` the pipeline minted itself. Owner
+    scope belongs on the *reads* a request can reach — :func:`get_run`,
+    :func:`list_runs` — and adding it here would mean threading the caller into a
+    background task that has no request.
+    """
+    result = await session.execute(select(RecallCoverageRun).where(RecallCoverageRun.id == run_id))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise CoverageRunNotFoundError()
+    return row
+
+
+async def mark_run_running(run_id: UUID) -> RunRecord:
+    """Flip a pending run to ``running``. The coroutine's first act."""
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        row = await _load_run(session, run_id)
+        row.status = RunStatus.RUNNING.value
+        await session.commit()
+        await session.refresh(row)
+        return _to_run_record(row)
+
+
+async def persist_run_results(
+    run_id: UUID,
+    rows: Sequence[CoverageRow],
+    summary: CoverageSummary,
+    counters: RunCounters,
+    *,
+    params: Optional[CoverageParams] = None,
+) -> RunRecord:
+    """Write the run's question rows and its frozen summary in one transaction.
+
+    Rows are inserted in :func:`cognee.modules.recall_coverage.aggregate.default_row_order`
+    — curated first, then by impact — but nothing depends on insertion order:
+    ``load_run_questions`` re-applies that order in Python, because the table has
+    no ordering column and ``id`` is a ``uuid4``.
+
+    ``params`` is optional: :func:`create_run` already stored the snapshot, and it
+    is accepted here only so a caller that resolved overrides after inserting the
+    row can correct it. An empty ``rows`` is a legitimate complete run — an empty
+    window completes immediately with ``overall_score: null`` and no questions,
+    which is the *expected* result for every label but ``all`` until
+    ``Query.session_id`` ships, and must read as "nothing asked yet" rather than
+    as a failure.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        run = await _load_run(session, run_id)
+
+        if rows:
+            session.add_all([_question_model(run_id, row) for row in default_row_order(rows)])
+
+        run.status = RunStatus.COMPLETE.value
+        run.finished_at = _utc_now()
+        run.summary = summary.to_dict()
+        if params is not None:
+            run.params = params.model_dump(mode="json")
+
+        run.recall_row_count = counters.recall_row_count
+        run.distinct_ask_count = counters.distinct_ask_count
+        run.collapsed_retry_count = counters.collapsed_retry_count
+        run.question_row_count = counters.question_row_count
+        run.curated_question_count = counters.curated_question_count
+        run.topic_count = counters.topic_count
+        run.dataset_count = counters.dataset_count
+        run.user_count = counters.user_count
+        run.taxonomy_version = counters.taxonomy_version
+
+        await session.commit()
+        await session.refresh(run)
+
+        logger.debug(
+            "recall_coverage: run %s complete with %s question rows",
+            run_id,
+            counters.question_row_count,
+        )
+        return _to_run_record(run)
+
+
+async def fail_run(run_id: UUID, message: Optional[str] = None) -> RunRecord:
+    """Mark a run ``failed``, recording why in ``summary``.
+
+    The message goes into ``summary`` rather than into a column of its own: a
+    failed run has no breakdowns, so the field is free, and adding an ``error``
+    column would invite writing partial breakdowns next to it — at which point a
+    reader could not tell a complete report from half of one. Any question rows
+    already inserted are left alone; they belong to a run whose status says not to
+    trust its numbers.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        row = await _load_run(session, run_id)
+        row.status = RunStatus.FAILED.value
+        row.finished_at = _utc_now()
+        row.summary = {"error": message} if message else {"error": "Recall coverage run failed."}
+        await session.commit()
+        await session.refresh(row)
+        return _to_run_record(row)
+
+
+async def get_run(run_id: UUID, owner_ids: Sequence[UUID]) -> RunRecord:
+    """One run, filtered by id **and** owner scope, 404 on either miss.
+
+    Never 403: that would confirm a run with this id exists under another owner.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageRun).where(
+                RecallCoverageRun.id == run_id,
+                RecallCoverageRun.owner_id.in_(tuple(owner_ids)),
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise CoverageRunNotFoundError()
+        return _to_run_record(row)
+
+
+async def list_runs(
+    owner_ids: Sequence[UUID],
+    agent_label: Optional[str] = None,
+    *,
+    limit: Optional[int] = None,
+) -> list[RunRecord]:
+    """The caller's runs, newest first, optionally narrowed to one label.
+
+    ``limit=None`` applies no ``LIMIT``; the route supplies
+    ``runs_list_default_limit``. Ordered by ``created_at`` then ``id`` so two runs
+    created inside the same clock tick still come back in a stable order.
+    """
+    terms: list[Any] = [RecallCoverageRun.owner_id.in_(tuple(owner_ids))]
+    if agent_label:
+        terms.append(RecallCoverageRun.agent_label == agent_label)
+
+    statement = (
+        select(RecallCoverageRun)
+        .where(*terms)
+        .order_by(RecallCoverageRun.created_at.desc(), RecallCoverageRun.id)
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(statement)
+        return [_to_run_record(row) for row in result.scalars().all()]
+
+
+async def runs_in_flight(owner_id: UUID, agent_label: str) -> list[RunRecord]:
+    """Pending or running runs for this ``(owner_id, agent_label)``, newest first.
+
+    The 409 guard's input. Scoped to the single owner rather than to
+    ``curated_owner_ids``: a run is started by one caller and paid for by them, so
+    a teammate's run must not block theirs — unlike curated questions, where the
+    shared benchmark set is deliberately maintained by anyone in the tenant.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageRun)
+            .where(
+                RecallCoverageRun.owner_id == owner_id,
+                RecallCoverageRun.agent_label == agent_label,
+                RecallCoverageRun.status.in_((RunStatus.PENDING.value, RunStatus.RUNNING.value)),
+            )
+            .order_by(RecallCoverageRun.created_at.desc())
+        )
+        return [_to_run_record(row) for row in result.scalars().all()]
+
+
+async def load_run_questions(run_id: UUID) -> list[QuestionRecord]:
+    """A run's question rows in the default report order.
+
+    The order is re-applied here rather than trusted from the table: there is no
+    ordering column, ``id`` is a ``uuid4``, and every row in a run shares a
+    ``created_at`` to the microsecond. Read-side ordering also means changing the
+    default order does not require a migration.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        result = await session.execute(
+            select(RecallCoverageQuestion).where(RecallCoverageQuestion.run_id == run_id)
+        )
+        records = [_to_question_record(row) for row in result.scalars().all()]
+
+    return sorted(records, key=report_order_key)
+
+
 __all__ = [
     "CuratedQuestion",
+    "QuestionRecord",
+    "RunRecord",
     "SuggestionDraft",
     "SuggestionRecord",
     "TopicRecord",
     "create_curated_question",
+    "create_run",
     "create_topic_suggestions",
     "curated_asks",
     "curated_owner_ids",
     "delete_curated_question",
+    "fail_run",
+    "get_run",
     "list_curated_questions",
+    "list_runs",
     "load_active_topics",
     "load_curated_asks",
     "load_curated_questions_for_scope",
     "load_pending_suggestions",
+    "load_run_questions",
     "load_settled_suggestions",
+    "mark_run_running",
     "normalize_curated_scope",
+    "persist_run_results",
     "resolve_curated_owner",
+    "runs_in_flight",
 ]
