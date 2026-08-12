@@ -14,6 +14,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.infrastructure.engine import DataPoint
+from .heartbeat_pipeline_run import heartbeat_pipeline_run
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
@@ -240,6 +241,14 @@ async def handle_task(
                     "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
                 },
             )
+
+            # A completed task is the pipeline's unit of observable progress,
+            # so stamp it on the run and anything outside this task can tell a
+            # long-but-advancing run from a wedged one. Throttled and
+            # best-effort internally; ctx is None for pipelines that run
+            # without a PipelineRun row (e.g. run_pipeline).
+            if ctx is not None:
+                await heartbeat_pipeline_run(ctx.pipeline_run_id)
 
         except Exception as error:
             span.set_status(StatusCode.ERROR, str(error))
