@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 69 scripts across three folders.
+Runnable example scripts demonstrating cognee end-to-end — 70 scripts across three folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -22,7 +22,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 |---|---|---|
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 37 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
-| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 24 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
 features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
@@ -154,6 +154,7 @@ Every demo lives in a topic folder.
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipelines/custom_pipeline_single_object_example.py) | Deferred-call pipeline pattern with typed `DataPoint`s |
 | [`memify_coding_agent_rule_extraction_example.py`](demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py) | Distilling coding-agent traces into reusable rules |
 | [`relational_database_to_knowledge_graph_migration_example.py`](demos/custom_pipelines/relational_database_to_knowledge_graph_migration_example.py) | Migration config + tuned recalls |
+| [`dynamic_steps_resume_analysis_hr_example.py`](demos/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py) | Self-coded run stages toggled per run, over a CV corpus |
 | [`organizational_hierarchy/`](demos/custom_pipelines/organizational_hierarchy/) | Org-chart ingestion — high-level and low-level variants |
 
 ### [`permissions/`](demos/permissions/) — multi-tenancy (set `ENABLE_BACKEND_ACCESS_CONTROL=True`)
