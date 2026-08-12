@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.summarization.models import GlobalContextSummary
 
+from .bucketing.divisive.placement import build_divisive_buckets_for_level
 from .bucketing.graph.placement import (
     place_graph_summaries_incrementally,
     rebuild_graph_buckets_for_level,
@@ -21,6 +22,8 @@ from .summarize import (
     generate_bucket_summary_datapoints,
 )
 
+BuildStrategyName = Literal["seed_and_absorb", "divisive"]
+
 
 @dataclass(frozen=True)
 class BuildOptions:
@@ -32,6 +35,8 @@ class BuildOptions:
     min_overlap: float
     entities_by_summary_id: Mapping[str, set[str]]
     idf_weights: Mapping[str, float]
+    build_strategy: BuildStrategyName
+    is_first_build: bool
     ctx: PipelineContext | None
 
 
@@ -120,6 +125,38 @@ async def place_vector_items(
     )
 
 
+async def place_divisive_items(
+    all_items: list[SummaryNode],
+    level: int,
+    options: BuildOptions,
+) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
+    return await build_divisive_buckets_for_level(
+        all_items,
+        level,
+        options.dataset_id,
+        options.max_bucket_size,
+        options.bucketing_strategy,
+        options.vector_engine,
+        options.entities_by_summary_id,
+        options.idf_weights,
+    )
+
+
+# Only the first, complete build of a dataset's index can use an alternative
+# build strategy (see ``is_first_build`` gating below); "seed_and_absorb" has
+# no entry because it means "no override -- fall through to the ordinary
+# bucketing_strategy dispatch".
+BUILD_STRATEGY_HANDLERS: dict[BuildStrategyName, Any] = {
+    "divisive": place_divisive_items,
+}
+
+# "graph" bucketing only ever applies at level 0; any level above it, or any
+# bucketing_strategy without an entry here, falls through to place_vector_items.
+BUCKETING_STRATEGY_LEVEL_ZERO_HANDLERS: dict[BucketingStrategyName, Any] = {
+    "graph": place_graph_items,
+}
+
+
 async def place_items_for_level(
     changed_items: list[SummaryNode],
     all_items: list[SummaryNode],
@@ -127,8 +164,15 @@ async def place_items_for_level(
     level: int,
     options: BuildOptions,
 ) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
-    if options.bucketing_strategy == "graph" and level == 0:
-        return place_graph_items(changed_items, all_items, existing_buckets, level, options)
+    if options.is_first_build and not existing_buckets:
+        build_handler = BUILD_STRATEGY_HANDLERS.get(options.build_strategy)
+        if build_handler is not None:
+            return await build_handler(all_items, level, options)
+
+    if level == 0:
+        bucketing_handler = BUCKETING_STRATEGY_LEVEL_ZERO_HANDLERS.get(options.bucketing_strategy)
+        if bucketing_handler is not None:
+            return bucketing_handler(changed_items, all_items, existing_buckets, level, options)
 
     return await place_vector_items(changed_items, all_items, existing_buckets, level, options)
 
@@ -207,6 +251,7 @@ async def build_context_index(
     max_bucket_size: int,
     placement_distance_threshold: float,
     bucketing_strategy: BucketingStrategyName = "vector",
+    build_strategy: BuildStrategyName = "seed_and_absorb",
     min_overlap: float = 0.05,
     entities_by_summary_id: dict[str, set[str]] | None = None,
     idf_weights: dict[str, float] | None = None,
@@ -220,7 +265,14 @@ async def build_context_index(
     level does not exist yet. The loop stops once the topmost non-root level
     fits in the root's capacity. Root is regenerated when anything below
     changed or when no root exists yet.
+
+    ``build_strategy="divisive"`` only takes effect for a dataset's very
+    first, complete build (no existing root or buckets at all) -- it picks
+    poles top-down instead of seeding-and-absorbing bottom-up. It has no
+    effect once an index already exists; ordinary incremental placement is
+    used from then on regardless of how the index was originally built.
     """
+    is_first_build = existing_root is None and not any(buckets_by_level.values())
     options = BuildOptions(
         dataset_id=dataset_id,
         vector_engine=vector_engine,
@@ -230,6 +282,8 @@ async def build_context_index(
         min_overlap=min_overlap,
         entities_by_summary_id=entities_by_summary_id or {},
         idf_weights=idf_weights or {},
+        build_strategy=build_strategy,
+        is_first_build=is_first_build,
         ctx=ctx,
     )
 
