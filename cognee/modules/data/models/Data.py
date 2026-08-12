@@ -30,15 +30,16 @@ class Data(Base):
     tenant_id = Column(UUID, index=True, nullable=True)
     # Dataset that owns this content row. Rows are dataset-scoped: the same
     # content in two datasets is two rows with two ids, so updating one
-    # document can never touch another dataset's data. NULL marks a legacy
-    # shared row (pre-refactor deterministic id, possibly member of several
-    # datasets); those are resolved by membership and split copy-on-write on
-    # their first content update.
+    # document can never touch another dataset's data. Nullable only for the
+    # upgrade window: the startup backfill (alembic d6e8f0a2b4c6) stamps every
+    # legacy row's dataset (splitting rows shared by several datasets), so no
+    # NULL rows exist after it runs.
     dataset_id = Column(UUID, index=True, nullable=True)
-    # The pre-refactor data_id this row's identity descends from (flattened —
-    # always the original user-visible id, never an intermediate). Set on
-    # backfill-split rows and carried forward by the update path so every id
-    # ever issued keeps resolving; NULL for rows whose id never changed.
+    # The pre-refactor data_id this row's identity descends from. Written by
+    # exactly one thing — the backfill split of a shared legacy row — and only
+    # preserved afterwards (update() re-ingests under the row's own id), so
+    # alias chains cannot form and every id ever issued keeps resolving.
+    # NULL for rows whose id never changed.
     legacy_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
     raw_content_hash = Column(String)

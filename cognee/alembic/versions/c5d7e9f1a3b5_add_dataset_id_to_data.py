@@ -3,10 +3,10 @@
 Data rows become dataset-scoped: `dataset_id` names the dataset that owns the
 content row, and the (dataset_id, owner_id, content_hash) index backs
 add-time dedup as a LOOKUP (scoped to dataset + owner + tenant) instead of a
-content-derived identity. Existing rows keep
-dataset_id = NULL (legacy shared rows); they are resolved by DatasetData
-membership and split copy-on-write on their first content update, so no
-backfill is required here.
+content-derived identity. This revision only adds the column and index;
+existing rows keep dataset_id = NULL until the next revision
+(d6e8f0a2b4c6) backfills them — stamping sole-membership rows in place and
+splitting rows shared by several datasets.
 
 Revision ID: c5d7e9f1a3b5
 Revises: e5a7b9c1d3f4

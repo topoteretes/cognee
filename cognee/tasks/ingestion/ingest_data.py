@@ -255,13 +255,14 @@ async def ingest_data(
 
         return existing_data_points + new_datapoints
 
-    # Legacy rows still carry content-derived ids, so concurrent ingests of the
-    # same legacy content can both try to INSERT the same primary key — the loser
-    # hits "UNIQUE constraint failed: data.id"; retrying re-reads the committed row
-    # and takes the existing-data branch. Dataset-scoped rows mint random ids and
-    # dedup by lookup instead: a concurrent same-content race there can produce
-    # two rows, which under document semantics are simply two documents.
-    # File writes are content-addressed, so re-running is idempotent.
+    # Concurrent ingests PINNED to the same data_id (dlt derives stable ids;
+    # update() re-ingests under the document's own id) can both try to INSERT
+    # the same primary key — the loser hits "UNIQUE constraint failed: data.id";
+    # retrying re-reads the committed row and takes the existing-data branch.
+    # Unpinned rows mint random ids and dedup by lookup instead: a concurrent
+    # same-content race there can produce two rows, which under document
+    # semantics are simply two documents. File writes are content-addressed,
+    # so re-running is idempotent.
     try:
         return await store_data_to_dataset(
             data, dataset_name, user, node_set, dataset_id, preferred_loaders
