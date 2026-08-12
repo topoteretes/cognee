@@ -103,6 +103,56 @@ class CloudClient:
             return default or self.DEFAULT_TIMEOUT
         return aiohttp.ClientTimeout(total=timeout, sock_connect=min(30.0, timeout))
 
+    async def _request(
+        self,
+        method: str,
+        operation: str,
+        path: str,
+        *,
+        json: Optional[dict] = None,
+        data: Any = None,
+        params: Any = None,
+        timeout: Optional[float] = None,
+        default_timeout: Optional[aiohttp.ClientTimeout] = None,
+    ) -> Any:
+        """Send a request to the instance, mapping failures to typed errors."""
+        session = await self._get_session()
+        request_timeout = self._resolve_timeout(timeout, default_timeout)
+        request_kwargs: dict = {"timeout": request_timeout}
+        if params is not None:
+            request_kwargs["params"] = params
+        if json is not None:
+            request_kwargs["json"] = json
+        if data is not None:
+            request_kwargs["data"] = data
+        send = getattr(session, method.lower())
+        try:
+            async with send(f"{self.service_url}{path}", **request_kwargs) as resp:
+                if resp.status >= 400:
+                    body: Any = await resp.text()
+                    try:
+                        import json as json_module
+
+                        body = json_module.loads(body)
+                    except Exception:
+                        pass
+                    raise http_error_for_status(resp.status, body, operation=operation)
+                if resp.status == 204:
+                    return None
+                try:
+                    return await resp.json()
+                except Exception:
+                    # Some routes (e.g. dataset deletion) reply with an empty
+                    # or non-JSON body on success.
+                    return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+            raise CogneeTransportError(
+                f"Could not reach the Cognee instance at {self.service_url} "
+                f"during {operation}: {error}",
+                operation=operation,
+                cause=error,
+            ) from error
+
     async def _post(
         self,
         operation: str,
@@ -113,33 +163,15 @@ class CloudClient:
         timeout: Optional[float] = None,
         default_timeout: Optional[aiohttp.ClientTimeout] = None,
     ) -> Any:
-        """POST to the instance, mapping failures to typed errors."""
-        session = await self._get_session()
-        request_timeout = self._resolve_timeout(timeout, default_timeout)
-        try:
-            async with session.post(
-                f"{self.service_url}{path}",
-                json=json,
-                data=data,
-                timeout=request_timeout,
-            ) as resp:
-                if resp.status >= 400:
-                    body: Any = await resp.text()
-                    try:
-                        import json as json_module
-
-                        body = json_module.loads(body)
-                    except Exception:
-                        pass
-                    raise http_error_for_status(resp.status, body, operation=operation)
-                return await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
-            raise CogneeTransportError(
-                f"Could not reach the Cognee instance at {self.service_url} "
-                f"during {operation}: {error}",
-                operation=operation,
-                cause=error,
-            ) from error
+        return await self._request(
+            "POST",
+            operation,
+            path,
+            json=json,
+            data=data,
+            timeout=timeout,
+            default_timeout=default_timeout,
+        )
 
     # ----- V2 Operations -----
 
@@ -457,3 +489,125 @@ class CloudClient:
         return await self._post(
             "forget", "/api/v1/forget", json=payload, timeout=kwargs.get("timeout")
         )
+
+    # ----- Datasets -----
+
+    async def datasets_list(self, timeout: Optional[float] = None) -> list:
+        """GET /api/v1/datasets — list the caller's datasets."""
+        return await self._request("GET", "datasets_list", "/api/v1/datasets", timeout=timeout)
+
+    async def datasets_create(self, name: str, timeout: Optional[float] = None) -> dict:
+        """POST /api/v1/datasets — get-or-create a dataset by name.
+
+        The server returns the existing dataset when the name is already
+        taken, so this call is safe to repeat (the integrations' "ensure
+        dataset" pattern).
+        """
+        return await self._request(
+            "POST", "datasets_create", "/api/v1/datasets", json={"name": name}, timeout=timeout
+        )
+
+    async def datasets_status(
+        self,
+        dataset_ids: list,
+        pipelines: Optional[list] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
+        """GET /api/v1/datasets/status — pipeline status per dataset.
+
+        The only way to track ``run_in_background`` work: poll with the
+        pipeline names of interest (``cognify_pipeline``, ``memify_pipeline``).
+        """
+        params = [("dataset", str(dataset_id)) for dataset_id in dataset_ids]
+        if pipelines:
+            params.extend(("pipeline", pipeline) for pipeline in pipelines)
+        return await self._request(
+            "GET", "datasets_status", "/api/v1/datasets/status", params=params, timeout=timeout
+        )
+
+    async def datasets_data(self, dataset_id, timeout: Optional[float] = None) -> list:
+        """GET /api/v1/datasets/{id}/data — list data items in a dataset."""
+        return await self._request(
+            "GET", "datasets_data", f"/api/v1/datasets/{dataset_id}/data", timeout=timeout
+        )
+
+    async def datasets_delete(self, dataset_id, timeout: Optional[float] = None) -> None:
+        """DELETE /api/v1/datasets/{id} — delete one dataset."""
+        return await self._request(
+            "DELETE", "datasets_delete", f"/api/v1/datasets/{dataset_id}", timeout=timeout
+        )
+
+    async def datasets_delete_all(self, timeout: Optional[float] = None) -> None:
+        """DELETE /api/v1/datasets — delete all of the caller's datasets."""
+        return await self._request(
+            "DELETE", "datasets_delete_all", "/api/v1/datasets", timeout=timeout
+        )
+
+    # ----- Agent connections -----
+
+    async def agents_register(
+        self,
+        agent_session_name: str,
+        *,
+        type: str = "api",
+        memory_mode: str = "unknown",
+        session_id: Optional[str] = None,
+        dataset_names: Optional[list] = None,
+        dataset_ids: Optional[list] = None,
+        source: str = "api",
+        origin_function: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
+        """POST /api/v1/agents/register — announce an agent connection."""
+        payload: dict = {
+            "agent_session_name": agent_session_name,
+            "type": type,
+            "memory_mode": memory_mode,
+            "source": source,
+        }
+        if session_id:
+            payload["session_id"] = session_id
+        if dataset_names:
+            payload["dataset_names"] = list(dataset_names)
+        if dataset_ids:
+            payload["dataset_ids"] = [str(dataset_id) for dataset_id in dataset_ids]
+        if origin_function:
+            payload["origin_function"] = origin_function
+        if metadata:
+            payload["metadata"] = metadata
+        return await self._post(
+            "agents_register", "/api/v1/agents/register", json=payload, timeout=timeout
+        )
+
+    async def agents_unregister(
+        self, agent_session_name: str, timeout: Optional[float] = None
+    ) -> dict:
+        """POST /api/v1/agents/unregister — deactivate an agent connection."""
+        return await self._post(
+            "agents_unregister",
+            "/api/v1/agents/unregister",
+            json={"agent_session_name": agent_session_name},
+            timeout=timeout,
+        )
+
+    async def agents_connections_me(
+        self,
+        agent_session_name: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
+        """GET /api/v1/agents/connections/me — the caller's connection state."""
+        params = {"agent_session_name": agent_session_name} if agent_session_name else None
+        return await self._request(
+            "GET",
+            "agents_connections_me",
+            "/api/v1/agents/connections/me",
+            params=params,
+            timeout=timeout,
+        )
+
+    # ----- Users -----
+
+    async def users_me(self, timeout: Optional[float] = None) -> dict:
+        """GET /api/v1/users/me — resolve the authenticated principal."""
+        return await self._request("GET", "users_me", "/api/v1/users/me", timeout=timeout)

@@ -22,6 +22,7 @@ async def serve(
     auth0_domain: Optional[str] = None,
     auth0_client_id: Optional[str] = None,
     auth0_audience: Optional[str] = None,
+    bootstrap_auth: Optional[bool] = None,
 ) -> CloudClient:
     """Connect the local Cognee SDK to a remote or local Cognee instance.
 
@@ -53,6 +54,13 @@ async def serve(
         auth0_domain: Override the Auth0 domain (cloud mode only).
         auth0_client_id: Override the Auth0 Device Code client ID.
         auth0_audience: Override the Auth0 API audience.
+        bootstrap_auth: Direct mode only — whether a missing ``api_key``
+            may be minted by logging in to the instance. Default
+            (``None``): allowed for loopback/private hosts only, since
+            the login sends user credentials to the host. Pass ``True``
+            to allow it for a remote instance you control (or set
+            ``COGNEE_AUTH_BOOTSTRAP=true``); ``False`` disables it
+            entirely.
 
     Returns:
         CloudClient connected to the instance.
@@ -62,7 +70,7 @@ async def serve(
     resolved_api_key = api_key or os.getenv("COGNEE_API_KEY", "")
 
     if service_url:
-        return await _serve_direct(service_url, resolved_api_key)
+        return await _serve_direct(service_url, resolved_api_key, bootstrap_auth=bootstrap_auth)
 
     return await _serve_cloud(
         management_url=management_url,
@@ -72,13 +80,57 @@ async def serve(
     )
 
 
-async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
-    """Connect directly to a Cognee instance — no Auth0, no Management API."""
+async def _serve_direct(
+    service_url: str,
+    api_key: str = "",
+    bootstrap_auth: Optional[bool] = None,
+) -> CloudClient:
+    """Connect directly to a Cognee instance — no Auth0, no Management API.
+
+    Without an ``api_key``, one is resolved instead of connecting
+    unauthenticated: a key previously saved for this URL is reused, else
+    a key is minted by logging in (``COGNEE_USER_EMAIL``/
+    ``COGNEE_USER_PASSWORD``, defaulting to the server's default user)
+    and persisted for subsequent connects. The login sends credentials
+    to the host, so minting is gated to loopback/private addresses
+    unless explicitly opted in (``bootstrap_auth=True`` /
+    ``COGNEE_AUTH_BOOTSTRAP=true``). Only when no key can be resolved
+    does the connection proceed keyless — valid for servers running
+    with authentication off.
+    """
     from cognee.api.v1.serve.cloud_client import CloudClient
-    from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
+    from cognee.api.v1.serve.credentials import CloudCredentials, load_credentials, save_credentials
+    from cognee.api.v1.serve.exceptions import CogneeAPIError
+    from cognee.api.v1.serve.local_auth import bootstrap_allowed, login_and_mint_api_key
     from cognee.api.v1.serve.state import set_remote_client
 
     service_url = service_url.rstrip("/")
+
+    if not api_key:
+        saved = load_credentials()
+        if saved and saved.service_url == service_url and saved.api_key:
+            logger.info("Reusing saved API key for %s", service_url)
+            api_key = saved.api_key
+        elif not bootstrap_allowed(service_url, bootstrap_auth):
+            logger.warning(
+                "No API key for %s and auth bootstrap is disabled for non-private hosts; "
+                "connecting without one. Pass api_key (or set COGNEE_API_KEY), or opt in "
+                "with bootstrap_auth=True / COGNEE_AUTH_BOOTSTRAP=true to mint a key by "
+                "logging in to this instance.",
+                service_url,
+            )
+        else:
+            try:
+                api_key = await login_and_mint_api_key(service_url)
+                logger.info("Minted API key for %s via default-user login", service_url)
+            except CogneeAPIError as error:
+                logger.warning(
+                    "Could not obtain an API key for %s (%s); connecting without one — "
+                    "this only works when the server runs with authentication off.",
+                    service_url,
+                    error,
+                )
+
     client = CloudClient(service_url, api_key)
 
     health_ok = await client._health_check()
