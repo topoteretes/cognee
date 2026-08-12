@@ -8,7 +8,7 @@ from pydantic import WithJsonSchema
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.data_item import pair_labels_with_data
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -133,22 +133,15 @@ def get_add_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        # Swagger UI submits untouched array entries as "" — normalize to None.
-        labels = [(entry or None) for entry in (label or [])]
-        if any(labels):
-            if len(labels) != len(data or []):
-                return JSONResponse(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    content=ErrorResponse(
-                        error=(
-                            f"Provide one label per uploaded file: got {len(labels)} labels "
-                            f"for {len(data or [])} files."
-                        ),
-                    ).model_dump(),
-                )
-            # Labels ride on DataItems, which ingestion unwraps to store each
-            # label on its file's Data record.
-            data = [DataItem(data=item, label=lab) for item, lab in zip(data, labels)]
+        # Labels ride on DataItems, which ingestion unwraps to store each
+        # label on its file's Data record.
+        try:
+            data = pair_labels_with_data(data, label)
+        except ValueError as error:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(error=str(error)).model_dump(),
+            )
 
         try:
             add_run = await cognee_add(

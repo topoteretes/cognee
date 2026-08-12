@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, WithJsonSchema
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.data_item import pair_labels_with_data
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
@@ -296,30 +296,25 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
-        # Swagger UI submits untouched array entries as "" — normalize to None.
-        labels = [(entry or None) for entry in (label or [])]
-
         # Labels live on the Data records that normal add+cognify ingestion
         # creates. The session-cache, skills, and archive paths never create
         # those records, so a label there would be silently dropped — reject it
-        # instead.
-        if any(labels):
-            if session_id or content_type:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "label is only supported for normal ingestion — "
-                        "remove session_id and content_type to use it."
-                    ),
-                )
-            if len(labels) != len(data or []):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Provide one label per uploaded file: got {len(labels)} labels "
-                        f"for {len(data or [])} files."
-                    ),
-                )
+        # instead. Untouched Swagger array entries arrive as "" and don't count.
+        if any(label or []) and (session_id or content_type):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "label is only supported for normal ingestion — "
+                    "remove session_id and content_type to use it."
+                ),
+            )
+
+        # Labels ride on DataItems, which ingestion unwraps to store each
+        # label on its file's Data record.
+        try:
+            data = pair_labels_with_data(data, label)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error))
 
         if content_type == "cogx-archive":
             if not data:
@@ -392,11 +387,6 @@ def get_remember_router() -> APIRouter:
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
                     }
                 }
-
-            # Labels ride on DataItems, which ingestion unwraps to store each
-            # label on its file's Data record.
-            if any(labels):
-                data = [DataItem(data=item, label=lab) for item, lab in zip(data, labels)]
 
             result = await cognee_remember(
                 data,
