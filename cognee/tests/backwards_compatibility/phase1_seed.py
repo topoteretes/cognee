@@ -74,8 +74,19 @@ async def seed_dlt() -> None:
 
     print(f"Seeding legacy DLT source '{DLT_COMPAT_SOURCE}' ({len(DLT_COMPAT_ROWS)} rows)...")
     await cognee.add([compat_widgets()], dataset_name=DLT_COMPAT_DATASET)
-    await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
-    print(f"Seeded dataset '{DLT_COMPAT_DATASET}'.")
+    try:
+        await cognee.cognify(datasets=[DLT_COMPAT_DATASET])
+        print(f"Seeded and cognified dataset '{DLT_COMPAT_DATASET}'.")
+    except Exception as error:
+        # v1.2.0's legacy DLT cognify is broken on SQLite (upsert_edges binds
+        # string UUIDs into a UUID column -> "'str' object has no attribute
+        # 'hex'"). The tag is immutable, so tolerate it: the per-row Data
+        # records with their source == "dlt" stamps ARE the compat surface
+        # Phase 2 verifies (migration, tombstone, re-add conversion).
+        print(
+            f"KNOWN-ISSUE: legacy cognify of '{DLT_COMPAT_DATASET}' failed on this "
+            f"backend ({type(error).__name__}); seeded per-row records only."
+        )
 
 
 async def seed_session() -> None:
