@@ -45,19 +45,6 @@ def as_uuid(value) -> UUID | None:
         return None
 
 
-def as_uuid(value) -> UUID | None:
-    """Coerce ``value`` to a UUID, or return None when it is not one.
-
-    The tolerant counterpart to ``UUID(str(value))`` for identifiers that
-    arrive as UUIDs, strings, or context values that may legitimately hold
-    something else (e.g. a dataset *name* in ``current_dataset_id``).
-    """
-    try:
-        return UUID(str(value))
-    except (ValueError, TypeError, AttributeError):
-        return None
-
-
 def create_secure_ssl_context() -> ssl.SSLContext:
     """
     Create a secure SSL context.
