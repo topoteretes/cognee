@@ -15,7 +15,10 @@ ingestion layer (no cognify, no LLM):
      and context-free (single fork), ambiguity refuses with candidates,
      pinned pre-fork ids bind to the canonical row, update() carries the
      original id onto its replacement row (flatten-on-write), and deletion
-     by the pre-fork id works through the real API — after an update. (Legacy-row semantics live in the backfill migration test:
+     by the pre-fork id works through the real API — after an update;
+  10. dlt-derived ids are dataset-scoped: the same dlt row in two datasets is
+     two id families, and pre-scoping rows are adopted in their own dataset
+     only. (Legacy-row semantics live in the backfill migration test:
      tests/unit/modules/data/test_dataset_scoped_backfill.py.)
 
 Runs on the default local stack (sqlite), no API keys.
@@ -322,3 +325,65 @@ async def _scenario():
 
     await datasets_api.delete_data(beta.id, pre_fork_id, user=user)
     assert await get_dataset_data(beta.id) == [], "delete by pre-fork id must succeed"
+
+    # --- 10. dlt-derived ids are dataset-scoped ----------------------------- #
+    # The same dlt row loaded into two datasets must be two id families (a
+    # shared id would trip ingestion's foreign-pin guard); rows ingested
+    # before ids were dataset-namespaced are adopted in their own dataset only.
+    from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
+    from cognee.modules.data.models import Data
+    from cognee.tasks.ingestion.dlt_row_data import DltRowData
+    from cognee.tasks.ingestion.resolve_dlt_sources import _dlt_row_identifier, _stable_row_ids
+    from sqlalchemy import insert as sql_insert
+
+    dlt_row = DltRowData(
+        table_name="users",
+        primary_key_column="id",
+        primary_key_value="1",
+        row_data={"id": 1, "name": "Ada"},
+        content_hash="hash-dlt-1",
+        schema_info=[],
+        schema_hash="schema-1",
+        foreign_keys=[],
+        dlt_db_name="dlt_db",
+        dataset_name="alpha",
+    )
+
+    (alpha_dlt_id,) = await _stable_row_ids([dlt_row], user, alpha.id)
+    (beta_dlt_id,) = await _stable_row_ids([dlt_row], user, beta.id)
+    assert alpha_dlt_id != beta_dlt_id, "same dlt row in two datasets must be two ids"
+    assert (await _stable_row_ids([dlt_row], user, alpha.id)) == [alpha_dlt_id], (
+        "dlt ids are stable across derivations"
+    )
+
+    # A pre-scoping row (old derivation as its primary id) is adopted in its
+    # own dataset — and never from another dataset.
+    pre_scoping_id = await get_unique_data_id(_dlt_row_identifier(dlt_row), user)
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        await session.execute(
+            sql_insert(Data.__table__).values(
+                id=pre_scoping_id,
+                dataset_id=alpha.id,
+                name="dlt-legacy-row",
+                content_hash="hash-dlt-1",
+                raw_data_location="file:///tmp/dlt-legacy-row.txt",
+                owner_id=user.id,
+                pipeline_status={},
+                token_count=-1,
+            )
+        )
+        await session.commit()
+    try:
+        assert (await _stable_row_ids([dlt_row], user, alpha.id)) == [pre_scoping_id], (
+            "a pre-scoping dlt row keeps its id in its own dataset"
+        )
+        assert (await _stable_row_ids([dlt_row], user, beta.id)) == [beta_dlt_id], (
+            "another dataset never adopts a foreign pre-scoping row"
+        )
+    finally:
+        async with engine.get_async_session() as session:
+            await session.execute(Data.__table__.delete().where(Data.id == pre_scoping_id))
+            await session.commit()
