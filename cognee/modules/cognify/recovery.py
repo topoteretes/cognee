@@ -15,29 +15,48 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("cognify.recovery")
 
 # A cognify run is only treated as "stale" (abandoned by a crashed process) once
-# it has stayed in a non-terminal state longer than this threshold. This guards
-# against rolling back a run that is still actively executing in another live
-# worker/replica (e.g. during a rolling deploy or a multi-process deployment
-# sharing one database). A heartbeat/lease would be more precise; an age
-# threshold is a pragmatic guard. Override via env when long-running cognify
-# jobs legitimately exceed the default.
+# it has gone this long without reporting progress. This guards against rolling
+# back a run that is still actively executing in another live worker/replica
+# (e.g. during a rolling deploy or a multi-process deployment sharing one
+# database). Override via env when a single cognify task legitimately takes
+# longer than the default to complete.
 STALE_RUN_MIN_AGE_SECONDS = int(os.getenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", "3600"))
 
 
-def _is_older_than_threshold(created_at) -> bool:
-    """Return True if the run started long enough ago to be considered stale.
+def _last_progress_at(pipeline_run):
+    """Return the most recent evidence that this run was alive.
 
-    When ``created_at`` is missing (e.g. legacy rows) we cannot prove the run is
-    young, so we conservatively allow recovery to proceed.
+    ``last_heartbeat_at`` is stamped by the pipeline as it completes each task
+    (see ``operations.heartbeat_pipeline_run``), so it measures progress rather
+    than elapsed time. Runs that predate the heartbeat column -- and runs that
+    died before completing their first task -- have none, and fall back to
+    ``created_at``, which is the original age-only behaviour.
     """
-    if created_at is None:
+    return getattr(pipeline_run, "last_heartbeat_at", None) or getattr(
+        pipeline_run, "created_at", None
+    )
+
+
+def _has_stalled_past_threshold(last_progress_at) -> bool:
+    """Return True if the run has been silent long enough to be considered stale.
+
+    Age is deliberately not the signal here. With a local LLM a cognify run can
+    legitimately take days, so "started long ago" says nothing about whether the
+    run is alive; "has not finished a task in an hour" does. A run that keeps
+    completing tasks keeps pushing its own cutoff forward and is never a
+    recovery candidate, however long it runs in total.
+
+    When there is no timestamp at all (e.g. legacy rows) we cannot prove the run
+    is alive, so we conservatively allow recovery to proceed.
+    """
+    if last_progress_at is None:
         return True
 
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
+    if last_progress_at.tzinfo is None:
+        last_progress_at = last_progress_at.replace(tzinfo=timezone.utc)
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_RUN_MIN_AGE_SECONDS)
-    return created_at <= cutoff
+    return last_progress_at <= cutoff
 
 
 async def recover_stale_cognify_runs_on_startup() -> None:
@@ -52,6 +71,10 @@ async def recover_stale_cognify_runs_on_startup() -> None:
     on every restart. After a successful rollback the dataset's pipeline status
     is reset to ``DATASET_PROCESSING_INITIATED`` so it is no longer reported as
     "already being processed" and can be cognified again.
+
+    Candidates are filtered by the run's progress heartbeat rather than its
+    age, so a run that is genuinely still working, however long it has been
+    running, is never rolled back out from under a live worker.
     """
     db_engine = get_relational_engine()
 
@@ -88,11 +111,14 @@ async def recover_stale_cognify_runs_on_startup() -> None:
         return
 
     for pipeline_run in recovery_candidates:
-        if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):
+        last_progress_at = _last_progress_at(pipeline_run)
+
+        if not _has_stalled_past_threshold(last_progress_at):
             logger.info(
-                "Skipping startup recovery for run %s: started less than %ds ago, "
-                "treating it as a live run rather than a stale one.",
+                "Skipping startup recovery for run %s: last reported progress at %s "
+                "(less than %ds ago), treating it as a live run rather than a stale one.",
                 pipeline_run.pipeline_run_id,
+                last_progress_at,
                 STALE_RUN_MIN_AGE_SECONDS,
             )
             continue
