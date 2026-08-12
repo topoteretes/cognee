@@ -250,6 +250,8 @@ async def _build_source_manifest_item(
     # Stable per-row node ids via the shared identifier formula. FK lookup
     # maps (table, pk_value) → node_id; when multiple rows share a PK value,
     # the last one wins (best-effort).
+    # TODO: add a batch variant of get_unique_data_id (one query per source
+    # instead of one per row) after the incremental load PR reshapes it.
     node_ids: dict[tuple[str, str, str], UUID] = {
         key: await get_unique_data_id(_dlt_row_identifier(row), user)
         for key, row in unique_rows.items()
