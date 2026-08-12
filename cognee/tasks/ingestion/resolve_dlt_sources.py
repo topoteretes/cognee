@@ -289,9 +289,7 @@ async def _stable_row_ids(rows: List[DltRowData], user: User, dataset_id: UUID) 
     if not rows:
         return []
 
-    new_ids = [
-        await get_unique_data_id(f"{dataset_id}:{_dlt_row_identifier(row)}", user) for row in rows
-    ]
+    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
     old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
 
     from sqlalchemy import select
