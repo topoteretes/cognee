@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 78 scripts across four folders.
+Runnable example scripts demonstrating cognee end-to-end — 77 scripts across four folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -20,7 +20,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 37 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 36 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 26 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept | 7 |
@@ -50,7 +50,6 @@ category rules.
 ### Retrieval
 | Script | Demonstrates |
 |---|---|
-| [`hybrid_retrieval_stages.py`](guides/hybrid_retrieval_stages.py) | The three stages inside hybrid retrieval: objects → context → completion |
 | [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
 | [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
 | [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval |

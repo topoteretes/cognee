@@ -10,7 +10,7 @@ Three import modes:
   - ``"hybrid"``    — preserve the graph *and* cognify raw content.
 
 Usage:
-    uv run python examples/demos/ingestion_and_migration/migrate_from_mem0/migrate_from_mem0_tutorial.py
+    uv run python examples/demos/ingestion_and_migration/migrate_from_mem0/migrate_from_mem0.py
 
 Requires:
     LLM_API_KEY set in .env (needed for re-derive mode and recall).
