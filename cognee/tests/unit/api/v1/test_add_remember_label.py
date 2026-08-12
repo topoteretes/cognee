@@ -118,12 +118,24 @@ def test_add_without_labels_passes_uploads_through(client, label_form):
         assert sent[0].filename == "first.txt"
 
 
-def test_add_rejects_label_count_mismatch(client):
+@pytest.mark.parametrize(
+    "files,labels",
+    [
+        (UPLOADS, ["finance"]),
+        (UPLOADS, ["a", "b", "c"]),
+        # An empty entry still counts toward the pairing — it means "no label
+        # for that file", not "one fewer label".
+        (UPLOADS, ["finance", "people", ""]),
+        (None, ["orphan"]),
+    ],
+    ids=["fewer_labels", "more_labels", "more_labels_with_empty", "labels_without_files"],
+)
+def test_add_rejects_label_count_mismatch(client, files, labels):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         response = client.post(
             "/api/v1/add",
-            files=UPLOADS,
-            data={"datasetName": "test_dataset", "label": ["finance"]},
+            files=files,
+            data={"datasetName": "test_dataset", "label": labels},
         )
 
         assert response.status_code == 400
@@ -172,12 +184,21 @@ def test_remember_without_labels_passes_uploads_through(client, label_form):
         assert not any(isinstance(item, DataItem) for item in sent)
 
 
-def test_remember_rejects_label_count_mismatch(client):
+@pytest.mark.parametrize(
+    "files,labels",
+    [
+        (UPLOADS, ["finance"]),
+        (UPLOADS, ["a", "b", "c"]),
+        (None, ["orphan"]),
+    ],
+    ids=["fewer_labels", "more_labels", "labels_without_files"],
+)
+def test_remember_rejects_label_count_mismatch(client, files, labels):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         response = client.post(
             "/api/v1/remember",
-            files=UPLOADS,
-            data={"datasetName": "test_dataset", "label": ["finance"]},
+            files=files,
+            data={"datasetName": "test_dataset", "label": labels},
         )
 
         assert response.status_code == 400
