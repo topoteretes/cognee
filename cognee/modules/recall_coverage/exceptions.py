@@ -149,6 +149,24 @@ class DuplicateCuratedQuestionError(CogneeValidationError):
         super().__init__(message, name, status_code, log_level=log_level)
 
 
+class EmptyCuratedQuestionError(CogneeValidationError):
+    """A curated question with no question text.
+
+    Rejected rather than stored: an empty question embeds to a meaningless
+    vector, would be replicated into every dataset partition, and would drag
+    ``benchmark_score_pct`` down with rows nobody can answer.
+    """
+
+    def __init__(
+        self,
+        message: str = "A curated question needs non-empty question text.",
+        name: str = "EmptyCuratedQuestionError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        log_level: str = "WARNING",
+    ):
+        super().__init__(message, name, status_code, log_level=log_level)
+
+
 class InvalidCuratedQuestionScopeError(CogneeValidationError):
     """``scope="agent"`` needs an ``agent_label``; ``scope="shared"`` forbids one."""
 
