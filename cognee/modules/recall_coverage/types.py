@@ -93,15 +93,21 @@ class AgentScope:
     """A validated agent selector.
 
     ``prefixes`` are already LIKE-escaped and sorted longest-first, so callers
-    build predicates from them directly and classification tries
-    ``claude_desktop_`` before ``claude_``. Everything downstream
+    build predicates from them directly. Everything downstream
     (``run_recall_coverage``, the repository fetch) takes this object rather
     than a raw label string, so an unvalidated label cannot reach a query.
+
+    ``excluded_prefixes`` is how "longest prefix wins" survives contact with
+    SQL. Escaping alone does not separate overlapping labels: ``claude_desktop_``
+    genuinely starts with ``claude_``, so Claude Code's own predicate has to
+    subtract every longer prefix another label owns. Populated by
+    ``resolve_agent_scope``; only meaningful for ``AgentScopeMode.PREFIX``.
     """
 
     label: str
     prefixes: tuple[str, ...] = ()
     mode: AgentScopeMode = AgentScopeMode.ALL
+    excluded_prefixes: tuple[str, ...] = ()
 
 
 class CoverageParams(BaseModel):
