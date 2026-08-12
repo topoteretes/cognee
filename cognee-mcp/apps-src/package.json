@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "d3": "^7.9.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
@@ -22,7 +22,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "cross-env": "^10.1.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10",
+    "vite": "^8.2.1",
     "vite-plugin-singlefile": "^2.3.3"
   }
 }
