@@ -38,6 +38,7 @@ os.environ.update(
 )
 
 import cognee  # noqa: E402
+from cognee import SearchType  # noqa: E402
 from cognee.infrastructure.databases.graph import get_graph_engine  # noqa: E402
 from cognee.infrastructure.session.get_session_manager import get_session_manager  # noqa: E402
 from cognee.memify_pipelines.apply_feedback_weights import (  # noqa: E402
@@ -56,10 +57,12 @@ STRUCTURAL = {"contains", "is_part_of", "made_from", "exists_in"}
 
 
 def first_answer(results) -> str:
-    """Pull the completion text out of a search result list."""
+    """Pull the completion text out of a recall result list."""
     if not results:
         return "(no results)"
     item = results[0]
+    if hasattr(item, "text"):
+        return str(item.text)
     if isinstance(item, dict) and item.get("search_result"):
         return str(item["search_result"][0])
     return str(item)
@@ -116,11 +119,11 @@ async def main() -> None:
     await cognee.prune.prune_system(metadata=True)
 
     # ---- STEP 1: first document ------------------------------------------ #
-    await cognee.add(
+    await cognee.remember(
         "Anna leads Project Falcon. The budget of Project Falcon is 2 million euros.",
         dataset_name=DATASET,
+        self_improvement=False,
     )
-    await cognee.cognify([DATASET])
     facts, conflicts = await read_facts()
     show(
         "STEP 1  REMEMBER: 'Anna leads Falcon. Budget is 2M EUR.'",
@@ -130,11 +133,11 @@ async def main() -> None:
     )
 
     # ---- STEP 2: conflicting document ------------------------------------ #
-    await cognee.add(
+    await cognee.remember(
         "Marko leads Project Falcon. The budget of Project Falcon is 5 million euros.",
         dataset_name=DATASET,
+        self_improvement=False,
     )
-    await cognee.cognify([DATASET])
     facts, conflicts = await read_facts()
     conflict_lines = []
     for conflict in conflicts:
@@ -154,7 +157,12 @@ async def main() -> None:
     )
 
     # ---- STEP 3: ask — retrieval sees both sides -------------------------- #
-    results = await cognee.search(QUESTION, datasets=[DATASET], session_id=SESSION)
+    results = await cognee.recall(
+        QUESTION,
+        query_type=SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET],
+        session_id=SESSION,
+    )
     answer = first_answer(results)
 
     user = await get_default_user()
@@ -200,7 +208,12 @@ async def main() -> None:
     # The 5/5 rating up-weighted every element the answer used, INCLUDING both
     # budget facts (the answer needed both to report the conflict). A symmetric
     # signal cannot break the tie, so the answer still reports the conflict.
-    results = await cognee.search(QUESTION, datasets=[DATASET], session_id="fresh_session_1")
+    results = await cognee.recall(
+        QUESTION,
+        query_type=SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET],
+        session_id="fresh_session_1",
+    )
     show(
         "STEP 5  ASK AGAIN: a rating alone cannot pick a winner",
         ["answer (fresh session, graph + weights only):", f"   {first_answer(results)}", ""]
@@ -212,14 +225,19 @@ async def main() -> None:
     )
 
     # ---- STEP 6: the correction becomes memory -> answer flips ------------ #
-    await cognee.add(
+    await cognee.remember(
         "The approved budget of Project Falcon is 5 million euros. "
         "The earlier 2 million euro figure is outdated.",
         dataset_name=DATASET,
+        self_improvement=False,
     )
-    await cognee.cognify([DATASET])
     _, conflicts = await read_facts()
-    results = await cognee.search(QUESTION, datasets=[DATASET], session_id="fresh_session_2")
+    results = await cognee.recall(
+        QUESTION,
+        query_type=SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET],
+        session_id="fresh_session_2",
+    )
     show(
         "STEP 6  REMEMBER THE CORRECTION -> the answer flips",
         [

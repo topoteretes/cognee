@@ -23,24 +23,20 @@ async def main(enable_steps):
         await cognee.prune.prune_system(metadata=True)
         print("System pruned.")
 
-    # Step 2: Add text
-    if enable_steps.get("add_text"):
+    # Step 2: Remember the CVs (ingest + build the knowledge graph)
+    if enable_steps.get("remember"):
         text_list = [job_1, job_2, job_3, job_4, job_5]
         for text in text_list:
-            await cognee.add(text)
-            print(f"Added text: {text[:35]}...")
-
-    # Step 3: Create knowledge graph
-    if enable_steps.get("cognify"):
-        await cognee.cognify()
+            print(f"Remembering text: {text[:35]}...")
+        await cognee.remember(text_list, self_improvement=False)
         print("Knowledge graph created.")
 
-    # Step 4: Query insights
+    # Step 3: Query insights
     if enable_steps.get("retriever"):
-        search_results = await cognee.search(
+        results = await cognee.recall(
             query_type=SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
         )
-        print(search_results)
+        print([result.text for result in results])
 
 
 if __name__ == "__main__":
@@ -51,9 +47,7 @@ if __name__ == "__main__":
     steps_to_enable = {
         "prune_data": rebuild_kg,
         "prune_system": rebuild_kg,
-        "add_text": rebuild_kg,
-        "cognify": rebuild_kg,
-        "graph_metrics": rebuild_kg,
+        "remember": rebuild_kg,
         "retriever": retrieve,
     }
 

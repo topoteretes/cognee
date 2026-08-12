@@ -22,6 +22,7 @@ import os
 import asyncio
 
 import cognee
+from cognee import SearchType
 
 
 async def main():
@@ -30,16 +31,16 @@ async def main():
             "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY (see this file's docstring)."
         )
 
-    print("Adding data...")
-    await cognee.add("Cognee turns your unstructured data into a graph memory.")
-
     # Because the Langfuse keys are set, cognee streams execution traces to Langfuse
     # over the existing OTLP HTTP exporter; LLM calls render as Generations.
-    print("Cognifying... (check your Langfuse dashboard)")
-    await cognee.cognify()
+    print("Remembering... (check your Langfuse dashboard)")
+    await cognee.remember(
+        "Cognee turns your unstructured data into a graph memory.", self_improvement=False
+    )
 
-    print("Searching...")
-    print(await cognee.search("What does cognee do?"))
+    print("Recalling...")
+    results = await cognee.recall("What does cognee do?", query_type=SearchType.GRAPH_COMPLETION)
+    print([result.text for result in results])
 
 
 if __name__ == "__main__":

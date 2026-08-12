@@ -62,28 +62,26 @@ async def main() -> None:
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    banner("LOCAL PIPELINE: ADD & COGNIFY USING OLLAMA")
+    banner("LOCAL PIPELINE: REMEMBER USING OLLAMA")
     llm_config = get_llm_config()
     print(f"Using LLM: {llm_config.llm_model}")
     print(f"Using Embeddings: {os.environ.get('EMBEDDING_MODEL')}")
 
-    # Add sample text to dataset
-    await cognee.add(SAMPLE_TEXT, dataset_name="ollama_local_demo")
-
-    # Process dataset (this will trigger warning if an unvalidated model is used)
-    await cognee.cognify(datasets=["ollama_local_demo"])
+    # Ingest and build the knowledge graph (this will trigger a warning if an
+    # unvalidated model is used)
+    await cognee.remember(SAMPLE_TEXT, dataset_name="ollama_local_demo", self_improvement=False)
     print("Local knowledge graph built successfully.")
 
-    banner("LOCAL SEARCH")
+    banner("LOCAL RECALL")
     query = "What does Cognee help developers do?"
-    results = await cognee.search(
+    results = await cognee.recall(
         query_text=query,
         query_type=SearchType.GRAPH_COMPLETION,
         datasets=["ollama_local_demo"],
     )
     print(f"Query: {query}")
-    print("Search Results:")
-    print(results[0] if results else "<no results>")
+    print("Recall Results:")
+    print(results[0].text if results else "<no results>")
 
 
 if __name__ == "__main__":
