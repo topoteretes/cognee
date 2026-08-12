@@ -1,6 +1,6 @@
 from fastapi.responses import JSONResponse
 from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated, Dict
+from typing import Optional, Annotated, Dict, Union
 from fastapi import APIRouter
 from typing import List
 from uuid import UUID
@@ -28,7 +28,9 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=Dict[UUID, PipelineRunInfo],
+        # Dict[UUID, PipelineRunInfo] for the standard path; DLT manifest
+        # updates return a row-delta summary (Dict[str, int]) instead.
+        response_model=Union[Dict[UUID, PipelineRunInfo], Dict[str, int]],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -111,6 +113,10 @@ def get_update_router() -> APIRouter:
                 user=user,
                 node_set=node_set if node_set else None,
             )
+
+            # DLT manifest updates return a row-delta summary, not pipeline runs.
+            if not any(isinstance(v, PipelineRunInfo) for v in update_run.values()):
+                return update_run
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in update_run.values()):
