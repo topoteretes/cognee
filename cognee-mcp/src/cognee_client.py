@@ -32,6 +32,34 @@ except ImportError:
 
 logger = get_logger()
 
+
+def normalize_api_url(api_url: Optional[str]) -> Optional[str]:
+    """Normalize a Cognee base URL so requests never fail on a missing scheme.
+
+    Users routinely paste a bare tenant host (e.g. ``tenant-xxx.aws.cognee.ai``)
+    into ``COGNEE_BASE_URL`` / ``--api-url``. Without a scheme, httpx raises the
+    cryptic "Request URL is missing an 'http://' or 'https://' protocol" only on
+    the first request (e.g. remember), long after startup. Assume ``https://`` for
+    a schemeless URL and warn, so the common case just works and the fix is clear.
+    """
+    if not api_url:
+        return api_url
+
+    url = api_url.strip()
+    if not url:
+        return None
+
+    if "://" not in url:
+        logger.warning(
+            "COGNEE_BASE_URL/--api-url %r has no scheme; assuming https://. "
+            "Set the full URL (e.g. https://your-tenant.aws.cognee.ai) to silence this.",
+            url,
+        )
+        url = f"https://{url}"
+
+    return url
+
+
 # Read-only GETs (dataset list/status) should fail fast rather than inherit the
 # 300s client timeout intended for long POSTs like cognify: a hung or black-holed
 # GET would otherwise freeze the caller for a full 5 minutes.
@@ -80,6 +108,7 @@ class CogneeClient:
     """
 
     def __init__(self, api_url: Optional[str] = None, api_token: Optional[str] = None):
+        api_url = normalize_api_url(api_url)
         self.api_url = api_url.rstrip("/") if api_url else None
         self.api_token = api_token
         self.use_api = bool(api_url)

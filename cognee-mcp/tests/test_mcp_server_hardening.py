@@ -18,6 +18,7 @@ if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
 
 CogneeClient = importlib.import_module("src.cognee_client").CogneeClient
+normalize_api_url = importlib.import_module("src.cognee_client").normalize_api_url
 server_utils = importlib.import_module("src.server_utils")
 retrieval_utils = importlib.import_module("src.retrieval_utils")
 format_recall_results = server_utils.format_recall_results
@@ -1227,3 +1228,32 @@ async def test_recall_without_env_default_omits_system_prompt(monkeypatch):
 
     payload = _recall_payload(requests)
     assert "system_prompt" not in payload
+
+
+def test_normalize_api_url_prepends_https_when_scheme_missing():
+    assert normalize_api_url("tenant-abc.aws.cognee.ai") == "https://tenant-abc.aws.cognee.ai"
+
+
+def test_normalize_api_url_preserves_existing_scheme():
+    assert normalize_api_url("http://localhost:8000") == "http://localhost:8000"
+    assert (
+        normalize_api_url("https://tenant-abc.aws.cognee.ai") == "https://tenant-abc.aws.cognee.ai"
+    )
+
+
+def test_normalize_api_url_strips_whitespace():
+    assert normalize_api_url("  tenant-abc.aws.cognee.ai  ") == "https://tenant-abc.aws.cognee.ai"
+
+
+def test_normalize_api_url_passthrough_empty():
+    assert normalize_api_url(None) is None
+    assert normalize_api_url("") == ""
+    assert normalize_api_url("   ") is None
+
+
+def test_client_normalizes_schemeless_api_url():
+    # A schemeless base URL used to reach httpx as-is and raise "missing protocol"
+    # only on the first request; the client must now carry a usable https URL.
+    client = CogneeClient(api_url="tenant-abc.aws.cognee.ai/")
+    assert client.api_url == "https://tenant-abc.aws.cognee.ai"
+    assert client.tenant_id is None  # 'abc' is not a uuid; extraction stays best-effort
