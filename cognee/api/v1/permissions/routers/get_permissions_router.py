@@ -187,7 +187,7 @@ def get_permissions_router() -> APIRouter:
         )
 
         datasets = await method_authorized_get_principal_datasets(
-            principal_id, permission_name, user.id, user.tenant_id
+            principal_id, permission_name, user.id
         )
 
         return JSONResponse(

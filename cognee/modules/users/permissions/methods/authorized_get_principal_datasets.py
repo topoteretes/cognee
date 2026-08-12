@@ -3,6 +3,7 @@ from uuid import UUID
 
 from cognee.modules.data.models import Dataset
 from cognee.modules.users.exceptions import PermissionDeniedError, RoleNotFoundError
+from cognee.modules.users.methods import get_user
 from cognee.modules.users.permissions.methods.get_principal import get_principal
 from cognee.modules.users.permissions.methods.get_principal_datasets import (
     get_principal_datasets,
@@ -16,7 +17,7 @@ from cognee.modules.users.permissions.methods.has_user_management_permission imp
 
 
 async def authorized_get_principal_datasets(
-    principal_id: UUID, permission_name: str, requester_id: UUID, tenant_id: UUID
+    principal_id: UUID, permission_name: str, requester_id: UUID
 ) -> List[Dataset]:
     """
         Return the datasets a principal holds a permission on, if the requester
@@ -30,13 +31,14 @@ async def authorized_get_principal_datasets(
           if they can manage users.
         * tenant — only the tenant they are currently in.
 
-        Results are always narrowed to the requester's current tenant, so a
-        principal that spans tenants never discloses another tenant's datasets.
+        The tenant is read off the requester rather than taken as an argument:
+        it is the tenant they are currently in, and a caller must not be able
+        to name a different one. Results are narrowed to it, so a principal
+        that spans tenants never discloses another tenant's datasets.
     Args:
         principal_id: Id of the principal whose datasets are requested
         permission_name: Name of the permission to list ("read", "write", ...)
         requester_id: Id of the user making the request
-        tenant_id: Id of the tenant the requester is currently acting in
 
     Returns:
         list[Dataset]: The principal's datasets within the requester's tenant.
@@ -44,7 +46,11 @@ async def authorized_get_principal_datasets(
     Raises:
         PermissionDeniedError: If the requester may not ask about this principal.
         RoleNotFoundError: If the role is not part of the requester's tenant.
+        UserNotFoundError: If the requester does not exist.
     """
+    requester = await get_user(requester_id)
+    tenant_id = requester.tenant_id
+
     principal = await get_principal(principal_id)
 
     if principal.type == "user":
