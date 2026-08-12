@@ -51,6 +51,37 @@ async def _record_session_usage_after(
     return result
 
 
+async def _heartbeat_pipeline_run_after(coro: Coroutine) -> T:
+    """Run the LLM coroutine, then (best-effort) report progress on the run.
+
+    Task boundaries are a coarse place to observe progress: a measured cognify
+    spent 79s inside one LLM-bound task with no signal at all. Every structured
+    output call funnels through here, so a completed call is the finest-grained
+    evidence of liveness available without reaching into a provider's streaming
+    API, and it cut the largest unobserved window on that same workload from
+    96.8s to 38.9s.
+
+    It does not remove the window. Calls here run under ``asyncio.gather``, and
+    a single call is atomic, so the floor is however long the slowest one takes
+    (93.6s in that run). Consumers still need ownership information to decide
+    liveness with certainty; this only narrows the guess.
+
+    Failures never propagate. Progress reporting is strictly auxiliary and must
+    not cost a caller their completion.
+    """
+    result = await coro
+    try:
+        from cognee.context_global_variables import current_pipeline_run_id
+        from cognee.modules.pipelines.operations.heartbeat_pipeline_run import (
+            heartbeat_pipeline_run,
+        )
+
+        await heartbeat_pipeline_run(current_pipeline_run_id.get())
+    except Exception:
+        pass
+    return result
+
+
 async def _fail_fast_on_quota(coro: Coroutine) -> T:
     """Convert provider quota/billing exhaustion into ``LLMQuotaExceededError``.
 
@@ -114,9 +145,12 @@ class LLMGateway:
                 **kwargs,
             )
 
-        # Wrap so usage is recorded against any active session tracker.
-        # No-op when no tracker is installed.
-        return _fail_fast_on_quota(_record_session_usage_after(inner, text_input=text_input))
+        # Wrap so usage is recorded against any active session tracker, and so
+        # a completed call reports progress on the pipeline run it belongs to.
+        # Both are no-ops when nothing is listening.
+        return _fail_fast_on_quota(
+            _heartbeat_pipeline_run_after(_record_session_usage_after(inner, text_input=text_input))
+        )
 
     @staticmethod
     def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:

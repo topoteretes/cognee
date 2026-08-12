@@ -38,6 +38,13 @@ session_user = ContextVar("session_user", default=None)
 current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
     "current_pipeline_stage", default=None
 )
+# The pipeline run the current work belongs to, so code far below the pipeline
+# machinery can report progress against it without threading the id through
+# every signature. Set per data item in run_tasks, which means each item's task
+# tree gets its own copy and concurrent items never see each other's run.
+current_pipeline_run_id: ContextVar[Optional[UUID]] = ContextVar(
+    "current_pipeline_run_id", default=None
+)
 
 
 async def set_session_user_context_variable(user):

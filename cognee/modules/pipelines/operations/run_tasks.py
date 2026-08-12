@@ -4,7 +4,10 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.context_global_variables import set_database_global_context_variables
+from cognee.context_global_variables import (
+    current_pipeline_run_id,
+    set_database_global_context_variables,
+)
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.users.models import User
@@ -84,6 +87,11 @@ async def run_tasks(
             semaphore = asyncio.Semaphore(data_per_batch)
 
             async def _run_item(data_item):
+                # Each item runs in its own task, so this set is scoped to that
+                # item's task tree and concurrent items never overwrite each
+                # other. Lets code far below the pipeline (the LLM gateway)
+                # report progress against this run without a threaded argument.
+                current_pipeline_run_id.set(pipeline_run_id)
                 async with semaphore:
                     return await run_tasks_data_item(
                         data_item,
