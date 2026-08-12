@@ -1,3 +1,13 @@
+"""All DLT-based data ingestion modes in cognee, end to end.
+
+Before you start:
+    pip install "cognee[dlt]"
+
+Covers explicit dlt resources with nested data, CSV auto-detection, the append and replace
+write dispositions, mixing unstructured text with a dlt resource, and combining a CSV with
+an ontology, finishing with a graph visualization.
+"""
+
 import asyncio
 import os
 
@@ -6,7 +16,9 @@ import cognee
 try:
     import dlt
 except ImportError:
-    dlt = None
+    raise SystemExit(
+        "The dlt extra is required for this example: pip install 'cognee[dlt]'"
+    ) from None
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.modules.ontology.ontology_config import Config
@@ -59,7 +71,9 @@ async def main():
 
     print("\n=== Mode 2: CSV auto-detection ===")
 
-    csv_path = os.path.join(os.path.dirname(__file__), "test_data", "employees.csv")
+    csv_path = os.path.join(
+        os.path.dirname(__file__), "dlt_ingestion_example_data", "employees.csv"
+    )
 
     await cognee.remember(
         csv_path,
@@ -167,7 +181,9 @@ async def main():
 
     # ── Mode 6: Adding a csv along with an ontology ──
 
-    ontology_path = os.path.join(os.path.dirname(__file__), "test_data", "employees_ontology.owl")
+    ontology_path = os.path.join(
+        os.path.dirname(__file__), "dlt_ingestion_example_data", "employees_ontology.owl"
+    )
 
     # Create full config structure manually
     config: Config = {

@@ -2,11 +2,11 @@
 
 Run with:
 
-    uv run python examples/demos/live_session_context_feedback_demo.py
+    uv run python examples/demos/sessions/live_session_context_feedback_demo.py
 
 Reuse already-ingested demo data and start a fresh session:
 
-    uv run python examples/demos/live_session_context_feedback_demo.py --no-ingest
+    uv run python examples/demos/sessions/live_session_context_feedback_demo.py --no-ingest
 
 This demo uses the real public ingestion and recall path. It ingests a small imagined company
 dataset, asks questions in one session, sends feedback as user messages, and prints JSON evidence

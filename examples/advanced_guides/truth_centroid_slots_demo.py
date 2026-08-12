@@ -1,6 +1,6 @@
 """End-to-end demo of truth centroid slots changing HybridRetriever ranking.
 
-The advanced companion to ``examples/demos/truth_subspace_reranking_demo.py``: that demo
+The advanced companion to ``examples/demos/feedback/truth_subspace_reranking_demo.py``: that demo
 shows what truth-subspace weighting does to ranking; this one shows how it works underneath —
 the deterministic centroid slots and their epochs, including rebuilds that keep anchors
 current across learning batches. Both are covered by the "Truth subspace re-ranking" guide

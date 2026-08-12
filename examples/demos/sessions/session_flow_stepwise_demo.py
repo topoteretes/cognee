@@ -2,7 +2,7 @@
 
 Run with:
 
-    uv run python examples/demos/session_flow_stepwise_demo.py
+    uv run python examples/demos/sessions/session_flow_stepwise_demo.py
 
 This is a *narrated trace*: at every hop it prints the actual data so you can watch memory
 move through the system using only the two top-level verbs, `cognee.remember` and `cognee.recall`.

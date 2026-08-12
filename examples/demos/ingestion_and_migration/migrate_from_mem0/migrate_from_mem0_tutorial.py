@@ -10,12 +10,12 @@ Three import modes:
   - ``"hybrid"``    — preserve the graph *and* cognify raw content.
 
 Usage:
-    uv run python examples/tutorials/migrate_from_mem0_tutorial.py
+    uv run python examples/demos/ingestion_and_migration/migrate_from_mem0/migrate_from_mem0_tutorial.py
 
 Requires:
     LLM_API_KEY set in .env (needed for re-derive mode and recall).
 
-The sample mem0 export lives at ``examples/tutorials/data/mem0_export.json``.
+The sample mem0 export lives at ``examples/demos/ingestion_and_migration/migrate_from_mem0/data/mem0_export.json``.
 """
 
 import asyncio

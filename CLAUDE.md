@@ -595,7 +595,7 @@ Supporting:
 - `datasets()` - Dataset operations
 - `serve(url)` / `disconnect()` - Point the SDK at a running instance
 
-All functions are async - use `await` or `asyncio.run()`. See `examples/demos/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
+All functions are async - use `await` or `asyncio.run()`. See `examples/advanced_guides/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
 
 ## Security Considerations
 

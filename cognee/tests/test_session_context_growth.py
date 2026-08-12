@@ -1,15 +1,17 @@
-"""Print a deterministic JSON demo of session-context growth.
+"""Deterministic test of session-context growth across a short conversation.
 
-Run with:
+Isolates the session loop — no live LLM or retriever. Simulated feedback-analysis results are fed
+into ``SessionManager.prepare_session_turn`` and the test asserts how context is learned, served,
+and rated turn by turn. UUIDs and analysis results are patched, so the output is fully
+deterministic.
 
-    uv run python examples/demos/session_context_growth_demo.py
+Run with pytest, or directly for the full JSON trace:
 
-This demo isolates the session loop. It does not call a live LLM or retriever. Instead, it feeds
-simulated feedback-analysis results into ``SessionManager.prepare_session_turn`` and prints how
-context is learned, served, and rated across a short conversation.
+    uv run python cognee/tests/test_session_context_growth.py
 """
 
 import asyncio
+import itertools
 import json
 import os
 from collections import defaultdict
@@ -156,17 +158,21 @@ async def run_demo() -> list[dict]:
         with (
             patch("cognee.infrastructure.session.session_manager.CacheConfig", demo_cache_config),
             patch(
-                "cognee.infrastructure.session.session_manager.analyze_turn_for_session_context",
+                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
                 side_effect=[turn.simulated_analysis for turn in turns],
             ),
             patch(
                 "cognee.infrastructure.session.session_manager.uuid.uuid4",
-                side_effect=["qa-1", "feedback-1", "qa-2", "feedback-2", "qa-3"],
+                side_effect=(f"qa-{index}" for index in itertools.count(1)),
+            ),
+            patch(
+                "cognee.infrastructure.session.session_turn.uuid4",
+                side_effect=(f"feedback-{index}" for index in itertools.count(1)),
             ),
             patch(
                 "cognee.infrastructure.session.session_context_builder.uuid4",
-                side_effect=["ctx-1", "ctx-2"],
+                side_effect=(f"ctx-{index}" for index in itertools.count(1)),
             ),
         ):
             output = []
@@ -374,5 +380,32 @@ class InMemorySessionCache:
         return True
 
 
+def test_session_context_growth():
+    output = asyncio.run(run_demo())
+
+    turns_with_answer = [turn for turn in output if turn["stored_qa"] is not None]
+    assert len(turns_with_answer) == 3, "three turns should store a Q&A"
+
+    learned_ids = {entry["id"] for entry in output[-1]["session_context_after_turn"]}
+    assert learned_ids == {"ctx-1", "ctx-2"}, "one preference and one rule should be learned"
+
+    served_after_learning = [
+        turn["context_served_to_answer"]["ids"]
+        for turn in turns_with_answer
+        if turn["context_served_to_answer"]["ids"]
+    ]
+    assert served_after_learning, "learned context should be served to at least one later answer"
+    assert all("ctx-1" in ids for ids in served_after_learning), (
+        "the learned preference should be part of every served context"
+    )
+
+    final_snapshot = {entry["id"]: entry for entry in output[-1]["session_context_after_turn"]}
+    assert final_snapshot["ctx-1"]["helpful_count"] == 1, (
+        "the rated context entry should record its helpful rating"
+    )
+
+
 if __name__ == "__main__":
     print(json.dumps(asyncio.run(run_demo()), indent=2))
+    test_session_context_growth()
+    print("\nAll assertions passed.")

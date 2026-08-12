@@ -6,11 +6,11 @@ tool/action traces — and, like that demo, the real lesson extraction is LLM-ba
 
 Run (full, requires a configured LLM provider):
 
-    uv run python examples/demos/agentic_session_context_demo.py
+    uv run python examples/demos/sessions/agentic_session_context_demo.py
 
 Run a reduced, no-LLM version (deterministic failure capture + recall only):
 
-    uv run python examples/demos/agentic_session_context_demo.py --offline
+    uv run python examples/demos/sessions/agentic_session_context_demo.py --offline
 
 What it shows:
 

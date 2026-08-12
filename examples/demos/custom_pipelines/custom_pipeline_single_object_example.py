@@ -6,7 +6,7 @@ with typed DataPoint models, field annotations, LLM structured output,
 and per-source freshness tracking via source_content_hash.
 
 Usage:
-    uv run python examples/demos/custom_pipeline_single_object_example.py
+    uv run python examples/demos/custom_pipelines/custom_pipeline_single_object_example.py
 
 Requires:
     LLM_API_KEY set in .env or environment.

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from disambiguate_entities import disambiguate_entities_pipeline
+from examples.pocs.disambiguation.disambiguate_entities import disambiguate_entities_pipeline
 
 import cognee
 from cognee import visualize_graph

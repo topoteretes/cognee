@@ -2,7 +2,7 @@
 
 Run from the repo root:
 
-    uv run python examples/demos/skill_feedback_loop/skill_feedback_loop_demo.py
+    uv run python examples/demos/feedback/skill_feedback_loop/skill_feedback_loop_demo.py
 
 Requires:
     LLM_API_KEY set in .env or environment.

@@ -13,7 +13,7 @@ Each step prints the ACTUAL state read back from the graph / session store.
 Storage is isolated under /tmp/conflict_demo so it never touches real data.
 Requires a working LLM + embedding config (.env) — run from the repo root:
 
-    uv run python examples/demos/contradiction_feedback_demo.py
+    uv run python examples/demos/feedback/contradiction_feedback_demo.py
 """
 
 import asyncio

@@ -199,6 +199,11 @@ cognee/cache/
 .artifacts/
 .anon_id
 
+# Runtime state written by example runs (dotless variants + dlt config)
+cognee_system/
+data_storage/
+.dlt/
+
 node_modules/
 
 # Evals

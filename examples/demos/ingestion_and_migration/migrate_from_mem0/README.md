@@ -9,7 +9,7 @@ Runnable tutorials that walk through a specific workflow end-to-end.
 ## Running a tutorial
 
 ```bash
-uv run python examples/tutorials/<tutorial_name>.py
+uv run python examples/demos/ingestion_and_migration/migrate_from_mem0/migrate_from_mem0_tutorial.py
 ```
 
 Requires `LLM_API_KEY` in `.env` (for `re-derive` mode and `recall`).
