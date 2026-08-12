@@ -1,6 +1,8 @@
 import asyncio
+import re
+from collections.abc import AsyncIterable
 from typing import Any, Dict, List, Optional, get_type_hints
-from uuid import UUID
+from uuid import UUID, uuid4
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
@@ -24,6 +26,7 @@ from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_re
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from ..models.ScoredResult import ScoredResult
+from ..models.IndexSchema import IndexSchema, index_schema_from_data_point
 from ..exceptions import CollectionNotFoundError
 from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
@@ -37,30 +40,6 @@ QUERY_BATCH_SIZE = 1000
 # retained while idle); the large max_overflow keeps burst headroom, since overflow
 # connections close on release instead of idling.
 _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
-
-
-class IndexSchema(DataPoint):
-    """
-    Define a schema for indexing data points with a text field.
-
-    This class inherits from the DataPoint class and specifies the structure of a single
-    data point that includes a text attribute. It also includes a metadata field that
-    indicates which fields should be indexed.
-    """
-
-    text: str
-
-    # Optional reference scalars carried for the search "Evidence" feature.
-    # They stay None for non-chunk data points, so this schema remains
-    # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
-
-    metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
@@ -377,7 +356,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     )
                     insert_statement = insert_statement.on_conflict_do_update(
                         index_elements=["id"],
-                        set_={"payload": merged_payload_expr},
+                        set_={
+                            "payload": merged_payload_expr,
+                            "vector": insert_statement.excluded.vector,
+                        },
                     )
                     await session.execute(insert_statement)
                 await session.commit()
@@ -393,22 +375,59 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
-                IndexSchema(
-                    id=data_point.id,
-                    text=DataPoint.get_embeddable_data(data_point),
-                    # Reference scalars for search "Evidence". Pulled via getattr
-                    # so non-chunk data points (which lack these fields) simply
-                    # fall back to None instead of raising.
-                    document_id=getattr(data_point, "document_id", None),
-                    document_name=getattr(data_point, "document_name", None),
-                    chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
-                    importance_weight=getattr(data_point, "importance_weight", None),
-                    belongs_to_set=(data_point.belongs_to_set or []),
-                )
+                index_schema_from_data_point(data_point, index_property_name)
                 for data_point in data_points
             ],
         )
+
+    async def replace_index_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_point_batches: AsyncIterable[List[DataPoint]],
+    ) -> None:
+        """Atomically replace one collection after staging writes succeed."""
+        collection_name = f"{index_name}_{index_property_name}"
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", collection_name):
+            raise ValueError(f"Invalid collection table name: {collection_name!r}")
+        staging_name = f"_cognee_staging_{uuid4().hex}"
+        staging_created = False
+        try:
+            async for batch in data_point_batches:
+                if not batch:
+                    continue
+                await self.create_data_points(
+                    staging_name,
+                    [
+                        index_schema_from_data_point(data_point, index_property_name)
+                        for data_point in batch
+                    ],
+                )
+                staging_created = True
+
+            if not staging_created:
+                if not await self.has_collection(collection_name):
+                    await self.create_collection(collection_name, payload_schema=IndexSchema)
+                async with self.engine.begin() as connection:
+                    await connection.execute(
+                        text(
+                            f'CREATE TABLE "{staging_name}" '
+                            f'(LIKE "{collection_name}" INCLUDING ALL)'
+                        )
+                    )
+
+            async with self._get_write_lock(collection_name):
+                async with self.engine.begin() as connection:
+                    await connection.execute(text(f'DROP TABLE IF EXISTS "{collection_name}"'))
+                    await connection.execute(
+                        text(f'ALTER TABLE "{staging_name}" RENAME TO "{collection_name}"')
+                    )
+            self.reset_metadata_cache()
+        except Exception:
+            async with self.engine.begin() as connection:
+                await connection.execute(text(f'DROP TABLE IF EXISTS "{staging_name}"'))
+            self.reset_metadata_cache()
+            raise
 
     async def get_table(self, collection_name: str) -> Table:
         """

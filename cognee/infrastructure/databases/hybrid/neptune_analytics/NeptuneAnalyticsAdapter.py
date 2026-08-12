@@ -2,50 +2,27 @@
 
 import asyncio
 import json
-from collections import Counter
+from collections.abc import AsyncIterable
 from typing import List, Optional, Any, Dict, Tuple
 from uuid import UUID
 
-from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.edge_index_points import build_edge_index_points
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.models.PayloadSchema import PayloadSchema
+from cognee.infrastructure.databases.vector.models.IndexSchema import (
+    IndexSchema,
+    index_schema_from_data_point,
+)
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 
 logger = get_logger("NeptuneAnalyticsAdapter")
-
-
-class IndexSchema(DataPoint):
-    """
-    Represents a schema for an index data point containing an ID and text.
-
-    Attributes:
-    - id: A string representing the unique identifier for the data point.
-    - text: A string representing the content of the data point.
-    - belongs_to_set: A list of node names this data point belongs to, used for filtering.
-    - metadata: A dictionary with default index fields for the schema, currently configured
-    to include 'text'.
-    """
-
-    id: str
-    text: str
-    # Optional reference scalars carried for the search "Evidence" feature.
-    # They stay None for non-chunk data points, so this schema remains
-    # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
-    belongs_to_set: List[str] = []
-    metadata: dict = {"index_fields": ["text"]}
 
 
 NEPTUNE_ANALYTICS_ENDPOINT_URL = "neptune-graph://"
@@ -201,8 +178,8 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 f"MERGE (n "
                 f":{self._VECTOR_NODE_LABEL} "
                 f" {{`~id`: $node_id}}) "
-                f"ON CREATE SET n = $properties, n.updated_at = timestamp() "
-                f"ON MATCH SET n += $properties, n.updated_at = timestamp() "
+                f"ON CREATE SET n = $properties, n.vector = $embedding, n.updated_at = timestamp() "
+                f"ON MATCH SET n += $properties, n.vector = $embedding, n.updated_at = timestamp() "
                 f"WITH n, $embedding AS embedding "
                 f"CALL neptune.algo.vectors.upsert(n, embedding) "
                 f"YIELD success "
@@ -468,21 +445,36 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             [
-                IndexSchema(
-                    id=str(data_point.id),
-                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
-                    # Reference scalars for search "Evidence". Pulled via getattr
-                    # so non-chunk data points (which lack these fields) simply
-                    # fall back to None instead of raising.
-                    document_id=getattr(data_point, "document_id", None),
-                    document_name=getattr(data_point, "document_name", None),
-                    chunk_index=getattr(data_point, "chunk_index", None),
-                    source_chunk_id=getattr(data_point, "source_chunk_id", None),
-                    importance_weight=getattr(data_point, "importance_weight", None),
-                )
+                index_schema_from_data_point(data_point, index_property_name)
                 for data_point in data_points
             ],
         )
+
+    async def replace_index_data_points(
+        self,
+        index_name: str,
+        index_property_name: str,
+        data_point_batches: AsyncIterable[List[DataPoint]],
+    ) -> None:
+        """Replace the vector nodes bearing one collection marker only."""
+        collection_name = f"{index_name}_{index_property_name}"
+        delete_query = (
+            f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
+            f"WHERE n.{self._COLLECTION_PREFIX} = $collection_name DETACH DELETE n"
+        )
+        try:
+            self._client.query(delete_query, {"collection_name": collection_name})
+        except Exception as e:
+            self._na_exception_handler(e, delete_query)
+        async for batch in data_point_batches:
+            if batch:
+                await self.create_data_points(
+                    collection_name,
+                    [
+                        index_schema_from_data_point(data_point, index_property_name)
+                        for data_point in batch
+                    ],
+                )
 
     async def prune(self):
         """
@@ -549,30 +541,17 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         for (type_name, field_name), points in groups.items():
             await self.create_vector_index(type_name, field_name)
-            index_schemas = [
-                IndexSchema(
-                    id=str(dp.id),
-                    text=getattr(dp, field_name),
-                    document_id=getattr(dp, "document_id", None),
-                    document_name=getattr(dp, "document_name", None),
-                    chunk_index=getattr(dp, "chunk_index", None),
-                    source_chunk_id=getattr(dp, "source_chunk_id", None),
-                    importance_weight=getattr(dp, "importance_weight", None),
-                    belongs_to_set=dp.belongs_to_set or [],
-                )
-                for dp in points
-            ]
+            index_schemas = [index_schema_from_data_point(dp, field_name) for dp in points]
             await self.create_data_points(f"{type_name}_{field_name}", index_schemas)
 
     async def add_edges_with_vectors(
         self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
     ) -> None:
-        """Add edges to the graph and index unique relationship types as vector data points.
+        """Add graph edges, then index relationship types and edge prose.
 
-        Graph edges are inserted via ``add_edges``. Each distinct relationship type
-        (or ``edge_text`` when present in edge properties) is embedded and stored as a
-        COGNEE_NODE in the ``EdgeType_relationship_name`` collection, matching the
-        behaviour of the non-hybrid ``index_graph_edges`` task.
+        The graph write happens first, so each EdgeType payload reflects the current
+        graph-wide count. Individual ``EdgeInstance_text`` points retain the prose
+        and stable edge-object IDs built by the shared edge point helper.
 
         Parameters:
         -----------
@@ -584,28 +563,30 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         await self.add_edges(edges)
 
-        # Collect unique edge texts for embedding.
-        edge_texts = []
-        for edge in edges:
-            props = edge[3] if len(edge) > 3 and edge[3] else {}
-            edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
-            if edge_text:
-                edge_texts.append(edge_text)
+        local_points = build_edge_index_points(edges)
+        relationship_names = [point.relationship_name for point in local_points.edge_types]
+        relationship_counts = await self.get_edge_type_counts(relationship_names)
+        edge_points = build_edge_index_points(edges, relationship_counts=relationship_counts)
 
-        edge_type_counts = Counter(edge_texts)
-        if not edge_type_counts:
-            return
-
-        await self.create_vector_index("EdgeType", "relationship_name")
-        index_schemas = [
-            IndexSchema(
-                id=str(EdgeType.id_for(text)),
-                text=text,
-                belongs_to_set=[],
+        if edge_points.edge_types:
+            await self.create_vector_index("EdgeType", "relationship_name")
+            await self.create_data_points(
+                "EdgeType_relationship_name",
+                [
+                    index_schema_from_data_point(point, "relationship_name")
+                    for point in edge_points.edge_types
+                ],
             )
-            for text in edge_type_counts
-        ]
-        await self.create_data_points("EdgeType_relationship_name", index_schemas)
+
+        if edge_points.edge_instances:
+            await self.create_vector_index("EdgeInstance", "text")
+            await self.create_data_points(
+                "EdgeInstance_text",
+                [
+                    index_schema_from_data_point(point, "text")
+                    for point in edge_points.edge_instances
+                ],
+            )
 
     async def run_migrations(self):
         """Run Neptune Analytics adapter migrations (currently no-op)."""

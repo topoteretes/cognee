@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
@@ -110,6 +112,64 @@ async def test_add_data_points_indexes_nodes_and_edges(
     assert expected_custom_edges[0] in first_call_edges
     assert graph_engine.add_edges.await_args_list[1].args[0] == expected_custom_edges
     assert mock_index_edges.await_count == 2
+    assert mock_index_edges.await_args_list[0].kwargs["graph_engine"] is graph_engine
+    assert mock_index_edges.await_args_list[1].kwargs["graph_engine"] is graph_engine
+    assert (
+        mock_index_edges.await_args_list[0].args[0][0][3]["edge_object_id"]
+        == first_call_edges[0][3]["edge_object_id"]
+    )
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_indexes_edges_after_graph_write_completes(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """Edge type counts are read only after the graph write makes the batch visible."""
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    mock_get_graph.side_effect = [([dp1], [edge]), ([dp2], [])]
+    mock_dedup.side_effect = lambda nodes, edges: (nodes, edges)
+    unified, graph_engine, _ = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    write_started = asyncio.Event()
+    allow_write_completion = asyncio.Event()
+    index_started = asyncio.Event()
+    visible_edge_count = 0
+    indexed_counts = []
+
+    async def add_edges(*_args, **_kwargs):
+        nonlocal visible_edge_count
+        write_started.set()
+        await allow_write_completion.wait()
+        visible_edge_count = 1
+
+    async def get_edge_type_counts(relationship_names):
+        return {relationship_name: visible_edge_count for relationship_name in relationship_names}
+
+    async def index_edges(*_args, **kwargs):
+        index_started.set()
+        indexed_counts.append(await kwargs["graph_engine"].get_edge_type_counts(["related_to"]))
+
+    graph_engine.add_edges.side_effect = add_edges
+    graph_engine.get_edge_type_counts.side_effect = get_edge_type_counts
+    mock_index_edges.side_effect = index_edges
+
+    task = asyncio.create_task(add_data_points([dp1, dp2]))
+    await write_started.wait()
+    await asyncio.sleep(0)
+    assert not index_started.is_set()
+
+    allow_write_completion.set()
+    await task
+
+    assert indexed_counts == [{"related_to": 1}]
 
 
 @pytest.mark.asyncio

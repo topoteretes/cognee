@@ -51,19 +51,22 @@ class CogneeGraph(CogneeAbstractGraph):
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
 
-        edge_text = edge.attributes.get("edge_text") or edge.attributes.get("relationship_type")
+        relationship_name = edge.attributes.get("relationship_type")
         edge.attributes["edge_type_id"] = (
-            EdgeType.id_for(edge_text) if edge_text else None
-        )  # Update edge with generated edge_type_id
+            EdgeType.id_for(relationship_name) if relationship_name else None
+        )
+        edge_object_id = edge.attributes.get("edge_object_id")
+        edge.attributes["edge_instance_id"] = str(edge_object_id) if edge_object_id else None
 
         edge.node1.add_skeleton_edge(edge)
         edge.node2.add_skeleton_edge(edge)
-        key = edge.get_distance_key()
-        if not key:
-            return
-        if key not in self.edges_by_distance_key:
-            self.edges_by_distance_key[key] = []
-        self.edges_by_distance_key[key].append(edge)
+        for key in (edge.attributes["edge_type_id"], edge.attributes["edge_instance_id"]):
+            if not key:
+                continue
+            key = str(key)
+            if key not in self.edges_by_distance_key:
+                self.edges_by_distance_key[key] = []
+            self.edges_by_distance_key[key].append(edge)
 
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
@@ -450,22 +453,25 @@ class CogneeGraph(CogneeAbstractGraph):
         if not edge_distances:
             return None
 
-        per_query_scored_results = self._normalize_query_distance_lists(
-            edge_distances, query_list_length, "edge_distances"
-        )
+        if not isinstance(edge_distances, dict):
+            edge_distances = {"EdgeType_relationship_name": edge_distances}
 
-        for query_index, scored_results in enumerate(per_query_scored_results):
-            for result in scored_results:
-                matching_edges = self.edges_by_distance_key.get(str(result.id))
-                if not matching_edges:
-                    continue
-                for edge in matching_edges:
-                    edge.update_distance_for_query(
-                        query_index=query_index,
-                        score=float(getattr(result, "score", self.triplet_distance_penalty)),
-                        query_count=query_count,
-                        default_penalty=self.triplet_distance_penalty,
-                    )
+        for collection_name in ("EdgeType_relationship_name", "EdgeInstance_text"):
+            per_query_scored_results = self._normalize_query_distance_lists(
+                edge_distances.get(collection_name, []), query_list_length, collection_name
+            )
+            for query_index, scored_results in enumerate(per_query_scored_results):
+                for result in scored_results:
+                    matching_edges = self.edges_by_distance_key.get(str(result.id))
+                    if not matching_edges:
+                        continue
+                    for edge in matching_edges:
+                        edge.update_distance_for_query(
+                            query_index=query_index,
+                            score=float(getattr(result, "score", self.triplet_distance_penalty)),
+                            query_count=query_count,
+                            default_penalty=self.triplet_distance_penalty,
+                        )
 
     def _calculate_query_top_triplet_importances(
         self,

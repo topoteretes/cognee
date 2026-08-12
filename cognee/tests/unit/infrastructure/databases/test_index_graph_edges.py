@@ -1,103 +1,47 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from cognee.tasks.storage.index_graph_edges import create_edge_type_datapoints, index_graph_edges
+from unittest.mock import AsyncMock, patch
+
+from cognee.modules.graph.models.EdgeInstance import EdgeInstance
+from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.engine.utils import generate_edge_object_id
+from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
 
 @pytest.mark.asyncio
-async def test_index_graph_edges_success():
-    """Test that index_graph_edges retrieves edges and delegates to index_data_points."""
-    mock_graph_engine = AsyncMock()
-    mock_graph_engine.get_graph_data.return_value = (
-        None,
-        [
-            [{"relationship_name": "rel1"}, {"relationship_name": "rel1"}],
-            [{"relationship_name": "rel2"}],
-        ],
-    )
-    mock_index_data_points = AsyncMock()
-
-    with patch.dict(
-        index_graph_edges.__globals__,
-        {
-            "get_graph_engine": AsyncMock(return_value=mock_graph_engine),
-            "index_data_points": mock_index_data_points,
-        },
-    ):
-        await index_graph_edges()
-
-    mock_graph_engine.get_graph_data.assert_awaited_once()
-    mock_index_data_points.assert_awaited_once()
-
-    call_args = mock_index_data_points.call_args[0][0]
-    assert len(call_args) == 2
-    assert all(hasattr(item, "relationship_name") for item in call_args)
-
-
-@pytest.mark.asyncio
-async def test_index_graph_edges_no_relationships():
-    """Test that index_graph_edges handles empty relationships correctly."""
-    mock_graph_engine = AsyncMock()
-    mock_graph_engine.get_graph_data.return_value = (None, [])
-    mock_index_data_points = AsyncMock()
-
-    with patch.dict(
-        index_graph_edges.__globals__,
-        {
-            "get_graph_engine": AsyncMock(return_value=mock_graph_engine),
-            "index_data_points": mock_index_data_points,
-        },
-    ):
-        await index_graph_edges()
-
-    mock_graph_engine.get_graph_data.assert_awaited_once()
-    mock_index_data_points.assert_awaited_once()
-
-    call_args = mock_index_data_points.call_args[0][0]
-    assert len(call_args) == 0
-
-
-def test_create_edge_type_datapoints_uses_nonblank_edge_text():
+async def test_edge_index_contract_standard_path():
+    """Structural edge types use graph counts while prose stays on edge instances."""
+    graph = AsyncMock()
+    graph.get_edge_type_counts.return_value = {"depends_on": 1}
+    vector = AsyncMock()
+    indexer = AsyncMock()
     edges = [
         (
             "source",
             "target",
-            "related_to",
-            {"relationship_name": "related_to", "edge_text": " custom text "},
+            "depends_on",
+            {
+                "edge_text": "Source depends on Target because the build requires it.",
+            },
         )
     ]
 
-    datapoints = create_edge_type_datapoints(edges)
+    with patch.dict(index_graph_edges.__globals__, {"index_data_points": indexer}):
+        await index_graph_edges(edges, vector_engine=vector, graph_engine=graph)
 
-    assert len(datapoints) == 1
-    assert datapoints[0].relationship_name == "custom text"
+    points = indexer.await_args.args[0]
+    edge_type = next(point for point in points if isinstance(point, EdgeType))
+    edge_instance = next(point for point in points if isinstance(point, EdgeInstance))
+    type_id = str(edge_type.id)
+    instance_id = str(edge_instance.id)
+    type_text = edge_type.relationship_name
+    instance_text = edge_instance.text
 
-
-def test_create_edge_type_datapoints_uses_edge_text_without_relationship_property():
-    edges = [("source", "target", "related_to", {"edge_text": " custom text "})]
-
-    datapoints = create_edge_type_datapoints(edges)
-
-    assert len(datapoints) == 1
-    assert datapoints[0].relationship_name == "custom text"
-
-
-def test_create_edge_type_datapoints_falls_back_from_blank_edge_text_to_relationship_name():
-    edges = [
-        ("source", "target", "related_to", {"relationship_name": "related_to", "edge_text": ""}),
-        ("source", "target", "mentions", {"relationship_name": "mentions", "edge_text": "   "}),
-        ("source", "target", "works_at", {"relationship_name": "works_at", "edge_text": None}),
-    ]
-
-    datapoints = create_edge_type_datapoints(edges)
-
-    relationship_names = {datapoint.relationship_name for datapoint in datapoints}
-    assert relationship_names == {"related_to", "mentions", "works_at"}
-
-
-def test_create_edge_type_datapoints_skips_empty_retrieval_text():
-    edges = [("source", "target", "", {"relationship_name": "", "edge_text": ""})]
-
-    assert create_edge_type_datapoints(edges) == []
+    assert type_id == str(EdgeType.id_for("depends_on"))
+    assert instance_id == generate_edge_object_id("source", "target", "depends_on")
+    assert type_text == "depends_on"
+    assert instance_text == "Source depends on Target because the build requires it."
+    assert edge_type.number_of_edges == 1
+    graph.get_edge_type_counts.assert_awaited_once_with(["depends_on"])
 
 
 @pytest.mark.asyncio

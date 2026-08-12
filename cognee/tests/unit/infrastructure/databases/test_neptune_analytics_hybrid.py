@@ -18,6 +18,8 @@ langchain_aws = pytest.importorskip(
 botocore = pytest.importorskip("botocore", reason="Neptune Analytics tests require botocore")
 
 from cognee.infrastructure.engine import DataPoint  # noqa: E402
+from cognee.modules.engine.utils import generate_edge_object_id  # noqa: E402
+from cognee.modules.graph.models.EdgeType import EdgeType  # noqa: E402
 from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (  # noqa: E402
     NeptuneAnalyticsAdapter,
 )
@@ -33,6 +35,12 @@ class NodeNoIndex(DataPoint):
     metadata: dict = {"index_fields": []}
 
 
+class MultiIndexNode(DataPoint):
+    title: str
+    summary: str
+    metadata: dict = {"index_fields": ["title", "summary"]}
+
+
 class _FakeAdapter:
     """Minimal stand-in for NeptuneAnalyticsAdapter that carries the two new methods."""
 
@@ -42,6 +50,7 @@ class _FakeAdapter:
     def __init__(self):
         self.add_nodes = AsyncMock()
         self.add_edges = AsyncMock()
+        self.get_edge_type_counts = AsyncMock(return_value={})
         self.create_vector_index = AsyncMock()
         self.create_data_points = AsyncMock()
 
@@ -114,6 +123,21 @@ async def test_add_nodes_with_vectors_multiple_nodes_same_type():
     assert texts == {"Alice", "Bob"}
 
 
+@pytest.mark.asyncio
+async def test_add_nodes_with_vectors_keeps_text_specific_to_each_index_field():
+    """A multi-index node must create field-specific payload text in each collection."""
+    adapter = _FakeAdapter()
+    node = MultiIndexNode(id=uuid4(), title="Short title", summary="Detailed summary")
+
+    await adapter.add_nodes_with_vectors([node])
+
+    schemas_by_collection = {
+        call.args[0]: call.args[1] for call in adapter.create_data_points.await_args_list
+    }
+    assert schemas_by_collection["MultiIndexNode_title"][0].text == "Short title"
+    assert schemas_by_collection["MultiIndexNode_summary"][0].text == "Detailed summary"
+
+
 # ---------------------------------------------------------------------------
 # add_edges_with_vectors
 # ---------------------------------------------------------------------------
@@ -131,29 +155,61 @@ async def test_add_edges_with_vectors_empty():
 
 
 @pytest.mark.asyncio
-async def test_add_edges_with_vectors_calls_add_edges_and_creates_edge_type_vectors():
-    """Edges are inserted into graph and one EdgeType schema per unique relationship."""
+async def test_edge_index_contract_neptune_hybrid_path():
+    """Neptune writes type and instance points after graph persistence."""
     adapter = _FakeAdapter()
-    src, tgt = str(uuid4()), str(uuid4())
+    first_id, second_id = (
+        generate_edge_object_id("source", "target", "depends_on"),
+        str(uuid4()),
+    )
     edges = [
-        (src, tgt, "knows", {"source_node_id": src, "target_node_id": tgt}),
-        (src, tgt, "knows", {"source_node_id": src, "target_node_id": tgt}),
-        (tgt, src, "likes", {"source_node_id": tgt, "target_node_id": src}),
+        (
+            "source",
+            "target",
+            "depends_on",
+            {
+                "edge_object_id": first_id,
+                "edge_text": "Source depends on Target because the build requires it.",
+            },
+        ),
+        (
+            "c",
+            "d",
+            "depends_on",
+            {"edge_object_id": second_id, "edge_text": "Service C depends on Service D."},
+        ),
     ]
+    adapter.get_edge_type_counts.return_value = {"depends_on": 7}
 
     await adapter.add_edges_with_vectors(edges)
 
     adapter.add_edges.assert_awaited_once_with(edges)
-    adapter.create_vector_index.assert_awaited_once_with("EdgeType", "relationship_name")
-    adapter.create_data_points.assert_awaited_once()
+    adapter.get_edge_type_counts.assert_awaited_once_with(["depends_on"])
+    assert adapter.create_vector_index.await_args_list[0].args == ("EdgeType", "relationship_name")
+    assert adapter.create_vector_index.await_args_list[1].args == ("EdgeInstance", "text")
+    assert adapter.create_data_points.await_count == 2
 
-    collection_arg = adapter.create_data_points.call_args[0][0]
-    assert collection_arg == "EdgeType_relationship_name"
+    type_collection, type_schemas = adapter.create_data_points.await_args_list[0].args
+    instance_collection, instance_schemas = adapter.create_data_points.await_args_list[1].args
+    assert type_collection == "EdgeType_relationship_name"
+    assert instance_collection == "EdgeInstance_text"
+    assert [schema.text for schema in type_schemas] == ["depends_on"]
+    assert sorted(schema.text for schema in instance_schemas) == [
+        "Source depends on Target because the build requires it.",
+        "Service C depends on Service D.",
+    ]
+    assert type_schemas[0].number_of_edges == 7
+    assert {str(schema.id) for schema in instance_schemas} == {first_id, second_id}
+    edge_instance = next(schema for schema in instance_schemas if str(schema.id) == first_id)
+    type_id = str(type_schemas[0].id)
+    instance_id = str(edge_instance.id)
+    type_text = type_schemas[0].text
+    instance_text = edge_instance.text
 
-    schemas = adapter.create_data_points.call_args[0][1]
-    assert len(schemas) == 2
-    texts = {s.text for s in schemas}
-    assert texts == {"knows", "likes"}
+    assert type_id == str(EdgeType.id_for("depends_on"))
+    assert instance_id == generate_edge_object_id("source", "target", "depends_on")
+    assert type_text == "depends_on"
+    assert instance_text == "Source depends on Target because the build requires it."
 
 
 @pytest.mark.asyncio
@@ -165,9 +221,10 @@ async def test_add_edges_with_vectors_uses_edge_text_property_when_present():
 
     await adapter.add_edges_with_vectors(edges)
 
-    schemas = adapter.create_data_points.call_args[0][1]
-    assert len(schemas) == 1
-    assert schemas[0].text == "custom text"
+    type_schemas = adapter.create_data_points.await_args_list[0].args[1]
+    instance_schemas = adapter.create_data_points.await_args_list[1].args[1]
+    assert type_schemas[0].text == "rel"
+    assert instance_schemas[0].text == "custom text"
 
 
 @pytest.mark.asyncio
@@ -181,8 +238,8 @@ async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relatio
 
     await adapter.add_edges_with_vectors(edges)
 
-    schemas = adapter.create_data_points.call_args[0][1]
-    assert {schema.text for schema in schemas} == {"blank_rel", "none_rel"}
+    instance_schemas = adapter.create_data_points.await_args_list[1].args[1]
+    assert {schema.text for schema in instance_schemas} == {"blank_rel", "none_rel"}
 
 
 # ---------------------------------------------------------------------------

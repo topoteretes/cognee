@@ -287,8 +287,9 @@ async def brute_force_triplet_search(
                 "DocumentChunk_text",
             ]
 
-        if "EdgeType_relationship_name" not in collections:
-            collections.append("EdgeType_relationship_name")
+        for edge_collection in ("EdgeType_relationship_name", "EdgeInstance_text"):
+            if edge_collection not in collections:
+                collections.append(edge_collection)
 
         otel_span.set_attribute("cognee.retrieval.collection_count", len(collections))
         otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, ", ".join(collections))

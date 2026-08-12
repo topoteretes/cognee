@@ -683,6 +683,25 @@ class PostgresAdapter(GraphDBInterface):
 
             return nodes, edges
 
+    async def get_edge_type_counts(self, relationship_names: List[str]) -> Dict[str, int]:
+        """Return current edge counts grouped by the requested relationship names."""
+        counts = dict.fromkeys(relationship_names, 0)
+        if not counts:
+            return {}
+        async with self._session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT relationship_name, COUNT(*)
+                    FROM graph_edge
+                    WHERE relationship_name = ANY(:relationship_names)
+                    GROUP BY relationship_name
+                """),
+                {"relationship_names": list(counts)},
+            )
+            for relationship_name, count in result.fetchall():
+                counts[relationship_name] = count
+        return counts
+
     async def get_id_filtered_graph_data(
         self, target_ids: List[str]
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:

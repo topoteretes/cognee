@@ -705,6 +705,23 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to get graph data: {error_msg}")
             raise Exception(f"Failed to get graph data: {error_msg}") from e
 
+    async def get_edge_type_counts(self, relationship_names: List[str]) -> Dict[str, int]:
+        """Return current edge counts grouped by the requested relationship names."""
+        counts = dict.fromkeys(relationship_names, 0)
+        if not counts:
+            return {}
+        rows = await self.query(
+            f"""
+            MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
+            WHERE type(r) IN $relationship_names
+            RETURN type(r) AS relationship_name, count(*) AS edge_count
+            """,
+            {"relationship_names": list(counts)},
+        )
+        for row in rows:
+            counts[row["relationship_name"]] = row["edge_count"]
+        return counts
+
     async def get_neighborhood(
         self,
         node_ids: List[str],

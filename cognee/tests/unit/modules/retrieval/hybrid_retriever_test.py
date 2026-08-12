@@ -30,7 +30,12 @@ def _unified(vector=None, graph=None):
 
 
 def _vector_search(
-    chunks=None, entities=None, summaries=None, edge_types=None, missing_collections=None
+    chunks=None,
+    entities=None,
+    summaries=None,
+    edge_types=None,
+    edge_instances=None,
+    missing_collections=None,
 ):
     missing_collections = set(missing_collections or [])
 
@@ -45,6 +50,8 @@ def _vector_search(
             return entities or []
         if collection_name == "EdgeType_relationship_name":
             return edge_types or []
+        if collection_name == "EdgeInstance_text":
+            return edge_instances or []
         return []
 
     return AsyncMock(side_effect=search)
@@ -1185,8 +1192,14 @@ def _payload_text(chunk):
     return chunk.payload.get("text")
 
 
-def _edge_hit(text):
-    return _result(str(EdgeType.id_for(text)), {"text": text})
+def _edge_type_hit(relationship_name):
+    return _result(
+        str(EdgeType.id_for(relationship_name)), {"relationship_name": relationship_name}
+    )
+
+
+def _edge_instance_hit(instance_id, text):
+    return _result(instance_id, {"text": text})
 
 
 def _graph(nodes=None, edges=None):
@@ -1196,14 +1209,18 @@ def _graph(nodes=None, edges=None):
 
 
 @pytest.mark.asyncio
-async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
+async def test_instance_hits_rank_entity_bullets_and_fill_facts_section():
     ranked_bullet = "Alice works at Acme."
     unranked_bullet = "Alice plays tennis."
     fact = "Acme acquired Initech."
     vector = MagicMock()
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
-        edge_types=[_edge_hit(fact), _edge_hit(ranked_bullet), _edge_hit("works at")],
+        edge_types=[_edge_type_hit("works_at")],
+        edge_instances=[
+            _edge_instance_hit("fact-id", fact),
+            _edge_instance_hit("works-id", ranked_bullet),
+        ],
     )
     graph = _graph(
         nodes=[
@@ -1213,8 +1230,18 @@ async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
             ("person-id", {"name": "Person"}),
         ],
         edges=[
-            ("entity-1", "tennis-id", "plays", {"edge_text": unranked_bullet}),
-            ("entity-1", "acme-id", "works_at", {"edge_text": ranked_bullet}),
+            (
+                "entity-1",
+                "tennis-id",
+                "plays",
+                {"edge_text": unranked_bullet, "edge_object_id": "plays-id"},
+            ),
+            (
+                "entity-1",
+                "acme-id",
+                "works_at",
+                {"edge_text": ranked_bullet, "edge_object_id": "works-id"},
+            ),
             ("entity-1", "person-id", "is_a", {}),
         ],
     )
@@ -1230,6 +1257,63 @@ async def test_edge_hits_rank_entity_bullets_and_fill_facts_section():
     bullets = [edge["text"] for edge in retrieved["entities"][0]["edges"]]
     assert bullets == ["Alice -- is_a -- Person", ranked_bullet, unranked_bullet]
     assert [item["text"] for item in retrieved["facts"]] == [fact]
+    _search_call(vector, "EdgeType_relationship_name")
+    _search_call(vector, "EdgeInstance_text")
+
+
+@pytest.mark.asyncio
+async def test_entity_edge_order_is_pinned_then_instance_then_type_then_graph_order():
+    vector = MagicMock()
+    vector.search = _vector_search(
+        entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
+        edge_types=[_edge_type_hit("knows")],
+        edge_instances=[_edge_instance_hit("works-id", "Alice works at Acme.")],
+    )
+    graph = _graph(
+        nodes=[
+            ("entity-1", {"name": "Alice"}),
+            ("person-id", {"name": "Person"}),
+            ("acme-id", {"name": "Acme"}),
+            ("bob-id", {"name": "Bob"}),
+            ("tennis-id", {"name": "Tennis"}),
+        ],
+        edges=[
+            (
+                "entity-1",
+                "tennis-id",
+                "plays",
+                {"edge_text": "Alice plays tennis.", "edge_object_id": "plays-id"},
+            ),
+            (
+                "entity-1",
+                "bob-id",
+                "knows",
+                {"edge_text": "Alice knows Bob.", "edge_object_id": "knows-id"},
+            ),
+            (
+                "entity-1",
+                "acme-id",
+                "works_at",
+                {"edge_text": "Alice works at Acme.", "edge_object_id": "works-id"},
+            ),
+            ("entity-1", "person-id", "is_a", {}),
+        ],
+    )
+    retriever = HybridRetriever(facts_top_k=0)
+
+    with patch(
+        "cognee.modules.retrieval.hybrid_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+        return_value=_unified(vector=vector, graph=graph),
+    ):
+        retrieved = await retriever.get_retrieved_objects(query="q")
+
+    assert [edge["text"] for edge in retrieved["entities"][0]["edges"]] == [
+        "Alice -- is_a -- Person",
+        "Alice works at Acme.",
+        "Alice knows Bob.",
+        "Alice plays tennis.",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1265,7 +1349,7 @@ async def test_scoped_search_keeps_bullet_ranking_but_hides_facts():
     vector = MagicMock()
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
-        edge_types=[_edge_hit(ranked_bullet)],
+        edge_types=[_edge_type_hit("works_at")],
     )
     graph = _graph(
         nodes=[
@@ -1298,7 +1382,7 @@ async def test_facts_top_k_zero_disables_facts_and_sizes_edge_search_for_ranking
     vector = MagicMock()
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
-        edge_types=[_edge_hit("Alice works at Acme.")],
+        edge_types=[_edge_type_hit("works_at")],
     )
     graph = _graph(
         nodes=[("entity-1", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
@@ -1315,15 +1399,16 @@ async def test_facts_top_k_zero_disables_facts_and_sizes_edge_search_for_ranking
 
     assert retrieved["facts"] == []
     assert _search_call(vector, "EdgeType_relationship_name").kwargs["limit"] == 12
+    assert _search_call(vector, "EdgeInstance_text").kwargs["limit"] == 12
     assert retrieved["entities"][0]["edges"][0]["text"] == "Alice works at Acme."
 
 
 @pytest.mark.asyncio
-async def test_missing_edge_collection_keeps_bullets_and_returns_no_facts():
+async def test_missing_instance_edge_collection_keeps_bullets_and_returns_no_facts():
     vector = MagicMock()
     vector.search = _vector_search(
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
-        missing_collections={"EdgeType_relationship_name"},
+        missing_collections={"EdgeInstance_text"},
     )
     graph = _graph(
         nodes=[("entity-1", {"name": "Alice"}), ("acme-id", {"name": "Acme"})],
@@ -1349,7 +1434,7 @@ async def test_graph_neighborhood_error_keeps_chunks_entities_and_facts():
     vector.search = _vector_search(
         chunks=[_result("chunk-1", {"id": "chunk-1", "text": "Chunk text"})],
         entities=[_result("entity-1", {"id": "entity-1", "name": "Alice"})],
-        edge_types=[_edge_hit(fact)],
+        edge_instances=[_edge_instance_hit("fact-id", fact)],
     )
     graph = MagicMock()
     graph.get_neighborhood = AsyncMock(side_effect=RuntimeError("graph unavailable"))

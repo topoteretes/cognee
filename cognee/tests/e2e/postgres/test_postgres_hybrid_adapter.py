@@ -79,6 +79,7 @@ async def adapter():
 
             for table_name in [
                 "EdgeType_relationship_name",
+                "EdgeInstance_text",
                 "TestEntity_name",
                 "test_hybrid_collection",
             ]:
@@ -200,6 +201,50 @@ async def test_embed_data(adapter):
     assert len(vectors[0]) > 0
 
 
+@pytest.mark.asyncio
+async def test_vector_upsert_replaces_embedding_when_index_text_changes(adapter):
+    """A mutable index row must receive the vector for its newest text."""
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
+
+    collection = "test_hybrid_collection"
+    point_id = uuid4()
+    vector_adapter = adapter._vector
+
+    class _TextEmbeddingEngine:
+        def __init__(self, vector_size):
+            self._vector_size = vector_size
+
+        def get_vector_size(self):
+            return self._vector_size
+
+        async def embed_text(self, texts):
+            return [[float(len(text))] + [0.0] * (self._vector_size - 1) for text in texts]
+
+    original_engine = vector_adapter.embedding_engine
+    vector_adapter.embedding_engine = _TextEmbeddingEngine(original_engine.get_vector_size())
+    try:
+        await vector_adapter.create_data_points(
+            collection, [IndexSchema(id=point_id, text="first version")]
+        )
+        table = await vector_adapter.get_table(collection)
+        async with vector_adapter.get_async_session() as session:
+            first_vector = (await session.execute(select(table.c.vector))).scalar_one()
+
+        await vector_adapter.create_data_points(
+            collection, [IndexSchema(id=point_id, text="different second version")]
+        )
+        async with vector_adapter.get_async_session() as session:
+            second_vector = (await session.execute(select(table.c.vector))).scalar_one()
+    finally:
+        vector_adapter.embedding_engine = original_engine
+
+    assert second_vector != first_vector
+
+
 # -- Tests: query raises --
 
 
@@ -273,9 +318,27 @@ async def test_combined_write_content_integrity(adapter):
     await adapter.add_nodes_with_vectors(nodes)
 
     # Add edges with properties
+    edge_instance_ids = [
+        str(uuid5(NAMESPACE_OID, "quantum-ml-edge")),
+        str(uuid5(NAMESPACE_OID, "neural-nets-edge")),
+    ]
     edges = [
-        (id1, id2, "RELATED_TO", {"weight": 0.8, "edge_text": "quantum ML"}),
-        (id2, id3, "CONTAINS", {"weight": 0.9, "edge_text": "neural nets in ML"}),
+        (
+            id1,
+            id2,
+            "DEPENDS_ON",
+            {"weight": 0.8, "edge_object_id": edge_instance_ids[0], "edge_text": "quantum ML"},
+        ),
+        (
+            id2,
+            id3,
+            "DEPENDS_ON",
+            {
+                "weight": 0.9,
+                "edge_object_id": edge_instance_ids[1],
+                "edge_text": "neural nets in ML",
+            },
+        ),
     ]
     await adapter.add_edges_with_vectors(edges)
 
@@ -291,11 +354,11 @@ async def test_combined_write_content_integrity(adapter):
     # -- Verify graph edge contents --
     connections = await adapter.get_connections(id1)
     rel_names = {conn[1]["relationship_name"] for conn in connections}
-    assert "RELATED_TO" in rel_names
+    assert "DEPENDS_ON" in rel_names
 
     # Verify edge properties preserved
     for _, edge, _ in connections:
-        if edge["relationship_name"] == "RELATED_TO":
+        if edge["relationship_name"] == "DEPENDS_ON":
             assert edge.get("weight") == 0.8
             assert edge.get("edge_text") == "quantum ML"
 
@@ -308,6 +371,14 @@ async def test_combined_write_content_integrity(adapter):
     # -- Verify vector collection was created --
     assert await adapter.has_collection("TestEntity_name") is True
     assert await adapter.has_collection("EdgeType_relationship_name") is True
+    assert await adapter.has_collection("EdgeInstance_text") is True
+
+    edge_instance_results = await adapter.retrieve("EdgeInstance_text", edge_instance_ids)
+    assert {str(result.id) for result in edge_instance_results} == set(edge_instance_ids)
+    assert {result.payload["text"] for result in edge_instance_results} == {
+        "quantum ML",
+        "neural nets in ML",
+    }
 
     # -- Verify vector entries have correct IDs --
     vector_results = await adapter.retrieve("TestEntity_name", [id1, id2, id3])

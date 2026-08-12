@@ -68,6 +68,23 @@ async def test_add_and_has_edge(adapter):
 
 
 @pytest.mark.asyncio
+async def test_edge_type_counts_reflect_upserts_and_hard_deletions(adapter):
+    await adapter.add_node("ec1", {"name": "A", "type": "T"})
+    await adapter.add_node("ec2", {"name": "B", "type": "T"})
+    await adapter.add_edges([("ec1", "ec2", "COUNTS", {"version": 1})])
+    await adapter.add_edges([("ec1", "ec2", "COUNTS", {"version": 2})])
+
+    assert await adapter.get_edge_type_counts(["COUNTS", "MISSING"]) == {
+        "COUNTS": 1,
+        "MISSING": 0,
+    }
+
+    await adapter.delete_node("ec1")
+
+    assert await adapter.get_edge_type_counts(["COUNTS"]) == {"COUNTS": 0}
+
+
+@pytest.mark.asyncio
 async def test_has_edges_returns_found_tuples(adapter):
     await adapter.add_node("n1", {"name": "Alice", "type": "Person"})
     await adapter.add_node("n2", {"name": "Bob", "type": "Person"})

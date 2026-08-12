@@ -168,7 +168,7 @@ class HybridRetriever(BaseRetriever):
         """Entity lane, run concurrently with the chunk lane so the graph round trip for
         edge bullets overlaps the chunk pipeline's ranking and summary loading."""
         max_ranked_bullets = self.entities_top_k * max(0, self.max_edges_per_entity)
-        entity_hits, edge_hits = await asyncio.gather(
+        entity_hits, edge_type_hits, edge_instance_hits = await asyncio.gather(
             search_collection(
                 self._unified_engine.vector,
                 "Entity_name",
@@ -182,6 +182,16 @@ class HybridRetriever(BaseRetriever):
                 self._unified_engine.vector,
                 "EdgeType_relationship_name",
                 query,
+                max_ranked_bullets,
+                self.node_name,
+                self.node_name_filter_operator,
+                apply_node_filter=False,
+                query_vector=query_vector,
+            ),
+            search_collection(
+                self._unified_engine.vector,
+                "EdgeInstance_text",
+                query,
                 max_ranked_bullets + self.facts_top_k,
                 self.node_name,
                 self.node_name_filter_operator,
@@ -193,22 +203,23 @@ class HybridRetriever(BaseRetriever):
             self._unified_engine.graph,
             entity_hits,
             self.max_edges_per_entity,
-            edge_rank_by_id(edge_hits),
+            edge_rank_by_id(edge_type_hits),
+            edge_rank_by_id(edge_instance_hits),
         )
-        return entities, self._select_facts(edge_hits, entities)
+        return entities, self._select_facts(edge_instance_hits, entities)
 
-    def _select_facts(self, edge_hits: List[Any], entities: List[dict]) -> List[dict]:
-        """Facts are gated off for scoped searches: EdgeType rows carry no node-set fields."""
+    def _select_facts(self, edge_instance_hits: List[Any], entities: List[dict]) -> List[dict]:
+        """Facts are gated off for scoped searches and use EdgeInstance rows only."""
         if self.facts_top_k <= 0 or self.node_name:
             return []
 
         bullet_ids = {
-            edge["edge_type_id"]
+            edge["edge_instance_id"]
             for entity in entities
             for edge in entity.get("edges", [])
-            if edge.get("edge_type_id")
+            if edge.get("edge_instance_id")
         }
-        return select_facts(edge_hits, bullet_ids, self.facts_top_k)
+        return select_facts(edge_instance_hits, bullet_ids, self.facts_top_k)
 
     async def get_context_from_objects(
         self,
