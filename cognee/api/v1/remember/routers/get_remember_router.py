@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, WithJsonSchema
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
@@ -144,6 +145,16 @@ def get_remember_router() -> APIRouter:
                 "to skip tagging."
             ),
         ),
+        label: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "Label to attach to every uploaded file in this request, stored on each "
+                "file's data record during ingestion. Only supported for normal ingestion "
+                "— rejected when combined with session_id or content_type, whose storage "
+                "paths carry no data records. Leave empty for no label."
+            ),
+        ),
         run_in_background: Optional[bool] = Form(
             default=False,
             description=(
@@ -248,6 +259,8 @@ def get_remember_router() -> APIRouter:
           background; the session is tracked in the sessions dashboard. When omitted,
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
+        - **label** (Optional[str]): Label attached to every uploaded file, stored on each
+          file's data record. Normal ingestion only — rejected with session_id or content_type.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
@@ -278,6 +291,19 @@ def get_remember_router() -> APIRouter:
             raise HTTPException(
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
+            )
+
+        # A label lives on the Data records that normal add+cognify ingestion
+        # creates. The session-cache, skills, and archive paths never create
+        # those records, so a label there would be silently dropped — reject it
+        # instead.
+        if label and (session_id or content_type):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "label is only supported for normal ingestion — "
+                    "remove session_id and content_type to use it."
+                ),
             )
 
         if content_type == "cogx-archive":
@@ -351,6 +377,11 @@ def get_remember_router() -> APIRouter:
                         "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
                     }
                 }
+
+            # A label wraps each upload in a DataItem, which ingestion unwraps
+            # to store the label on the file's Data record.
+            if label and data:
+                data = [DataItem(data=item, label=label) for item in data]
 
             result = await cognee_remember(
                 data,

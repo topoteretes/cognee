@@ -8,6 +8,7 @@ from pydantic import WithJsonSchema
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -56,6 +57,15 @@ def get_add_router() -> APIRouter:
             ),
         ),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        label: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "Label to attach to every item uploaded in this request. Stored on each "
+                "item's data record and returned when listing dataset data. Leave empty "
+                "for no label."
+            ),
+        ),
         run_in_background: Optional[bool] = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
@@ -75,6 +85,8 @@ def get_add_router() -> APIRouter:
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        - **label** (Optional[str]): Label attached to every item uploaded in this request,
+                 stored on each item's data record.
         - **run_in_background** (Optional[bool]): Run add pipeline asynchronously (default: False).
 
         Either datasetName or datasetId must be provided.
@@ -113,6 +125,12 @@ def get_add_router() -> APIRouter:
                     error="Either datasetId or datasetName must be provided.",
                 ).model_dump(),
             )
+
+        # Swagger UI submits untouched optional fields as "" — treat that as no
+        # label. A label wraps each upload in a DataItem, which ingestion unwraps
+        # to store the label on the item's Data record.
+        if label and data:
+            data = [DataItem(data=item, label=label) for item in data]
 
         try:
             add_run = await cognee_add(
