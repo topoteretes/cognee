@@ -29,3 +29,42 @@ def test_ingest_data_update_branch_assigns_data_size():
 
     assert "data_size" in assigned_attrs
     assert "file_size" not in assigned_attrs
+
+
+def test_ingest_data_update_branch_preserves_label_when_absent():
+    """A re-ingest without a label must not clear a stored one: every
+    `data_point.label = ...` in the update branch has to sit under a
+    `current_label is not None` guard, so absent means "leave unchanged".
+    """
+    source_path = Path(__file__).parents[4] / "tasks" / "ingestion" / "ingest_data.py"
+    tree = ast.parse(source_path.read_text())
+
+    def label_assigns(node):
+        return [
+            sub
+            for sub in ast.walk(node)
+            if isinstance(sub, ast.Assign)
+            and isinstance(sub.targets[0], ast.Attribute)
+            and sub.targets[0].attr == "label"
+            and isinstance(sub.targets[0].value, ast.Name)
+            and sub.targets[0].value.id == "data_point"
+        ]
+
+    guarded = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "current_label"
+            and isinstance(node.test.ops[0], ast.IsNot)
+        ):
+            guarded.update(id(assign) for assign in label_assigns(node))
+
+    all_assigns = label_assigns(tree)
+    assert all_assigns, "expected a data_point.label assignment in the update branch"
+    unguarded = [assign for assign in all_assigns if id(assign) not in guarded]
+    assert not unguarded, (
+        f"{len(unguarded)} unguarded data_point.label assignment(s): a re-ingest "
+        "without a label would clear the stored label"
+    )
