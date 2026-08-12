@@ -33,30 +33,51 @@ migration = importlib.import_module(
 
 
 def _make_engine():
+    """Scratch SQLite engine by default; COGNEE_BACKFILL_TEST_DB_URL overrides.
+
+    The override lets the same tests run against a scratch PostgreSQL
+    database, so both directions of the migration execute on both dialects.
+    """
+    import os
+
+    override_url = os.environ.get("COGNEE_BACKFILL_TEST_DB_URL")
+    if override_url:
+        return sa.create_engine(override_url)
     db_path = Path(tempfile.mkdtemp(prefix="cognee_backfill_test_")) / "test.db"
     return sa.create_engine(f"sqlite:///{db_path}")
 
 
+def _membership_table() -> sa.Table:
+    """The dropped legacy membership table, UUID-typed as the old model was."""
+    return sa.Table(
+        "dataset_data",
+        sa.MetaData(),
+        sa.Column("dataset_id", sa.Uuid, primary_key=True),
+        sa.Column("data_id", sa.Uuid, primary_key=True),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+
+
 def _create_schema(engine):
-    # Register the current models, then add the dropped membership table by hand.
+    # Register the current models, then add the dropped membership table by
+    # hand. Existing tables are dropped first so a shared scratch database
+    # (the PostgreSQL override) is clean between tests.
     from cognee.infrastructure.databases.relational import Base
     from cognee.modules.data.models import Data, Dataset  # noqa: F401
     from cognee.modules.graph.models import Node  # noqa: F401
 
-    Base.metadata.create_all(engine, tables=[Data.__table__, Dataset.__table__, Node.__table__])
-    with engine.begin() as conn:
-        conn.execute(
-            sa.text(
-                "CREATE TABLE dataset_data ("
-                "dataset_id CHAR(32) NOT NULL, data_id CHAR(32) NOT NULL, "
-                "created_at DATETIME, PRIMARY KEY (dataset_id, data_id))"
-            )
-        )
+    membership = _membership_table()
+    model_tables = [Data.__table__, Dataset.__table__, Node.__table__]
+    membership.drop(engine, checkfirst=True)
+    Base.metadata.drop_all(engine, tables=model_tables)
+    Base.metadata.create_all(engine, tables=model_tables)
+    membership.create(engine)
+    return membership
 
 
 def test_backfill_preserves_sole_ids_and_splits_shared_rows():
     engine = _make_engine()
-    _create_schema(engine)
+    membership = _create_schema(engine)
 
     from cognee.modules.data.models import Data
     from cognee.modules.graph.models import Node
@@ -90,11 +111,9 @@ def test_backfill_preserves_sole_ids_and_splits_shared_rows():
 
         def add_membership(dataset_id, data_id, created_at):
             conn.execute(
-                sa.text(
-                    "INSERT INTO dataset_data (dataset_id, data_id, created_at) "
-                    "VALUES (:ds, :da, :ts)"
-                ),
-                {"ds": dataset_id.hex, "da": data_id.hex, "ts": created_at},
+                sa.insert(membership).values(
+                    dataset_id=dataset_id, data_id=data_id, created_at=created_at
+                )
             )
 
         add_membership(dataset_a, sole_id, now)
@@ -174,7 +193,7 @@ def test_backfill_downgrade_recreates_memberships_without_data_loss():
     rows. That is inherent to the old schema having nowhere to keep lineage.
     """
     engine = _make_engine()
-    _create_schema(engine)
+    membership = _create_schema(engine)
 
     from cognee.modules.data.models import Data
 
@@ -204,13 +223,15 @@ def test_backfill_downgrade_recreates_memberships_without_data_loss():
         add_row(shared_id, name="shared")
 
         conn.execute(
-            sa.text(
-                "INSERT INTO dataset_data (dataset_id, data_id, created_at) VALUES (:ds, :da, :ts)"
-            ),
+            sa.insert(membership),
             [
-                {"ds": dataset_a.hex, "da": sole_id.hex, "ts": now},
-                {"ds": dataset_a.hex, "da": shared_id.hex, "ts": now},
-                {"ds": dataset_b.hex, "da": shared_id.hex, "ts": now + timedelta(minutes=1)},
+                {"dataset_id": dataset_a, "data_id": sole_id, "created_at": now},
+                {"dataset_id": dataset_a, "data_id": shared_id, "created_at": now},
+                {
+                    "dataset_id": dataset_b,
+                    "data_id": shared_id,
+                    "created_at": now + timedelta(minutes=1),
+                },
             ],
         )
 
@@ -247,10 +268,10 @@ def test_backfill_downgrade_recreates_memberships_without_data_loss():
 
         memberships = {
             (row.dataset_id, row.data_id)
-            for row in conn.execute(sa.text("SELECT dataset_id, data_id FROM dataset_data"))
+            for row in conn.execute(sa.select(membership.c.dataset_id, membership.c.data_id))
         }
         assert memberships == {
-            (dataset_a.hex, sole_id.hex),
-            (dataset_a.hex, shared_id.hex),
-            (dataset_b.hex, split_row.id.hex),
+            (dataset_a, sole_id),
+            (dataset_a, shared_id),
+            (dataset_b, split_row.id),
         }, "one membership per scoped row, fork membership points at the fork row"
