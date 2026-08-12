@@ -147,6 +147,7 @@ def test_shipped_slugs_are_pinned():
         "namespace_entity_type_node_ids",
         "namespace_edge_type_point_ids",
         "postgres_graph_provenance_columns",
+        "ladybug_graph_provenance_columns",
     ]
 
 

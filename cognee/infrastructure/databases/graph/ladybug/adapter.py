@@ -392,35 +392,8 @@ class LadybugAdapter(GraphDBInterface):
                 source_run_refs STRING
             )
         """)
-        self._ensure_provenance_columns()
         self._ensure_graph_metadata_table()
         logger.debug("Ladybug database schema ensured")
-
-    def _ensure_provenance_columns(self) -> None:
-        """ALTER-add provenance columns missing from a legacy database file.
-
-        ``CREATE ... IF NOT EXISTS`` above no-ops when the Node/EDGE tables
-        already exist, so database files created before graph provenance
-        (COG-5522) keep their old schema. An *empty* legacy graph then gets
-        marked graph-provenance on first write ("empty" was assumed to mean
-        "fresh"), and every stamped write or provenance read fails with
-        "Cannot find property source_run_refs". Adding exactly the missing
-        columns restores the invariant the marker relies on: every opened
-        graph carries the full provenance schema.
-        """
-        for table in ("Node", "EDGE"):
-            result = self.connection.execute(f"CALL TABLE_INFO('{table}') RETURN *")
-            existing = set()
-            while result.has_next():
-                existing.add(result.get_next()[1])
-            for column in PROVENANCE_COLUMNS:
-                if column not in existing:
-                    self.connection.execute(f"ALTER TABLE {table} ADD {column} STRING")
-                    logger.info(
-                        "Added missing provenance column %s.%s to legacy graph database.",
-                        table,
-                        column,
-                    )
 
     def _ensure_graph_metadata_table(self) -> None:
         """Create the GraphMetadata key/value table used by graph-provenance markers.
