@@ -343,12 +343,17 @@ async def test_incremental_update_full_flow(incremental_env):
     )
     assert await _stored_text(user, data_id) == healed_text
 
-    # --- Multi-item payload: chunk-level refuses, full update takes over ------ #
+    # --- Multi-item payload: refused outright (one document per update) ------- #
+    # Reconciled contract: update() replaces exactly ONE document. The old
+    # fall-back-to-full-flow behavior multiplied documents and churned ids.
+    from cognee.modules.ingestion.exceptions import IngestionError
+
     uploads = [
         _upload(b"first file", "a.txt"),
         _upload(b"second file", "b.txt"),
     ]
-    multi = await update_like_an_api_request(data_id, uploads, dataset.id, user=user)
-    assert not (isinstance(multi, dict) and multi.get("status") == "incremental"), (
-        "multi-item update must fall back to the full flow"
+    with pytest.raises(IngestionError):
+        await update_like_an_api_request(data_id, uploads, dataset.id, user=user)
+    assert await _stored_text(user, data_id) == healed_text, (
+        "a refused multi-item update must not touch the stored document"
     )
