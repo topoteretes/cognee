@@ -20,18 +20,6 @@ class DataItem:
     # Data.system_metadata — never merged with user external_metadata.
     system_metadata: Optional[dict] = field(default=None)
     data_id: Optional[UUID] = None
-    # Optional pre-computed content hash. When set together with an explicit
-    # data_id, the add pipeline's incremental skip compares it against the
-    # stored Data.content_hash and reprocesses on mismatch — this is how a
-    # stable-id item signals "same identity, new content". Sole remaining
-    # client: resolver-built DLT manifests for dlt resource / connection-string
-    # sources (a re-synced source keeps its manifest id, so without this the
-    # completed-skip would silently drop the change). CSVs do NOT use it —
-    # they enter as raw files whose own content hash changes naturally, and
-    # the dlt_csv_loader pins identity later, inside the pipeline. Must use
-    # the same formula as ingestion's content hashing (plain md5 over the
-    # stored bytes) or changed content goes undetected.
-    content_hash: Optional[str] = None
 
 
 def parse_labels(labels: Optional[str]) -> Optional[List[Optional[str]]]:

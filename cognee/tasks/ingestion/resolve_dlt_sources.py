@@ -9,7 +9,6 @@ into the document path — each row becomes a text document that flows through
 normal cognify — by declaring a document-source tag (see
 dlt_utils.document_source_tag)."""
 
-import hashlib
 import json
 import os
 import shutil
@@ -374,13 +373,12 @@ async def _build_source_manifest_item(
     # The data_id is STABLE — seeded from (dataset, source name) with no
     # content hash — so a changed source updates its Data row in place instead
     # of orphaning it (which left the source absent from the graph between add
-    # and cognify). Change detection travels separately: DataItem.content_hash
-    # pierces the add pipeline's incremental skip when it differs from the
-    # stored Data.content_hash, and the DLT cognify route purges the source's
-    # stale derived artifacts before re-emitting. Renaming a source (or
-    # dataset) changes this identity and is remove + add — a one-time full
-    # rebuild, by design.
-    manifest_hash = hashlib.md5(manifest_text.encode()).hexdigest()
+    # and cognify). add() is idempotent: a re-add of the same source — changed
+    # or not — keeps the completed record as-is. Updating an existing source
+    # is update()'s job (explicit UUID), or an explicit re-ingest via
+    # add(..., incremental_loading=False, data_cache=False). Renaming a source (or dataset)
+    # changes this identity and is remove + add — a one-time full rebuild,
+    # by design.
     data_id = await get_unique_data_id(f"dlt_source:{dataset_name}:{source_name}", user)
 
     return DataItem(
@@ -394,7 +392,6 @@ async def _build_source_manifest_item(
             "row_count": len(manifest_rows),
         },
         data_id=data_id,
-        content_hash=manifest_hash,
     )
 
 

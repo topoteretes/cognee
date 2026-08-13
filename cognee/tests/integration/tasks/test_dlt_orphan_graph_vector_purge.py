@@ -1,12 +1,14 @@
 """A row hard-deleted upstream must vanish from ALL per-dataset stores
 (relational, graph, vector) after a re-sync, under multi-user access control.
 
-Mechanism, under stable manifest identity: the re-sync updates the SAME
-manifest Data record in place (DataItem.content_hash pierces the add
-pipeline's completed-skip), and the deleted row's derived artifacts are
-purged by ``purge_stale_dlt_source_artifacts`` at the head of the DLT route
-during re-cognify — inside the run's per-dataset DB context, so the purge
-hits the per-dataset graph + vector stores, not the default engines.
+Mechanism, under stable manifest identity: an explicit re-ingest
+(add(..., incremental_loading=False, data_cache=False) — plain add() is
+idempotent and skips completed items; update() is the UUID-based
+alternative) updates the SAME manifest Data record in place, and the
+deleted row's derived artifacts are purged by
+``purge_stale_dlt_source_artifacts`` at the head of the DLT route during
+re-cognify — inside the run's per-dataset DB context, so the purge hits
+the per-dataset graph + vector stores, not the default engines.
 (Historically this scenario went through ``_delete_dlt_orphans`` at add
 time: a changed source produced a NEW content-addressed id and orphaned the
 old manifest. Stable ids removed that churn; ``_delete_dlt_orphans`` now
@@ -215,13 +217,17 @@ async def test_deleted_row_purged_from_per_dataset_stores_on_resync(clean_env):
         nodes_before, vec_before = await _store_counts(dataset)
         assert nodes_before > 0 and vec_before == 2  # graph populated, 2 chunks
 
-        # Delete 'b' upstream and re-sync through the real add pipeline. The
-        # manifest keeps its STABLE Data id: the re-sync updates the record in
-        # place (content hash changed -> the completed-skip is pierced and
-        # pipeline_status cleared), so nothing is orphaned and the source is
+        # Delete 'b' upstream and re-sync via an EXPLICIT re-ingest (plain
+        # add() is idempotent — completed items keep the fast skip). The
+        # manifest keeps its STABLE Data id: the record updates in place and
+        # pipeline_status clears, so nothing is orphaned and the source is
         # never absent from the relational store.
         await cognee.add(
-            _dlt_source([{"id": "b", "_deleted": True}]), dataset_name=DATASET, **kwargs
+            _dlt_source([{"id": "b", "_deleted": True}]),
+            dataset_name=DATASET,
+            incremental_loading=False,
+            data_cache=False,
+            **kwargs,
         )
         # Re-cognify: purge_stale_dlt_source_artifacts drops the source's
         # previous graph/vector artifacts (including row 'b') inside the
