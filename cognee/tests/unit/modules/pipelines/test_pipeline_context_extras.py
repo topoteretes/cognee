@@ -121,3 +121,48 @@ async def test_task_without_ctx_ignores_extras():
 
     flat = results[0] if isinstance(results[0], list) else results
     assert flat == [2, 4, 6]
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_copies_extras_per_item(monkeypatch, runner_plumbing):
+    """Each data item gets its OWN copy of caller-supplied extras.
+
+    A shared dict would let one item's ctx.extras mutations (e.g. DLT dedup
+    sets) leak into every concurrently running item — the same bug class as
+    the shared Task-kwarg sets, one layer up.
+    """
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
+
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+
+    captured_ctxs = []
+
+    async def _fake_item_run(data_item, ds, item_tasks, name, pid, rid, ctx, *args):
+        captured_ctxs.append(ctx)
+        ctx.extras["mutated_by"] = str(data_item)
+        return {"run_info": "ok"}
+
+    monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", _fake_item_run)
+
+    caller_extras = {"score_multiplier": 3}
+    async for _ in run_tasks_module.run_tasks(
+        tasks="TASKS",
+        dataset_id=dataset.id,
+        data=["item_a", "item_b"],
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+        pipeline_name="custom_pipeline",
+        extras=caller_extras,
+    ):
+        pass
+
+    assert len(captured_ctxs) == 2
+    # Distinct dict objects, each seeded with the caller's values.
+    assert captured_ctxs[0].extras is not captured_ctxs[1].extras
+    assert all(ctx.extras["score_multiplier"] == 3 for ctx in captured_ctxs)
+    # Per-item mutations stayed per-item and never reached the caller's dict.
+    assert captured_ctxs[0].extras["mutated_by"] != captured_ctxs[1].extras["mutated_by"]
+    assert caller_extras == {"score_multiplier": 3}

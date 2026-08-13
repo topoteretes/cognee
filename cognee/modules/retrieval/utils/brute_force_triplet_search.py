@@ -285,6 +285,9 @@ async def brute_force_triplet_search(
                 "TextSummary_text",
                 "EntityType_name",
                 "DocumentChunk_text",
+                # DLT rows live in their own collection — chunk search
+                # is documents-only, but graph completion covers row text too.
+                "DltRow_text",
             ]
 
         if "EdgeType_relationship_name" not in collections:

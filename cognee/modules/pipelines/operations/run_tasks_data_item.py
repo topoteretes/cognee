@@ -90,7 +90,14 @@ async def run_tasks_data_item_incremental(
             await session.execute(select(Data).filter(Data.id == data_id))
         ).scalar_one_or_none()
         if data_point:
-            if (
+            # A stable-id DataItem carries its own content hash; when it
+            # differs from the stored one the content changed under the same
+            # identity, so the completed-skip must NOT fire — ingest_data then
+            # updates the row and clears pipeline_status for reprocessing.
+            content_changed_under_stable_id = getattr(
+                data_item, "content_hash", None
+            ) is not None and str(data_item.content_hash) != str(data_point.content_hash)
+            if not content_changed_under_stable_id and (
                 data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
                 == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
             ):
