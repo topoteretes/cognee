@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import Any, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
@@ -25,7 +24,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
     SearchResult,
     SearchType,
@@ -90,8 +89,6 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    logged_dataset_id = _single_dataset_id(dataset_ids)
-    query = await log_query(query_text, query_type.value, user.id, logged_dataset_id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
@@ -146,22 +143,11 @@ async def search(
         },
     )
 
-    # Log only the completion text (what the user sees), not the full
-    # serialized graph payload. The raw result_objects can be 50-100 KB
-    # each and cause unbounded DB growth in long-running deployments.
-    completions = []
-    for item in search_results:
-        payload = item[0] if isinstance(item, tuple) else item
-        if hasattr(payload, "completion") and payload.completion:
-            completions.append(payload.completion)
-        elif hasattr(payload, "context") and payload.context:
-            completions.append(payload.context)
-    await log_result(
-        query.id,
-        json.dumps(completions) if completions else "[]",
-        user.id,
-        logged_dataset_id,
-    )
+    # Logged after the search because only the results say which datasets were
+    # actually searched — dataset_ids=None means "every dataset the user can
+    # read". Only the completion text is stored, never the raw result_objects,
+    # which run 50-100 KB each and would grow the DB without bound.
+    await log_search_history(query_text, query_type.value, user.id, search_results)
 
     return _backwards_compatible_search_results(search_results, verbose)
 

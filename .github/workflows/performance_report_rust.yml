@@ -71,7 +71,25 @@ jobs:
     # ubuntu-latest (not 22.04): lbug's bundled simsimd needs a C compiler with
     # avx512fp16 / _Float16 support (GCC >= 12). This matches cognee-rs's own CI.
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The War-and-Peace real-LLM arm is the binding case and 90 was too tight:
+    # it was cancelled at the limit on two consecutive runs. Measured, with the
+    # cargo cache warm in every one (restore 1.5-2 min, build ~20 min):
+    #
+    #   03:31 UTC nightly   report 53.9 min   job 76 min   success
+    #   14:53 UTC run       report >67 min    job 90 min   CANCELLED
+    #   18:03 UTC run       report >67 min    job 90 min   CANCELLED
+    #
+    # So this is not a cold-cache problem — the benchmark itself is slower by
+    # day, along with the whole nightly (the Python W&P arm's cognify p50 moved
+    # 425s -> 475s across the same runs), which points at LLM API latency rather
+    # than anything in the pipeline. A cancelled job is the worst outcome
+    # available: it produces no report, no metrics and no Slack link, and it
+    # kills the fail-gate too, so the CLO-490 handling cannot rescue it.
+    #
+    # 150 leaves the report room to reach ~125 min against a 54-min best case.
+    # The other three arms finish far sooner, so the only cost is a longer
+    # worst case for a genuinely hung job.
+    timeout-minutes: 150
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
       html_key: ${{ steps.upload.outputs.html_key }}

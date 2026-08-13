@@ -161,6 +161,13 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
     steps:
+      # This job runs repo scripts (the Slack block renderer, the MotherDuck
+      # ETL), so it needs a working tree. It previously had none: the ETL is
+      # skipped on pull_request and has never run on a schedule from this
+      # branch, so nothing exercised the gap until the renderer landed.
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Determine status
         id: status
         run: |

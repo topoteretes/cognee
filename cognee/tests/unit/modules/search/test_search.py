@@ -39,8 +39,11 @@ def _patch_side_effect_boundaries(monkeypatch, search_mod):
         return None
 
     monkeypatch.setattr(search_mod, "send_telemetry", lambda *a, **k: None)
-    monkeypatch.setattr(search_mod, "log_query", dummy_log_query)
-    monkeypatch.setattr(search_mod, "log_result", dummy_log_result)
+    import importlib
+
+    history_mod = importlib.import_module("cognee.modules.search.operations.log_search_history")
+    monkeypatch.setattr(history_mod, "log_query", dummy_log_query)
+    monkeypatch.setattr(history_mod, "log_result", dummy_log_result)
 
     yield
 

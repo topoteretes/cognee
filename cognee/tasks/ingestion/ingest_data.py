@@ -209,7 +209,10 @@ async def ingest_data(
                 data_point.external_metadata = ext_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
-                data_point.label = current_label
+                # Absent means "leave unchanged": a re-ingest without a label
+                # (current_label None) must not clear a previously stored one.
+                if current_label is not None:
+                    data_point.label = current_label
 
                 if content_changed:
                     data_point.pipeline_status = {}
