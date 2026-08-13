@@ -409,7 +409,7 @@ async def incremental_update(
     dataset_data = await get_dataset_data(dataset.id)
     if not any(item.id == data_id for item in dataset_data):
         raise IncrementalUpdateNotPossible(f"data {data_id} is not part of dataset {dataset_id}")
-    old_data = await get_data(user.id, data_id)  # raises on foreign data
+    old_data = await get_data(user.id, data_id, dataset.id)  # raises on foreign data
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible("no stored processed text for this data item")
 
@@ -506,7 +506,7 @@ async def _apply_incremental_update(
     # Re-fetch the row INSIDE the lock: a concurrent update that just finished
     # has moved raw_data_location to a new processed file, and diffing against
     # the pre-lock snapshot would use a stale baseline.
-    old_data = await get_data(user.id, data_id)
+    old_data = await get_data(user.id, data_id, dataset_id)
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible("data row disappeared before the update ran")
 
