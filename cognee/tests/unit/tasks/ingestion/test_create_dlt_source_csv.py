@@ -18,6 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# The unit CI matrices install the base extras only — dlt is optional there,
+# and these tests patch dlt.sources.filesystem / drive dlt-gated resolution.
+pytest.importorskip("dlt")
+
 from cognee.tasks.ingestion.create_dlt_source import (
     create_dlt_source_from_csv,
     download_csv_for_staging,
