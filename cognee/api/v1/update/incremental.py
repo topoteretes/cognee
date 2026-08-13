@@ -793,7 +793,7 @@ async def _write_and_publish(
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     ids_to_delete = sorted(affected_ids - new_ids)
     if ids_to_delete:
-        doomed = await delete_chunks_incremental(ids_to_delete)
+        doomed = await delete_chunks_incremental(ids_to_delete, dataset_id, data_id)
         await _prune_ledger_rows(data_id, dataset_id, doomed)
 
     # -- Renumber kept chunks whose position shifted --------------------------- #

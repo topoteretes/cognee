@@ -283,7 +283,7 @@ async def test_incremental_update_full_flow(incremental_env):
 
     original_delete = incremental_module.delete_chunks_incremental
 
-    async def exploding_delete(chunk_ids):
+    async def exploding_delete(chunk_ids, dataset_id, data_id):
         raise RuntimeError("simulated crash before deletion")
 
     incremental_module.delete_chunks_incremental = exploding_delete

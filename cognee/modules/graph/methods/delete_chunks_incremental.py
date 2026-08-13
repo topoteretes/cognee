@@ -48,8 +48,33 @@ def _relationship_name(edge: dict) -> str:
     return name
 
 
-async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
+async def _strip_dead_chunk_refs(graph_engine, deleting, dataset_id, data_id) -> None:
+    """Remove the deleted chunks' v2 ownership keys from surviving artifacts."""
+    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+    from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+
+    if not await stores_provenance_in_graph(graph_engine):
+        return
+
+    for chunk_id in sorted(deleting):
+        key = make_chunk_source_ref_key(
+            UUID(str(dataset_id)), UUID(str(data_id)), UUID(str(chunk_id))
+        )
+        node_holders = await graph_engine.find_nodes_by_source_ref(key)
+        if node_holders:
+            await graph_engine.remove_node_source_refs(node_holders, [key])
+        edge_holders = await graph_engine.find_edges_by_source_ref(key)
+        if edge_holders:
+            await graph_engine.remove_edge_source_refs(edge_holders, [key])
+
+
+async def delete_chunks_incremental(chunk_ids: List[str], dataset_id, data_id) -> List[str]:
     """Delete the given chunk nodes, their summaries, and chunk-orphaned entities.
+
+    Also strips the deleted chunks' chunk-scoped (v2) ownership refs from the
+    artifacts that SURVIVE them — shared output outlives a chunk by design,
+    the dead chunk's ownership key must not (``dataset_id``/``data_id`` name
+    the document whose keys are being retired).
 
     Returns the ids of every node removed (used for vector cleanup, which is
     performed here as well).
@@ -97,6 +122,12 @@ async def delete_chunks_incremental(chunk_ids: List[str]) -> List[str]:
 
     doomed = orphan_entities + summary_ids + sorted(deleting)
     await graph_engine.delete_nodes(doomed)
+
+    # Dead chunks' v2 refs on SURVIVORS: a shared entity (or its edges)
+    # outlives the chunk, the ownership key does not. Left in place it shows
+    # phantom ownership and — once deletion resolves through the ref planner —
+    # keeps survivors alive on behalf of a chunk that no longer exists.
+    await _strip_dead_chunk_refs(graph_engine, deleting, dataset_id, data_id)
 
     vector_engine = await get_vector_engine_async()
     for collection in _VECTOR_COLLECTIONS:
