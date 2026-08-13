@@ -51,6 +51,12 @@ class GraphDBInterface(ABC):
     # importing optional backend packages that slim images do not ship.
     supports_cypher_queries: bool = True
 
+    # Whether ``add_nodes`` / ``add_edges`` accept a per-row source-ref mapping
+    # (node id / edge identity -> ref key) instead of one scalar key per call.
+    # Backends that support it stamp chunk-scoped ownership in a single batch
+    # statement; others get one grouped call per owner key from the caller.
+    supports_per_row_source_refs: bool = False
+
     @abstractmethod
     async def is_empty(self) -> bool:
         """Return True when the graph contains no nodes."""

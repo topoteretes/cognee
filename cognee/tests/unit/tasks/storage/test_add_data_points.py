@@ -107,7 +107,9 @@ async def test_add_data_points_indexes_nodes_and_edges(
     expected_custom_edges = ensure_default_edge_properties(custom_edges, nodes=[dp1, dp2])
     first_call_edges = graph_engine.add_edges.await_args_list[0].args[0]
     assert expected_main_edges[0] in first_call_edges
-    assert expected_custom_edges[0] in first_call_edges
+    assert expected_custom_edges[0] not in first_call_edges, (
+        "custom edges are written in their own call, not the main-edge batch"
+    )
     assert graph_engine.add_edges.await_args_list[1].args[0] == expected_custom_edges
     assert mock_index_edges.await_count == 2
 
@@ -159,7 +161,7 @@ async def test_add_data_points_with_empty_list(
 
     assert result == []
     mock_get_graph.assert_not_called()
-    graph_engine.add_nodes.assert_awaited_once_with([], source_ref_key=None, pipeline_run_id=None)
+    graph_engine.add_nodes.assert_not_awaited()  # nothing to write, no empty call
 
 
 @pytest.mark.asyncio
@@ -779,7 +781,8 @@ async def test_add_data_points_with_empty_custom_edges(
     result = await add_data_points([dp], custom_edges=[])
 
     assert result == [dp]
-    assert graph_engine.add_edges.await_count == 1
+    # No edges at all (main empty, custom empty): no edge writes are issued.
+    assert graph_engine.add_edges.await_count == 0
 
 
 @pytest.mark.asyncio

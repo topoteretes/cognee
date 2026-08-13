@@ -129,6 +129,42 @@ async def _cognify_document(dataset_name: str):
     return user, dataset, (await get_dataset_data(dataset.id))[0]
 
 
+async def _flatten_to_document_scoped_refs(graph, dataset_id, data_id):
+    """Rewrite a freshly built graph into the PRE-REFACTOR ref shape.
+
+    Old cognee stamped the whole document subgraph with the document-scoped
+    v1 key; current cognify stamps chunk-produced artifacts with chunk-scoped
+    v2 refs instead. Scenarios that simulate data written by old versions
+    (the shared-store keeper) must flatten those v2 refs back to the v1 key,
+    or the simulation tests a graph shape no old version ever produced.
+    """
+    from cognee.infrastructure.databases.provenance import (
+        make_source_ref_key,
+        parse_source_ref_key,
+    )
+
+    doc_key = make_source_ref_key(dataset_id, data_id)
+
+    def _v2_refs(refs):
+        selected = []
+        for ref in refs:
+            parsed = parse_source_ref_key(ref)
+            if parsed.version == 2 and str(parsed.data_id) == str(data_id):
+                selected.append(ref)
+        return selected
+
+    for node_id, refs in (await graph.find_node_source_refs_by_dataset(str(dataset_id))).items():
+        v2_refs = _v2_refs(refs)
+        if v2_refs:
+            await graph.attach_node_source_refs([node_id], [doc_key], None)
+            await graph.remove_node_source_refs([node_id], v2_refs)
+    for edge, refs in (await graph.find_edge_source_refs_by_dataset(str(dataset_id))).items():
+        v2_refs = _v2_refs(refs)
+        if v2_refs:
+            await graph.attach_edge_source_refs([edge], [doc_key], None)
+            await graph.remove_edge_source_refs([edge], v2_refs)
+
+
 async def _simulate_backfill_fork(old_id, fork_dataset_id=None, keep_keeper=False):
     """Copy the Data row under a fresh id with legacy_id, as the backfill would.
 
@@ -462,6 +498,9 @@ async def _keeper_scenario():
     vector_engine = await get_vector_engine_async()
     chunk_ids = await _doc_chunk_ids(graph, old_id)
     assert chunk_ids
+    # Pre-refactor data carried ONLY the document-scoped key on the whole
+    # subgraph — flatten the chunk-scoped refs current cognify writes.
+    await _flatten_to_document_scoped_refs(graph, dataset_a.id, old_id)
 
     # Dataset B: pre-refactor shared membership = B's provenance refs on the
     # SAME subgraph, then the backfill fork row (keeper row kept).
