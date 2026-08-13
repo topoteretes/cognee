@@ -1,4 +1,4 @@
-"""Chunk-level incremental update: diff, delete affected chunks, re-ingest.
+"""Chunk-level incremental update: stage, plan, validate, write, publish.
 
 Flow (only runs from the update endpoint):
 
@@ -6,16 +6,24 @@ Flow (only runs from the update endpoint):
    (same checks as the raw-document read endpoint).
 2. Read the OLD processed text from ``Data.raw_data_location`` and the stored
    chunk nodes from the graph, ordered by their position in that text.
-3. Run ``add()`` so the new file goes through the normal add pipeline (loaders
-   store the new processed text and update the ``Data`` row).
+3. STAGE the new content: the input runs through the same loader machinery as
+   ingestion (content-addressed storage write) — but the ``Data`` row is NOT
+   touched. Readers keep resolving the coherent old version.
 4. Diff old vs new text into DISJOINT changed regions (line-anchored hunks,
    trimmed to char precision, expanded to old chunk boundaries); chunks between
    regions are kept untouched. Each region is re-chunked with the standard
-   TextChunker (same boundary semantics and token budget as pipeline chunks).
-5. Delete the replaced chunks (+ summaries + chunk-orphaned entities) from the
-   graph and vector stores.
-6. Re-ingest ONLY the new chunks through the standard graph-extraction and
-   storage tasks, attributed to the same ``data_id`` via ``PipelineContext``.
+   TextChunker (same boundary semantics and token budget as pipeline chunks),
+   then ``validate_no_loss`` proves the final chunk set reassembles the new
+   text byte-for-byte. Only now — staging and validation done — is a pipeline
+   run record created; refused updates leave no run-record noise.
+5. Write: extract ONLY the new chunks through the standard graph-extraction
+   and storage tasks (attributed to the same ``data_id``), delete the replaced
+   chunks (+ summaries + chunk-orphaned entities), renumber shifted survivors.
+6. PUBLISH in one relational transaction: content location, hashes, size,
+   token count, and the processed stamp flip together. A crash anywhere
+   before the publish leaves the row on the old content; the stored chunks
+   then no longer tile the stored text, so the next touch fails closed into a
+   full rebuild (self-heal).
 
 Raises IncrementalUpdateNotPossible when preconditions fail (first ingestion,
 non-text data, stored chunks not tiling the stored text) — the caller decides
@@ -29,7 +37,6 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, select
 
-from cognee.api.v1.add import add
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -74,7 +81,11 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
+from cognee.modules.ingestion import classify
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
+from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 from cognee.modules.pipelines.operations.run_tasks_data_item import DataItemStatus
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -140,14 +151,22 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
     return sorted(chunks, key=lambda node: int(node.get("chunk_index", -1)))
 
 
-def _build_document(data: Data) -> TextDocument:
-    """Mirror classify_documents' Document construction for this data row."""
+def _build_document(data: Data, staged: Optional["StagedContent"] = None) -> TextDocument:
+    """Mirror classify_documents' Document construction for this data row.
+
+    With ``staged`` the document describes the NEW content (name, location,
+    mime type from the staged files) under the row's stable id — the chunks
+    written during the update must carry post-publish metadata even though
+    the row itself flips only at the end.
+    """
+    name = staged.name if staged else data.name
+    extension = staged.extension if staged else data.extension
     document = TextDocument(
         id=data.id,
-        title=f"{data.name}.{data.extension}",
-        raw_data_location=data.raw_data_location,
-        name=data.name,
-        mime_type=data.mime_type,
+        title=f"{name}.{extension}",
+        raw_data_location=staged.raw_data_location if staged else data.raw_data_location,
+        name=name,
+        mime_type=staged.mime_type if staged else data.mime_type,
         external_metadata=json.dumps(data.external_metadata, indent=4),
         importance_weight=data.importance_weight if data.importance_weight is not None else 0.5,
     )
@@ -365,6 +384,107 @@ async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> 
     )
 
 
+class StagedContent(BaseModel):
+    """The new content, processed and stored — with the Data row untouched.
+
+    Content-addressed storage writes are safe to make before anything is
+    decided: until ``_publish_staged`` flips the row, readers keep resolving
+    the old file, and an abandoned staged file is inert garbage.
+    """
+
+    name: str
+    raw_data_location: str
+    original_data_location: str
+    extension: str
+    mime_type: str
+    original_extension: str
+    original_mime_type: str
+    loader_engine: str
+    content_hash: str
+    raw_content_hash: str
+    data_size: int
+
+
+async def _stage_new_content(data, preferred_loaders) -> StagedContent:
+    """Run the input through ingestion's loader machinery without row writes.
+
+    Mirrors ingest_data's per-item processing exactly (same storage layout,
+    same metadata derivation), so the published row is indistinguishable from
+    one written by a full ingestion.
+    """
+    original_file_path = await save_data_item_to_storage(data)
+    actual_file_path = get_data_file_path(original_file_path)
+
+    storage_file_path, loader_engine = await data_item_to_text_file(
+        actual_file_path, preferred_loaders
+    )
+    if loader_engine is None:
+        raise IncrementalUpdateNotPossible("no loader accepted the new content")
+
+    async with open_data_file(original_file_path) as file:
+        original_metadata = classify(file).get_metadata()
+    async with open_data_file(storage_file_path) as file:
+        storage_metadata = classify(file).get_metadata()
+
+    return StagedContent(
+        name=original_metadata["name"],
+        raw_data_location=storage_file_path,
+        original_data_location=original_metadata["file_path"],
+        extension=storage_metadata["extension"],
+        mime_type=storage_metadata["mime_type"],
+        original_extension=original_metadata["extension"],
+        original_mime_type=original_metadata["mime_type"],
+        loader_engine=loader_engine.loader_name,
+        content_hash=original_metadata["content_hash"],
+        raw_content_hash=storage_metadata["content_hash"],
+        data_size=original_metadata["file_size"],
+    )
+
+
+async def _publish_staged(
+    data_id: UUID,
+    dataset_id: UUID,
+    staged: StagedContent,
+    token_count: int,
+    node_set: Optional[List[str]],
+) -> None:
+    """The one-transaction publish: content, metadata, and status flip together.
+
+    Everything readers can observe about the document — stored text location,
+    hashes, size, token count, and the cognify-completed stamp — commits
+    atomically. Any crash before this leaves the row entirely on the old
+    version.
+    """
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if data_point is None:
+            raise IncrementalUpdateNotPossible("data row disappeared before publish")
+
+        data_point.name = staged.name
+        data_point.raw_data_location = staged.raw_data_location
+        data_point.original_data_location = staged.original_data_location
+        data_point.extension = staged.extension
+        data_point.mime_type = staged.mime_type
+        data_point.original_extension = staged.original_extension
+        data_point.original_mime_type = staged.original_mime_type
+        data_point.loader_engine = staged.loader_engine
+        data_point.content_hash = staged.content_hash
+        data_point.raw_content_hash = staged.raw_content_hash
+        data_point.data_size = staged.data_size
+        data_point.token_count = token_count
+        if node_set:
+            data_point.node_set = json.dumps(node_set)
+
+        status_for_pipeline = data_point.pipeline_status.setdefault(PIPELINE_NAME, {})
+        status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+
+        await session.merge(data_point)
+        await session.commit()
+
+
 async def _mark_document_processed(data_id: UUID, dataset_id: UUID) -> None:
     """Stamp cognify completion so a later cognify() doesn't redo the document."""
     db_engine = get_relational_engine()
@@ -444,7 +564,17 @@ async def _run_incremental_update(
     graph_model: type[BaseModel],
     custom_prompt: Optional[str],
 ) -> dict:
-    """Run-record-logged wrapper around the incremental update body."""
+    """Stage → validate → (record) → write → publish.
+
+    Run-record discipline: no PipelineRun exists until staging and validation
+    have succeeded — a refused or unchanged update leaves no run-record noise.
+    Errors after the record is created are logged against it.
+    """
+    bundle = await _stage_and_plan(data_id, data, dataset, user, node_set, preferred_loaders)
+
+    if bundle.get("status") == "unchanged":
+        return bundle
+
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
     pipeline_run = await log_pipeline_run_start(
         pipeline_id, RUN_PIPELINE_NAME, dataset.id, [data_id]
@@ -455,20 +585,10 @@ async def _run_incremental_update(
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
     )
     try:
-        result = await _apply_incremental_update(
-            data_id,
-            data,
-            dataset,
-            user,
-            old_data,
-            node_set,
-            preferred_loaders,
-            graph_model,
-            custom_prompt,
+        result = await _write_and_publish(
+            bundle, data_id, dataset, user, node_set, graph_model, custom_prompt
         )
     except Exception as error:
-        # Includes IncrementalUpdateNotPossible: the record shows why this run
-        # ended and the full update that follows logs its own runs.
         await log_pipeline_run_error(
             pipeline_run.pipeline_run_id,
             pipeline_id,
@@ -489,18 +609,21 @@ async def _run_incremental_update(
     return result
 
 
-async def _apply_incremental_update(
+async def _stage_and_plan(
     data_id: UUID,
     data,
     dataset,
     user: User,
-    old_data: Data,
     node_set: Optional[List[str]],
     preferred_loaders,
-    graph_model: type[BaseModel],
-    custom_prompt: Optional[str],
 ) -> dict:
-    """The locked, dataset-context-scoped body of the incremental update."""
+    """Everything that can be decided WITHOUT touching live state.
+
+    Stages the new content (content-addressed storage write, row untouched),
+    reads the old state, plans the diff, chunks the regions at their recorded
+    budgets, and proves no-loss. Raises IncrementalUpdateNotPossible freely —
+    at this point nothing observable has changed and no run record exists.
+    """
     dataset_id = dataset.id
 
     # Re-fetch the row INSIDE the lock: a concurrent update that just finished
@@ -510,50 +633,26 @@ async def _apply_incremental_update(
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible("data row disappeared before the update ran")
 
-    # -- Old state (must be captured BEFORE add() replaces the stored file) - #
     old_text = await _read_processed_text(old_data.raw_data_location)
     stored_chunks = await _get_stored_chunks(data_id, old_text)
 
-    # -- New state through the standard add pipeline ------------------------ #
-    # Wrapping in DataItem(data_id=...) routes ingest_data into its UPDATE
-    # branch for this exact row (text input would otherwise mint a new
-    # content-addressed id and leave the old row untouched).
-    from cognee.tasks.ingestion.data_item import DataItem
+    # Stage the new content through ingestion's own loader machinery. The Data
+    # row is NOT written: readers keep resolving the old version until publish.
+    staged = await _stage_new_content(data, preferred_loaders)
+    new_text = await _read_processed_text(staged.raw_data_location)
 
-    # Both caching layers must be off: the add-pipeline's incremental skip and
-    # the data cache would otherwise drop the item (its id already reads as
-    # processed) before ingest_data can rewrite the stored text.
-    await add(
-        data=DataItem(data=data, data_id=data_id),
-        dataset_id=dataset_id,
-        user=user,
-        node_set=node_set,
-        preferred_loaders=preferred_loaders,
-        incremental_loading=False,
-        data_cache=False,
-    )
-    new_data = await get_data(user.id, data_id)
-    new_text = await _read_processed_text(new_data.raw_data_location)
+    document = _build_document(old_data, staged)
 
-    # -- Plan ---------------------------------------------------------------- #
-    stored_texts = [node["text"] for node in stored_chunks]
-    try:
-        plan = compute_incremental_plan(old_text, stored_texts, new_text)
-    except IncrementalPlanError as error:
-        raise IncrementalUpdateNotPossible(str(error)) from error
-
-    document = _build_document(new_data)
-    context = PipelineContext(
-        user=user,
-        data_item=new_data,
-        dataset=dataset,
-        pipeline_run_id=uuid4(),
-        pipeline_name=PIPELINE_NAME,
-    )
-
-    if not plan.regions:
-        # Self-heal: a crash between an earlier delete and its renumbering can
-        # leave stale indexes behind an unchanged text — repair them here.
+    if staged.content_hash == old_data.content_hash and new_text == old_text:
+        # Same content re-submitted. Self-heal: a crash between an earlier
+        # delete and its renumbering can leave stale indexes — repair them.
+        context = PipelineContext(
+            user=user,
+            data_item=old_data,
+            dataset=dataset,
+            pipeline_run_id=uuid4(),
+            pipeline_name=PIPELINE_NAME,
+        )
         repaired = _build_shifted_chunks(
             document, stored_chunks, set(), {i: i for i in range(len(stored_chunks))}
         )
@@ -565,10 +664,16 @@ async def _apply_incremental_update(
             "status": "unchanged",
             "deleted_chunks": 0,
             "added_chunks": 0,
+            "reused_chunks": 0,
             "reindexed_chunks": len(repaired),
         }
 
-    # -- Chunk each region with the standard TextChunker, then verify no-loss - #
+    stored_texts = [node["text"] for node in stored_chunks]
+    try:
+        plan = compute_incremental_plan(old_text, stored_texts, new_text)
+    except IncrementalPlanError as error:
+        raise IncrementalUpdateNotPossible(str(error)) from error
+
     fallback_budget = await get_max_chunk_tokens()
     region_chunk_lists = [
         await _chunk_region(
@@ -591,6 +696,52 @@ async def _apply_incremental_update(
     except IncrementalPlanError as error:
         raise IncrementalUpdateNotPossible(str(error)) from error
 
+    return {
+        "staged": staged,
+        "document": document,
+        "data_item": old_data,
+        "stored_chunks": stored_chunks,
+        "plan": plan,
+        "new_chunks": new_chunks,
+        "kept_final_index": kept_final_index,
+    }
+
+
+async def _write_and_publish(
+    bundle: dict,
+    data_id: UUID,
+    dataset,
+    user: User,
+    node_set: Optional[List[str]],
+    graph_model: type[BaseModel],
+    custom_prompt: Optional[str],
+) -> dict:
+    """The write phase, ending in the one-transaction publish.
+
+    Order is crash-shaped: fresh content lands first (a failure leaves
+    recoverable duplicates, never holes), replaced chunks are deleted, shifted
+    survivors renumber — and only then does the row flip to the new content,
+    hashes, token count, and completed stamp in a single transaction. Any
+    crash before the flip leaves readers on the coherent old version; the
+    stored chunks then fail the tiling gate on the next touch and the
+    document self-heals via full rebuild.
+    """
+    dataset_id = dataset.id
+    staged: StagedContent = bundle["staged"]
+    document = bundle["document"]
+    stored_chunks = bundle["stored_chunks"]
+    plan = bundle["plan"]
+    new_chunks = bundle["new_chunks"]
+    kept_final_index = bundle["kept_final_index"]
+
+    context = PipelineContext(
+        user=user,
+        data_item=bundle.get("data_item"),
+        dataset=dataset,
+        pipeline_run_id=uuid4(),
+        pipeline_name=PIPELINE_NAME,
+    )
+
     # A replacement chunk that is byte-identical to one being replaced hashes
     # to the SAME node id. Keep its subgraph: rehydrate the stored node at its
     # new position (preserving all properties), skip re-extraction, and
@@ -605,9 +756,6 @@ async def _apply_incremental_update(
     ]
     fresh_chunks = [chunk for chunk in new_chunks if str(chunk.id) not in affected_ids]
 
-    # -- Ingest new content FIRST (crash safety: a failure between phases ----- #
-    #    leaves recoverable duplicates, never holes; the retry falls back to a
-    #    full update because the stored chunks no longer tile the stored text).
     cognify_config = get_cognify_config()
     if fresh_chunks:
         # Same extraction + summarization the cognify pipeline runs, with the
@@ -640,16 +788,14 @@ async def _apply_incremental_update(
     if shifted_chunks:
         await _restore_repositioned_chunks(shifted_chunks, context)
 
-    # -- Keep Data.token_count in sync with the final chunk set --------------- #
+    # -- PUBLISH: content + metadata + token count + stamp, atomically --------- #
     surviving_tokens = sum(
         int(node.get("chunk_size", 0))
         for position, node in enumerate(stored_chunks)
         if position not in set(plan.affected_indices)
     )
     new_tokens = sum(chunk.chunk_size for chunk in new_chunks)
-    await update_document_token_count(data_id, surviving_tokens + new_tokens)
-
-    await _mark_document_processed(data_id, dataset_id)
+    await _publish_staged(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
 
     kept_count = len(stored_chunks) - len(plan.affected_indices)
     logger.info(
