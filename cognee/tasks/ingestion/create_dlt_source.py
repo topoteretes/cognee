@@ -21,6 +21,26 @@ def is_csv_path(data: str) -> bool:
     return data.lower().endswith(".csv") and not data.startswith(("http://", "https://"))
 
 
+def is_csv_upload(item) -> bool:
+    """A file-like CSV input: an API upload (``.file`` + ``.filename``) or a
+    binary handle (``.read`` + ``.name``) whose filename ends in .csv."""
+    if isinstance(item, (str, bytes)):
+        return False
+    filename = getattr(item, "filename", None) or getattr(item, "name", None)
+    if not isinstance(filename, str) or not filename.lower().endswith(".csv"):
+        return False
+    return hasattr(item, "file") or hasattr(item, "read")
+
+
+def csv_source_name(filename: str) -> str:
+    """Deterministic dlt resource name for a CSV file, derived from its
+    basename stem. The manifest identity is seeded from this name, so it must
+    be stable across runs and distinct across files."""
+    stem = os.path.splitext(os.path.basename(filename))[0]
+    safe = re.sub(r"[^A-Za-z0-9_]+", "_", stem).strip("_").lower()
+    return safe or "csv_source"
+
+
 def create_dlt_source_from_connection_string(
     connection_string: str,
     query: Optional[str] = None,
@@ -63,13 +83,17 @@ def create_dlt_source_from_csv(csv_path: str):
     parent_dir = os.path.dirname(os.path.abspath(csv_path))
     filename = os.path.basename(csv_path)
 
-    return (
+    source = (
         filesystem(
             bucket_url=f"file://{parent_dir}",
             file_glob=filename,
         )
         | read_csv()
     )
+    # A piped read_csv resource is otherwise always named "_read_csv", and the
+    # manifest identity is seeded from (dataset, source name) — every CSV in a
+    # dataset would collapse into one identity. Name per file instead.
+    return source.with_name(csv_source_name(filename))
 
 
 def _parse_sql_query(query: str) -> tuple:
