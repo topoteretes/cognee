@@ -30,9 +30,25 @@ def triplets_to_hybrid(edges: List[Edge]) -> dict:
     """Map GraphCompletion edges into Hybrid's chunks/ entities/ facts channels.
 
     Relationships already attached to an entity are not repeated as facts.
-    ``made_from`` edges (summary↔chunk) are structural and skipped as facts.
+    ``made_from`` edges (summary -> chunk) are structural and skipped as facts,
+    but still used below to pair a summary with its source chunk.
+
+    Chunks and summaries are tracked separately, matching how Hybrid itself
+    splits them (see ``hybrid/context.py::format_passages``): a summary whose
+    source chunk was also retrieved is paired with it via ``chunk_summaries``
+    (rendered as "[Passage Summary]: ...\\n[Raw Passage]: ..."), never shown
+    as a second, unrelated passage. A summary whose source chunk was not
+    retrieved is still shown -- as a standalone passage -- instead of being
+    dropped.
+
+    Note: ``TextSummary.source_chunk_id`` is *not* exposed on the retrieved
+    node's attributes here (verified empirically -- GraphCompletionRetriever's
+    node projection only carries id/description/name/type/text/
+    importance_weight/vector_distance), so pairing is derived from the
+    ``made_from`` edge itself instead.
     """
-    chunks_by_id, entities_by_id, facts = {}, {}, []
+    document_chunks_by_id, summaries_by_id, entities_by_id, facts = {}, {}, {}, []
+    summary_to_chunk_id: dict = {}
 
     def label(n: Node) -> str:
         return n.attributes.get("name") or n.attributes.get("text") or n.id
@@ -41,8 +57,10 @@ def triplets_to_hybrid(edges: List[Edge]) -> dict:
         for node in (edge.node1, edge.node2):
             ntype = node.attributes.get("type")
             text = node.attributes.get("text")
-            if ntype in {"DocumentChunk", "TextSummary"} and text and node.id not in chunks_by_id:
-                chunks_by_id[node.id] = {"id": node.id, "text": text}
+            if ntype == "DocumentChunk" and text and node.id not in document_chunks_by_id:
+                document_chunks_by_id[node.id] = {"id": node.id, "text": text}
+            elif ntype == "TextSummary" and text and node.id not in summaries_by_id:
+                summaries_by_id[node.id] = {"id": node.id, "text": text}
             elif ntype == "Entity" and node.id not in entities_by_id:
                 entities_by_id[node.id] = {
                     "id": node.id,
@@ -56,7 +74,17 @@ def triplets_to_hybrid(edges: List[Edge]) -> dict:
             or edge.attributes.get("relationship_name")
             or edge.attributes.get("edge_text")
         )
-        if not rel or rel == "made_from":
+
+        if rel == "made_from":
+            n1_type = edge.node1.attributes.get("type")
+            n2_type = edge.node2.attributes.get("type")
+            if n1_type == "TextSummary" and n2_type == "DocumentChunk":
+                summary_to_chunk_id[edge.node1.id] = edge.node2.id
+            elif n2_type == "TextSummary" and n1_type == "DocumentChunk":
+                summary_to_chunk_id[edge.node2.id] = edge.node1.id
+            continue
+
+        if not rel:
             continue
 
         bullet = f"{label(edge.node1)} -- {rel} -- {label(edge.node2)}"
@@ -71,9 +99,21 @@ def triplets_to_hybrid(edges: List[Edge]) -> dict:
         if not touches_entity:
             facts.append({"id": f"{edge.node1.id}:{edge.node2.id}", "text": bullet})
 
+    # Pair each retrieved summary with its source chunk when that chunk was
+    # also retrieved; otherwise fall back to showing the summary itself as a
+    # standalone passage instead of dropping it.
+    chunks_by_id = dict(document_chunks_by_id)
+    chunk_summaries: dict = {}
+    for summary_id, summary in summaries_by_id.items():
+        source_chunk_id = summary_to_chunk_id.get(summary_id)
+        if source_chunk_id and source_chunk_id in chunks_by_id:
+            chunk_summaries[source_chunk_id] = summary["text"]
+        else:
+            chunks_by_id.setdefault(summary_id, {"id": summary_id, "text": summary["text"]})
+
     return {
         "chunks": list(chunks_by_id.values()),
-        "chunk_summaries": {},
+        "chunk_summaries": chunk_summaries,
         "entities": list(entities_by_id.values()),
         "facts": facts,
     }
@@ -108,6 +148,7 @@ async def main() -> None:
     print(
         "\nCHANNEL COUNTS\n",
         f"chunks={len(evidence['chunks'])} "
+        f"chunk_summaries={len(evidence['chunk_summaries'])} "
         f"entities={len(evidence['entities'])} "
         f"facts={len(evidence['facts'])}",
     )
