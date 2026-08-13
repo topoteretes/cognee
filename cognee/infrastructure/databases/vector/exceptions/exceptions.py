@@ -1,5 +1,5 @@
 from fastapi import status
-from cognee.exceptions import CogneeValidationError
+from cognee.exceptions import CogneeApiError, CogneeValidationError
 
 
 class CollectionNotFoundError(CogneeValidationError):
@@ -18,5 +18,19 @@ class CollectionNotFoundError(CogneeValidationError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
         log=True,
         log_level="DEBUG",
+    ):
+        super().__init__(message, name, status_code, log, log_level)
+
+
+class VectorDimensionMismatchError(CogneeApiError):
+    """Raised when a collection and its embedding engine use different vector sizes."""
+
+    def __init__(
+        self,
+        message: str = "A vector dimension mismatch occurred.",
+        name: str = "VectorDimensionMismatchError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        log=True,
+        log_level="ERROR",
     ):
         super().__init__(message, name, status_code, log, log_level)
