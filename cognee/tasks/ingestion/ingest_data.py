@@ -1,6 +1,6 @@
 import json
 import inspect
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
@@ -16,6 +16,7 @@ from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
+    resolve_data_id,
     get_dataset_data,
     load_or_create_datasets,
 )
@@ -53,7 +54,6 @@ async def ingest_data(
     ):
         new_datapoints = []
         existing_data_points = []
-        dataset_new_data_points = []
 
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -83,10 +83,13 @@ async def ingest_data(
 
         db_engine = get_relational_engine()
 
-        # Pre-loop: compute data_id for every item and cache intermediate results
-        # to avoid repeating expensive I/O in the main loop.
+        # Pre-loop: resolve or mint data_id for every item and cache intermediate
+        # results to avoid repeating expensive I/O in the main loop. Dedup is a
+        # dataset-scoped LOOKUP (identify); a miss mints a random id — two
+        # identical items in one batch share the first mint.
         data_point_ids = []
         precomputed_items = {}
+        batch_id_by_hash: dict = {}
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
@@ -96,10 +99,19 @@ async def ingest_data(
 
             async with open_data_file(actual_file_path) as file:
                 classified_data = ingestion.classify(file)
-                data_id = await ingestion.identify(classified_data, user)
+                item_content_hash = classified_data.get_identifier()
+                data_id = await ingestion.identify(classified_data, user, dataset.id)
 
             if item_data_id is not None:
-                data_id = item_data_id
+                # A pinned id may be one the user held before a fork/update —
+                # resolve it (exact, then legacy) instead of minting a new row
+                # under a legacy value. Unknown pins stay as-is (dlt mints
+                # stable ids through this path deliberately).
+                resolved_pin = await resolve_data_id(dataset.id, item_data_id)
+                data_id = resolved_pin if resolved_pin is not None else item_data_id
+            elif data_id is None:
+                data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
+            batch_id_by_hash.setdefault(item_content_hash, data_id)
 
             data_point_ids.append(data_id)
             precomputed_items[id(data_item)] = {
@@ -173,6 +185,15 @@ async def ingest_data(
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
+                # Rows are dataset-scoped (the startup migration backfills
+                # legacy rows). A row of another dataset can only reach this
+                # branch through a mispinned data_id — never mutate it.
+                if str(data_point.dataset_id) != str(dataset.id):
+                    raise IngestionError(
+                        f"Data {data_point.id} belongs to dataset {data_point.dataset_id}; "
+                        f"refusing to touch it from dataset {dataset.id}."
+                    )
+
                 data_point.name = original_file_metadata["name"]
                 data_point.raw_data_location = cognee_storage_file_path
                 data_point.original_data_location = original_file_metadata["file_path"]
@@ -196,18 +217,15 @@ async def ingest_data(
                 if content_changed:
                     data_point.pipeline_status = {}
 
-                # Check if data is already in dataset
-                if str(data_point.id) in dataset_data_map:
-                    existing_data_points.append(data_point)
-                else:
-                    dataset_new_data_points.append(data_point)
-                    dataset_data_map[str(data_point.id)] = True
+                existing_data_points.append(data_point)
+                dataset_data_map[str(data_point.id)] = True
             else:
                 if str(data_id) in dataset_data_map:
                     continue
 
                 data_point = Data(
                     id=data_id,
+                    dataset_id=dataset.id,
                     name=original_file_metadata["name"],
                     raw_data_location=cognee_storage_file_path,
                     original_data_location=original_file_metadata["file_path"],
@@ -233,30 +251,21 @@ async def ingest_data(
                 dataset_data_map[str(data_point.id)] = True
 
         async with db_engine.get_async_session() as session:
-            if dataset not in session:
-                session.add(dataset)
-
-            if len(new_datapoints) > 0:
-                dataset.data.extend(new_datapoints)
-
-            if len(existing_data_points) > 0:
-                for data_point in existing_data_points:
-                    await session.merge(data_point)
-
-            if len(dataset_new_data_points) > 0:
-                dataset.data.extend(dataset_new_data_points)
-
-            await session.merge(dataset)
-
+            for data_point in existing_data_points:
+                await session.merge(data_point)
+            session.add_all(new_datapoints)
             await session.commit()
 
-        return existing_data_points + dataset_new_data_points + new_datapoints
+        return existing_data_points + new_datapoints
 
-    # data.id is a content hash, so concurrent ingests of the same content both
-    # see it as missing and try to INSERT the same primary key — the loser hits
-    # "UNIQUE constraint failed: data.id". Retrying re-reads the now-committed row
-    # and takes the existing-data branch (update + link) instead of inserting.
-    # File writes are content-addressed, so re-running is idempotent.
+    # Concurrent ingests PINNED to the same data_id (dlt derives stable ids;
+    # update() re-ingests under the document's own id) can both try to INSERT
+    # the same primary key — the loser hits "UNIQUE constraint failed: data.id";
+    # retrying re-reads the committed row and takes the existing-data branch.
+    # Unpinned rows mint random ids and dedup by lookup instead: a concurrent
+    # same-content race there can produce two rows, which under document
+    # semantics are simply two documents. File writes are content-addressed,
+    # so re-running is idempotent.
     try:
         return await store_data_to_dataset(
             data, dataset_name, user, node_set, dataset_id, preferred_loaders

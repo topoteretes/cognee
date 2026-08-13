@@ -279,7 +279,6 @@ def get_activity_router() -> APIRouter:
         """Export a dataset's knowledge graph as a Markdown memory report."""
         from fastapi.responses import Response
         from cognee.modules.data.models.Dataset import Dataset
-        from cognee.modules.data.models.DatasetData import DatasetData
         from cognee.modules.data.models.Data import Data
         from cognee.modules.graph.methods import get_formatted_graph_data
         from cognee.infrastructure.databases.relational import get_relational_engine
@@ -298,12 +297,8 @@ def get_activity_router() -> APIRouter:
             if not dataset:
                 return Response(content="Dataset not found", status_code=404)
 
-            # Get documents (join DatasetData → Data)
-            docs_result = await session.execute(
-                select(Data)
-                .join(DatasetData, Data.id == DatasetData.data_id)
-                .filter(DatasetData.dataset_id == dataset_id)
-            )
+            # Get documents (dataset-scoped rows)
+            docs_result = await session.execute(select(Data).filter(Data.dataset_id == dataset_id))
             docs = docs_result.scalars().all()
 
         # Get graph data

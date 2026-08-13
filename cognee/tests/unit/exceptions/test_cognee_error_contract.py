@@ -44,6 +44,14 @@ PACKAGE_ROOT = Path(cognee.__file__).parent
 # turned into an actionable failure (see ``_build_kwargs``).
 SAMPLE_ARGUMENTS = {
     "attribute": "sample_attribute",
+    "candidates": [
+        {
+            "dataset_id": "sample-dataset-id",
+            "dataset_name": "sample_dataset",
+            "data_id": "sample-data-id",
+        }
+    ],
+    "data_id": "sample-data-id",
     "detail": "sample detail",
     "dimension": 1,
     "field": "sample_field",
