@@ -19,7 +19,7 @@ from .bucketing.graph.placement import (
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
 )
-from .build import build_context_index, group_buckets_by_level
+from .build import GraphSimilarityMode, build_context_index, group_buckets_by_level
 from .bucketing_strategy import BucketingStrategyName
 from .load import dataset_id_from_context, load_context_index_input_from_graph
 from .models import GlobalContextIndexUpdateData, SummaryNode
@@ -241,6 +241,7 @@ async def build_and_persist_context_index(
     min_overlap: float,
     graph_bucketing_inputs: GraphBucketingInputs | None,
     ctx: PipelineContext | None,
+    graph_similarity_mode: GraphSimilarityMode = "entity",
 ) -> list[GlobalContextSummary]:
     inputs = unpack_graph_bucketing_inputs(graph_bucketing_inputs)
     context_datapoints, assignments = await build_context_index(
@@ -258,6 +259,7 @@ async def build_and_persist_context_index(
         idf_weights=inputs.idf_weights,
         entity_type_by_entity_id=inputs.entity_type_by_entity_id,
         type_idf_weights=inputs.type_idf_weights,
+        graph_similarity_mode=graph_similarity_mode,
         entity_relations=inputs.entity_relations,
         edge_type_embeddings=inputs.edge_type_embeddings,
         ctx=ctx,
@@ -276,6 +278,7 @@ async def update_global_context_index(
     bucketing_strategy: BucketingStrategyName = "vector",
     min_overlap: float = 0.05,
     ctx: PipelineContext | None = None,
+    graph_similarity_mode: GraphSimilarityMode = "entity",
 ) -> list[GlobalContextSummary]:
     """
     Build or incrementally extend the global context index above a dataset's
@@ -288,6 +291,11 @@ async def update_global_context_index(
     vector-built buckets cannot be extended by graph incremental mode, and
     existing graph-built buckets cannot be extended by vector incremental mode;
     use ``rebuild=True`` to switch strategies.
+
+    ``graph_similarity_mode`` only matters when ``bucketing_strategy="graph"``:
+    ``"entity"`` (default) scores level-0 placement by entity overlap alone,
+    exactly as before; ``"combined"`` blends in entity-type and
+    relationship-pattern signals too.
     """
     validate_global_context_index_config(
         max_bucket_size,
@@ -328,4 +336,5 @@ async def update_global_context_index(
         min_overlap,
         graph_bucketing_inputs,
         ctx,
+        graph_similarity_mode=graph_similarity_mode,
     )

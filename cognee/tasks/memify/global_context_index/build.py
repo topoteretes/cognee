@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.summarization.models import GlobalContextSummary
@@ -20,6 +20,27 @@ from .summarize import (
     build_global_context_summary_datapoint,
     generate_bucket_summary_datapoints,
 )
+
+
+GraphSimilarityMode = Literal["entity", "combined"]
+
+_GRAPH_SIMILARITY_WEIGHTS: dict[GraphSimilarityMode, tuple[float, float, float]] = {
+    "entity": (1.0, 0.0, 0.0),
+    "combined": (1 / 3, 1 / 3, 1 / 3),
+}
+
+
+def resolve_graph_similarity_weights(mode: GraphSimilarityMode) -> tuple[float, float, float]:
+    """
+    Returns (entity_weight, type_weight, pattern_weight) for the "graph"
+    bucketing strategy's level-0 placement score.
+
+    ``"entity"`` (default) reproduces today's entity-only behavior exactly.
+    ``"combined"`` blends entity, entity-type, and relationship-pattern
+    signals with equal (1/3) weight each -- not separately tunable; empirical
+    comparison against other weight splits is future, out-of-scope work.
+    """
+    return _GRAPH_SIMILARITY_WEIGHTS[mode]
 
 
 @dataclass(frozen=True)
@@ -236,9 +257,7 @@ async def build_context_index(
     idf_weights: dict[str, float] | None = None,
     entity_type_by_entity_id: dict[str, str] | None = None,
     type_idf_weights: dict[str, float] | None = None,
-    entity_weight: float = 1.0,
-    type_weight: float = 0.0,
-    pattern_weight: float = 0.0,
+    graph_similarity_mode: GraphSimilarityMode = "entity",
     entity_relations: list[tuple[str, str, str]] | None = None,
     edge_type_embeddings: Mapping[str, list[float]] | None = None,
     pattern_distance_threshold: float = 0.5,
@@ -253,11 +272,14 @@ async def build_context_index(
     fits in the root's capacity. Root is regenerated when anything below
     changed or when no root exists yet.
 
-    ``entity_weight``/``type_weight``/``pattern_weight`` control how much the
-    "graph" strategy's placement score weighs entity overlap, entity-type
-    overlap, and relationship-pattern match, respectively. Defaults reproduce
-    today's entity-only behavior exactly (see ``combined_similarity``).
+    ``graph_similarity_mode`` controls how the "graph" strategy's level-0
+    placement score is computed: ``"entity"`` (default) reproduces today's
+    entity-only behavior exactly; ``"combined"`` blends in entity-type and
+    relationship-pattern signals too (see ``resolve_graph_similarity_weights``).
     """
+    entity_weight, type_weight, pattern_weight = resolve_graph_similarity_weights(
+        graph_similarity_mode
+    )
     options = BuildOptions(
         dataset_id=dataset_id,
         vector_engine=vector_engine,
