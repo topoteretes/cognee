@@ -19,6 +19,7 @@ async def log_search_history(
     query_type: str,
     user_id: UUID,
     search_results: List[Any],
+    session_id: Optional[str] = None,
 ) -> None:
     """Record a searched question and its answers, one row per dataset.
 
@@ -34,8 +35,8 @@ async def log_search_history(
 
     for payload in payloads:
         dataset_id = getattr(payload, "dataset_id", None)
-        query = await log_query(query_text, query_type, user_id, dataset_id)
+        query = await log_query(query_text, query_type, user_id, dataset_id, session_id)
         # Every query keeps a result row even when the search produced no text
         # — CHUNKS and SUMMARIES return objects, not completions — so history
         # stays one result per query, as it was before this fanned out.
-        await log_result(query.id, _completion_of(payload) or "", user_id, dataset_id)
+        await log_result(query.id, _completion_of(payload) or "", user_id, dataset_id, session_id)

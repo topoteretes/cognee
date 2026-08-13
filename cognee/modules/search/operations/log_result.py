@@ -12,6 +12,7 @@ async def log_result(
     result: str,
     user_id: UUID,
     dataset_id: Optional[UUID] = None,
+    session_id: Optional[str] = None,
 ):
     if not _LOG_ENABLED:
         return
@@ -25,6 +26,7 @@ async def log_result(
                 query_id=query_id,
                 user_id=user_id,
                 dataset_id=dataset_id,
+                session_id=session_id,
             )
         )
 

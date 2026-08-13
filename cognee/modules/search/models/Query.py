@@ -19,6 +19,12 @@ class Query(Base):
     # attribute the query to, so they stay NULL.
     dataset_id = Column(UUID, index=True, nullable=True)
 
+    # Caller-supplied session id (e.g. "claude_ab12cd34" from the Claude Code
+    # plugin, "codex_..." from Codex). It names the tool that asked, which is
+    # what recall history needs to report coverage per agent. NULL for callers
+    # that send none — raw API traffic — and for rows written before this.
+    session_id = Column(String, index=True, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )

@@ -1,0 +1,8 @@
+These {{ questions | length }} questions were asked of the same memory and were
+grouped together because they are about the same thing.
+
+{% for question in questions -%}
+- {{ question }}
+{% endfor %}
+Name the subject these questions are about, in at most {{ max_chars }}
+characters.

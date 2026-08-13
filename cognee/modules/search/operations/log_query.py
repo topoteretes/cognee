@@ -12,12 +12,14 @@ async def log_query(
     query_type: str,
     user_id: UUID,
     dataset_id: Optional[UUID] = None,
+    session_id: Optional[str] = None,
 ) -> Query:
     query = Query(
         text=query_text,
         query_type=query_type,
         user_id=user_id,
         dataset_id=dataset_id,
+        session_id=session_id,
     )
 
     if not _LOG_ENABLED:

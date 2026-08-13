@@ -20,6 +20,7 @@ async def get_history(user_id: UUID, limit: int = 10) -> list[dict[str, Any]]:
         Query.created_at,
         literal("user").label("user"),
         Query.dataset_id,
+        Query.session_id,
     ).filter(Query.user_id == user_id)
 
     results_query = select(
@@ -28,6 +29,7 @@ async def get_history(user_id: UUID, limit: int = 10) -> list[dict[str, Any]]:
         Result.created_at,
         literal("system").label("user"),
         Result.dataset_id,
+        Result.session_id,
     ).filter(Result.user_id == user_id)
 
     history_query = queries_query.union(results_query).order_by("created_at")
