@@ -17,6 +17,8 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.data.processing.document_types import Document
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 
 EdgeKey = Tuple[str, str, str]
@@ -39,17 +41,30 @@ def _edge_key(edge) -> EdgeKey:
     return (str(edge[0]), str(edge[1]), str(edge[2]))
 
 
-# Node types that stay document-scoped even when a chunk's expansion reaches
-# them: the document IS the document (v1 ref), and NodeSet tags outlive any
-# chunk.
-_DOCUMENT_SCOPED_TYPES = {
-    "TextDocument",
-    "PdfDocument",
-    "AudioDocument",
-    "ImageDocument",
-    "Document",
-    "NodeSet",
-}
+def _document_scoped_type_names() -> set:
+    """Names of node types that stay document-scoped even when a chunk's
+    expansion reaches them: the document IS the document (v1 ref), and NodeSet
+    tags outlive any chunk.
+
+    Derived from the real type hierarchy — every ``Document`` subclass
+    (CsvDocument, UnstructuredDocument, DltRowDocument, user-defined types) is
+    covered automatically, so a new document type can never silently get its
+    document node chunk-owned. It must be a NAME set because
+    ``get_graph_from_model`` returns synthetic pydantic copies (minted in
+    ``cognee.modules.storage.utils``) that keep the class NAME but not the
+    class hierarchy — ``isinstance`` never matches them. Computed per call so
+    document subclasses imported after this module (plugins, user models) are
+    still seen; the walk is a handful of classes.
+    """
+    names = {Document.__name__, NodeSet.__name__}
+    frontier = [Document]
+    while frontier:
+        cls = frontier.pop()
+        for subclass in cls.__subclasses__():
+            if subclass.__name__ not in names:
+                names.add(subclass.__name__)
+                frontier.append(subclass)
+    return names
 
 
 async def collect_chunk_ownership(
@@ -70,6 +85,7 @@ async def collect_chunk_ownership(
     """
     ownership = ChunkOwnership()
     seen_chunk_keys: dict = {}
+    document_scoped_names = _document_scoped_type_names()
 
     for root in data_points:
         sub_nodes, sub_edges = await get_graph_from_model(
@@ -86,7 +102,7 @@ async def collect_chunk_ownership(
         if not owner_keys:
             continue
         for sub_node in sub_nodes:
-            if type(sub_node).__name__ in _DOCUMENT_SCOPED_TYPES:
+            if type(sub_node).__name__ in document_scoped_names:
                 continue
             owners = ownership.node_owners.setdefault(str(sub_node.id), [])
             for key in owner_keys:
