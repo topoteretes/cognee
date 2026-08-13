@@ -88,13 +88,23 @@ jobs:
         run: uv sync --all-extras
 
       # Bundle the official Ladybug JSON extension binaries into the wheel so
-      # installs never download them from extension.ladybugdb.com at runtime
-      # (see cognee_db_workers/ladybug_extensions/README.md).
+      # installs never download them from extension.ladybugdb.com at runtime.
+      # Versions are derived from the ladybug constraint in pyproject.toml —
+      # the source of truth (see cognee_db_workers/ladybug_extensions/README.md).
       - name: Fetch Ladybug JSON extension binaries
-        run: ./scripts/fetch_ladybug_json_extension.sh v0.18.1
+        run: ./scripts/fetch_ladybug_json_extension.sh
 
       - name: Build distributions
         run: uv build
+
+      # A wheel without the binaries would still pass every test (the loader
+      # falls back to the remote repo), so assert their presence explicitly.
+      - name: Verify bundled extensions in wheel
+        run: |
+          for version in $(python3 scripts/ladybug_extension_versions.py); do
+            unzip -l dist/*.whl | grep -q "ladybug_extensions/$version/linux_amd64/libjson.lbug_extension" \
+              || { echo "wheel is missing bundled extension $version"; exit 1; }
+          done
 
       - name: Attest build provenance for distributions
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # v2.4.0

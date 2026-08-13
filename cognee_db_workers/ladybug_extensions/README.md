@@ -40,17 +40,30 @@ the error message) lives in `_EXTENSION_REPO_VERSIONS` in `_kuzu_helpers.py`:
 | 0.18.0 | v0.18.0 |
 | 0.18.1, 0.18.2 | v0.18.1 |
 
-Only `v0.18.1` is shipped by default — it serves both ladybug versions cognee
-actually resolves (0.18.1 via uv.lock, 0.18.2 via the pip range). When bumping
-the ladybug constraint: extend the mapping, fetch the new version's binaries,
-and ship those instead.
+## Source of truth: the pyproject.toml ladybug constraint
+
+Which versions get bundled is not decided here: the ladybug requirement in
+`pyproject.toml` defines the supported set, and
+`scripts/ladybug_extension_versions.py` intersects it with the mapping above
+to produce the version dirs to fetch. Release workflows call the fetch script
+with no arguments, so bumping the ladybug constraint automatically changes
+what ships — provided the mapping has an entry for the new version, which the
+guard tests in `test_bundled_json_extension.py` enforce (they fail when the
+locked or bound versions are unmapped, and cross-check the resolver against
+`packaging`'s PEP 440 semantics). The release workflows also assert after
+`uv build` that every supported version's binary made it into the wheel.
+
+So the bump procedure is: change the constraint, run `uv lock`, and let the
+red tests walk you through extending the mapping (offline `INSTALL JSON;`
+prints the URL with the new version dir).
 
 ## Populating
 
 Binaries are not committed to git. Fetch the official ones with:
 
 ```bash
-scripts/fetch_ladybug_json_extension.sh v0.18.1            # all five platforms
+scripts/fetch_ladybug_json_extension.sh                    # everything pyproject supports
+scripts/fetch_ladybug_json_extension.sh v0.18.1            # one version, all platforms
 scripts/fetch_ladybug_json_extension.sh v0.18.1 linux_amd64 linux_arm64
 ```
 

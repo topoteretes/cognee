@@ -6,7 +6,10 @@ and load it by absolute path, so no network is needed. The ladder must be:
 by-name load → bundled binary by path → INSTALL from remote repo.
 """
 
+import importlib.util
+import re
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -133,3 +136,63 @@ def _ladybug_version() -> str:
     import ladybug
 
     return getattr(ladybug, "__version__", "")
+
+
+# --- Source-of-truth guards -------------------------------------------------
+#
+# The ladybug constraint in pyproject.toml decides which versions cognee
+# supports; the mapping and the release tooling must follow it. These tests
+# turn "someone bumped ladybug but forgot the extension mapping" into a red CI
+# instead of a silent regression to the remote-download path.
+
+REPO_ROOT = Path(__file__).resolve().parents[6]
+
+_spec = importlib.util.spec_from_file_location(
+    "ladybug_extension_versions", REPO_ROOT / "scripts" / "ladybug_extension_versions.py"
+)
+resolver = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(resolver)
+
+
+def _pyproject_requirement() -> str:
+    return resolver.ladybug_requirement((REPO_ROOT / "pyproject.toml").read_text())
+
+
+def test_locked_ladybug_version_is_mapped():
+    """uv.lock pins what CI and Docker actually run — it must have a mapping."""
+    lock_text = (REPO_ROOT / "uv.lock").read_text()
+    match = re.search(r'name = "ladybug"\nversion = "([^"]+)"', lock_text)
+    assert match, "ladybug not found in uv.lock"
+    locked = match.group(1)
+    assert locked in _kuzu_helpers._EXTENSION_REPO_VERSIONS, (
+        f"ladybug {locked} (uv.lock) has no _EXTENSION_REPO_VERSIONS entry — run "
+        "`INSTALL JSON;` offline and add the version from the error URL"
+    )
+
+
+def test_constraint_bounds_are_mapped():
+    """Every exact version named in the pyproject specifier needs an entry."""
+    requirement = _pyproject_requirement()
+    for bound in re.findall(r"[\d.]+", requirement.removeprefix("ladybug")):
+        assert bound in _kuzu_helpers._EXTENSION_REPO_VERSIONS, (
+            f"constraint bound ladybug {bound} has no _EXTENSION_REPO_VERSIONS entry"
+        )
+
+
+def test_resolver_matches_packaging_semantics():
+    """The stdlib-only comparator in the script must agree with PEP 440."""
+    from packaging.specifiers import SpecifierSet
+
+    requirement = _pyproject_requirement()
+    spec = SpecifierSet(requirement.removeprefix("ladybug").strip())
+    for version in _kuzu_helpers._EXTENSION_REPO_VERSIONS:
+        assert resolver.satisfies(version, requirement) == spec.contains(version), (
+            f"resolver disagrees with packaging for ladybug {version}"
+        )
+
+
+def test_resolver_yields_at_least_the_locked_dir():
+    dirs = resolver.supported_extension_dirs()
+    lock_text = (REPO_ROOT / "uv.lock").read_text()
+    locked = re.search(r'name = "ladybug"\nversion = "([^"]+)"', lock_text).group(1)
+    assert _kuzu_helpers._EXTENSION_REPO_VERSIONS[locked] in dirs
