@@ -485,6 +485,9 @@ async def create_mocked_legacy_data(user):
     async with db_engine.get_async_session() as session:
         old_data = Data(
             id=legacy_document.id,
+            # Post-upgrade legacy rows are dataset-scoped (the backfill stamps
+            # sole-membership rows); membership IS this column now.
+            dataset_id=dataset.id,
             name=legacy_document.name,
             extension="txt",
             raw_data_location=legacy_document.raw_data_location,
@@ -498,9 +501,6 @@ async def create_mocked_legacy_data(user):
             },
         )
         session.add(old_data)
-
-        dataset.data.append(old_data)
-        session.add(dataset)
 
         await session.commit()
 

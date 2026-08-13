@@ -48,6 +48,7 @@ async def resolve_dlt_sources(
     data: Any,
     dataset_name: str,
     user: User,
+    dataset_id: UUID = None,
     **kwargs,
 ) -> Any:
     """Resolve DLT resources (and auto-detected structured data) into DataItems.
@@ -135,8 +136,12 @@ async def resolve_dlt_sources(
                 write_disposition=write_disposition,
                 max_rows_per_table=0,
             )
-            for row in rows:
-                data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
+            # Dataset-scoped ids with the pre-scoping adoption probe: rows are
+            # dataset-scoped with id as primary key, so a dataset-free
+            # derivation would pin the same id when one source loads into two
+            # datasets — a hard collision on the foreign-pin guard.
+            row_ids = await _stable_row_ids(rows, user, dataset_id)
+            for row, data_id in zip(rows, row_ids):
                 document_fresh_ids.add(data_id)
                 document_data_items.append(_build_document_data_item(row, data_id, source_tag))
 
@@ -534,6 +539,42 @@ def _dlt_row_identifier(row: DltRowData) -> str:
     across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
     """
     return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+
+
+async def _stable_row_ids(rows: List[DltRowData], user: User, dataset_id: UUID) -> List[UUID]:
+    """Dataset-scoped stable ids for dlt rows, adopting pre-scoping rows in place.
+
+    Ids are derived from (dataset, table, pk, content_hash, user), so the same
+    source loaded into two datasets yields two independent id families and
+    dataset-scoped rows never collide across datasets (a cross-dataset
+    collision would trip ingestion's foreign-pin guard). Rows ingested before
+    ids were dataset-namespaced carry the old derivation as their primary id;
+    those are adopted — the old id kept — ONLY when the row lives in this
+    dataset, so unchanged rows stay stable through the upgrade instead of
+    being re-minted (and orphan-cleanup never mistakes them for stale rows).
+    A row of another dataset never matches the probe.
+    """
+    if not rows:
+        return []
+
+    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
+    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        adopted = set(
+            (
+                await session.execute(
+                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
+                )
+            ).scalars()
+        )
+    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
 
 
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:

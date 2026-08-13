@@ -1,7 +1,7 @@
 """add_system_metadata_to_data
 
 Revision ID: f2b4c6d8e0a1
-Revises: e5a7b9c1d3f4
+Revises: d6e8f0a2b4c6
 Create Date: 2026-08-12 00:00:00.000000
 
 Splits system-derived metadata out of the user-writable external_metadata
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "f2b4c6d8e0a1"
-down_revision: Union[str, None] = "e5a7b9c1d3f4"
+down_revision: Union[str, None] = "d6e8f0a2b4c6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
