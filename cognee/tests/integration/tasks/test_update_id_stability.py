@@ -12,8 +12,8 @@ it. Scenarios:
   4. update with content identical to ANOTHER document in the dataset: the
      pin wins over content dedup — both documents keep their ids, nothing
      collapses;
-  5. unknown id: the document is created under the given id (pinned-add
-     contract), including its graph identity;
+  5. unknown id: refused with UpdateTargetNotFoundError (404) — update()
+     never creates documents; the dataset is untouched;
   6. a single-element list unwraps; a multi-item list is refused;
   7. fork lineage: a row carrying ``legacy_id`` updated by EITHER id keeps
      its canonical id and its lineage, and both ids keep resolving;
@@ -260,20 +260,28 @@ async def _scenario():
     assert await _read_text(updated) == other_text
     assert await _read_text(untouched) == other_text
 
-    # --- 5. unknown id: document created under the given id ---------------- #
+    # --- 5. unknown id: refused, nothing created --------------------------- #
+    from cognee.api.v1.exceptions import UpdateTargetNotFoundError
+
     ghost_id = uuid4()
-    await cognee.update(ghost_id, _text("g", "h"), dataset.id, user=user)
-    rows = await get_dataset_data(dataset.id)
-    assert ghost_id in {r.id for r in rows}, "an unknown id creates the document under that id"
-    await _assert_stack_under_id(graph, vector_engine, ghost_id, "ENTG")
+    rows_before = {r.id for r in await get_dataset_data(dataset.id)}
+    try:
+        await cognee.update(ghost_id, _text("g", "h"), dataset.id, user=user)
+    except UpdateTargetNotFoundError as error:
+        assert str(ghost_id) in str(error), "the error names the missing id"
+        assert getattr(error, "status_code", None) == 404
+    else:
+        raise AssertionError("update() with an unknown id must raise UpdateTargetNotFoundError")
+    rows_after = {r.id for r in await get_dataset_data(dataset.id)}
+    assert rows_after == rows_before, "a refused update must not create or remove documents"
 
     # --- 6. single-element list unwraps; multi-item list refused ----------- #
-    await cognee.update(ghost_id, [_text("g", "h", "i")], dataset.id, user=user)
-    ghost_row = next(r for r in await get_dataset_data(dataset.id) if r.id == ghost_id)
-    assert await _read_text(ghost_row) == _text("g", "h", "i")
+    await cognee.update(other_id, [_text("g", "h", "i")], dataset.id, user=user)
+    other_row = next(r for r in await get_dataset_data(dataset.id) if r.id == other_id)
+    assert await _read_text(other_row) == _text("g", "h", "i")
 
     try:
-        await cognee.update(ghost_id, ["one", "two"], dataset.id, user=user)
+        await cognee.update(other_id, ["one", "two"], dataset.id, user=user)
     except IngestionError:
         pass
     else:

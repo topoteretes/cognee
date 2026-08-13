@@ -28,6 +28,8 @@ async def update(
     re-ingested pinned to the resolved id (exact, or the recorded pre-fork
     ``legacy_id``), so externally held id mappings never break. Exactly one
     document is replaced per call — lists of more than one item are rejected.
+    An id that resolves to no document raises ``UpdateTargetNotFoundError``
+    (404) — update() never creates documents; use add() for that.
 
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
@@ -96,18 +98,23 @@ async def update(
 
     # The document KEEPS its data_id through updates. Resolve the incoming id
     # (exact, then pre-fork legacy_id) and re-ingest pinned to the resolved
-    # id; an unknown id creates the document under the given id — the same
-    # contract as a pinned add.
+    # id. An id that resolves to nothing is a caller error, not a create:
+    # ids are random uuid4s now, so a stale or mistyped id can never match —
+    # silently creating a second document would hide the mistake as
+    # duplication. add() is the path for new documents.
     resolved_id = await resolve_data_id(dataset_id, data_id)
-    pinned_id = resolved_id if resolved_id is not None else data_id
+    if resolved_id is None:
+        from cognee.api.v1.exceptions import UpdateTargetNotFoundError
+
+        raise UpdateTargetNotFoundError(data_id=data_id, dataset_id=dataset_id)
+    pinned_id = resolved_id
 
     preserved_legacy_id = None
-    if resolved_id is not None:
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            old_row = await session.get(Data, resolved_id)
-            if old_row is not None:
-                preserved_legacy_id = old_row.legacy_id
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        old_row = await session.get(Data, resolved_id)
+        if old_row is not None:
+            preserved_legacy_id = old_row.legacy_id
 
     await datasets.delete_data(
         dataset_id=dataset_id,
