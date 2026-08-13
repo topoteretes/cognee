@@ -153,6 +153,27 @@ class GraphDBInterface(ABC):
         """
         return None
 
+    async def update_chunk_index(self, chunk_indexes: "dict[str, int]") -> None:
+        """
+        Update ONLY the ``chunk_index`` property of the given chunk nodes.
+
+        A narrow positional move: a retained chunk shifts after text is
+        inserted or removed before it. Implementations must change nothing
+        but ``chunk_index`` (and bookkeeping timestamps) — full node rewrites
+        rebuilt from models erase any property the model forgets to carry.
+
+        Parameters:
+        -----------
+
+            - chunk_indexes (dict[str, int]): node id -> new chunk_index.
+
+        Default implementation raises UnsupportedGraphOperation; callers fall
+        back to the full node-rewrite path.
+        """
+        from cognee.infrastructure.databases.exceptions import UnsupportedGraphOperation
+
+        raise UnsupportedGraphOperation("update_chunk_index is not implemented by this adapter")
+
     async def attach_node_source_refs(
         self,
         node_ids: list[str],

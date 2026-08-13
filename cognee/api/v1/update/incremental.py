@@ -364,24 +364,39 @@ def _build_shifted_chunks(
 async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> None:
     """Write back chunks whose ONLY change is their position (kept or reused).
 
-    Graph node properties refresh through the normal MERGE path; the vector
-    row takes a payload-only update where the adapter supports it — the text
-    is unchanged, so re-embedding it would be pure waste (an early edit in a
-    large document repositions O(document) chunks). Adapters without
-    update_payload take the full re-embedding write: same stored state,
-    higher cost.
+    Fast path (both stores support narrow moves): the graph adapter's
+    ``update_chunk_index`` patches ONLY the index — the stored node is the
+    source of truth and every other property is carried verbatim, so nothing
+    a rehydrated model forgets to declare can be erased — and the vector row
+    takes a payload-only update (text unchanged, so re-embedding would be
+    pure waste; an early edit in a large document repositions O(document)
+    chunks). Where either store lacks its narrow operation, the full MERGE
+    rewrite of rehydrated models remains: same stored state, higher cost and
+    the carry-list burden.
     """
+    from cognee.infrastructure.databases.exceptions import UnsupportedGraphOperation
+
     vector_engine = await get_vector_engine_async()
-    if not getattr(vector_engine, "supports_payload_update", False):
-        await add_data_points(chunks, ctx=context)
+    supports_payload = getattr(vector_engine, "supports_payload_update", False)
+
+    if supports_payload:
+        graph_engine = await get_graph_engine()
+        try:
+            await graph_engine.update_chunk_index(
+                {str(chunk.id): chunk.chunk_index for chunk in chunks}
+            )
+        except UnsupportedGraphOperation:
+            await add_data_points(chunks, ctx=context, graph_only=True)
+        # Only chunk_index changed; content_hash is deliberately not written
+        # here — legacy collections may predate the field in their payload
+        # schema.
+        await vector_engine.update_payload(
+            "DocumentChunk_text",
+            {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
+        )
         return
-    await add_data_points(chunks, ctx=context, graph_only=True)
-    # Only chunk_index changed; content_hash is deliberately not written here —
-    # legacy collections may predate the field in their payload schema.
-    await vector_engine.update_payload(
-        "DocumentChunk_text",
-        {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
-    )
+
+    await add_data_points(chunks, ctx=context)
 
 
 class StagedContent(BaseModel):

@@ -1690,6 +1690,44 @@ class LadybugAdapter(GraphDBInterface):
             await self.checkpoint()
         return None
 
+    async def update_chunk_index(self, chunk_indexes: Dict[str, int]) -> None:
+        """Patch ONLY chunk_index inside the stored properties blobs.
+
+        The stored blob is the source of truth: every other key is carried
+        verbatim, so nothing a model forgets to declare can be erased (the
+        failure mode of rewriting nodes from rehydrated models).
+        """
+        if not chunk_indexes:
+            return
+        rows = await self.query(
+            """
+            MATCH (n:Node) WHERE n.id IN $ids
+            RETURN n.id, n.properties
+            """,
+            {"ids": list(chunk_indexes.keys())},
+        )
+        updates = []
+        for row in rows:
+            raw_props = row[1]
+            if not raw_props:
+                continue
+            try:
+                properties = json.loads(raw_props)
+            except json.JSONDecodeError:
+                continue
+            properties["chunk_index"] = chunk_indexes[str(row[0])]
+            updates.append({"id": row[0], "properties": json.dumps(properties, cls=JSONEncoder)})
+        if updates:
+            await self.query(
+                """
+                UNWIND $rows AS row
+                MATCH (n:Node) WHERE n.id = row.id
+                SET n.properties = row.properties
+                """,
+                {"rows": updates},
+            )
+            await self.checkpoint()
+
     async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
         Extract a node by its ID.
