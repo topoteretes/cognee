@@ -8,7 +8,6 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 
 POSTGRES_ADAPTER_MODULES = [
     "cognee.infrastructure.databases.graph.postgres.adapter",
-    "cognee.infrastructure.databases.hybrid.postgres.adapter",
 ]
 
 
@@ -107,9 +106,3 @@ def test_postgres_adapters_declare_no_cypher_support():
         reason="postgres extra not installed",
     )
     assert postgres_adapter.PostgresAdapter.supports_cypher_queries is False
-
-    hybrid_adapter = pytest.importorskip(
-        "cognee.infrastructure.databases.hybrid.postgres.adapter",
-        reason="postgres extra not installed",
-    )
-    assert hybrid_adapter.PostgresHybridAdapter.supports_cypher_queries is False
