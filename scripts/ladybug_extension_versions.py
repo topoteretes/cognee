@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Print the extension-repo version dirs the current pyproject.toml supports.
+"""Filter extension-repo version dirs down to what pyproject.toml supports.
 
-The ladybug requirement in pyproject.toml is the source of truth for which
-ladybug versions cognee supports. This script intersects that constraint with
-the verified package-version -> extension-repo-version mapping in
-``cognee_db_workers/_kuzu_helpers.py`` and prints the distinct extension
-directories to bundle, one per line (e.g. ``v0.18.1``).
+Reads candidate directory names (``v0.18.1`` style, one per line, as listed in
+the ladybug extension repo) on stdin and prints the ones cognee should bundle,
+based on the ladybug requirement in pyproject.toml — the source of truth for
+the supported version range. Non-version entries (``vdev``, ``dataset``) are
+skipped.
 
-Used by scripts/fetch_ladybug_json_extension.sh (release builds) and
-cross-checked by the guard tests in
-cognee/tests/unit/infrastructure/databases/graph/test_bundled_json_extension.py.
+One subtlety: an extension dir can *trail* the package versions it serves
+(ladybug 0.18.2 requests ``v0.18.1``), so when the range floor itself has no
+exact dir, the newest dir below the floor is included too — it is the one
+serving the floor version. At runtime the engine announces its exact dir via
+the probe in ``cognee_db_workers/_kuzu_helpers.py``; this filter only decides
+what to ship.
 
 Stdlib-only on purpose: release runners call it before any environment sync.
 Fails loudly on constraint syntax it does not understand rather than guessing.
+
+Usage: docker run --rm --entrypoint ls <extension-repo-image> \
+           /usr/share/nginx/html | python3 scripts/ladybug_extension_versions.py
 """
 
 from __future__ import annotations
@@ -23,8 +29,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-sys.path.insert(0, str(REPO_ROOT))
-from cognee_db_workers._kuzu_helpers import _EXTENSION_REPO_VERSIONS  # noqa: E402
+_VERSION_DIR = re.compile(r"v\d+(\.\d+)*$")
 
 
 def ladybug_requirement(pyproject_text: str) -> str:
@@ -46,16 +51,11 @@ def _version_tuple(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
-def satisfies(version: str, requirement: str) -> bool:
-    """True when *version* satisfies the requirement's specifier list.
-
-    Supports the operators actually used in cognee's pyproject (==, !=, <=,
-    >=, <, >) on plain X.Y.Z versions; anything else aborts loudly.
-    """
+def _clauses(requirement: str) -> list[tuple[str, tuple[int, ...]]]:
     spec = requirement.removeprefix("ladybug").strip()
     if not spec:
-        return True
-    have = _version_tuple(version)
+        return []
+    clauses = []
     for clause in spec.split(","):
         clause = clause.strip()
         match = re.fullmatch(r"(==|!=|<=|>=|<|>)\s*([\d.]+)", clause)
@@ -64,37 +64,61 @@ def satisfies(version: str, requirement: str) -> bool:
                 f"unsupported specifier clause {clause!r} — "
                 "extend scripts/ladybug_extension_versions.py"
             )
-        op, bound = match.group(1), _version_tuple(match.group(2))
-        ok = {
-            "==": have == bound,
-            "!=": have != bound,
-            "<=": have <= bound,
-            ">=": have >= bound,
-            "<": have < bound,
-            ">": have > bound,
-        }[op]
-        if not ok:
-            return False
-    return True
+        clauses.append((match.group(1), _version_tuple(match.group(2))))
+    return clauses
 
 
-def supported_extension_dirs() -> list[str]:
-    requirement = ladybug_requirement((REPO_ROOT / "pyproject.toml").read_text())
-    dirs = sorted(
-        {
-            ext_dir
-            for package_version, ext_dir in _EXTENSION_REPO_VERSIONS.items()
-            if satisfies(package_version, requirement)
-        }
+def satisfies(version: str, requirement: str) -> bool:
+    """True when *version* satisfies every specifier clause (PEP 440 subset)."""
+    have = _version_tuple(version)
+    checks = {
+        "==": lambda bound: have == bound,
+        "!=": lambda bound: have != bound,
+        "<=": lambda bound: have <= bound,
+        ">=": lambda bound: have >= bound,
+        "<": lambda bound: have < bound,
+        ">": lambda bound: have > bound,
+    }
+    return all(checks[op](bound) for op, bound in _clauses(requirement))
+
+
+def supported_extension_dirs(candidates: list[str], requirement: str) -> list[str]:
+    """The candidate dirs to bundle for the requirement's version range."""
+    versioned = sorted(
+        (d for d in candidates if _VERSION_DIR.fullmatch(d)),
+        key=lambda d: _version_tuple(d[1:]),
     )
-    if not dirs:
-        raise SystemExit(
-            f"no _EXTENSION_REPO_VERSIONS entry satisfies {requirement!r} — "
-            "extend the mapping in cognee_db_workers/_kuzu_helpers.py "
-            "(run `INSTALL JSON;` offline and read the version out of the error URL)"
+    in_range = [d for d in versioned if satisfies(d[1:], requirement)]
+
+    # Upper-bound clauses only — a dir failing these serves nothing we support.
+    uppers = [(op, bound) for op, bound in _clauses(requirement) if op in ("<=", "<")]
+    below_floor = [
+        d
+        for d in versioned
+        if d not in in_range
+        and all(
+            {"<=": _version_tuple(d[1:]) <= b, "<": _version_tuple(d[1:]) < b}[op]
+            for op, b in uppers
         )
-    return dirs
+    ]
+    # The floor version's dir can trail below the floor (dirs lag package
+    # versions); when no dir matches the floor exactly, ship the newest one
+    # below it.
+    floors = [bound for op, bound in _clauses(requirement) if op == ">="]
+    floor_has_exact_dir = any(_version_tuple(d[1:]) in floors for d in in_range)
+    if below_floor and floors and not floor_has_exact_dir:
+        in_range.insert(0, below_floor[-1])
+
+    if not in_range:
+        raise SystemExit(
+            f"no candidate extension dir satisfies {requirement!r} — candidates were {candidates!r}"
+        )
+    return in_range
 
 
 if __name__ == "__main__":
-    print("\n".join(supported_extension_dirs()))
+    if sys.stdin.isatty():
+        raise SystemExit(__doc__)
+    requirement = ladybug_requirement((REPO_ROOT / "pyproject.toml").read_text())
+    candidates = [line.strip() for line in sys.stdin if line.strip()]
+    print("\n".join(supported_extension_dirs(candidates, requirement)))

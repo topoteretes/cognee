@@ -98,10 +98,13 @@ jobs:
         run: uv build
 
       # A wheel without the binaries would still pass every test (the loader
-      # falls back to the remote repo), so assert their presence explicitly.
+      # falls back to the remote repo), so assert their presence explicitly:
+      # every version dir the fetch produced must be inside the wheel.
       - name: Verify bundled extensions in wheel
         run: |
-          for version in $(python3 scripts/ladybug_extension_versions.py); do
+          versions=$(ls cognee_db_workers/ladybug_extensions | grep '^v' || true)
+          test -n "$versions" || { echo "fetch produced no extension versions"; exit 1; }
+          for version in $versions; do
             unzip -l dist/*.whl | grep -q "ladybug_extensions/$version/linux_amd64/libjson.lbug_extension" \
               || { echo "wheel is missing bundled extension $version"; exit 1; }
           done

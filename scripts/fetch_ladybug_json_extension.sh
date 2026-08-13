@@ -11,8 +11,10 @@
 # Usage:
 #   scripts/fetch_ladybug_json_extension.sh
 #       Fetch every extension version the ladybug constraint in pyproject.toml
-#       supports (derived via scripts/ladybug_extension_versions.py — the
-#       constraint is the source of truth), for all five platforms.
+#       supports — the image's published version dirs are filtered through
+#       scripts/ladybug_extension_versions.py, so the constraint is the source
+#       of truth and no version list is maintained anywhere. All five
+#       platforms.
 #   scripts/fetch_ladybug_json_extension.sh <ext-version> [platform ...]
 #       Fetch one explicit version, e.g. for a Docker image build:
 #       scripts/fetch_ladybug_json_extension.sh v0.18.1 linux_amd64 linux_arm64
@@ -22,9 +24,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_BASE="$REPO_ROOT/cognee_db_workers/ladybug_extensions"
 ALL_PLATFORMS=(linux_amd64 linux_arm64 osx_amd64 osx_arm64 win_amd64)
 
+IMAGE="ghcr.io/ladybugdb/extension-repo:latest"
+docker pull -q "$IMAGE"
+
 if [ $# -eq 0 ]; then
   # shellcheck disable=SC2207  # dir names never contain whitespace
-  VERSIONS=($(python3 "$REPO_ROOT/scripts/ladybug_extension_versions.py"))
+  VERSIONS=($(docker run --rm --entrypoint ls "$IMAGE" /usr/share/nginx/html \
+    | python3 "$REPO_ROOT/scripts/ladybug_extension_versions.py"))
   PLATFORMS=("${ALL_PLATFORMS[@]}")
 else
   VERSIONS=("$1")
@@ -36,8 +42,6 @@ else
   fi
 fi
 
-IMAGE="ghcr.io/ladybugdb/extension-repo:latest"
-docker pull -q "$IMAGE"
 CONTAINER="$(docker create "$IMAGE")"
 trap 'docker rm "$CONTAINER" >/dev/null' EXIT
 

@@ -16,7 +16,7 @@ avoids surprising contributors.
 from __future__ import annotations
 
 import os
-import platform as _platform
+import re
 import sys
 import tempfile
 from typing import Callable, Optional
@@ -33,66 +33,78 @@ def _safe_close(obj) -> None:
 
 # --- Bundled JSON extension -------------------------------------------------
 #
-# Ladybug's macOS wheels compile the JSON extension into the native library
-# (plain ``LOAD EXTENSION JSON`` works offline), but the Linux and Windows
-# wheels dynamic-load it: ``INSTALL JSON`` downloads a ``libjson.lbug_extension``
-# binary from http://extension.ladybugdb.com at runtime. To keep cognee working
-# without that network dependency, the matching binaries can be shipped inside
-# the ``cognee_db_workers/ladybug_extensions/`` package directory and loaded by
-# absolute path — ``LOAD EXTENSION '<path>'`` reads the file directly and never
-# consults the remote repo. See ladybug_extensions/README.md for how the
-# directory is populated.
-
-# Maps the installed ladybug package version to the extension-repo version
-# directory its binary requests (baked into the native lib; it can trail the
-# package version). Discover a new entry by running ``INSTALL JSON;`` offline —
-# the error message prints the exact URL, e.g.
-# ``.../v0.18.1/linux_arm64/json/libjson.lbug_extension``. Every entry below
-# was verified that way. Covers cognee's full supported range
-# (ladybug>=0.16.0,<=0.18.2 in pyproject.toml).
-_EXTENSION_REPO_VERSIONS = {
-    "0.16.0": "v0.16.0",
-    "0.17.0": "v0.17.0",
-    "0.17.1": "v0.17.0",
-    "0.18.0": "v0.18.0",
-    "0.18.1": "v0.18.1",
-    "0.18.2": "v0.18.1",
-}
+# Ladybug's macOS wheels currently compile the JSON extension into the native
+# library (plain ``LOAD EXTENSION JSON`` works offline), but the Linux and
+# Windows wheels dynamic-load it: ``INSTALL JSON`` downloads a
+# ``libjson.lbug_extension`` binary from http://extension.ladybugdb.com at
+# runtime. To keep cognee working without that network dependency — and to
+# cover macOS too should a future wheel stop embedding it — the official
+# binaries are shipped inside the ``cognee_db_workers/ladybug_extensions/``
+# package directory and loaded by absolute path: ``LOAD EXTENSION '<path>'``
+# reads the file directly and never consults the remote repo. See
+# ladybug_extensions/README.md for how the directory is populated.
+#
+# Which binary matches is decided by ladybug itself, not by a maintained
+# mapping: ``INSTALL JSON FROM '<invalid local path>'`` fails instantly (the
+# path is treated as an unreachable URL — no network involved) and the error
+# message spells out the exact ``<version>/<platform>`` the installed binary
+# requests. Never guess here: loading a wrong-version extension binary can
+# segfault the process, so only the engine-announced path is ever loaded.
 
 _BUNDLED_EXTENSIONS_DIR = os.path.join(os.path.dirname(__file__), "ladybug_extensions")
 
+# Deliberately unreachable "repo": makes INSTALL fail instantly while its
+# error reveals the version/platform path the binary wants (verified instant
+# and offline on ladybug 0.16.0 through 0.18.2).
+_PROBE_REPO = "/cognee-nonexistent-extension-repo/"
 
-def _ladybug_platform() -> Optional[str]:
-    """The platform token ladybug uses in extension paths, or None if unknown."""
-    machine = _platform.machine().lower()
-    arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine)
-    if arch is None:
-        return None
-    if sys.platform.startswith("linux"):
-        return f"linux_{arch}"
-    if sys.platform == "darwin":
-        return f"osx_{arch}"
-    if sys.platform == "win32":
-        return f"win_{arch}"
+_EXTENSION_RELPATH_PATTERN = re.compile(r"(v[\d.]+)[/\\]([A-Za-z0-9_]+)[/\\]json[/\\]libjson")
+
+
+def _requested_extension_relpath(
+    execute: Callable[[str], object],
+) -> Optional[tuple[str, str]]:
+    """The ``(version_dir, platform)`` the installed ladybug requests, or None.
+
+    Asks the engine itself via the failing-INSTALL probe, so there is nothing
+    to maintain when ladybug versions change.
+    """
+    try:
+        execute(f"INSTALL JSON FROM '{_PROBE_REPO}';")
+    except Exception as error:
+        match = _EXTENSION_RELPATH_PATTERN.search(str(error))
+        if match:
+            return match.group(1), match.group(2)
     return None
 
 
+def bundled_extensions_present(bundled_dir: Optional[str] = None) -> bool:
+    """True when any extension binary is bundled (cheap, connection-free)."""
+    bundled_dir = bundled_dir or _BUNDLED_EXTENSIONS_DIR
+    if not os.path.isdir(bundled_dir):
+        return False
+    for _root, _dirs, files in os.walk(bundled_dir):
+        if any(name.endswith(".lbug_extension") for name in files):
+            return True
+    return False
+
+
 def bundled_json_extension_path(
-    bundled_dir: str = _BUNDLED_EXTENSIONS_DIR,
+    execute: Callable[[str], object],
+    bundled_dir: Optional[str] = None,
 ) -> Optional[str]:
     """Absolute path of the bundled JSON extension for this ladybug install.
 
-    Returns None when no binary is bundled for the installed ladybug version
-    and platform (e.g. macOS, where the extension is statically linked, or a
-    version/platform the bundle does not cover).
+    Returns None when the probe yields nothing or no binary is bundled for
+    the announced version/platform (e.g. macOS while the extension is
+    statically linked, or a version the bundle does not cover).
     """
-    import ladybug
-
-    repo_version = _EXTENSION_REPO_VERSIONS.get(getattr(ladybug, "__version__", ""))
-    plat = _ladybug_platform()
-    if repo_version is None or plat is None:
+    bundled_dir = bundled_dir or _BUNDLED_EXTENSIONS_DIR
+    requested = _requested_extension_relpath(execute)
+    if requested is None:
         return None
-    path = os.path.join(bundled_dir, repo_version, plat, "libjson.lbug_extension")
+    version_dir, platform_token = requested
+    path = os.path.join(bundled_dir, version_dir, platform_token, "libjson.lbug_extension")
     return path if os.path.isfile(path) else None
 
 
@@ -100,9 +112,10 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
     """Load the JSON extension on a live connection without requiring network.
 
     Order: the by-name form first (succeeds on statically linked builds and
-    when the extension is already installed), then the bundled binary by
-    absolute path, then — only when neither applies — the classic
-    INSTALL-from-remote-repo path. Raises when every applicable step fails.
+    when the extension is already installed), then the bundled binary the
+    engine announces via the probe, then — only when neither applies — the
+    classic INSTALL-from-remote-repo path. Raises when every applicable step
+    fails.
     """
     try:
         execute("LOAD EXTENSION JSON;")
@@ -111,7 +124,7 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
         if "not been installed" not in str(error):
             raise
 
-    bundled = bundled_json_extension_path()
+    bundled = bundled_json_extension_path(execute)
     if bundled is not None:
         try:
             # Forward slashes work on every platform and keep Windows
@@ -152,10 +165,10 @@ def install_json_extension_local(
     """
     import ladybug
 
-    # A bundled binary makes the warm-up pointless: LOAD by absolute path
+    # Bundled binaries make the warm-up pointless: LOAD by absolute path
     # needs no pre-install and no network, so skip the throwaway database
     # (and its startup cost) entirely.
-    if bundled_json_extension_path() is not None:
+    if bundled_extensions_present():
         return
 
     with tempfile.TemporaryDirectory() as tmp_dir:
