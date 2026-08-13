@@ -3,18 +3,22 @@
 Verifies the DLT single-item pipeline:
 - a DLT resource resolves to a single manifest Data record with rows
   deduplicated by (table, pk, content_hash)
+- a file-like CSV upload (the API's UploadFile shape) in the same add()
+  resolves to its own manifest, named after the uploaded filename
 - a regular text item in the same add() keeps its own Data record
-- cognify executes both under ONE cognify_pipeline run, resolving the task
-  list per item: the manifest through the deterministic DLT task list (row
-  chunks + schema graph, no LLM) and the text through the standard list
+- cognify executes all of them under ONE cognify_pipeline run, resolving the
+  task list per item: the manifests through the deterministic DLT task list
+  (row chunks + schema graph, no LLM) and the text through the standard list
   (LLM entity extraction and summarization)
 - both are searchable afterwards
 """
 
 import asyncio
+import io
 import json
 
 import dlt
+from starlette.datastructures import UploadFile
 
 import cognee
 from cognee import SearchType
@@ -40,6 +44,12 @@ PEOPLE_ROWS = [
 ]
 UNIQUE_ROW_COUNT = 3
 
+# Uploaded as a file-like CSV (the shape the API's /add route receives) —
+# must resolve to its own manifest named after the filename stem.
+MACHINES_CSV = b"id,hostname,room\n1,turing-01,lab-a\n2,hopper-02,lab-b\n"
+MACHINES_ROW_COUNT = 2
+MACHINES_SOURCE_NAME = "lab_machines"
+
 
 def _system_metadata(row) -> dict:
     ext = row["system_metadata"]
@@ -53,28 +63,41 @@ async def test_dlt_mixed_input():
     await cognee.prune.prune_system(metadata=True)
 
     people_resource = dlt.resource(PEOPLE_ROWS, name="people", primary_key="id")
+    machines_upload = UploadFile(io.BytesIO(MACHINES_CSV), filename="Lab Machines.csv")
 
-    await cognee.add([people_resource, TEXT_FACT], DATASET_NAME)
+    await cognee.add([people_resource, TEXT_FACT, machines_upload], DATASET_NAME)
 
-    # --- Add: one manifest Data record + one text Data record ---------------
+    # --- Add: two manifest Data records + one text Data record --------------
     relational_engine = get_relational_engine()
     data_rows = await relational_engine.get_all_data_from_table("data")
-    assert len(data_rows) == 2, (
-        f"Expected 2 data records (1 DLT manifest + 1 text), got {len(data_rows)}"
+    assert len(data_rows) == 3, (
+        f"Expected 3 data records (2 DLT manifests + 1 text), got {len(data_rows)}"
     )
 
     manifest_rows = [r for r in data_rows if _system_metadata(r).get("source") == "dlt_source"]
-    assert len(manifest_rows) == 1, (
-        f"Expected exactly 1 DLT-source manifest record, got {len(manifest_rows)}"
+    assert len(manifest_rows) == 2, (
+        f"Expected exactly 2 DLT-source manifest records, got {len(manifest_rows)}"
     )
+    manifests_by_source = {
+        _system_metadata(r)["source_name"]: _system_metadata(r) for r in manifest_rows
+    }
 
-    manifest_meta = _system_metadata(manifest_rows[0])
+    manifest_meta = manifests_by_source["people"]
     assert manifest_meta["row_count"] == UNIQUE_ROW_COUNT, (
         f"Duplicate row was not collapsed: row_count={manifest_meta['row_count']}, "
         f"expected {UNIQUE_ROW_COUNT}"
     )
     assert "people" in manifest_meta["tables"], (
         f"Manifest tables missing 'people': {manifest_meta['tables']}"
+    )
+
+    # The uploaded CSV gets its own manifest, named after the filename stem.
+    assert MACHINES_SOURCE_NAME in manifests_by_source, (
+        f"Uploaded CSV manifest missing: sources={sorted(manifests_by_source)}"
+    )
+    machines_meta = manifests_by_source[MACHINES_SOURCE_NAME]
+    assert machines_meta["row_count"] == MACHINES_ROW_COUNT, (
+        f"Uploaded CSV row_count={machines_meta['row_count']}, expected {MACHINES_ROW_COUNT}"
     )
 
     # --- Cognify: manifest → DLT pipeline, text → standard pipeline ---------
@@ -88,10 +111,15 @@ async def test_dlt_mixed_input():
     assert any(p.get("name") == "people" for p in schema_tables), (
         "SchemaTable node for 'people' missing — DLT pipeline did not build the schema graph"
     )
+    assert any(p.get("name") == MACHINES_SOURCE_NAME for p in schema_tables), (
+        f"SchemaTable node for '{MACHINES_SOURCE_NAME}' missing — uploaded CSV did not "
+        "take the DLT pipeline"
+    )
 
+    expected_row_edges = UNIQUE_ROW_COUNT + MACHINES_ROW_COUNT
     is_row_of_count = sum(1 for edge in edges if edge[2] == "is_row_of")
-    assert is_row_of_count == UNIQUE_ROW_COUNT, (
-        f"Expected {UNIQUE_ROW_COUNT} is_row_of edges (one per unique row), got {is_row_of_count}"
+    assert is_row_of_count == expected_row_edges, (
+        f"Expected {expected_row_edges} is_row_of edges (one per unique row), got {is_row_of_count}"
     )
 
     summaries = [p for p in node_props if p.get("type") == "TextSummary"]
