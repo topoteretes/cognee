@@ -31,6 +31,10 @@ from cognee.modules.migrations.versions.ladybug_graph_provenance_columns import 
     downgrade as ladybug_graph_provenance_columns_down,
     migrate as ladybug_graph_provenance_columns,
 )
+from cognee.modules.migrations.versions.rekey_fork_document_ids import (
+    downgrade as rekey_fork_document_ids_down,
+    migrate as rekey_fork_document_ids,
+)
 
 # The vector adapter's storage-schema sync (e.g. LanceDB adding columns) is NOT
 # in this chain: a chain entry runs once per database, but that sync must run on
@@ -79,10 +83,21 @@ MIGRATIONS: list[Migration] = [
     # backwards-compatibility CI). No-op on every non-Ladybug graph backend.
     Migration(
         slug="ladybug_graph_provenance_columns",
-        cognee_version="1.4.3",
+        cognee_version="1.5.0",
         up=ladybug_graph_provenance_columns,
         down_revision="postgres_graph_provenance_columns",
         down=ladybug_graph_provenance_columns_down,
+    ),
+    # Dataset-scoping backfill split pre-refactor shared Data rows; fork
+    # datasets' graph document nodes still carried the pre-fork id. Re-keys
+    # them to the canonical relational id (ledger references included), so no
+    # graph/vector path needs legacy awareness afterwards.
+    Migration(
+        slug="rekey_fork_document_ids",
+        cognee_version="1.5.0",
+        up=rekey_fork_document_ids,
+        down_revision="ladybug_graph_provenance_columns",
+        down=rekey_fork_document_ids_down,
     ),
 ]
 

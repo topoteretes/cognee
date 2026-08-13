@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from typing import Optional, Literal
+from typing import Literal, Optional
 import pydantic
 
 
@@ -37,6 +37,14 @@ class CacheConfig(BaseSettings):
     - auto_feedback: When caching is True, run automatic feedback detection and session-context
       guidance on each query (default True). Adds one structured-output LLM call per answered
       turn; set AUTO_FEEDBACK=false to disable.
+    - session_search_mode: How one session turn executes (default "concurrent"). Both
+      modes make the same two LLM calls; they differ in how those calls are sequenced,
+      and the trade is which turn the analysis can influence.
+      "concurrent" runs the turn analysis alongside retrieval and answering, so a turn
+      costs one answer call of wall-clock time -- but its context updates land after this
+      turn's answer and apply from the next one.
+      "sequential" runs the analysis first, so its rewritten query drives retrieval and
+      its context updates reach this turn's answer -- at the cost of two calls in a row.
     """
 
     cache_backend: Literal["redis", "fs", "tapes", "sqlite", "postgres"] = "sqlite"
@@ -44,6 +52,7 @@ class CacheConfig(BaseSettings):
     cache_purge_interval_seconds: int = 900
     caching: bool = True
     auto_feedback: bool = True
+    session_search_mode: Literal["sequential", "concurrent"] = "concurrent"
     shared_ladybug_lock: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
@@ -79,6 +88,7 @@ class CacheConfig(BaseSettings):
             "cache_purge_interval_seconds": self.cache_purge_interval_seconds,
             "caching": self.caching,
             "auto_feedback": self.auto_feedback,
+            "session_search_mode": self.session_search_mode,
             "shared_ladybug_lock": self.shared_ladybug_lock,
             "shared_kuzu_lock": self.shared_kuzu_lock,
             "cache_host": self.cache_host,

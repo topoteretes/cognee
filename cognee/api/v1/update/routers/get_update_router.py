@@ -15,6 +15,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunInfo,
 )
 from cognee.api.DTO import ErrorResponse
+from cognee.exceptions import CogneeApiError
 
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
@@ -136,6 +137,11 @@ def get_update_router() -> APIRouter:
                 )
             return update_run
 
+        except CogneeApiError:
+            # Typed API errors (e.g. UpdateTargetNotFoundError -> 404) carry
+            # their own status codes — let the app-level handler map them
+            # instead of flattening everything into a 500.
+            raise
         except Exception as error:
             logger.exception("Update failed")
             return JSONResponse(

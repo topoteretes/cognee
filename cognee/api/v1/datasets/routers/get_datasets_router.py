@@ -52,6 +52,8 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    label: Optional[str] = None
+    external_metadata: Optional[dict] = None
 
 
 class DatasetGraphSummaryDTO(OutDTO):
@@ -360,6 +362,9 @@ def get_datasets_router() -> APIRouter:
         - **mime_type**: MIME type of the data
         - **raw_data_location**: Storage location of the raw data
         - **dataset_id**: ID of the containing dataset
+        - **label**: Label attached to the data item at upload, if any
+        - **external_metadata**: Stored metadata dict (upload-provided keys merged over
+          loader-derived ones), if any
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
@@ -692,7 +697,6 @@ def get_datasets_router() -> APIRouter:
         )
 
         from cognee.modules.data.methods import get_data
-        from cognee.modules.data.methods import get_dataset_data
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
@@ -702,20 +706,10 @@ def get_datasets_router() -> APIRouter:
                 status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )
 
-        dataset_data = await get_dataset_data(dataset[0].id)
-
-        if dataset_data is None:
-            raise DataNotFoundError(message=f"No data found in dataset ({dataset_id}).")
-
-        matching_data = [data for data in dataset_data if data.id == data_id]
-
-        # Check if matching_data contains an element
-        if len(matching_data) == 0:
-            raise DataNotFoundError(
-                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
-            )
-
-        data = await get_data(user.id, data_id)
+        # Dataset-scoped lookup: resolves the exact id or, for a row whose
+        # identity forked in the dataset-scoping upgrade, its recorded
+        # pre-fork legacy_id — every id ever issued keeps resolving.
+        data = await get_data(user.id, data_id, dataset[0].id)
 
         if data is None:
             raise DataNotFoundError(

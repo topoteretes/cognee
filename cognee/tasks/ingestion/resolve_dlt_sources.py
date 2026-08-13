@@ -11,7 +11,12 @@ dlt_utils.document_source_tag)."""
 
 import hashlib
 import json
+import os
+import shutil
+import tempfile
 from typing import Any, Callable, List, Optional, Set
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
@@ -21,6 +26,8 @@ from cognee.shared.logging_utils import get_logger
 from .create_dlt_source import (
     is_connection_string,
     is_csv_path,
+    is_csv_upload,
+    csv_source_name,
     create_dlt_source_from_connection_string,
     create_dlt_source_from_csv,
 )
@@ -41,6 +48,7 @@ async def resolve_dlt_sources(
     data: Any,
     dataset_name: str,
     user: User,
+    dataset_id: UUID = None,
     **kwargs,
 ) -> Any:
     """Resolve DLT resources (and auto-detected structured data) into DataItems.
@@ -63,7 +71,10 @@ async def resolve_dlt_sources(
         from dlt.extract import DltResource, SourceFactory
         from dlt.extract.source import DltSource
     except ImportError:
-        # dlt not installed — nothing to resolve
+        # dlt not installed — nothing to resolve. Warn when inputs would have
+        # matched the auto-detection below: they silently degrade to plain
+        # (LLM-processed) document ingestion otherwise.
+        _log_structured_inputs_without_dlt(data if isinstance(data, list) else [data])
         return data, None
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
@@ -78,14 +89,10 @@ async def resolve_dlt_sources(
     # --- Auto-detect structured data (CSV paths / connection strings) ------
     # Per item, so a mixed add like [csv_path, note_path] routes the CSV to
     # the DLT manifest path instead of silently LLM-processing it as text.
-    data_list = [
-        create_dlt_source_from_csv(item)
-        if isinstance(item, str) and is_csv_path(item)
-        else create_dlt_source_from_connection_string(item, query=query)
-        if isinstance(item, str) and is_connection_string(item)
-        else item
-        for item in data_list
-    ]
+    # CSVs can arrive as local paths, file:// / s3:// locations, or file-like
+    # uploads; remote and streamed bytes are spooled into a temp directory so
+    # dlt's filesystem source can read them, deleted once ingestion is done.
+    data_list, spool_dir = await _normalize_structured_inputs(data_list, query)
 
     dlt_items = []
     non_dlt_items = []
@@ -115,55 +122,65 @@ async def resolve_dlt_sources(
     # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
     # out of the current corpus. write_disposition/primary_key default to
     # "replace"/"id" (see the kwargs resolution above).
-    document_data_items: list[DataItem] = []
-    document_fresh_ids: Set[UUID] = set()
-    document_source_tags: set[str] = set()
-    for dlt_item in document_items:
-        source_tag = document_source_tag(dlt_item)
-        document_source_tags.add(source_tag)
-        rows = await ingest_dlt_source(
-            dlt_item,
-            dataset_name,
-            primary_key=primary_key or "id",
-            write_disposition=write_disposition,
-            max_rows_per_table=0,
-        )
-        for row in rows:
-            data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
-            document_fresh_ids.add(data_id)
-            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
+    try:
+        document_data_items: list[DataItem] = []
+        document_fresh_ids: Set[UUID] = set()
+        document_source_tags: set[str] = set()
+        for dlt_item in document_items:
+            source_tag = document_source_tag(dlt_item)
+            document_source_tags.add(source_tag)
+            rows = await ingest_dlt_source(
+                dlt_item,
+                dataset_name,
+                primary_key=primary_key or "id",
+                write_disposition=write_disposition,
+                max_rows_per_table=0,
+            )
+            # Dataset-scoped ids with the pre-scoping adoption probe: rows are
+            # dataset-scoped with id as primary key, so a dataset-free
+            # derivation would pin the same id when one source loads into two
+            # datasets — a hard collision on the foreign-pin guard.
+            row_ids = await _stable_row_ids(rows, user, dataset_id)
+            for row, data_id in zip(rows, row_ids):
+                document_fresh_ids.add(data_id)
+                document_data_items.append(_build_document_data_item(row, data_id, source_tag))
 
-    # --- Relational sources: one manifest DataItem per source ---------------
-    expanded_items: list[DataItem] = []
-    manifest_data_ids: Set[UUID] = set()
-    for dlt_item in relational_items:
-        rows = await ingest_dlt_source(
-            dlt_item,
-            dataset_name,
-            primary_key=primary_key,
-            write_disposition=write_disposition,
-            max_rows_per_table=max_rows_per_table,
-        )
-        source_name = getattr(dlt_item, "name", None) or dataset_name
-        item = await _build_source_manifest_item(
-            rows,
-            source_name,
-            dataset_name,
-            user,
-            column_value_columns=column_value_columns,
-        )
-        if item is not None:
-            if item.data_id in manifest_data_ids:
-                # Stable ids are seeded from (dataset, source name): two
-                # resources sharing a name would silently overwrite each
-                # other's manifest. Fail loudly instead of last-write-wins.
-                raise ValueError(
-                    f"Two DLT sources in one add() resolve to the same identity "
-                    f"(dataset {dataset_name!r}, source {source_name!r}). "
-                    "Give each source a unique name."
-                )
-            expanded_items.append(item)
-            manifest_data_ids.add(item.data_id)
+        # --- Relational sources: one manifest DataItem per source -----------
+        expanded_items: list[DataItem] = []
+        manifest_data_ids: Set[UUID] = set()
+        for dlt_item in relational_items:
+            rows = await ingest_dlt_source(
+                dlt_item,
+                dataset_name,
+                primary_key=primary_key,
+                write_disposition=write_disposition,
+                max_rows_per_table=max_rows_per_table,
+            )
+            source_name = getattr(dlt_item, "name", None) or dataset_name
+            item = await _build_source_manifest_item(
+                rows,
+                source_name,
+                dataset_name,
+                user,
+                column_value_columns=column_value_columns,
+            )
+            if item is not None:
+                if item.data_id in manifest_data_ids:
+                    # Stable ids are seeded from (dataset, source name): two
+                    # resources sharing a name would silently overwrite each
+                    # other's manifest. Fail loudly instead of last-write-wins.
+                    raise ValueError(
+                        f"Two DLT sources in one add() resolve to the same identity "
+                        f"(dataset {dataset_name!r}, source {source_name!r}). "
+                        "Give each source a unique name."
+                    )
+                expanded_items.append(item)
+                manifest_data_ids.add(item.data_id)
+    finally:
+        # Spooled CSV copies are only needed while dlt reads them (the ingest
+        # calls above); drop them even when ingestion fails.
+        if spool_dir is not None:
+            shutil.rmtree(spool_dir, ignore_errors=True)
 
     # Manifest source names, collected before document items join the list.
     ingested_source_names = {item.system_metadata["source_name"] for item in expanded_items}
@@ -217,6 +234,108 @@ async def resolve_dlt_sources(
 
     result = non_dlt_items + expanded_items
     return result, orphan_cleanup
+
+
+async def _normalize_structured_inputs(data_list: list, query: Optional[str]) -> tuple:
+    """Wrap auto-detected structured inputs in dlt sources.
+
+    CSV inputs (local path strings, file:// / s3:// locations, and file-like
+    uploads) become dlt filesystem resources; connection strings become dlt
+    sql_database sources; everything else passes through unchanged. Returns
+    ``(normalized_list, spool_dir)`` where ``spool_dir`` (or None) is a temp
+    directory holding local copies of remote/streamed CSVs — the caller must
+    delete it once dlt has read the files.
+    """
+    spool_dir: Optional[str] = None
+    normalized = []
+    try:
+        for item in data_list:
+            if isinstance(item, str) and is_connection_string(item):
+                normalized.append(create_dlt_source_from_connection_string(item, query=query))
+            elif (isinstance(item, str) and is_csv_path(item)) or is_csv_upload(item):
+                local_path, spool_dir = await _as_local_csv_path(item, spool_dir)
+                normalized.append(create_dlt_source_from_csv(local_path))
+            else:
+                normalized.append(item)
+    except Exception:
+        if spool_dir is not None:
+            shutil.rmtree(spool_dir, ignore_errors=True)
+        raise
+    return normalized, spool_dir
+
+
+async def _as_local_csv_path(item, spool_dir: Optional[str]) -> tuple:
+    """Return a local path dlt's filesystem source can read for one CSV input.
+
+    Plain local path strings pass through untouched; file:// URIs are
+    unwrapped. s3:// paths and file-like uploads are spooled into a shared
+    temp directory (created on first use and returned for caller cleanup).
+    Spooled files are stored as ``{csv_source_name}.csv`` so the on-disk name,
+    dlt's file glob, and the manifest identity all agree.
+    """
+    if isinstance(item, str):
+        parsed = urlparse(item)
+        if parsed.scheme == "file":
+            return url2pathname(parsed.path), spool_dir
+        if parsed.scheme != "s3":
+            return item, spool_dir
+
+    filename = (
+        item
+        if isinstance(item, str)
+        else getattr(item, "filename", None) or getattr(item, "name", "")
+    )
+    if spool_dir is None:
+        spool_dir = tempfile.mkdtemp(prefix="cognee_dlt_csv_")
+    target = os.path.join(spool_dir, f"{csv_source_name(filename)}.csv")
+    if os.path.exists(target):
+        # Manifest identity is seeded from the source name, so two inputs
+        # landing on one spooled file would also collide there — fail loudly
+        # before the first one's bytes get overwritten.
+        raise ValueError(
+            f"Two CSV inputs in one add() resolve to the same source name "
+            f"{csv_source_name(filename)!r}. Give the files distinct names."
+        )
+
+    if isinstance(item, str):
+        # s3:// path — read through cognee's storage layer (configured
+        # credentials) instead of teaching dlt a second credential path.
+        from cognee.infrastructure.files.utils.open_data_file import open_data_file
+
+        async with open_data_file(item, mode="rb") as remote_file:
+            with open(target, "wb") as local_file:
+                shutil.copyfileobj(remote_file, local_file)
+    else:
+        stream = getattr(item, "file", None) or item
+        try:
+            stream.seek(0)
+        except (AttributeError, OSError, ValueError):
+            pass
+        with open(target, "wb") as local_file:
+            shutil.copyfileobj(stream, local_file)
+    return target, spool_dir
+
+
+def _log_structured_inputs_without_dlt(data_list: list) -> None:
+    """Warn when inputs that would auto-route to the DLT path are about to be
+    ingested as plain documents because dlt is not installed."""
+    names = []
+    for item in data_list:
+        if isinstance(item, str) and is_csv_path(item):
+            names.append(item)
+        elif isinstance(item, str) and is_connection_string(item):
+            # Never log the string itself — it may embed credentials.
+            names.append("<connection string>")
+        elif is_csv_upload(item):
+            names.append(getattr(item, "filename", None) or getattr(item, "name", "<upload>"))
+    if names:
+        logger.warning(
+            "dlt is not installed: %d structured input(s) (%s) will be ingested as plain "
+            "documents through the standard LLM pipeline instead of the DLT manifest path. "
+            'Install the dlt extra (pip install "cognee[dlt]") to route them through DLT.',
+            len(names),
+            ", ".join(str(name) for name in names[:5]),
+        )
 
 
 async def _build_source_manifest_item(
@@ -420,6 +539,42 @@ def _dlt_row_identifier(row: DltRowData) -> str:
     across runs (no re-ingest/re-cognify) while edited rows get a fresh one.
     """
     return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
+
+
+async def _stable_row_ids(rows: List[DltRowData], user: User, dataset_id: UUID) -> List[UUID]:
+    """Dataset-scoped stable ids for dlt rows, adopting pre-scoping rows in place.
+
+    Ids are derived from (dataset, table, pk, content_hash, user), so the same
+    source loaded into two datasets yields two independent id families and
+    dataset-scoped rows never collide across datasets (a cross-dataset
+    collision would trip ingestion's foreign-pin guard). Rows ingested before
+    ids were dataset-namespaced carry the old derivation as their primary id;
+    those are adopted — the old id kept — ONLY when the row lives in this
+    dataset, so unchanged rows stay stable through the upgrade instead of
+    being re-minted (and orphan-cleanup never mistakes them for stale rows).
+    A row of another dataset never matches the probe.
+    """
+    if not rows:
+        return []
+
+    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
+    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        adopted = set(
+            (
+                await session.execute(
+                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
+                )
+            ).scalars()
+        )
+    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
 
 
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
