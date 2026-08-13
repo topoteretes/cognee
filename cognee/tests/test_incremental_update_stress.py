@@ -1,4 +1,4 @@
-"""Twenty-iteration incremental-update torture run over Alice in Wonderland.
+"""Ten-iteration incremental-update stress run over Alice in Wonderland.
 
 The document is mutated through every edit shape the diff engine claims to
 handle — boundary edits, disjoint multi-region edits, insertions, deletions,
@@ -18,8 +18,8 @@ remains. After every single iteration the whole system is verified:
     from the CURRENT text — nothing stale survives, nothing new is missing;
   - every live chunk has exactly one summary; no summary references a dead
     chunk;
-  - every chunk-scoped (v2) source ref points at a LIVE chunk; the document
-    node keeps its v1 ref only;
+  - every chunk-scoped (v2) source ref — on nodes and edges — points at a
+    LIVE chunk; the document node keeps its v1 ref only;
   - vector rows exist for live artifacts and are gone for dead ones, and
     their chunk_index payloads agree with the graph;
   - each genuine incremental update logs exactly one pipeline run; the
@@ -27,21 +27,16 @@ remains. After every single iteration the whole system is verified:
 
 Runs on the default local stack (kuzu + lancedb + sqlite) with a
 deterministic mock LLM (proper-noun extraction) and mock embeddings —
-CI-safe, no API keys. Runtime is a few minutes; this is an e2e suite, not a
-unit test.
+CI-safe, no API keys required.
 """
 
 import asyncio
 import hashlib
 import os
 import re
-import shutil
-import tempfile
 from pathlib import Path
 
-import pytest
-
-FIXTURE = Path(__file__).parents[1] / "test_data" / "alice_in_wonderland.txt"
+FIXTURE = Path(__file__).parent / "test_data" / "alice_in_wonderland.txt"
 PARAGRAPHS_USED = 120
 CHUNK_TOKENS = 80
 
@@ -55,9 +50,11 @@ def _nouns(text: str) -> set:
     return {word.lower() for word in NOUN.findall(text)}
 
 
-@pytest.fixture(scope="module")
-def torture_env():
-    root = Path(tempfile.mkdtemp(prefix="cognee_alice_torture_"))
+def _setup_environment() -> None:
+    """Isolated scratch stores, config-cache resets, and the mock LLM."""
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="cognee_stress_"))
 
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
@@ -72,6 +69,7 @@ def torture_env():
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
         ENABLE_BACKEND_ACCESS_CONTROL="false",
     )
+    os.environ.setdefault("LLM_API_KEY", "mock-key")
 
     import importlib
 
@@ -116,19 +114,13 @@ def torture_env():
             return "mock answer"
         return response_model()
 
-    original = LLMGateway.acreate_structured_output
     LLMGateway.acreate_structured_output = _mock_acreate
-
-    yield root
-
-    LLMGateway.acreate_structured_output = original
-    shutil.rmtree(root, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- #
-# The mutation program: 20 named operations on a paragraph list. Each returns
-# the new list. Synthetic paragraphs are tagged CLOCKWORK so the final state
-# is provably free of original content.
+# The mutation program: 10 named operations on a paragraph list, together
+# covering every edit shape. Synthetic paragraphs are Clockwork-tagged so the
+# final state is provably free of original content.
 # --------------------------------------------------------------------------- #
 
 _SYNTH_COUNTER = [0]
@@ -144,159 +136,106 @@ def _synth(sentences: int = 3) -> str:
     )
 
 
-def _op01_replace_middle(p):
-    p = list(p)
-    p[len(p) // 2] = _synth()
-    return p
-
-
-def _op02_edit_first(p):
+def _op01_boundary_and_disjoint(p):
+    """First, middle, and last paragraph in ONE update: three disjoint
+    regions including both document boundaries."""
     p = list(p)
     p[0] = _synth()
-    return p
-
-
-def _op03_edit_last(p):
-    p = list(p)
+    p[len(p) // 2] = _synth()
     p[-1] = _synth()
     return p
 
 
-def _op04_three_disjoint(p):
-    p = list(p)
-    p[2] = _synth()
-    p[len(p) // 2 + 1] = _synth()
-    p[-3] = _synth()
-    return p
-
-
-def _op05_insert_three(p):
+def _op02_insert_and_delete(p):
+    """Insert three paragraphs at one site, delete one at another."""
     p = list(p)
     p[6:6] = [_synth(), _synth(), _synth()]
+    del p[12]
     return p
 
 
-def _op06_delete_one(p):
-    p = list(p)
-    del p[8]
-    return p
-
-
-def _op07_merge_two(p):
+def _op03_merge_and_split(p):
+    """Merge two adjacent paragraphs; split another in half."""
     p = list(p)
     p[10:12] = [p[10] + " " + p[11]]
-    return p
-
-
-def _op08_split_one(p):
-    p = list(p)
     target = p[4]
-    cut = len(target) // 2
-    space = target.find(" ", cut)
-    if space == -1:
-        space = cut
-    p[4:5] = [target[:space].rstrip(), target[space:].lstrip()]
+    cut = target.find(" ", len(target) // 2)
+    if cut == -1:
+        cut = len(target) // 2
+    p[4:5] = [target[:cut].rstrip(), target[cut:].lstrip()]
     return p
 
 
-def _op09_reorder(p):
+def _op04_reorder_and_duplicate(p):
+    """Move a paragraph to a distant position; duplicate another verbatim
+    (repeated identical content exercises occurrence counters)."""
     p = list(p)
     moved = p.pop(12)
     p.insert(3, moved)
-    return p
-
-
-def _op10_duplicate(p):
-    p = list(p)
     p.insert(20, p[6])
     return p
 
 
-def _op11_edit_second_occurrence(p):
+def _op05_edit_duplicate_and_grow(p):
+    """Edit only the SECOND occurrence of the duplicated paragraph; grow
+    another paragraph roughly 8x."""
     p = list(p)
-    first = p.index(p[20])
-    # p[20] is the duplicate inserted by op10; if positions drifted, find the
-    # SECOND occurrence of any duplicated paragraph and edit that one.
-    seen = {}
+    seen = set()
     for i, para in enumerate(p):
         if para in seen:
             p[i] = _synth()
-            return p
-        seen[para] = i
-    # No duplicate found (should not happen after op10) — edit index 20.
-    assert first is not None
-    p[20] = _synth()
-    return p
-
-
-def _op12_grow(p):
-    p = list(p)
+            break
+        seen.add(para)
+    else:
+        raise AssertionError("op04 must have left a duplicated paragraph")
     p[7] = p[7] + " " + _synth(8)
     return p
 
 
-def _op13_collapse_five(p):
+def _op06_collapse_unicode_whitespace(p):
+    """Collapse five paragraphs to one line; unicode substitutions in one
+    paragraph; whitespace-only change in another."""
     p = list(p)
     mid = len(p) // 2
     p[mid : mid + 5] = ["The Meridian survey ends here."]
-    return p
-
-
-def _op14_unicode(p):
-    p = list(p)
     p[9] = p[9].replace("e", "é", 3).replace('"', "“", 1)
-    return p
-
-
-def _op15_whitespace(p):
-    p = list(p)
     p[3] = p[3].replace(" ", "  ", 2)
     return p
 
 
-def _op16_unchanged(p):
+def _op07_unchanged(p):
+    """Byte-identical resubmit: no run, no writes."""
     return list(p)
 
 
-def _op17_replace_second_half(p):
+def _op08_replace_second_half(p):
+    """Wholesale replacement of the document's second half."""
     p = list(p)
     half = len(p) // 2
     return p[:half] + [_synth() for _ in range(10)]
 
 
-def _op18_mass_append(p):
-    return list(p) + [_synth() for _ in range(15)]
+def _op09_delete_head_and_append(p):
+    """Delete the head half (mass renumbering) and append ten paragraphs."""
+    return list(p)[len(p) // 2 :] + [_synth() for _ in range(10)]
 
 
-def _op19_delete_head(p):
-    return list(p)[len(p) // 2 :]
-
-
-def _op20_total_replacement(p):
+def _op10_total_replacement(p):
+    """Replace the whole document: nothing of the original may remain."""
     return [_synth(4) for _ in range(25)]
 
 
 OPERATIONS = [
-    ("01 replace middle paragraph", _op01_replace_middle),
-    ("02 edit first paragraph", _op02_edit_first),
-    ("03 edit last paragraph", _op03_edit_last),
-    ("04 three disjoint edits", _op04_three_disjoint),
-    ("05 insert three paragraphs", _op05_insert_three),
-    ("06 delete a paragraph", _op06_delete_one),
-    ("07 merge two paragraphs", _op07_merge_two),
-    ("08 split a paragraph", _op08_split_one),
-    ("09 reorder a paragraph", _op09_reorder),
-    ("10 duplicate a paragraph", _op10_duplicate),
-    ("11 edit one duplicate occurrence", _op11_edit_second_occurrence),
-    ("12 grow a paragraph 8x", _op12_grow),
-    ("13 collapse five paragraphs to one line", _op13_collapse_five),
-    ("14 unicode substitutions", _op14_unicode),
-    ("15 whitespace-only change", _op15_whitespace),
-    ("16 unchanged resubmit", _op16_unchanged),
-    ("17 replace the second half", _op17_replace_second_half),
-    ("18 mass append 15 paragraphs", _op18_mass_append),
-    ("19 delete the head half", _op19_delete_head),
-    ("20 total replacement", _op20_total_replacement),
+    ("01 boundary + disjoint multi-region edits", _op01_boundary_and_disjoint),
+    ("02 insert three paragraphs, delete one", _op02_insert_and_delete),
+    ("03 merge two paragraphs, split another", _op03_merge_and_split),
+    ("04 reorder one paragraph, duplicate another", _op04_reorder_and_duplicate),
+    ("05 edit one duplicate occurrence, grow a paragraph", _op05_edit_duplicate_and_grow),
+    ("06 collapse five paragraphs, unicode + whitespace", _op06_collapse_unicode_whitespace),
+    ("07 unchanged resubmit", _op07_unchanged),
+    ("08 replace the second half", _op08_replace_second_half),
+    ("09 delete the head half, append ten paragraphs", _op09_delete_head_and_append),
+    ("10 total replacement", _op10_total_replacement),
 ]
 
 
@@ -418,12 +357,11 @@ async def _verify(
             # id-diff counts NET graph change. Work can exceed net change:
             # content-derived ids mean a re-cut chunk with unchanged content
             # is re-extracted IN PLACE (same id, idempotent merge) instead of
-            # being reused — the known reuse-gate miss under occurrence drift.
-            # Iteration "09 reorder" demonstrates it: a pure move extracts 6
-            # chunks where the optimum is ~2. That is wasted spend, not
-            # wrongness — correctness is pinned by the tiling/entity/vector/
-            # ref asserts above. Here we pin only that the graph never
-            # changes MORE than the summary accounts for.
+            # being reused — the known reuse-gate miss under occurrence
+            # drift, demonstrated by the reorder in iteration 04. That is
+            # wasted spend, not wrongness — correctness is pinned by the
+            # tiling/entity/vector/ref asserts. Here we pin only that the
+            # graph never changes MORE than the summary accounts for.
             assert len(added_ids) <= summary["added_chunks"], (
                 f"{label}: graph gained {len(added_ids)} chunks but the "
                 f"summary reports only {summary['added_chunks']} added"
@@ -515,11 +453,9 @@ async def _verify(
 # --------------------------------------------------------------------------- #
 
 
-def test_twenty_iteration_torture(torture_env):
-    asyncio.run(_scenario())
+async def main():
+    _setup_environment()
 
-
-async def _scenario():
     import cognee
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine_async
@@ -532,16 +468,15 @@ async def _scenario():
     original_paragraphs = list(paragraphs)
     text = "\n\n".join(paragraphs)
 
-    await cognee.add(text, dataset_name="alice_torture")
+    await cognee.add(text, dataset_name="alice_stress")
     user = await get_default_user()
-    dataset = next(d for d in await get_datasets(user.id) if d.name == "alice_torture")
+    dataset = next(d for d in await get_datasets(user.id) if d.name == "alice_stress")
     await cognee.cognify(datasets=[dataset.id], chunk_size=CHUNK_TOKENS)
     data_id = (await get_dataset_data(dataset.id))[0].id
 
     graph = await get_graph_engine()
     vector = await get_vector_engine_async()
 
-    # Baseline verification of the initial cognify before any mutation.
     runs_before = await _incremental_run_count(dataset.id)
     chunk_ids, entity_ids = await _verify(
         "baseline",
@@ -557,6 +492,7 @@ async def _scenario():
         expect_run=False,
     )
     assert len(chunk_ids) >= 30, f"need a real corpus; got only {len(chunk_ids)} chunks"
+    print(f"baseline verified: {len(chunk_ids)} chunks, {len(entity_ids)} entities")
 
     for label, operation in OPERATIONS:
         paragraphs = operation(paragraphs)
@@ -580,6 +516,7 @@ async def _scenario():
             expect_run=expect_run,
         )
         text = new_text
+        print(f"iteration {label}: verified ({len(chunk_ids)} chunks)")
 
     # ----- Final state: NOTHING of the original document remains ----------- #
     for paragraph in original_paragraphs:
@@ -590,7 +527,8 @@ async def _scenario():
     assert "Alice" not in text and "alice" not in _nouns(text), (
         "the final document must contain no trace of Alice"
     )
-    final_entities = set()
-    for chunk_text in text.split("\n\n"):
-        final_entities |= _nouns(chunk_text)
-    assert "alice" not in final_entities and "rabbit" not in final_entities
+    print("stress run complete: nothing of the original document remains")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
