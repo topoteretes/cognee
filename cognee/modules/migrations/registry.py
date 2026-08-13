@@ -27,6 +27,10 @@ from cognee.modules.migrations.versions.postgres_graph_provenance_columns import
     downgrade as postgres_graph_provenance_columns_down,
     migrate as postgres_graph_provenance_columns,
 )
+from cognee.modules.migrations.versions.rekey_fork_document_ids import (
+    downgrade as rekey_fork_document_ids_down,
+    migrate as rekey_fork_document_ids,
+)
 
 # The vector adapter's storage-schema sync (e.g. LanceDB adding columns) is NOT
 # in this chain: a chain entry runs once per database, but that sync must run on
@@ -66,6 +70,17 @@ MIGRATIONS: list[Migration] = [
         up=postgres_graph_provenance_columns,
         down_revision="namespace_edge_type_point_ids",
         down=postgres_graph_provenance_columns_down,
+    ),
+    # Dataset-scoping backfill split pre-refactor shared Data rows; fork
+    # datasets' graph document nodes still carried the pre-fork id. Re-keys
+    # them to the canonical relational id (ledger references included), so no
+    # graph/vector path needs legacy awareness afterwards.
+    Migration(
+        slug="rekey_fork_document_ids",
+        cognee_version="1.5.0",
+        up=rekey_fork_document_ids,
+        down_revision="postgres_graph_provenance_columns",
+        down=rekey_fork_document_ids_down,
     ),
 ]
 
