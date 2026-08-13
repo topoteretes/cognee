@@ -1115,6 +1115,47 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
+    supports_payload_update = True
+
+    async def update_payload(self, collection_name: str, payload_updates: dict[str, dict]) -> None:
+        """Update payload fields on existing rows WITHOUT re-embedding.
+
+        Vector-preserving rewrite: read the matching rows (payload struct and
+        stored vector), merge the field updates into each payload, and
+        merge_insert them back with the SAME vector — no embedding call.
+        Fields must already exist in the collection's payload schema. Runs
+        under VECTOR_DB_LOCK like every other read→build→write cycle here.
+        """
+        if not payload_updates:
+            return
+        if not await self.has_collection(collection_name):
+            return
+        collection = await self.get_collection(collection_name)
+
+        escaped_ids = [str(id_).replace("'", "''") for id_ in payload_updates]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
+        else:
+            id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+
+        async with self.VECTOR_DB_LOCK:
+            rows = await collection.query().where(where_clause).to_list()
+            if not rows:
+                return
+            records = []
+            for row in rows:
+                payload = dict(row.get("payload") or {})
+                payload.update(payload_updates[str(row["id"])])
+                records.append({"id": row["id"], "vector": list(row["vector"]), "payload": payload})
+            # Build against the table's OWN arrow schema: plain dicts make
+            # merge_insert re-infer types and choke on the fixed-size-list
+            # vector column.
+            import pyarrow
+
+            arrow_records = pyarrow.Table.from_pylist(records, schema=await collection.schema())
+            await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
+
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a
     # LanceDB commit that appends a table version, and manifest listing slows
     # down as versions accumulate — a delete per id turns a 13k-id wipe into
