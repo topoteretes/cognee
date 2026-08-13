@@ -75,9 +75,7 @@ async def _embed_relationship_names(
     (PGVector's retrieve() drops it; only LanceDB's does not) -- re-embedding a
     handful of short strings once per build is cheap and adapter-agnostic.
     """
-    relationship_names = sorted(
-        {relationship_name for _, _, relationship_name in entity_relations}
-    )
+    relationship_names = sorted({relationship_name for _, _, relationship_name in entity_relations})
     if not relationship_names:
         return {}
 

@@ -531,8 +531,7 @@ def _pattern_test_entities() -> tuple[dict[str, set[str]], dict[str, float]]:
         "s2": {"alice", "alps", "other-1", "other-2", "other-3", "other-4"},
     }
     idf_weights = {
-        entity_id: 1.0
-        for entity_id in entities_by_summary_id["s1"] | entities_by_summary_id["s2"]
+        entity_id: 1.0 for entity_id in entities_by_summary_id["s1"] | entities_by_summary_id["s2"]
     }
     return entities_by_summary_id, idf_weights
 
