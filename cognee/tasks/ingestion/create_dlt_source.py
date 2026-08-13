@@ -64,29 +64,32 @@ def is_remote_csv_path(data: str) -> bool:
 async def download_csv_for_staging(csv_url: str, temp_dir: str) -> str:
     """Localize a remote CSV through cognee's file layer for dlt staging.
 
-    The storage layer (``open_data_file`` -> ``S3FileStorage``) owns the
-    local-vs-S3 distinction and the credentials: cognee's ``S3Config``
-    (access key / endpoint / profile / session token) or the IAM chain —
-    never a parallel fsspec configuration. dlt's staging reader then treats
-    the result like any local CSV, keeping one read path and identical
-    typing behavior for both origins.
+    Read side: ``open_data_file`` — cognee's canonical local-vs-S3 entry
+    (``S3FileStorage`` underneath; credentials come from cognee's
+    ``S3Config`` or the IAM chain, never a parallel fsspec configuration).
+    Write side: ``LocalFileStorage.store``, so directory creation and
+    stream handling stay in the storage layer. dlt's staging reader then
+    treats the result like any local CSV.
     """
     from uuid import uuid4
 
+    from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+    from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
-    filename = csv_url.rpartition("/")[2]
+    # Same filename idiom open_data_file applies to s3:// paths.
+    filename = os.path.basename(get_data_file_path(csv_url))
     # Per-download subdirectory: two sources may share a filename.
-    local_dir = os.path.join(temp_dir, uuid4().hex)
-    os.makedirs(local_dir)
-    local_path = os.path.join(local_dir, filename)
+    # LocalFileStorage directly, not the get_file_storage factory — with
+    # STORAGE_BACKEND=s3 the factory returns S3 storage for any path, and
+    # dlt must stage from local disk.
+    local_storage = LocalFileStorage(os.path.join(temp_dir, uuid4().hex))
 
     async with open_data_file(csv_url, mode="rb") as remote_file:
-        content = remote_file.read()
-    with open(local_path, "wb") as local_file:
-        local_file.write(content)
+        stored_uri = await local_storage.store(filename, remote_file)
 
-    return local_path
+    # store() returns a file:// URI; hand dlt a plain filesystem path.
+    return get_data_file_path(stored_uri)
 
 
 def create_dlt_source_from_csv(csv_path: str):

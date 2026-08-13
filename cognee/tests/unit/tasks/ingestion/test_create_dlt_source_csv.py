@@ -75,9 +75,14 @@ def test_csv_path_predicates():
 
 @pytest.mark.asyncio
 async def test_download_csv_for_staging_uses_cognee_file_layer(tmp_path, monkeypatch):
-    """The download must go through open_data_file — cognee's canonical
-    local-vs-S3 entry — and land in a per-download subdirectory."""
+    """Both sides of the download must stay in cognee's file layer:
+    open_data_file (the canonical local-vs-S3 read entry) feeding
+    LocalFileStorage.store (the canonical local write), landing in a
+    per-download subdirectory."""
+    from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+
     opened_urls = []
+    stored_filenames = []
 
     @asynccontextmanager
     async def fake_open_data_file(file_path, mode="rb", **kwargs):
@@ -87,12 +92,22 @@ async def test_download_csv_for_staging_uses_cognee_file_layer(tmp_path, monkeyp
     open_data_file_module = sys.modules["cognee.infrastructure.files.utils.open_data_file"]
     monkeypatch.setattr(open_data_file_module, "open_data_file", fake_open_data_file)
 
+    original_store = LocalFileStorage.store
+
+    async def spy_store(self, file_path, data, overwrite=False):
+        stored_filenames.append(file_path)
+        return await original_store(self, file_path, data, overwrite)
+
+    monkeypatch.setattr(LocalFileStorage, "store", spy_store)
+
     local_path = await download_csv_for_staging("s3://bucket/exports/rows.csv", str(tmp_path))
 
     assert opened_urls == [("s3://bucket/exports/rows.csv", "rb")]
+    assert stored_filenames == ["rows.csv"]
     assert pathlib.Path(local_path).read_bytes() == b"id,name\n1,anemometer\n"
     assert pathlib.Path(local_path).name == "rows.csv"
-    assert pathlib.Path(local_path).parent.parent == tmp_path
+    # store() realpaths its root; resolve tmp_path the same way for comparison.
+    assert pathlib.Path(local_path).parent.parent == tmp_path.resolve()
 
 
 @pytest.mark.asyncio
