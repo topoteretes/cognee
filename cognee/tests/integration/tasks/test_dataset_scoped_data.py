@@ -205,7 +205,7 @@ async def _scenario():
 
     # --- 4. mispinned foreign row: refuse to touch ------------------------- #
     # A data_id pinned from another dataset must never be linked or mutated.
-    with pytest.raises(IngestionError, match="belongs to dataset"):
+    with pytest.raises(IngestionError, match="is not available in dataset"):
         await ingest_data(
             [DataItem(data=text_v1, data_id=alpha_data.id)], "beta", user, None, beta.id
         )
