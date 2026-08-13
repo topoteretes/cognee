@@ -35,6 +35,11 @@ class LoaderEngine:
             "image_loader",
             "audio_loader",
             "video_loader",
+            # dlt before csv on purpose: with the dlt extra installed, CSVs
+            # take the structured DLT route; csv_loader's text flattening is
+            # the fallback (no dlt) or an explicit per-call choice via
+            # preferred_loaders={"csv_loader": {}}.
+            "dlt_csv_loader",
             "csv_loader",
             "unstructured_loader",
             "advanced_pdf_loader",

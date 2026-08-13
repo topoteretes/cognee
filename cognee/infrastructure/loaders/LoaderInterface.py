@@ -1,5 +1,23 @@
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from dataclasses import dataclass
+from typing import Any, ClassVar, Optional
+from uuid import UUID
+
+
+@dataclass
+class LoaderResult:
+    """Rich loader output for loaders that own more than text extraction.
+
+    ``load()`` normally returns the stored derived-text path as a plain str.
+    A loader that also owns the record's identity and routing (dlt: the
+    manifest's stable data_id and the ``system_metadata`` route stamp) returns
+    this instead; ``ingest_data`` pins the record to ``data_id`` and stamps
+    ``system_metadata`` exactly as it does for pinned ``DataItem``s.
+    """
+
+    file_path: str
+    data_id: Optional[UUID] = None
+    system_metadata: Optional[dict] = None
 
 
 class LoaderInterface(ABC):
