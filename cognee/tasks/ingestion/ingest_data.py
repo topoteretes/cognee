@@ -21,9 +21,13 @@ from cognee.modules.data.methods import (
     load_or_create_datasets,
 )
 
+from cognee.shared.logging_utils import get_logger
+
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
+
+logger = get_logger(__name__)
 
 
 async def ingest_data(
@@ -189,9 +193,18 @@ async def ingest_data(
                 # legacy rows). A row of another dataset can only reach this
                 # branch through a mispinned data_id — never mutate it.
                 if str(data_point.dataset_id) != str(dataset.id):
+                    # The owning dataset's id goes to the operator log only —
+                    # naming it in the exception would tell a caller with no
+                    # access to that dataset which dataset holds this id.
+                    logger.info(
+                        "foreign-pin refused: data %s belongs to dataset %s, pinned from %s",
+                        data_point.id,
+                        data_point.dataset_id,
+                        dataset.id,
+                    )
                     raise IngestionError(
-                        f"Data {data_point.id} belongs to dataset {data_point.dataset_id}; "
-                        f"refusing to touch it from dataset {dataset.id}."
+                        f"Data id {data_point.id} is not available in dataset {dataset.id}; "
+                        f"refusing to touch it."
                     )
 
                 data_point.name = original_file_metadata["name"]
