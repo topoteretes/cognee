@@ -25,6 +25,7 @@ from cognee.api.v1.validate.validate import (
     _check_vector_sync,
     validate,
 )
+from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.engine.models import Entity
 
 # Patch targets use the module object rather than the dotted string: the
@@ -314,6 +315,64 @@ async def test_validate_reports_healthy_and_scopes_to_dataset():
         "graph_edges": 1,
         "node_type_distribution": {"Entity": 2},
     }
+
+
+@pytest.mark.asyncio
+async def test_validate_rejects_missing_or_unauthorized_dataset_before_reads():
+    mock_graph_engine = AsyncMock()
+    mock_vector_engine = AsyncMock()
+
+    with (
+        patch.object(
+            validate_module,
+            "get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            validate_module,
+            "get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch.object(
+            validate_module,
+            "get_authorized_existing_datasets",
+            return_value=[],
+        ),
+    ):
+        with pytest.raises(DatasetNotFoundError, match="not found or not readable"):
+            await validate(dataset="private_dataset", user=object())
+
+    mock_graph_engine.get_graph_data.assert_not_awaited()
+    mock_vector_engine.retrieve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_validate_rejects_mixed_authorized_and_unauthorized_datasets():
+    mock_graph_engine = AsyncMock()
+    mock_vector_engine = AsyncMock()
+
+    with (
+        patch.object(
+            validate_module,
+            "get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            validate_module,
+            "get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch.object(
+            validate_module,
+            "get_authorized_existing_datasets",
+            return_value=[_mock_dataset()],
+        ),
+    ):
+        with pytest.raises(DatasetNotFoundError, match="not found or not readable"):
+            await validate(dataset=["visible_dataset", "private_dataset"], user=object())
+
+    mock_graph_engine.get_graph_data.assert_not_awaited()
+    mock_vector_engine.retrieve.assert_not_awaited()
 
 
 @pytest.mark.asyncio
