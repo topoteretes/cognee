@@ -52,6 +52,7 @@ SAMPLE_ARGUMENTS = {
         }
     ],
     "data_id": "sample-data-id",
+    "dataset_id": "sample-dataset-id",
     "detail": "sample detail",
     "dimension": 1,
     "field": "sample_field",
