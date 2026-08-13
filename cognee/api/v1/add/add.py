@@ -50,7 +50,7 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 20,
+    data_per_batch: Optional[int] = 2000,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
@@ -179,6 +179,11 @@ async def add(
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
 
+        # Add a single url and keenable extract ingestion method
+        Make sure to set KEENABLE_API_KEY = YOUR_KEENABLE_API_KEY as a environment variable
+        (Tavily takes precedence if both keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
@@ -195,6 +200,7 @@ async def add(
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
+        - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
 
     """
     # Route to remote instance if connected via serve()
