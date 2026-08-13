@@ -360,6 +360,12 @@ def main():
         "--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py"
     )
     parser.add_argument(
+        "--mock-document-embeddings",
+        type=Path,
+        default=None,
+        help="Forward to bench_cognee.py: replay captured document embeddings",
+    )
+    parser.add_argument(
         "--tenant-url",
         default=None,
         help="Cognee Cloud tenant URL; benchmark runs remotely via cognee.serve()",
@@ -406,6 +412,8 @@ def main():
         extra_args += ["--mock-llm"]
     if args.mock_memories:
         extra_args += ["--mock-memories", str(args.mock_memories)]
+    if args.mock_document_embeddings:
+        extra_args += ["--mock-document-embeddings", str(args.mock_document_embeddings)]
     if args.tenant_url:
         extra_args += ["--tenant-url", args.tenant_url]
     if args.tenant_api_key:

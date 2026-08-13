@@ -50,7 +50,7 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 20,
+    data_per_batch: Optional[int] = 2000,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
