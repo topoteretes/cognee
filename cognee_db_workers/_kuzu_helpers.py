@@ -47,8 +47,14 @@ def _safe_close(obj) -> None:
 # directory its binary requests (baked into the native lib; it can trail the
 # package version). Discover a new entry by running ``INSTALL JSON;`` offline —
 # the error message prints the exact URL, e.g.
-# ``.../v0.18.1/linux_arm64/json/libjson.lbug_extension``.
+# ``.../v0.18.1/linux_arm64/json/libjson.lbug_extension``. Every entry below
+# was verified that way. Covers cognee's full supported range
+# (ladybug>=0.16.0,<=0.18.2 in pyproject.toml).
 _EXTENSION_REPO_VERSIONS = {
+    "0.16.0": "v0.16.0",
+    "0.17.0": "v0.17.0",
+    "0.17.1": "v0.17.0",
+    "0.18.0": "v0.18.0",
     "0.18.1": "v0.18.1",
     "0.18.2": "v0.18.1",
 }
@@ -108,7 +114,9 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
     bundled = bundled_json_extension_path()
     if bundled is not None:
         try:
-            escaped = bundled.replace("'", "''")
+            # Forward slashes work on every platform and keep Windows
+            # backslashes from being read as escape sequences in the literal.
+            escaped = bundled.replace("\\", "/").replace("'", "''")
             execute(f"LOAD EXTENSION '{escaped}';")
             return
         except Exception as error:

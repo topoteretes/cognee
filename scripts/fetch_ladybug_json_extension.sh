@@ -17,9 +17,10 @@ set -euo pipefail
 
 VERSION="${1:?usage: $0 <ext-version e.g. v0.18.1> [platform ...]}"
 shift
-PLATFORMS=("${@:-linux_amd64}")
 if [ $# -eq 0 ]; then
-  PLATFORMS=(linux_amd64 linux_arm64)
+  PLATFORMS=(linux_amd64 linux_arm64 osx_amd64 osx_arm64 win_amd64)
+else
+  PLATFORMS=("$@")
 fi
 
 IMAGE="ghcr.io/ladybugdb/extension-repo:latest"

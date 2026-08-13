@@ -112,6 +112,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras
 
+      # Bundle the official Ladybug JSON extension binaries into the wheel so
+      # installs never download them from extension.ladybugdb.com at runtime
+      # (see cognee_db_workers/ladybug_extensions/README.md).
+      - name: Fetch Ladybug JSON extension binaries
+        run: ./scripts/fetch_ladybug_json_extension.sh v0.18.1
+
       - name: Build distributions
         run: uv build
 
