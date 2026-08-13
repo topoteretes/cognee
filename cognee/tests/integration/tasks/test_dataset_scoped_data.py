@@ -18,8 +18,7 @@ ingestion layer (no cognify, no LLM):
      by the pre-fork id works through the real API — after an update;
   10. dlt-derived ids are dataset-scoped: the same dlt row in two datasets is
      two id families, and pre-scoping rows are adopted in their own dataset
-     only. (Legacy-row semantics live in the backfill migration test:
-     tests/unit/modules/data/test_dataset_scoped_backfill.py.)
+     only.
 
 Runs on the default local stack (sqlite), no API keys.
 """
