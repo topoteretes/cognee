@@ -290,7 +290,11 @@ async def run_benchmark(
         # With document-embedding replay active, embeddings are handled there;
         # only the LLM gets the built-in mock treatment.
         _install_mocks(mock_data, mock_embeddings=not document_embeddings_file)
-        print("Mock LLM mode enabled" if document_embeddings_file else "Mock LLM/embedding mode enabled")
+        print(
+            "Mock LLM mode enabled"
+            if document_embeddings_file
+            else "Mock LLM/embedding mode enabled"
+        )
     if document_embeddings_file:
         _install_document_embedding_mock(Path(document_embeddings_file))
 
