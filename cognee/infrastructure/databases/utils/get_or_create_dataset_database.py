@@ -91,9 +91,12 @@ async def get_or_create_dataset_database(
     if isinstance(dataset, str):
         from cognee.modules.data.methods import create_authorized_dataset
 
-        async with db_engine.get_async_session() as session:
-            if isinstance(dataset, str):
-                dataset = await create_authorized_dataset(dataset, user)
+        # create_authorized_dataset opens its own relational session (and so does
+        # the permission grant it performs). Don't wrap it in an extra session
+        # here: that outer connection was never used, and holding it idle while
+        # the callee acquires more connections deadlocks the pool under
+        # concurrency (same class as #4197).
+        dataset = await create_authorized_dataset(dataset, user)
 
     # If dataset database already exists return it
     existing_dataset_database = await _existing_dataset_database(dataset_id, user)

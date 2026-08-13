@@ -34,9 +34,6 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_attach_inputs,
 )
 
-from distributed.utils import override_distributed
-from distributed.tasks.queued_add_nodes import queued_add_nodes
-from distributed.tasks.queued_add_edges import queued_add_edges
 
 from .neo4j_metrics_utils import (
     get_avg_clustering,
@@ -204,6 +201,13 @@ class Neo4jAdapter(GraphDBInterface):
         # add_nodes/add_edges does not need it).
         self._source_ref_change_lock = asyncio.Lock()
 
+    async def close(self) -> None:
+        """
+        Close the underlying Neo4j driver connection pool.
+        """
+        if hasattr(self, "driver") and self.driver is not None:
+            await self.driver.close()
+
     async def initialize(self) -> None:
         """
         Initializes the database: adds uniqueness constraint on id and performs indexing
@@ -219,10 +223,6 @@ class Neo4jAdapter(GraphDBInterface):
         """
         async with self.driver.session(database=self.graph_database_name) as session:
             yield session
-
-    async def close(self) -> None:
-        """Close the underlying Neo4j driver and its connection pool."""
-        await self.driver.close()
 
     async def is_empty(self) -> bool:
         """Return True if the graph contains no data nodes.
@@ -342,7 +342,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @override_distributed(queued_add_nodes)
     async def add_nodes(
         self,
         nodes: list[DataPoint],
@@ -1165,7 +1164,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @override_distributed(queued_add_edges)
     async def add_edges(
         self,
         edges: list[tuple[str, str, str, dict[str, Any]]],
@@ -2138,19 +2136,21 @@ class Neo4jAdapter(GraphDBInterface):
         query_edges = f"""
         MATCH (n)-[r]->(m)
         WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
-        RETURN n.id AS source, n.id AS target, TYPE(r) AS type, properties(r) AS properties
+        RETURN n.id AS source, m.id AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result_edges = await self.query(query_edges)
 
-        edges = [
-            (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
-                record["type"],
-                _strip_provenance(record["properties"]),
+        edges = []
+        for record in result_edges:
+            properties = _strip_provenance(record["properties"] or {})
+            edges.append(
+                (
+                    properties.get("source_node_id", record["source"]),
+                    properties.get("target_node_id", record["target"]),
+                    record["type"],
+                    properties,
+                )
             )
-            for record in result_edges
-        ]
 
         return (nodes, edges)
 
@@ -2486,8 +2486,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = f"""
         MATCH (start_node:`{BASE_LABEL}`)-[relationship]->(end_node:`{BASE_LABEL}`)
-        RETURN start_node, properties(relationship) AS relationship_properties, end_node
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, type(relationship)
         SKIP $offset LIMIT $limit
+        RETURN start_node, properties(relationship) AS relationship_properties, end_node
         """
         results = await self.query(query, {"offset": offset, "limit": limit})
 

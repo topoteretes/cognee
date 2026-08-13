@@ -9,6 +9,7 @@ from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -32,6 +33,8 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.context_global_variables import session_user
 
 
@@ -59,6 +62,8 @@ async def get_search_type_retriever_instance(
 
     # Extract common defaults with fallback values from kwargs
     top_k = kwargs.get("top_k", 15)
+    if top_k is not None and top_k <= 0:
+        raise QueryValidationError(message="top_k must be a positive integer.")
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)
@@ -76,6 +81,10 @@ async def get_search_type_retriever_instance(
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+        SearchType.CODE: (
+            CodeRetriever,
+            {"config": retriever_specific_config},
+        ),
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
@@ -304,6 +313,7 @@ async def get_search_type_retriever_instance(
             },
         ),
         SearchType.CHUNKS_LEXICAL: (BM25ChunksRetriever, {"top_k": top_k}),
+        SearchType.GRAPH_REPORT: (GraphReportRetriever, {"top_n": top_k}),
         SearchType.CODING_RULES: (
             CodingRulesRetriever,
             {"rules_nodeset_name": node_name},

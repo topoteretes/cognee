@@ -11,7 +11,7 @@ to verify behaviour across the SDK.
 | Example | What you'll learn |
 |---|---|
 | [`demos/simple_cognee_example.py`](demos/simple_cognee_example.py) | Canonical `remember → recall` pipeline |
-| [`demos/remember_recall_improve_example.py`](demos/remember_recall_improve_example.py) | The v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
+| [`advanced_guides/remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | The v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
 | [`guides/agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with cognee memory |
 | [`guides/graph_visualization.py`](guides/graph_visualization.py) | Render the resulting knowledge graph |
 | [`demos/start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py) | Launch the cognee UI alongside the API server |
@@ -25,8 +25,9 @@ to verify behaviour across the SDK.
 | [`database_examples/`](database_examples/) | Smoke tests per supported backend | 5 |
 | [`demos/`](demos/) | Feature demos — broadest coverage | 22 |
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
-| [`integrations/`](integrations/) | Integrations Hub — first-class SaaS connectors (Gmail, …) | 1 |
+| [`integrations/`](integrations/) | Data-source connectors — installed from cognee-community | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
+| [`tutorials/`](tutorials/) | Step-by-step tutorials for common workflows (migration, ...) | 1 |
 
 Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
 
@@ -76,8 +77,8 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 |---|---|
 | [`simple_cognee_example.py`](demos/simple_cognee_example.py) | Canonical `remember → recall` pipeline (start here) |
 | [`comprehensive_example/cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | End-to-end with most features stitched together |
-| [`remember_recall_improve_example.py`](demos/remember_recall_improve_example.py) | v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
-| [`conversation_session_persistence_example.py`](demos/conversation_session_persistence_example.py) | Session memory persisted across runs |
+| [`remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
+| [`conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py) | Session memory persisted across runs |
 | [`session_feedback_example.py`](demos/session_feedback_example.py) | Capturing thumbs-up/down feedback on retrieval |
 | [`session_feedback_lifecycle_demo/backend/app.py`](demos/session_feedback_lifecycle_demo/backend/app.py) | Full feedback-loop backend (FastAPI + cognee) |
 | [`feedback_score_shifting_example.py`](demos/feedback_score_shifting_example.py) | How feedback nudges retrieval scores |
@@ -86,13 +87,12 @@ Most runnable demos and backend examples use the v1.0 memory API (`remember`, `r
 | [`custom_pipeline_single_object_example.py`](demos/custom_pipeline_single_object_example.py) | Run a custom pipeline on a single object |
 | [`dynamic_multiple_weighted_edges_example.py`](demos/dynamic_multiple_weighted_edges_example.py) | Many-to-many edges with per-edge weights |
 | [`nodeset_grouping_example.py`](demos/nodeset_grouping_example.py) | Group nodes into named sets for filtered retrieval |
-| [`temporal_awareness_example/temporal_awareness_example.py`](demos/temporal_awareness_example/temporal_awareness_example.py) | Time-aware retrieval (`Event` model) |
-| [`ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py) | Ontology as a constraining vocabulary for extraction |
+| [`temporal_awareness_example/temporal_awareness_example.py`](advanced_guides/temporal_awareness_example/temporal_awareness_example.py) | Time-aware retrieval (`Event` model) |
+| [`ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py) | Ontology as a constraining vocabulary for extraction |
 | [`web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py) | Crawl a URL and cognify the content |
 | [`dlt_ingestion_example.py`](demos/dlt_ingestion_example.py) | Ingest via [dlt](https://dlthub.com/) sources |
-| [`gmail_connector_example.py`](demos/gmail_connector_example.py) | "Ask my inbox" — Gmail connector (incremental + forget-on-delete) |
 | [`multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py) | Audio + image ingestion |
-| [`simple_document_qa/simple_document_qa_demo.py`](demos/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
+| [`simple_document_qa/simple_document_qa_demo.py`](advanced_guides/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
 | [`simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py) | SQL → graph (small schema) |
 | [`complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py) | SQL → graph (richer schema) |
 | [`schema_inventory_demo.py`](demos/schema_inventory_demo.py) | Schema and entity inventory visualization |
@@ -139,24 +139,24 @@ These are exploratory scripts; conventions evolve faster here than in `guides/` 
 Same scripts, indexed by what they demonstrate.
 
 ### Memory API (v1.0: remember / recall / improve / forget)
-- [`demos/remember_recall_improve_example.py`](demos/remember_recall_improve_example.py)
+- [`advanced_guides/remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py)
 - [`guides/agent_memory_quickstart.py`](guides/agent_memory_quickstart.py)
 - [`guides/improve_quickstart.py`](guides/improve_quickstart.py)
 - [`guides/recall_core.py`](guides/recall_core.py)
 
 ### Session memory & feedback
-- [`demos/conversation_session_persistence_example.py`](demos/conversation_session_persistence_example.py)
+- [`advanced_guides/conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py)
 - [`demos/session_feedback_example.py`](demos/session_feedback_example.py)
 - [`demos/session_feedback_lifecycle_demo/backend/app.py`](demos/session_feedback_lifecycle_demo/backend/app.py)
 - [`demos/feedback_score_shifting_example.py`](demos/feedback_score_shifting_example.py)
 - [`guides/importance_weight.py`](guides/importance_weight.py)
 
 ### Temporal awareness
-- [`demos/temporal_awareness_example/temporal_awareness_example.py`](demos/temporal_awareness_example/temporal_awareness_example.py)
+- [`advanced_guides/temporal_awareness_example/temporal_awareness_example.py`](advanced_guides/temporal_awareness_example/temporal_awareness_example.py)
 - [`guides/temporal_recall.py`](guides/temporal_recall.py)
 
 ### Ontology
-- [`demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py)
+- [`advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py)
 - [`guides/ontology_quickstart.py`](guides/ontology_quickstart.py)
 
 ### Multimedia & non-text ingestion
@@ -164,9 +164,9 @@ Same scripts, indexed by what they demonstrate.
 - [`demos/web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py)
 - [`demos/dlt_ingestion_example.py`](demos/dlt_ingestion_example.py)
 
-### Connectors / Integrations Hub
-- [`integrations/`](integrations/) — first-class SaaS connectors (DLT-based)
-- [`demos/gmail_connector_example.py`](demos/gmail_connector_example.py) — Gmail ("ask my inbox")
+### Connectors / Integrations
+- [`integrations/`](integrations/) — data-source connectors (installed from cognee-community)
+- [`tutorials/migrate_from_mem0_tutorial.py`](tutorials/migrate_from_mem0_tutorial.py) — import mem0 memories into Cognee
 
 ### SQL → knowledge graph
 - [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
@@ -226,7 +226,7 @@ uv run python examples/demos/simple_cognee_example.py
 ```
 
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
-[the cognee docs](https://docs.cognee.ai) and `.env.template`.
+[the cognee docs](https://docs.cognee.ai), the [Ollama model matrix guide](../docs/ollama_models.md), and `.env.template`.
 
 ## 🤝 Contributing a new example
 

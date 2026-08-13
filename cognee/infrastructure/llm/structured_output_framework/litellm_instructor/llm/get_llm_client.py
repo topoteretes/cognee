@@ -64,6 +64,7 @@ class _LLMClientCacheKey:
     llama_cpp_n_ctx: int
     llama_cpp_n_gpu_layers: int
     llama_cpp_chat_format: str
+    ollama_num_ctx: int
 
 
 # Define an Enum for LLM Providers
@@ -90,6 +91,8 @@ class LLMProvider(Enum):
     AZURE = "azure"
     BEDROCK = "bedrock"
     LLAMA_CPP = "llama_cpp"
+    # Delegates completions to the host harness via MCP sampling (no API key).
+    MCP_SAMPLING = "mcp-sampling"
 
 
 _API_KEY_REQUIRED_PROVIDERS = {
@@ -178,6 +181,7 @@ def _build_llm_client_cache_key(llm_config, max_completion_tokens: int) -> _LLMC
         llama_cpp_n_ctx=llm_config.llama_cpp_n_ctx,
         llama_cpp_n_gpu_layers=llm_config.llama_cpp_n_gpu_layers,
         llama_cpp_chat_format=llm_config.llama_cpp_chat_format,
+        ollama_num_ctx=llm_config.ollama_num_ctx,
     )
 
 
@@ -251,13 +255,14 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
 
     elif provider == LLMProvider.OLLAMA:
         return OllamaAPIAdapter(
-            cache_key.endpoint,
-            llm_api_key,
-            cache_key.model,
-            "Ollama",
-            max_completion_tokens,
+            endpoint=cache_key.endpoint,
+            api_key=llm_api_key,
+            model=cache_key.model,
+            name="Ollama",
+            max_completion_tokens=max_completion_tokens,
             instructor_mode=cache_key.instructor_mode,
             llm_args=llm_args,
+            ollama_num_ctx=cache_key.ollama_num_ctx,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -354,6 +359,18 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             chat_format=cache_key.llama_cpp_chat_format,
             llm_args=llm_args,
         )
+
+    elif provider == LLMProvider.MCP_SAMPLING:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling.adapter import (
+            MCPSamplingAdapter,
+        )
+
+        # No API key / endpoint: completions are delegated to the host MCP
+        # session. `model` is only a preference hint.
+        return MCPSamplingAdapter(
+            model=cache_key.model,
+            max_completion_tokens=max_completion_tokens,
+        )
     else:
         raise UnsupportedLLMProviderError(provider)
 
@@ -394,6 +411,8 @@ def get_llm_client(raise_api_key_error: bool = True) -> LLMInterface:
     if model_max_completion_tokens is not None:
         # Use the lower of the model's hard limit and the user's configured ceiling
         max_completion_tokens = min(model_max_completion_tokens, user_max)
+    elif provider == LLMProvider.OLLAMA:
+        max_completion_tokens = llm_config.ollama_num_ctx
     else:
         max_completion_tokens = user_max
 

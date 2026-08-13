@@ -15,8 +15,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project \
     --extra api --extra docs --extra evals --extra codegraph --extra ollama \
     --extra dev --extra neo4j --extra redis --extra postgres --extra aws \
-    --extra baml --extra distributed --extra deepeval --extra scraping \
-    --extra notebook --extra docling
+    --extra baml --extra deepeval --extra scraping \
+    --extra notebook --extra docling --extra turso
 
 # Marker file for container detection in cognee_setup
 RUN echo "test-machine" > /app/.anon_id

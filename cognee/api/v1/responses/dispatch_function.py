@@ -79,6 +79,7 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
         user=user,
         system_prompt_path=system_prompt_path,
         top_k=top_k if isinstance(top_k, int) else 15,
+        code_query=arguments.get("code_query"),
     )
 
     return results
