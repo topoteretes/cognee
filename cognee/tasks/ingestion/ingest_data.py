@@ -203,8 +203,7 @@ async def ingest_data(
                         dataset.id,
                     )
                     raise IngestionError(
-                        f"Data id {data_point.id} is not available in dataset {dataset.id}; "
-                        f"refusing to touch it."
+                        f"Data id {data_point.id} is not available in dataset {dataset.id}."
                     )
 
                 data_point.name = original_file_metadata["name"]
