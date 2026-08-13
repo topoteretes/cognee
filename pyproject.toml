@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.4.1.dev1"
+version = "1.4.2"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -67,7 +67,6 @@ dependencies = [
     # version-comparing platform_release crashes pip on Linux kernels like
     # "6.8.0-45-generic" (packaging.version.InvalidVersion).
     "ladybug>=0.16.0,<=0.18.2 ; sys_platform != 'darwin' or platform_release >= '24.'",
-    "ladybug>=0.16.0,<0.18 ; sys_platform == 'darwin' and platform_release < '24.'",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",

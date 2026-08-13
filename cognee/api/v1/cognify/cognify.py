@@ -63,7 +63,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     functional_relationships: Optional[Collection[str]] = None,
-    data_per_batch: int = 20,
+    data_per_batch: int = 2000,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = True,
