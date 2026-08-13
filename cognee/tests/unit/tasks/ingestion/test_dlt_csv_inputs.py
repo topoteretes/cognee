@@ -21,6 +21,10 @@ from types import SimpleNamespace
 
 import pytest
 
+# The unit CI matrices install the base extras only — dlt is optional there,
+# and the resolve_dlt_sources import chain below pulls dlt at module level.
+pytest.importorskip("dlt")
+
 import cognee.infrastructure.files.utils.open_data_file as open_data_file_module
 from cognee.tasks.ingestion.create_dlt_source import (
     create_dlt_source_from_csv,
