@@ -223,9 +223,7 @@ async def validate(
     if dataset_names:
         authorized = await get_authorized_existing_datasets(dataset_names, "read", user)
         if len(authorized) != len(dataset_names):
-            raise DatasetNotFoundError(
-                message="Dataset not found or not readable."
-            )
+            raise DatasetNotFoundError(message="Dataset not found or not readable.")
         resolved_dataset = authorized[0]
 
     async with set_database_global_context_variables(
