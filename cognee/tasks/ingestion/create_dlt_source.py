@@ -56,34 +56,57 @@ def create_dlt_source_from_connection_string(
     return source
 
 
-# fsspec-style URL scheme (s3://, gs://, az://, file://, memory://, ...).
-# http(s) is already excluded by is_csv_path. A URL must NOT go through
-# os.path.abspath below — abspath treats "s3://bucket/x.csv" as a relative
-# local path and mangles it into "<cwd>/s3:/bucket/x.csv".
-_URL_SCHEME = re.compile(r"^[a-z0-9]+://", re.IGNORECASE)
+def is_remote_csv_path(data: str) -> bool:
+    """A CSV living behind cognee's remote storage layer (currently S3)."""
+    return is_csv_path(data) and data.startswith("s3://")
+
+
+async def download_csv_for_staging(csv_url: str, temp_dir: str) -> str:
+    """Localize a remote CSV through cognee's file layer for dlt staging.
+
+    The storage layer (``open_data_file`` -> ``S3FileStorage``) owns the
+    local-vs-S3 distinction and the credentials: cognee's ``S3Config``
+    (access key / endpoint / profile / session token) or the IAM chain —
+    never a parallel fsspec configuration. dlt's staging reader then treats
+    the result like any local CSV, keeping one read path and identical
+    typing behavior for both origins.
+    """
+    from uuid import uuid4
+
+    from cognee.infrastructure.files.utils.open_data_file import open_data_file
+
+    filename = csv_url.rpartition("/")[2]
+    # Per-download subdirectory: two sources may share a filename.
+    local_dir = os.path.join(temp_dir, uuid4().hex)
+    os.makedirs(local_dir)
+    local_path = os.path.join(local_dir, filename)
+
+    async with open_data_file(csv_url, mode="rb") as remote_file:
+        content = remote_file.read()
+    with open(local_path, "wb") as local_file:
+        local_file.write(content)
+
+    return local_path
 
 
 def create_dlt_source_from_csv(csv_path: str):
-    """Auto-generate a dlt resource from a CSV file path or fsspec URL.
+    """Auto-generate a dlt resource from a local CSV file path.
 
-    Local paths are resolved to absolute file:// URLs. URL inputs (s3://,
-    gs://, az://, file://, ...) are split into parent-URL + filename and
-    passed to dlt's filesystem source as-is; the protocol's fsspec backend
-    must be installed (s3 ships with the ``aws`` extra) and credentials come
-    from the standard environment (e.g. AWS_ACCESS_KEY_ID / _SECRET / region
-    for s3).
+    Accepts plain paths and ``file://`` URLs. Remote CSVs (s3://) must be
+    localized first via ``download_csv_for_staging`` — resolve_dlt_sources
+    does this — so this function never needs to know about remote backends.
     """
     from dlt.sources.filesystem import filesystem, read_csv
 
-    if _URL_SCHEME.match(csv_path):
-        bucket_url, _, filename = csv_path.rpartition("/")
-    else:
-        bucket_url = f"file://{os.path.dirname(os.path.abspath(csv_path))}"
-        filename = os.path.basename(csv_path)
+    if csv_path.startswith("file://"):
+        csv_path = csv_path[len("file://") :]
+
+    parent_dir = os.path.dirname(os.path.abspath(csv_path))
+    filename = os.path.basename(csv_path)
 
     return (
         filesystem(
-            bucket_url=bucket_url,
+            bucket_url=f"file://{parent_dir}",
             file_glob=filename,
         )
         | read_csv()

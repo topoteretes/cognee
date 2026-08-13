@@ -11,6 +11,7 @@ dlt_utils.document_source_tag)."""
 
 import hashlib
 import json
+import tempfile
 from typing import Any, Callable, List, Optional, Set
 from uuid import UUID
 
@@ -21,8 +22,10 @@ from cognee.shared.logging_utils import get_logger
 from .create_dlt_source import (
     is_connection_string,
     is_csv_path,
+    is_remote_csv_path,
     create_dlt_source_from_connection_string,
     create_dlt_source_from_csv,
+    download_csv_for_staging,
 )
 from .config import get_ingestion_config
 from .data_item import DataItem
@@ -58,19 +61,14 @@ async def resolve_dlt_sources(
     the source, or ``None`` when there is nothing to clean up; the caller must
     await it *after* the fresh rows are committed.
     """
-    # Lazy-import DLT types so the dlt package is not a hard dependency
+    # Lazy-import gate so the dlt package is not a hard dependency.
     try:
-        from dlt.extract import DltResource, SourceFactory
-        from dlt.extract.source import DltSource
+        import dlt.extract  # noqa: F401 — presence check; resolution requires dlt
     except ImportError:
         # dlt not installed — nothing to resolve
         return data, None
 
-    primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
-    write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
     query = kwargs["query"] if "query" in kwargs else None
-    max_rows_per_table = kwargs.get("max_rows_per_table")
-    column_value_columns = kwargs.get("column_value_columns")
 
     # Normalise to list for uniform processing
     data_list = data if isinstance(data, list) else [data]
@@ -78,14 +76,44 @@ async def resolve_dlt_sources(
     # --- Auto-detect structured data (CSV paths / connection strings) ------
     # Per item, so a mixed add like [csv_path, note_path] routes the CSV to
     # the DLT manifest path instead of silently LLM-processing it as text.
-    data_list = [
-        create_dlt_source_from_csv(item)
-        if isinstance(item, str) and is_csv_path(item)
-        else create_dlt_source_from_connection_string(item, query=query)
-        if isinstance(item, str) and is_connection_string(item)
-        else item
-        for item in data_list
-    ]
+    # Remote CSVs (s3://) are localized through cognee's storage layer first
+    # (credentials come from S3Config / the IAM chain), so dlt's staging
+    # reader only ever sees local files. The temp copies live until the
+    # sources are consumed by staging ingestion below.
+    remote_csv_temp: Optional[tempfile.TemporaryDirectory] = None
+    converted_items: list = []
+    for item in data_list:
+        if isinstance(item, str) and is_csv_path(item):
+            if is_remote_csv_path(item):
+                if remote_csv_temp is None:
+                    remote_csv_temp = tempfile.TemporaryDirectory(prefix="cognee_dlt_csv_")
+                item = await download_csv_for_staging(item, remote_csv_temp.name)
+            converted_items.append(create_dlt_source_from_csv(item))
+        elif isinstance(item, str) and is_connection_string(item):
+            converted_items.append(create_dlt_source_from_connection_string(item, query=query))
+        else:
+            converted_items.append(item)
+    data_list = converted_items
+
+    try:
+        return await _resolve_converted_items(data_list, data, dataset_name, user, kwargs)
+    finally:
+        if remote_csv_temp is not None:
+            remote_csv_temp.cleanup()
+
+
+async def _resolve_converted_items(data_list, data, dataset_name: str, user: User, kwargs: dict):
+    """Split converted items into dlt/non-dlt, ingest the dlt sources into
+    staging, and build the expanded DataItems + deferred orphan cleanup.
+    Extracted from resolve_dlt_sources so the remote-CSV temp copies can be
+    scoped exactly to this consumption (see the try/finally above)."""
+    from dlt.extract import DltResource, SourceFactory
+    from dlt.extract.source import DltSource
+
+    primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
+    write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
+    max_rows_per_table = kwargs.get("max_rows_per_table")
+    column_value_columns = kwargs.get("column_value_columns")
 
     dlt_items = []
     non_dlt_items = []
