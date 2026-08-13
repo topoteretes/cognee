@@ -1,10 +1,17 @@
-"""Propose new topics from dense clusters of sink questions.
+"""Propose new topics from dense clusters of sink questions, and create topics.
 
-Phase 2 steps 8-10 of the recall-coverage spec. The sink is the honest answer for
-a question the taxonomy cannot place; a *dense group* of such questions is
-something else — evidence of a topic the owner has not accepted yet. This module
-turns those groups into ``pending`` suggestion rows and stops there: the topic id
-is minted on accept, which is what makes accepted topic ids stable across runs.
+Phase 2 of a recall-coverage run, plus the write path behind ``POST /topics``. The
+sink is the honest answer for a question the taxonomy cannot place; a *dense group*
+of such questions is something else — evidence of a topic the owner does not have
+yet. Suggestions are a **per-run output**: they are written as ``pending`` rows,
+frozen into the run's report as ``suggested_topics``, and the topic id is minted
+only when the owner posts the label — which is what makes accepted topic ids
+stable across runs.
+
+That posting is :func:`create_topic_from_label`, and it lives here rather than in
+the repository because it needs an embedding engine: a topic must store a real
+centroid, so a posted label is either matched to a pending suggestion (whose
+centroid is copied verbatim) or embedded to become one.
 
 Three decisions worth stating outright, because each has a tempting wrong version:
 
@@ -18,13 +25,16 @@ Three decisions worth stating outright, because each has a tempting wrong versio
   duplicate.
 * **``cohesion`` orders candidates and is never scored.** It is the mean
   intra-cluster cosine: useful for "propose the tightest five first", meaningless
-  as a quality number about memory, and deliberately absent from every aggregate.
+  as a quality number about memory, and therefore stored but never returned.
 * **The re-proposal guard is owner-scoped, spanning agent labels.** Dismissing a
   suggestion is a statement about the owner's taxonomy, not about one tool, so a
   suggestion dismissed on the Codex run must not reappear on the Claude Code run.
   ``agent_label`` on a suggestion is provenance only. A *pending* suggestion from
   another run is not consulted: it has not been decided, so re-surfacing the same
-  theme is correct rather than noise.
+  theme is correct rather than noise. Accepting a suggestion by posting its label
+  settles it, which is what stops the same theme being proposed forever — the
+  guard and ``POST /topics`` are two halves of one mechanism, and both go through
+  :func:`best_match` so they cannot disagree about what "the same theme" means.
 
 One LLM call per surviving cluster, and only for survivors — filtering, capping
 and the guard all run first, so a run that proposes nothing costs nothing.
@@ -38,14 +48,29 @@ from uuid import UUID
 import numpy as np
 from pydantic import BaseModel, Field, create_model
 
+from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
+    get_embedding_engine,
+)
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from cognee.modules.recall_coverage.config import (
+    RecallCoverageConfig,
+    get_recall_coverage_config,
+)
 from cognee.modules.recall_coverage.dedup import group_by_similarity
-from cognee.modules.recall_coverage.embedding import EmbeddingFingerprint
+from cognee.modules.recall_coverage.embedding import (
+    EmbeddingFingerprint,
+    embed_normalized,
+    engine_fingerprint,
+)
+from cognee.modules.recall_coverage.exceptions import EmptyTopicLabelError
 from cognee.modules.recall_coverage.repository import (
     SuggestionDraft,
     SuggestionRecord,
+    TopicRecord,
+    create_topic,
     create_topic_suggestions,
+    load_pending_suggestions,
     load_settled_suggestions,
 )
 from cognee.modules.recall_coverage.types import CoverageParams
@@ -163,36 +188,27 @@ def cluster_sink_questions(
     return clusters
 
 
-def drop_reproposed(
-    clusters: Sequence[SinkCluster],
-    settled: Sequence[SuggestionRecord],
-    *,
-    fingerprint: EmbeddingFingerprint,
-    suggestion_dedup_threshold: float,
-) -> list[SinkCluster]:
-    """Drop candidates that repeat a suggestion the owner already accepted or dismissed.
+def usable_by_fingerprint(
+    suggestions: Sequence[SuggestionRecord], fingerprint: EmbeddingFingerprint
+) -> list[SuggestionRecord]:
+    """The suggestions whose centroid the live engine can be compared against.
 
-    Without this, dismissing a suggestion does not stick: the same dense cluster
-    is in the sink next run and would be proposed again forever.
-
-    A settled suggestion stored under a different embedding fingerprint is
-    skipped with a warning rather than failing the run. Unlike a topic centroid —
-    which is scored against and therefore must fail (see
-    :func:`cognee.modules.recall_coverage.assign.require_matching_fingerprint`) —
-    a stale suggestion only weakens this filter, and the visible consequence is a
-    re-proposal the owner can dismiss again, not a wrong number.
+    A suggestion stored under a different embedding fingerprint is skipped with a
+    warning rather than failing anything. Unlike a topic centroid — which is scored
+    against and therefore must fail the run (see
+    :func:`cognee.modules.recall_coverage.assign.require_matching_fingerprint`) — a
+    stale suggestion only weakens a *match*, and the visible consequence is a
+    re-proposal the owner can dismiss again, or a posted label that mints a fresh
+    topic instead of accepting an old suggestion. Neither is a wrong number.
     """
-    if not clusters or not settled:
-        return list(clusters)
-
     usable: list[SuggestionRecord] = []
-    for suggestion in settled:
+    for suggestion in suggestions:
         if suggestion.embedding_model != fingerprint.model or (
             fingerprint.dimensions > 0 and suggestion.embedding_dimensions != fingerprint.dimensions
         ):
             logger.warning(
-                "recall_coverage: ignoring %s suggestion %s in the re-proposal guard; it was "
-                "embedded with %r/%s, the live engine is %r/%s",
+                "recall_coverage: ignoring %s suggestion %s; it was embedded with %r/%s, "
+                "the live engine is %r/%s",
                 suggestion.status,
                 suggestion.id,
                 suggestion.embedding_model,
@@ -202,24 +218,59 @@ def drop_reproposed(
             )
             continue
         usable.append(suggestion)
+    return usable
 
+
+def best_match(
+    vector: Sequence[float], suggestions: Sequence[SuggestionRecord], *, threshold: float
+) -> Optional[SuggestionRecord]:
+    """The suggestion closest to ``vector``, if it is at least ``threshold`` close.
+
+    The single definition of "this is the same theme as that suggestion", read by
+    both users of ``suggestion_dedup_threshold``: the re-proposal guard
+    (:func:`drop_reproposed`) and the accept path
+    (:func:`create_topic_from_label`). Two copies would drift, and the symptom would
+    be a suggestion that a posted label cannot accept but the next run still
+    suppresses.
+
+    ``vector`` and every centroid are L2-normalized, so the dot product is the
+    cosine similarity. Suggestions of a different width are skipped — a stored
+    centroid that disagrees with its own recorded fingerprint cannot be compared —
+    and ``None`` comes back when nothing clears the threshold.
+    """
+    candidate = [float(value) for value in vector]
+    rows = [suggestion for suggestion in suggestions if len(suggestion.centroid) == len(candidate)]
+    if not candidate or not rows:
+        return None
+
+    matrix = np.asarray([list(suggestion.centroid) for suggestion in rows], dtype=float)
+    similarity = matrix @ np.asarray(candidate, dtype=float)
+    best = int(np.argmax(similarity))
+    return rows[best] if float(similarity[best]) >= threshold else None
+
+
+def drop_reproposed(
+    clusters: Sequence[SinkCluster],
+    settled: Sequence[SuggestionRecord],
+    *,
+    fingerprint: EmbeddingFingerprint,
+    suggestion_dedup_threshold: float,
+) -> list[SinkCluster]:
+    """Drop candidates that repeat a suggestion the owner already accepted or dismissed.
+
+    Without this, dismissing a suggestion does not stick: the same dense cluster is
+    in the sink next run and would be proposed again forever.
+    """
+    if not clusters or not settled:
+        return list(clusters)
+
+    usable = usable_by_fingerprint(settled, fingerprint)
     if not usable:
         return list(clusters)
 
-    width = max(len(cluster.centroid) for cluster in clusters)
-    settled_rows = [
-        list(suggestion.centroid) for suggestion in usable if len(suggestion.centroid) == width
-    ]
-    if not settled_rows:
-        return list(clusters)
-
-    settled_matrix = np.asarray(settled_rows, dtype=float)
-    candidate_matrix = np.asarray([list(cluster.centroid) for cluster in clusters], dtype=float)
-    similarity = candidate_matrix @ settled_matrix.T
-
     kept: list[SinkCluster] = []
-    for index, cluster in enumerate(clusters):
-        if float(np.max(similarity[index])) >= suggestion_dedup_threshold:
+    for cluster in clusters:
+        if best_match(cluster.centroid, usable, threshold=suggestion_dedup_threshold) is not None:
             logger.debug(
                 "recall_coverage: dropping a %s-question suggestion candidate already settled",
                 cluster.question_count,
@@ -378,13 +429,92 @@ async def suggest_topics(
     return await create_topic_suggestions(drafts)
 
 
+async def create_topic_from_label(
+    owner_id: UUID,
+    label: str,
+    *,
+    config: Optional[RecallCoverageConfig] = None,
+) -> tuple[TopicRecord, Optional[SuggestionRecord]]:
+    """Create one topic from a posted label, accepting a matching suggestion if there is one.
+
+    The write path behind ``POST /topics``, and the only way a topic id comes into
+    existence. Both of the PRD's flows go through it, because they are the same act
+    from the UI's side — the owner types or clicks a name:
+
+    * **The label matches a pending suggestion** (within
+      ``suggestion_dedup_threshold``, by :func:`best_match` over the embedded
+      label). The suggestion's centroid, model and dimensions are copied
+      **verbatim** and the suggestion is marked accepted and linked. Verbatim
+      because re-embedding the label would put the topic somewhere other than the
+      cluster that motivated it, and the link is what stops the same theme being
+      proposed again next run.
+    * **Nothing matches.** The topic's centroid *is* its label, embedded by the live
+      engine. Worth saying out loud: such a topic only attracts questions worded
+      like its name until real traffic drifts towards it. That is honest — it also
+      reports ``question_count: 0`` until something lands in it — and the remedy is
+      to delete it and accept a suggestion instead, not to widen the threshold.
+
+    A blank label raises :class:`EmptyTopicLabelError` (422). An embedding engine
+    that returns all-zero vectors (``MOCK_EMBEDDING=true``) raises
+    ``DegenerateEmbeddingError`` (500) rather than storing a centroid that is
+    cosine-0 to everything and would silently never match a question.
+
+    There is an accepted non-atomic window between the match and the write: two
+    concurrent posts of the same label can both mint a topic. Owner-scoped, so the
+    blast radius is one owner's taxonomy, and the casefold-exact duplicate check
+    inside :func:`cognee.modules.recall_coverage.repository.create_topic` closes the
+    common case — same reasoning as the user-defined question duplicate guard.
+    """
+    text = (label or "").strip()
+    if not text:
+        raise EmptyTopicLabelError()
+
+    if config is None:
+        config = get_recall_coverage_config()
+
+    engine = get_embedding_engine()
+    fingerprint = engine_fingerprint(engine)
+    vector = (await embed_normalized(engine, [text]))[0]
+
+    pending = usable_by_fingerprint(await load_pending_suggestions(owner_id), fingerprint)
+    matched = best_match(vector, pending, threshold=config.suggestion_dedup_threshold)
+
+    if matched is not None:
+        logger.debug(
+            "recall_coverage: posted topic label %r accepts pending suggestion %s",
+            text,
+            matched.id,
+        )
+        topic = await create_topic(
+            owner_id,
+            text,
+            centroid=matched.centroid,
+            embedding_model=matched.embedding_model,
+            embedding_dimensions=matched.embedding_dimensions,
+            accepted_suggestion_id=matched.id,
+        )
+        return topic, matched
+
+    topic = await create_topic(
+        owner_id,
+        text,
+        centroid=[float(value) for value in vector],
+        embedding_model=fingerprint.model,
+        embedding_dimensions=fingerprint.dimensions or len(vector),
+    )
+    return topic, None
+
+
 __all__ = [
     "SinkCluster",
+    "best_match",
     "cluster_centroid",
     "cluster_cohesion",
     "cluster_sink_questions",
+    "create_topic_from_label",
     "drop_reproposed",
     "generate_topic_label",
     "suggest_topics",
     "topic_label_model",
+    "usable_by_fingerprint",
 ]

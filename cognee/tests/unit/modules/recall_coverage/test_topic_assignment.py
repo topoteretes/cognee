@@ -4,9 +4,9 @@ Four invariants, each protecting a number the report prints:
 
 * **Threshold AND margin.** A question that clears the threshold but sits between
   two topics goes to the sink, not to whichever topic won by a hair — a coin flip
-  there moves two ``topics[].avg_score`` values.
-* **One question, one topic**, and the sink is the wire literal ``"other"``, never
-  a stored row.
+  there moves two ``topics[].memory_score`` values.
+* **One question, one topic**, and the sink is ``topic_id: null`` labelled
+  ``"Uncategorized"`` on the wire, never a stored row.
 * **A fingerprint mismatch fails the run.** Stored centroids are never re-embedded
   behind the operator's back: a cosine between two embedding spaces is a
   confident number about nothing.
@@ -36,7 +36,7 @@ from cognee.modules.recall_coverage.embedding import (
     normalize_rows,
 )
 from cognee.modules.recall_coverage.exceptions import EmbeddingFingerprintMismatchError
-from cognee.modules.recall_coverage.types import SINK_TOPIC_ID, SINK_TOPIC_LABEL
+from cognee.modules.recall_coverage.types import SINK_TOPIC_LABEL
 
 MODEL = "openai/text-embedding-3-large"
 FINGERPRINT = EmbeddingFingerprint(model=MODEL, dimensions=2)
@@ -79,10 +79,9 @@ def test_a_question_on_a_topic_is_assigned_to_it():
 
     assignment = result.assignments[0]
     assert assignment.topic_id == billing.id
-    assert assignment.topic_label == "Billing & invoices"
+    assert assignment.topic == "Billing & invoices"
     assert assignment.similarity > 0.99
     assert result.sink_indices == []
-    assert result.assigned_topic_ids == (billing.id,)
 
 
 def test_below_the_threshold_goes_to_the_sink():
@@ -101,10 +100,10 @@ def test_below_the_threshold_goes_to_the_sink():
     assignment = result.assignments[0]
     assert assignment.is_sink
     assert assignment.topic_id is None
-    assert assignment.topic_label == SINK_TOPIC_LABEL
-    assert assignment.wire_topic_id == SINK_TOPIC_ID
+    # The sink is reported with topic_id null and this label; there is no id
+    # literal for it, so nothing can address it as a topic.
+    assert assignment.topic == SINK_TOPIC_LABEL
     assert result.sink_indices == [0]
-    assert result.assigned_topic_ids == ()
 
 
 def test_a_question_between_two_topics_goes_to_the_sink_on_the_margin():
@@ -182,7 +181,6 @@ def test_each_question_gets_exactly_one_assignment_in_input_order():
     ]
     assert result.sink_indices == [2]
     assert result.sink_question_count == 1
-    assert set(result.assigned_topic_ids) == {billing.id, incidents.id}
 
 
 def test_no_topics_sends_every_question_to_the_sink():
@@ -196,8 +194,8 @@ def test_no_topics_sends_every_question_to_the_sink():
     )
 
     assert result.sink_indices == [0, 1]
-    assert all(assignment.wire_topic_id == SINK_TOPIC_ID for assignment in result.assignments)
-    assert result.assigned_topic_ids == ()
+    assert all(assignment.topic_id is None for assignment in result.assignments)
+    assert all(assignment.topic == SINK_TOPIC_LABEL for assignment in result.assignments)
 
 
 def test_no_questions_assigns_nothing():

@@ -24,6 +24,14 @@ from cognee.modules.search.types import SearchType
 # backend never mints from a prefix: "api" (unknown prefix, or no session at
 # all) and "all" (no session predicate at all).
 #
+# "ui" is reserved too, but unlike those two it *is* prefix-based: a human in the
+# cloud search box is ordinary recall traffic, distinguishable only by the
+# session id the frontend sends. It carries two prefixes — "search-ui-", what the
+# shipped frontend actually mints, and "ui_", reserved so a deployment-supplied
+# map keeps a stable name for the same thing. A deployment overriding
+# ``agent_prefix_map`` should keep the entry: dropping it does not merge UI
+# traffic into "api", it makes the label unresolvable.
+#
 # Kept as a code-level default rather than a settings field because
 # pydantic-settings has no mutable-collection default in this repo; the
 # ``agent_prefix_map`` field below overrides it with JSON when a deployment
@@ -38,7 +46,7 @@ DEFAULT_AGENT_PREFIX_MAP: dict[str, tuple[str, ...]] = {
     "cursor": ("cursor_",),
     "gemini": ("gemini_",),
     "cline": ("cline_",),
-    "ui": ("search-ui-",),
+    "ui": ("search-ui-", "ui_"),
 }
 
 # The search types that count as recall. CHUNKS, CHUNKS_LEXICAL, SUMMARIES,
@@ -64,13 +72,13 @@ class RecallCoverageConfig(BaseSettings):
     # Hard cap on observed question rows per run, newest first. This is also
     # what keeps dedup non-quadratic in history size: the matmul is bounded by
     # this number, not by an index (there is no ANN index in this repo).
-    max_questions: int = 150
+    max_questions: int = 500
     max_age_days: int = 30
     # Hard SQL LIMIT on the window fetch itself, far above ``max_questions``
     # because the collapse needs the raw rows to count retries and fan-outs.
     # Without it a busy deployment materializes every logged recall in the age
     # window as Python objects before the truncation runs; with it,
-    # ``recall_row_count`` stays honest via a COUNT(*) when the cap is hit.
+    # ``recall_count`` stays honest via a COUNT(*) when the cap is hit.
     window_row_cap: int = 50000
 
     # --- Collapse ----------------------------------------------------------
@@ -79,15 +87,15 @@ class RecallCoverageConfig(BaseSettings):
     # there is no fan-out counting rule.
     fanout_window_seconds: int = 5
     # Identical text from the same user against the same dataset inside this
-    # window counts as ONE ask: an agent retrying is not demand. A heuristic;
-    # what it swallowed is reported as ``collapsed_retry_count``.
+    # window counts as ONE ask: an agent retrying is not demand. A heuristic, and
+    # a lossy one — what it swallowed is not reported anywhere.
     retry_cooldown_seconds: int = 300
 
     # --- Dedup -------------------------------------------------------------
     # Cosine similarity above which two questions in the same
     # (user_id, dataset_id) partition are the same question. Not a free knob:
-    # once ``occurrence_count`` is displayed, this threshold *defines* the
-    # demand metric.
+    # ``relevance`` is a count of the questions this merged, so this threshold
+    # *defines* the demand metric rather than just tuning it.
     dedup_threshold: float = Field(default=0.92, ge=0.0, le=1.0)
 
     # --- Topic assignment --------------------------------------------------
@@ -106,11 +114,11 @@ class RecallCoverageConfig(BaseSettings):
     max_suggestions_per_run: int = 5
     topic_label_max_chars: int = 60
 
-    # --- Curated questions ---------------------------------------------------
-    # Cap per (owner, scope) bucket, enforced at creation. Curated questions are
-    # a per-run cost multiplier that ``max_questions`` does not bound: each one
-    # is replicated into every readable dataset partition and each row is a
-    # replay plus up to three judge LLM calls.
+    # --- User-defined questions ----------------------------------------------
+    # Cap per owner, enforced at creation. User-defined questions are a per-run
+    # cost multiplier that ``max_questions`` does not bound: each one is
+    # replicated into every readable dataset partition, and each resulting row is
+    # a replay plus a judge call plus an answer completion.
     max_curated_questions: int = 100
 
     # --- Replay ------------------------------------------------------------
@@ -121,21 +129,22 @@ class RecallCoverageConfig(BaseSettings):
     # --- Judge -------------------------------------------------------------
     judge_max_concurrent: int = 10
     judge_max_retries: int = 2
-    judge_score_max: int = 5
+    # Upper anchor of the 0-10 coverage rubric; the prompts under ``prompts/``
+    # describe the anchors. Every reported score is on this scale, so moving it
+    # rescales the whole report — which is why a run snapshots it.
+    judge_score_max: int = 10
     judge_reason_max_chars: int = 500
 
     # --- Aggregation -------------------------------------------------------
-    # A topic with fewer scored rows than this reports avg_score null and is
-    # excluded from overall_score, rather than letting one question speak for a
-    # whole topic.
+    # A topic with fewer scored rows than this reports memory_score null and is
+    # excluded from the run's memory_score, rather than letting one question speak
+    # for a whole topic.
     min_scored_questions_per_topic: int = 3
-    sink_share_alert: float = Field(default=0.30, ge=0.0, le=1.0)
-    sink_cluster_alert_size: int = 10
 
     # --- Ceilings on per-request overrides ---------------------------------
-    # ``POST /runs`` takes per-run parameter overrides, and the cost knobs are
-    # among them: the window size, the age window, the retrieval depth and the two
-    # concurrency limits each bill LLM calls or hold memory. Without an upper
+    # ``POST /api/v1/coverage`` takes per-run parameter overrides, and the cost
+    # knobs are among them: the window size, the age window, the retrieval depth and
+    # the two concurrency limits each bill LLM calls or hold memory. Without an upper
     # bound any authenticated caller can ask for a run nobody would start —
     # ``max_questions = 200000`` is a 200000 x 200000 similarity matrix before a
     # single LLM call — and the ``(owner, agent_label)`` in-flight guard bounds
@@ -165,18 +174,12 @@ class RecallCoverageConfig(BaseSettings):
 
     # --- Read endpoints ----------------------------------------------------
     runs_list_default_limit: int = 20
-    # "I don't show 10, only show the top five."
-    agents_list_default_limit: int = 5
 
     # --- Agent resolution --------------------------------------------------
     # JSON object mapping a tool label to a prefix string or a list of prefix
     # strings, e.g. '{"claude-code": ["claude_", "cc_"], "codex": "codex_"}'.
     # Empty (the default) means DEFAULT_AGENT_PREFIX_MAP.
     agent_prefix_map: str = ""
-    # Granularity of a minted label. Only "tool" is implemented: every session
-    # sharing a tool's prefix is one agent. Reserved so a future per-project
-    # granularity is a config change rather than a schema change.
-    agent_label_granularity: str = "tool"
 
     def prefix_map(self) -> dict[str, tuple[str, ...]]:
         """Return the effective label -> prefixes map.
@@ -279,13 +282,9 @@ class RecallCoverageConfig(BaseSettings):
             "judge_score_max": self.judge_score_max,
             "judge_reason_max_chars": self.judge_reason_max_chars,
             "min_scored_questions_per_topic": self.min_scored_questions_per_topic,
-            "sink_share_alert": self.sink_share_alert,
-            "sink_cluster_alert_size": self.sink_cluster_alert_size,
             "run_stale_after_seconds": self.run_stale_after_seconds,
             "override_ceilings": self.override_ceilings(),
             "runs_list_default_limit": self.runs_list_default_limit,
-            "agents_list_default_limit": self.agents_list_default_limit,
-            "agent_label_granularity": self.agent_label_granularity,
             "query_types": self.query_types(),
             "agent_prefix_map": {
                 label: list(prefixes) for label, prefixes in self.prefix_map().items()

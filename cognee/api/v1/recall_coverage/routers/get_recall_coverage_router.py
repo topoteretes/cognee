@@ -1,36 +1,37 @@
-"""HTTP router for recall coverage — the twelve routes of spec section 5.
+"""HTTP router for recall coverage — the ten routes mounted at ``/api/v1/coverage``.
 
 Given an agent (a tool such as Claude Code or Codex), replay the questions it
 recently asked, judge whether memory could answer them, and report where the gaps
-are. Runs are always background: ``POST /runs`` inserts a ``pending`` row,
-schedules the coroutine and returns **202**; ``GET /runs/{run_id}`` is the main
-read.
+are. Runs are always background: ``POST /api/v1/coverage`` inserts a ``pending``
+row, schedules the coroutine and returns **202**; ``GET /runs/{run_id}`` is the
+main read.
 
 Four rules hold across every route here:
 
 * **Response models are plain ``pydantic.BaseModel``, never ``OutDTO``.** ``OutDTO``
   sets ``alias_generator=to_camel`` and FastAPI serializes response models *by
-  alias*, so an ``OutDTO`` here would emit ``topicId`` / ``judgeScore`` and break
+  alias*, so an ``OutDTO`` here would emit ``topicId`` / ``coverageScore`` and break
   the agreed snake_case wire contract (see ``cognee/api/DTO.py``). Request bodies
   do use ``InDTO``, which accepts both cases — that is a convenience on the way in,
   and it does not touch what goes out.
 * **The report is read from the run's frozen ``summary``**, never recomputed.
   Recomputing would let a deleted topic, or an owner losing access to a dataset,
   silently reshape a historical run and destroy the trend that stable topic ids
-  exist to carry.
+  exist to carry. Every read of it goes through ``.get``, so an unfinished run
+  renders as "no numbers yet" instead of raising.
 * **Authorisation is owner scope, not ``Depends(get_authenticated_user)`` alone.**
   That dependency falls back to the default user when authentication is optional,
   so every id-keyed route filters on **both** id and owner scope and 404s on a
   mismatch — never 403, which would confirm that another owner's row with that id
   exists. Errors are raised as ``CogneeApiError`` subclasses and turned into
   responses by the global handler in ``cognee/api/client.py``.
-* **An unknown ``agent_label`` is a 404; a valid label with no traffic is an empty
+* **An unknown ``agent_label`` is a 422; a valid label with no traffic is an empty
   run, not an error.** A typo must not be indistinguishable from "this agent has
   asked nothing yet", which is a legitimate answer — and the expected one for
   prefix labels over history rows that predate ``Query.session_id``.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, Mapping, Optional, Sequence
 from uuid import UUID
 
@@ -40,39 +41,31 @@ from pydantic import BaseModel, Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
 from cognee.modules.recall_coverage.agent_scope import resolve_agent_scope
-from cognee.modules.recall_coverage.aggregate import PERCENT
-from cognee.modules.recall_coverage.agents import agent_window_counts
 from cognee.modules.recall_coverage.config import (
     RecallCoverageConfig,
     get_recall_coverage_config,
 )
-from cognee.modules.recall_coverage.pipeline import build_params, start_recall_coverage_run
+from cognee.modules.recall_coverage.pipeline import start_recall_coverage_run
 from cognee.modules.recall_coverage.repository import (
-    BenchmarkCell,
     CuratedQuestion,
     QuestionRecord,
     RunRecord,
-    SuggestionRecord,
     TopicRecord,
-    accept_topic_suggestion,
-    benchmark_cells,
     create_curated_question,
-    curated_owner_ids,
-    current_taxonomy_version,
     delete_curated_question,
     delete_topic,
     dismiss_topic_suggestion,
     get_run,
-    latest_complete_runs,
     list_curated_questions,
     list_runs,
     list_topics,
-    load_pending_suggestions,
     load_run_questions,
+    owner_scope_ids,
     parse_topic_id,
-    visible_user_ids,
+    topic_question_counts,
 )
-from cognee.modules.recall_coverage.types import SINK_TOPIC_ID, SINK_TOPIC_LABEL, RunStatus
+from cognee.modules.recall_coverage.suggest import create_topic_from_label
+from cognee.modules.recall_coverage.types import SINK_TOPIC_LABEL, RunStatus
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -90,85 +83,119 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-class RunInfo(BaseModel):
-    """One ``recall_coverage_runs`` row, counters included."""
+class StartedRun(BaseModel):
+    """The receipt for a scheduled run: enough to poll it, and nothing else.
+
+    No counters and no score — the row is ``pending`` and has neither yet. The
+    caller polls ``GET /runs/{run_id}`` with the id returned here.
+    """
 
     run_id: str
-    agent_label: str
     status: str
+    agent_label: str
+    created_at: Optional[datetime] = None
+
+
+class RunListItem(BaseModel):
+    """One row of the run history: identity, lifecycle and the headline number.
+
+    ``memory_score`` comes from the run's frozen summary, which is what makes this
+    list a trend rather than a log. It is null on a run that has not finished, and
+    on a finished one where nothing was scored.
+
+    A failed run appears here with ``status: "failed"`` and no score, but not with
+    its reason: ``error`` belongs to the detail route, where the rest of the
+    diagnosis lives. A history list is a trend, and one long exception message per
+    row would be the widest column in it.
+    """
+
+    run_id: str
+    status: str
+    agent_label: str
     created_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    recall_row_count: int = 0
-    distinct_ask_count: int = 0
-    collapsed_retry_count: int = 0
-    question_row_count: int = 0
-    curated_question_count: int = 0
-    topic_count: int = 0
-    dataset_count: int = 0
-    user_count: int = 0
-    taxonomy_version: int = 0
+    question_count: int = 0
+    memory_score: Optional[float] = None
+
+
+class RunInfo(BaseModel):
+    """The ``run`` block of the report: the two counters plus the frozen ``params``.
+
+    ``recall_count`` counts raw recall rows in the window and ``question_count``
+    the rows this run judged, so a window truncated by ``window_row_cap`` is
+    visible in the report rather than only in the log. ``params`` is the snapshot
+    the run executed under, which is what keeps it readable after the deployment's
+    defaults move.
+
+    ``error`` is why a failed run failed, and null on every other status. It lives
+    here and not on the history list because this is the diagnosis route; without
+    it a failed run's only explanation would be the server log.
+    """
+
+    run_id: str
+    status: str
+    agent_label: str
+    created_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    question_count: int = 0
+    recall_count: int = 0
     params: Optional[dict] = None
-    # Why a failed run failed. Null on any other status; without it the only
-    # diagnosis path for a failed run would be the server log.
     error: Optional[str] = None
 
 
-class AlertItem(BaseModel):
-    """One thing worth telling the reader, as a stable code plus prose."""
+class TopicScoreItem(BaseModel):
+    """One topic's score. ``topic_id: null`` is the ``Uncategorized`` row.
 
-    code: str
-    message: str
+    The sink is a member of this list rather than a block of its own: it is the
+    residual of the same partition, and giving it its own shape made every reader
+    special-case it. ``memory_score`` is null below the scored-row minimum. The
+    sink reports its own average like any other row, but is left out of the run's
+    ``memory_score``: it is a gap in the taxonomy, so averaging it into the
+    headline would let an unplaceable question lower the score of a taxonomy that
+    never claimed to cover it.
+    """
+
+    topic_id: Optional[str] = None
+    topic: str = SINK_TOPIC_LABEL
+    question_count: int = 0
+    memory_score: Optional[float] = None
 
 
-class TopicCell(BaseModel):
-    """One topic's aggregate. ``avg_score`` is null below the scored-row minimum."""
+class SuggestedTopicItem(BaseModel):
+    """One topic this run proposed: accept it by label, dismiss it by id.
 
-    topic_id: str
+    A per-run output, frozen into the summary: the review queue moves as the owner
+    accepts and dismisses, and a historical run must keep showing what it proposed.
+
+    The two halves of the review are deliberately keyed differently, which is why
+    both a label and an id are here. Accepting goes through ``POST /topics`` with
+    the **label**, because typing a name and clicking a proposed one are the same
+    act and must mint the same kind of topic. Dismissing goes through
+    ``POST /suggestions/{suggestion_id}/dismiss`` with the **id**, because it
+    settles one specific proposed row rather than a name — and this list is the
+    only place a client can learn that id. ``suggestion_id`` is optional only
+    because every frozen field here is read defensively; a run written by this code
+    always carries it.
+    """
+
+    suggestion_id: Optional[str] = None
     label: str
     question_count: int = 0
-    scored_question_count: int = 0
-    avg_score: Optional[float] = None
-
-
-class SinkCell(BaseModel):
-    """The residual: questions the taxonomy could not place."""
-
-    topic_id: str = SINK_TOPIC_ID
-    label: str = SINK_TOPIC_LABEL
-    question_count: int = 0
-    scored_question_count: int = 0
-    share: Optional[float] = None
-    avg_score: Optional[float] = None
-    alerts: list[AlertItem] = Field(default_factory=list)
-
-
-class DatasetCell(BaseModel):
-    """One dataset's aggregate. ``dataset_id`` is null for the unscoped rows."""
-
-    dataset_id: Optional[str] = None
-    dataset_name: Optional[str] = None
-    question_count: int = 0
-    scored_question_count: int = 0
-    avg_score: Optional[float] = None
-
-
-class UserCell(BaseModel):
-    """One asker's aggregate. A run covers every user, and the UI filters."""
-
-    user_id: str
-    question_count: int = 0
-    scored_question_count: int = 0
-    avg_score: Optional[float] = None
 
 
 class QuestionRow(BaseModel):
     """One judged question row: ``(user_id, dataset_id, canonical text)``.
 
-    Raw rows, deliberately ungrouped — grouping and filtering are the UI's job,
-    which is what ``question_group_id`` is for. ``retrieval_context`` is stored but
-    not returned: it is up to ``store_context_max_chars`` per row, and shipping it
-    for every row would make the report an order of magnitude larger than the
-    numbers anyone came for.
+    Raw rows, deliberately ungrouped — grouping and filtering are the UI's job over
+    the flat table. ``retrieval_context`` is stored but not returned: it is up to
+    ``store_context_max_chars`` per row, and shipping it for every row would make
+    the report an order of magnitude larger than the numbers anyone came for. A row
+    the run could not judge simply carries ``coverage_score: null``.
+
+    ``agent`` is the label resolved from *this row's* originating session, not the
+    run's label: the default run covers ``all``, and narrowing one flat table to one
+    agent is the entire point. A ``user_defined`` row nobody asked has no session
+    and therefore no agent.
 
     ``answer`` is returned only on the **caller's own** rows. It is an LLM
     completion synthesized from the row user's private retrieval context — the
@@ -179,134 +206,64 @@ class QuestionRow(BaseModel):
     """
 
     question_id: str
-    question_group_id: Optional[str] = None
-    source: str
-    was_asked: bool
-    question_text: str
+    question: str
+    coverage_score: Optional[int] = None
+    relevance: int = 0
+    topic: str = SINK_TOPIC_LABEL
+    agent: Optional[str] = None
     user_id: str
     dataset_id: Optional[str] = None
     dataset_name: Optional[str] = None
     answer: Optional[str] = None
-    judge_score: Optional[int] = None
-    judge_answered: Optional[bool] = None
-    # Why the scores are null on this row, when they are.
-    error: Optional[str] = None
-    topic_id: str = SINK_TOPIC_ID
-    topic_label: str = SINK_TOPIC_LABEL
+    source: str
     first_asked_at: Optional[datetime] = None
     last_asked_at: Optional[datetime] = None
-    occurrence_count: int = 0
-    impact: Optional[float] = None
 
 
 class CoverageReport(BaseModel):
     """The full report for one run: the frozen summary plus its raw rows."""
 
     run: RunInfo
-    overall_score: Optional[float] = None
-    benchmark_score_pct: Optional[float] = None
-    unscoped_ask_share: Optional[float] = None
-    sink: SinkCell = Field(default_factory=SinkCell)
-    datasets: list[DatasetCell] = Field(default_factory=list)
-    users: list[UserCell] = Field(default_factory=list)
-    topics: list[TopicCell] = Field(default_factory=list)
+    memory_score: Optional[float] = None
+    topics: list[TopicScoreItem] = Field(default_factory=list)
+    suggested_topics: list[SuggestedTopicItem] = Field(default_factory=list)
     questions: list[QuestionRow] = Field(default_factory=list)
 
 
-class AgentSummary(BaseModel):
-    """One label with traffic in the window, plus its latest complete run."""
+class CreatedTopic(BaseModel):
+    """A minted topic. The id is created here and then never moves.
 
-    agent_label: str
-    recall_row_count: int = 0
-    latest_run: Optional[RunInfo] = None
-    overall_score: Optional[float] = None
-
-
-class TopicItem(BaseModel):
-    """One stored topic. ``deleted_at`` is set on a soft-deleted one."""
+    Stable because every later run assigns questions to it and the per-topic score
+    trend is keyed on it — which is why accepting a suggestion goes through this
+    same call rather than minting a second id for one theme.
+    """
 
     topic_id: str
-    label: str
-    seed_question_count: int = 0
-    taxonomy_version: int = 0
-    created_at: Optional[datetime] = None
-    deleted_at: Optional[datetime] = None
-
-
-class SuggestionItem(BaseModel):
-    """One topic suggestion. ``cohesion`` orders candidates and is never scored."""
-
-    suggestion_id: str
-    label: str
-    status: str
-    question_count: int = 0
-    cohesion: Optional[float] = None
-    agent_label: Optional[str] = None
-    run_id: Optional[str] = None
-    accepted_topic_id: Optional[str] = None
+    topic: str
     created_at: Optional[datetime] = None
 
 
-class TopicsResponse(BaseModel):
-    """The owner's taxonomy plus its undecided suggestions.
+class TopicItem(CreatedTopic):
+    """One stored topic, with how many questions the newest complete run put in it.
 
-    The pending suggestions travel with the topics rather than on a route of their
-    own: they are the only place the ids that ``POST /suggestions/{id}/accept``
-    takes come from, and a review screen shows both halves at once.
+    A count as of the last finished run, not a lifetime total: a lifetime total
+    would multiply by how often the owner happens to run coverage. A topic nothing
+    has landed in — a freshly created one above all — honestly reports 0.
     """
 
-    taxonomy_version: int = 0
-    topics: list[TopicItem] = Field(default_factory=list)
-    suggestions: list[SuggestionItem] = Field(default_factory=list)
+    question_count: int = 0
 
 
-class TaxonomyVersionResponse(BaseModel):
-    """What a delete returns: the owner's new, monotone taxonomy version."""
+class UserQuestionItem(BaseModel):
+    """One question a human said memory should answer.
 
-    taxonomy_version: int
-
-
-class CuratedQuestionItem(BaseModel):
-    """One human-added question. ``agent_label`` is null for a shared one."""
+    One flat list per owner: no scope and no agent label, because what a person
+    wants memory to answer is not a property of the tool that asks.
+    """
 
     question_id: str
-    scope: str
-    agent_label: Optional[str] = None
-    question_text: str
+    question: str
     created_at: Optional[datetime] = None
-
-
-class BenchmarkMatrixCell(BaseModel):
-    """One datasets x agents cell over shared curated rows only.
-
-    ``judge_score_max`` is the scale **this cell's run** executed under, which is
-    what ``score_pct`` is a percentage of. It is per cell rather than per matrix
-    because two labels' latest runs can have used different scales, and a run is
-    read on the scale that produced it.
-    """
-
-    agent_label: str
-    run_id: str
-    dataset_id: Optional[str] = None
-    dataset_name: Optional[str] = None
-    question_count: int = 0
-    scored_question_count: int = 0
-    avg_score: Optional[float] = None
-    judge_score_max: Optional[int] = None
-    score_pct: Optional[float] = None
-
-
-class BenchmarkMatrix(BaseModel):
-    """The benchmark matrix: which agent answers which dataset's questions.
-
-    The top-level ``judge_score_max`` is the **deployment's current** scale, i.e.
-    what a run started now would use. Each cell carries the scale of the run it
-    came from; those are the denominators behind ``score_pct``.
-    """
-
-    judge_score_max: int
-    agent_labels: list[str] = Field(default_factory=list)
-    cells: list[BenchmarkMatrixCell] = Field(default_factory=list)
 
 
 # --- request models (InDTO: accepts snake_case and camelCase) ----------------
@@ -318,8 +275,8 @@ class StartRunRequest(InDTO):
     agent_label: Optional[str] = Field(
         default=None,
         description=(
-            "Agent to analyse: a label from the configured prefix map, or the "
-            "literal 'api' / 'all'. Omitted means 'all'."
+            "Agent to analyse: a label from the configured prefix map (including "
+            "'ui'), or the literal 'api' / 'all'. Omitted means 'all'."
         ),
     )
     params: Optional[dict] = Field(
@@ -328,28 +285,19 @@ class StartRunRequest(InDTO):
     )
 
 
-class CreateCuratedQuestionRequest(InDTO):
+class CreateQuestionRequest(InDTO):
     """A question a human says memory should answer."""
 
-    question_text: str = Field(description="The question, as a human would ask it.")
-    scope: str = Field(
-        default="agent",
-        description=(
-            "'agent' (one agent_label, which is then required) or 'shared' (the "
-            "benchmark set, which forbids one)."
-        ),
-    )
-    agent_label: Optional[str] = Field(
-        default=None, description="Required when scope is 'agent', forbidden when it is 'shared'."
-    )
+    question: str = Field(description="The question, as a human would ask it.")
+
+
+class CreateTopicRequest(InDTO):
+    """A topic label: either typed by the owner, or a suggestion's label clicked."""
+
+    topic: str = Field(description="The topic name, as it should read in the report.")
 
 
 # --- mapping ------------------------------------------------------------------
-
-
-def _owner_scope(user: Any) -> tuple[UUID, ...]:
-    """Owner ids this caller may read: their own, plus their tenant's."""
-    return curated_owner_ids(user)
 
 
 def _run_error(run: RunRecord) -> Optional[str]:
@@ -365,36 +313,74 @@ def _run_error(run: RunRecord) -> Optional[str]:
     return str(error) if error else None
 
 
+def _summary_of(run: RunRecord) -> dict:
+    """The run's frozen report, or an empty mapping.
+
+    A pending run has no summary and a failed one carries ``{"error": ...}``, so
+    anything without ``topics`` is not a report and is read as "no numbers yet".
+    """
+    summary = run.summary if isinstance(run.summary, dict) else {}
+    return summary if "topics" in summary else {}
+
+
+def _started_run(run: RunRecord) -> StartedRun:
+    return StartedRun(
+        run_id=str(run.id),
+        status=run.status,
+        agent_label=run.agent_label,
+        created_at=run.created_at,
+    )
+
+
+def _run_list_item(run: RunRecord) -> RunListItem:
+    return RunListItem(
+        run_id=str(run.id),
+        status=run.status,
+        agent_label=run.agent_label,
+        created_at=run.created_at,
+        finished_at=run.finished_at,
+        question_count=run.question_count,
+        memory_score=_summary_of(run).get("memory_score"),
+    )
+
+
 def _run_info(run: RunRecord) -> RunInfo:
     return RunInfo(
         run_id=str(run.id),
-        agent_label=run.agent_label,
         status=run.status,
+        agent_label=run.agent_label,
         created_at=run.created_at,
         finished_at=run.finished_at,
-        recall_row_count=run.recall_row_count,
-        distinct_ask_count=run.distinct_ask_count,
-        collapsed_retry_count=run.collapsed_retry_count,
-        question_row_count=run.question_row_count,
-        curated_question_count=run.curated_question_count,
-        topic_count=run.topic_count,
-        dataset_count=run.dataset_count,
-        user_count=run.user_count,
-        taxonomy_version=run.taxonomy_version,
+        question_count=run.question_count,
+        recall_count=run.recall_count,
         params=run.params,
         error=_run_error(run),
     )
 
 
-def _summary_of(run: RunRecord) -> dict:
-    """The run's frozen summary, or an empty mapping.
+def _topic_score(cell: Mapping[str, Any]) -> TopicScoreItem:
+    """One frozen ``topics[]`` entry, read key by key.
 
-    A pending run has no summary and a failed one carries ``{"error": ...}``, so
-    every read below goes through ``.get`` — a report for an unfinished run must
-    render as "no numbers yet" rather than raise.
+    Field by field through ``.get`` rather than ``TopicScoreItem(**cell)``: the
+    summary is whatever the run that wrote it froze, and a report must render a
+    row from an older payload rather than 500 on a key that has since been renamed.
     """
-    summary = run.summary if isinstance(run.summary, dict) else {}
-    return summary if "topics" in summary or "sink" in summary else {}
+    topic_id = cell.get("topic_id")
+    return TopicScoreItem(
+        topic_id=None if topic_id is None else str(topic_id),
+        topic=str(cell.get("topic") or SINK_TOPIC_LABEL),
+        question_count=int(cell.get("question_count") or 0),
+        memory_score=cell.get("memory_score"),
+    )
+
+
+def _suggested_topic(cell: Mapping[str, Any]) -> SuggestedTopicItem:
+    suggestion_id = cell.get("suggestion_id")
+    return SuggestedTopicItem(
+        suggestion_id=None if suggestion_id is None else str(suggestion_id),
+        label=str(cell.get("label") or ""),
+        question_count=int(cell.get("question_count") or 0),
+    )
 
 
 def _topic_labels(summary: Mapping[str, Any]) -> dict[str, str]:
@@ -404,42 +390,36 @@ def _topic_labels(summary: Mapping[str, Any]) -> dict[str, str]:
     ``recall_coverage_topics`` precisely because a topic may since have been
     deleted, and the report must still name what it measured.
     """
-    labels = {
-        str(topic.get("topic_id")): str(topic.get("label", ""))
+    return {
+        str(topic.get("topic_id")): str(topic.get("topic") or SINK_TOPIC_LABEL)
         for topic in summary.get("topics", [])
         if topic.get("topic_id")
     }
-    labels[SINK_TOPIC_ID] = SINK_TOPIC_LABEL
-    return labels
 
 
 def _question_row(
     record: QuestionRecord, labels: Mapping[str, str], *, viewer_id: UUID
 ) -> QuestionRow:
-    topic_id = SINK_TOPIC_ID if record.topic_id is None else str(record.topic_id)
     return QuestionRow(
         question_id=str(record.id),
-        question_group_id=None
-        if record.question_group_id is None
-        else str(record.question_group_id),
-        source=record.source,
-        was_asked=record.was_asked,
-        question_text=record.question_text,
+        question=record.question,
+        coverage_score=record.coverage_score,
+        relevance=record.relevance,
+        # No stored topic_id means Uncategorized; an id the summary does not name
+        # means the same thing to a reader, and inventing a label would be worse.
+        topic=SINK_TOPIC_LABEL
+        if record.topic_id is None
+        else labels.get(str(record.topic_id), SINK_TOPIC_LABEL),
+        agent=record.agent_label,
         user_id=str(record.user_id),
         dataset_id=None if record.dataset_id is None else str(record.dataset_id),
         dataset_name=record.dataset_name,
         # Withheld on other users' rows: the answer is distilled from the row
         # user's private retrieval context. See the QuestionRow docstring.
         answer=record.answer if record.user_id == viewer_id else None,
-        judge_score=record.judge_score,
-        judge_answered=record.judge_answered,
-        error=record.error,
-        topic_id=topic_id,
-        topic_label=labels.get(topic_id, SINK_TOPIC_LABEL),
+        source=record.source,
         first_asked_at=record.first_asked_at,
         last_asked_at=record.last_asked_at,
-        occurrence_count=record.occurrence_count,
-        impact=record.impact,
     )
 
 
@@ -451,103 +431,36 @@ def _report(
 
     return CoverageReport(
         run=_run_info(run),
-        overall_score=summary.get("overall_score"),
-        benchmark_score_pct=summary.get("benchmark_score_pct"),
-        unscoped_ask_share=summary.get("unscoped_ask_share"),
-        sink=SinkCell(**summary["sink"]) if summary.get("sink") else SinkCell(),
-        datasets=[DatasetCell(**cell) for cell in summary.get("datasets", [])],
-        users=[UserCell(**cell) for cell in summary.get("users", [])],
-        topics=[TopicCell(**cell) for cell in summary.get("topics", [])],
+        memory_score=summary.get("memory_score"),
+        topics=[_topic_score(cell) for cell in summary.get("topics", [])],
+        suggested_topics=[_suggested_topic(cell) for cell in summary.get("suggested_topics", [])],
         questions=[_question_row(record, labels, viewer_id=viewer_id) for record in questions],
     )
 
 
-def _topic_item(topic: TopicRecord) -> TopicItem:
+def _created_topic(topic: TopicRecord) -> CreatedTopic:
+    return CreatedTopic(
+        topic_id=str(topic.id),
+        topic=topic.label,
+        created_at=topic.created_at,
+    )
+
+
+def _topic_item(topic: TopicRecord, counts: Mapping[UUID, int]) -> TopicItem:
     return TopicItem(
         topic_id=str(topic.id),
-        label=topic.label,
-        seed_question_count=topic.seed_question_count,
-        taxonomy_version=topic.taxonomy_version,
+        topic=topic.label,
         created_at=topic.created_at,
-        deleted_at=topic.deleted_at,
+        question_count=counts.get(topic.id, 0),
     )
 
 
-def _suggestion_item(suggestion: SuggestionRecord) -> SuggestionItem:
-    return SuggestionItem(
-        suggestion_id=str(suggestion.id),
-        label=suggestion.label,
-        status=suggestion.status,
-        question_count=suggestion.question_count,
-        cohesion=suggestion.cohesion,
-        agent_label=suggestion.agent_label,
-        run_id=None if suggestion.run_id is None else str(suggestion.run_id),
-        accepted_topic_id=None
-        if suggestion.accepted_topic_id is None
-        else str(suggestion.accepted_topic_id),
-        created_at=suggestion.created_at,
-    )
-
-
-def _curated_item(question: CuratedQuestion) -> CuratedQuestionItem:
-    return CuratedQuestionItem(
+def _question_item(question: CuratedQuestion) -> UserQuestionItem:
+    return UserQuestionItem(
         question_id=str(question.id),
-        scope=question.scope,
-        agent_label=question.agent_label,
-        question_text=question.question_text,
+        question=question.question,
         created_at=question.created_at,
     )
-
-
-def _matrix_cell(cell: BenchmarkCell, *, judge_score_max: int) -> BenchmarkMatrixCell:
-    """One cell, with the percentage of its own run's ``judge_score_max``."""
-    score_pct = (
-        None
-        if cell.avg_score is None or judge_score_max <= 0
-        else (cell.avg_score / judge_score_max) * PERCENT
-    )
-    return BenchmarkMatrixCell(
-        agent_label=cell.agent_label,
-        run_id=str(cell.run_id),
-        dataset_id=None if cell.dataset_id is None else str(cell.dataset_id),
-        dataset_name=cell.dataset_name,
-        question_count=cell.question_count,
-        scored_question_count=cell.scored_question_count,
-        avg_score=cell.avg_score,
-        judge_score_max=judge_score_max,
-        score_pct=score_pct,
-    )
-
-
-def _run_judge_score_max(run: RunRecord, default: int) -> int:
-    """The judge scale one run executed under, out of its frozen ``params``.
-
-    ``params`` is frozen on the run row precisely so a historical run stays
-    readable after the deployment's defaults move (spec section 14). Dividing a
-    stored mean by *today's* default instead would restate it silently: a run
-    judged 0..10 whose cell averages 8 reports 160% against a default of 5, and a
-    matrix mixing two labels whose runs used different scales would compare
-    numbers that are not on the same axis. The default is the fallback for a run
-    with no snapshot, which only pre-dates this column.
-    """
-    params = run.params if isinstance(run.params, dict) else {}
-    value = params.get("judge_score_max")
-    return (
-        int(value)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0
-        else default
-    )
-
-
-def _requested_labels(agent_labels: Optional[str], user: Any, config: Any) -> list[str]:
-    """Parse and validate ``?agent_labels=a,b,c``. An unknown label 404s."""
-    if not agent_labels or not agent_labels.strip():
-        return []
-    return [
-        resolve_agent_scope(part.strip(), user=user, config=config).label
-        for part in agent_labels.split(",")
-        if part.strip()
-    ]
 
 
 def _telemetry(event: str, user: Any, **properties: Any) -> None:
@@ -574,17 +487,18 @@ def get_recall_coverage_router() -> APIRouter:
         return get_recall_coverage_config()
 
     # 1 --------------------------------------------------------------------
-    @router.post("/runs", response_model=RunInfo, status_code=202, responses=_ERRORS)
+    @router.post("", response_model=StartedRun, status_code=202, responses=_ERRORS)
     async def start_run(
         payload: Optional[StartRunRequest] = None,
         user: User = Depends(get_authenticated_user),
-    ) -> RunInfo:
+    ) -> StartedRun:
         """Start a coverage run in the background and return its ``pending`` row.
 
         Always background — a run replays and judges every question row, which is
         minutes of LLM calls. **409** when a run for this ``(owner, agent_label)``
         is already pending or running: overlapping runs would multiply the cost and
-        race on the same taxonomy.
+        race on the same taxonomy. The guard is bounded by
+        ``run_stale_after_seconds``, because status is not liveness.
         """
         request = payload or StartRunRequest()
 
@@ -598,14 +512,14 @@ def get_recall_coverage_router() -> APIRouter:
         _telemetry(
             "Recall Coverage Run Started API Endpoint Invoked",
             user,
-            endpoint="POST /v1/recall-coverage/runs",
+            endpoint="POST /v1/coverage",
             agent_label=run.agent_label,
             run_id=str(run.id),
         )
-        return _run_info(run)
+        return _started_run(run)
 
     # 2 --------------------------------------------------------------------
-    @router.get("/runs", response_model=list[RunInfo], responses=_ERRORS)
+    @router.get("/runs", response_model=list[RunListItem], responses=_ERRORS)
     async def list_coverage_runs(
         agent_label: Optional[str] = Query(
             default=None, description="Narrow the list to one agent label."
@@ -616,8 +530,8 @@ def get_recall_coverage_router() -> APIRouter:
             description="Newest N runs. Defaults to runs_list_default_limit.",
         ),
         user: User = Depends(get_authenticated_user),
-    ) -> list[RunInfo]:
-        """The caller's runs, newest first."""
+    ) -> list[RunListItem]:
+        """The caller's runs, newest first — the score trend over time."""
         config = _config()
         label = (
             resolve_agent_scope(agent_label, user=user, config=config).label
@@ -626,11 +540,11 @@ def get_recall_coverage_router() -> APIRouter:
         )
 
         runs = await list_runs(
-            _owner_scope(user),
+            owner_scope_ids(user),
             label,
             limit=limit if limit is not None else config.runs_list_default_limit,
         )
-        return [_run_info(run) for run in runs]
+        return [_run_list_item(run) for run in runs]
 
     # 3 --------------------------------------------------------------------
     @router.get("/runs/{run_id}", response_model=CoverageReport, responses=_ERRORS)
@@ -640,263 +554,174 @@ def get_recall_coverage_router() -> APIRouter:
     ) -> CoverageReport:
         """The full report: the run's frozen summary plus its raw question rows.
 
-        The main read endpoint. Rows come back ungrouped, newest demand first,
-        curated rows pinned above observed ones; grouping and filtering are the
-        UI's job and ``question_group_id`` is what it groups on.
+        The main read endpoint. Rows come back ungrouped, user-defined rows pinned
+        above observed ones and then most-asked first; grouping and filtering are
+        the UI's job over one flat table.
         """
-        run = await get_run(run_id, _owner_scope(user))
+        run = await get_run(run_id, owner_scope_ids(user))
         questions = await load_run_questions(run.id)
 
         _telemetry(
             "Recall Coverage Report Read API Endpoint Invoked",
             user,
-            endpoint="GET /v1/recall-coverage/runs/{run_id}",
+            endpoint="GET /v1/coverage/runs/{run_id}",
             agent_label=run.agent_label,
             run_id=str(run.id),
         )
         return _report(run, questions, viewer_id=user.id)
 
     # 4 --------------------------------------------------------------------
-    @router.get("/agents", response_model=list[AgentSummary], responses=_ERRORS)
-    async def list_agents(
-        limit: Optional[int] = Query(
-            default=None,
-            ge=1,
-            description="Top N by window traffic. Defaults to agents_list_default_limit.",
-        ),
+    @router.post("/questions", response_model=UserQuestionItem, status_code=201, responses=_ERRORS)
+    async def add_user_question(
+        payload: CreateQuestionRequest,
         user: User = Depends(get_authenticated_user),
-    ) -> list[AgentSummary]:
-        """Labels that actually asked something, busiest first.
+    ) -> UserQuestionItem:
+        """Add a question memory should answer. **409** on a casefold-exact duplicate.
 
-        Discovered from traffic, never from a registry: an agent exists because it
-        asked something. Each row is left-joined to that label's latest **complete**
-        run, so a label with traffic but no finished run still appears — with a null
-        run rather than being hidden.
+        Refused rather than merged so the writer learns the question is already
+        covered; a silent merge would leave them believing they had added something.
+        **422** once the list holds ``max_curated_questions`` rows — a full list
+        makes the value unprocessable rather than the state conflicting — because
+        every row costs a replay, a judge call and an answer completion on every run.
         """
-        config = _config()
-        params = build_params(None, config)
-        since = datetime.now(timezone.utc) - timedelta(days=params.max_age_days)
+        question = await create_curated_question(user, payload.question, config=_config())
 
-        windows = await agent_window_counts(
-            since=since,
-            query_types=params.query_types,
-            config=config,
-            user_ids=await visible_user_ids(user),
+        _telemetry(
+            "Recall Coverage Question Added API Endpoint Invoked",
+            user,
+            endpoint="POST /v1/coverage/questions",
+            question_id=str(question.id),
         )
-        top = windows[: limit if limit is not None else config.agents_list_default_limit]
-
-        # Nothing to join when no label has traffic — and an empty label list would
-        # make ``latest_complete_runs`` fall back to "every label", which is a full
-        # scan to answer a question nobody asked.
-        latest = (
-            await latest_complete_runs(_owner_scope(user), [window.label for window in top])
-            if top
-            else {}
-        )
-
-        summaries: list[AgentSummary] = []
-        for window in top:
-            run = latest.get(window.label)
-            summaries.append(
-                AgentSummary(
-                    agent_label=window.label,
-                    recall_row_count=window.recall_row_count,
-                    latest_run=None if run is None else _run_info(run),
-                    overall_score=None if run is None else _summary_of(run).get("overall_score"),
-                )
-            )
-        return summaries
+        return _question_item(question)
 
     # 5 --------------------------------------------------------------------
-    @router.get("/topics", response_model=TopicsResponse, responses=_ERRORS)
-    async def get_topics(
-        include_deleted: bool = Query(default=False, description="Include soft-deleted topics."),
+    @router.get("/questions", response_model=list[UserQuestionItem], responses=_ERRORS)
+    async def get_user_questions(
         user: User = Depends(get_authenticated_user),
-    ) -> TopicsResponse:
-        """The owner's taxonomy plus its pending suggestions.
+    ) -> list[UserQuestionItem]:
+        """The caller's own questions, newest first. One flat list, no label filter."""
+        questions = await list_curated_questions(user)
+        return [_question_item(question) for question in questions]
+
+    # 6 --------------------------------------------------------------------
+    @router.delete("/questions/{question_id}", status_code=204, responses=_ERRORS)
+    async def remove_user_question(
+        question_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ) -> None:
+        """Delete one of the caller's questions. 404 outside their own list."""
+        await delete_curated_question(user, question_id)
+
+        _telemetry(
+            "Recall Coverage Question Deleted API Endpoint Invoked",
+            user,
+            endpoint="DELETE /v1/coverage/questions/{id}",
+            question_id=str(question_id),
+        )
+
+    # 7 --------------------------------------------------------------------
+    @router.post("/topics", response_model=CreatedTopic, status_code=201, responses=_ERRORS)
+    async def add_topic(
+        payload: CreateTopicRequest,
+        user: User = Depends(get_authenticated_user),
+    ) -> CreatedTopic:
+        """Create a topic — and accept a suggestion, when the label matches one.
+
+        One route for both of the UI's flows, because from the owner's side they are
+        one act: they type a name, or they click a proposed one. If the posted label
+        matches a pending suggestion within ``suggestion_dedup_threshold``, that
+        suggestion's centroid is copied verbatim and the suggestion is marked
+        accepted, which is what stops the theme being proposed again next run.
+        Otherwise the label is embedded and *is* the new topic's centroid, so it
+        only attracts questions worded like its name until traffic drifts towards it.
+
+        **422** on a blank label, **409** on a casefold-exact duplicate of an active
+        one: two topics with near-identical centroids cannot be separated by the
+        assignment margin rule, so every question about that theme would land in
+        ``Uncategorized`` instead — a duplicate label disables a topic rather than
+        adding one. **500** under ``MOCK_EMBEDDING=true``, which cannot produce a
+        centroid that means anything.
+        """
+        topic, accepted = await create_topic_from_label(user.id, payload.topic, config=_config())
+
+        _telemetry(
+            "Recall Coverage Topic Created API Endpoint Invoked",
+            user,
+            endpoint="POST /v1/coverage/topics",
+            topic_id=str(topic.id),
+            accepted_suggestion_id=None if accepted is None else str(accepted.id),
+        )
+        return _created_topic(topic)
+
+    # 8 --------------------------------------------------------------------
+    @router.get("/topics", response_model=list[TopicItem], responses=_ERRORS)
+    async def get_topics(
+        user: User = Depends(get_authenticated_user),
+    ) -> list[TopicItem]:
+        """The owner's taxonomy, oldest first, with each topic's question count.
 
         Owner-scoped and with **no ``agent_label`` parameter**: one taxonomy serves
         all of an owner's agents, which is what makes "Codex 4.2 on Billing, Claude
-        Code 2.1 on Billing" a sentence at all.
+        Code 2.1 on Billing" a sentence at all. Soft-deleted topics are never
+        listed — the row survives only so a historical run can still resolve the
+        topic id on its own question rows.
+
+        Pending suggestions are not here: they are a per-run output and travel in
+        the run report.
         """
-        owners = _owner_scope(user)
-        topics = await list_topics(owners, include_deleted=include_deleted)
-        suggestions = await load_pending_suggestions(user.id)
+        owners = owner_scope_ids(user)
+        topics = await list_topics(owners)
+        counts = await topic_question_counts(owners)
 
-        return TopicsResponse(
-            taxonomy_version=await current_taxonomy_version(user.id),
-            topics=[_topic_item(topic) for topic in topics],
-            suggestions=[_suggestion_item(suggestion) for suggestion in suggestions],
-        )
+        return [_topic_item(topic, counts) for topic in topics]
 
-    # 6 --------------------------------------------------------------------
-    @router.delete("/topics/{topic_id}", response_model=TaxonomyVersionResponse, responses=_ERRORS)
+    # 9 --------------------------------------------------------------------
+    @router.delete("/topics/{topic_id}", status_code=204, responses=_ERRORS)
     async def remove_topic(
         topic_id: str,
         user: User = Depends(get_authenticated_user),
-    ) -> TaxonomyVersionResponse:
-        """Soft-delete a topic and return the owner's new taxonomy version.
+    ) -> None:
+        """Soft-delete a topic. Idempotent, and nothing to report back.
 
-        **422** for the sink: ``"other"`` is a wire literal, not a row. The topic's
-        questions are never deleted — they fall back to the sink on the next run,
-        which is exactly the signal the sink exists to give.
+        The topic's questions are never deleted — they fall back to
+        ``Uncategorized`` on the next run, which is exactly the signal the
+        ``Uncategorized`` row exists to give. The path parameter is parsed here
+        rather than by FastAPI so an unparseable id is a 404 (it names nothing)
+        instead of a 422.
         """
         parsed = parse_topic_id(topic_id)
-        version = await delete_topic(parsed, _owner_scope(user))
+        await delete_topic(parsed, owner_scope_ids(user))
 
         _telemetry(
             "Recall Coverage Topic Deleted API Endpoint Invoked",
             user,
-            endpoint="DELETE /v1/recall-coverage/topics/{topic_id}",
+            endpoint="DELETE /v1/coverage/topics/{topic_id}",
             topic_id=str(parsed),
         )
-        return TaxonomyVersionResponse(taxonomy_version=version)
 
-    # 7 --------------------------------------------------------------------
-    @router.post("/suggestions/{suggestion_id}/accept", response_model=TopicItem, responses=_ERRORS)
-    async def accept_suggestion(
-        suggestion_id: UUID,
-        user: User = Depends(get_authenticated_user),
-    ) -> TopicItem:
-        """Accept a suggestion. **This call mints the topic id** and bumps the version.
-
-        **409** on an already decided suggestion: a second accept would mint a
-        second id for one theme and split its score trend in half.
-        """
-        topic, _suggestion = await accept_topic_suggestion(suggestion_id, _owner_scope(user))
-
-        _telemetry(
-            "Recall Coverage Suggestion Accepted API Endpoint Invoked",
-            user,
-            endpoint="POST /v1/recall-coverage/suggestions/{id}/accept",
-            suggestion_id=str(suggestion_id),
-            topic_id=str(topic.id),
-        )
-        return _topic_item(topic)
-
-    # 8 --------------------------------------------------------------------
-    @router.post(
-        "/suggestions/{suggestion_id}/dismiss", response_model=SuggestionItem, responses=_ERRORS
-    )
+    # 10 -------------------------------------------------------------------
+    @router.post("/suggestions/{suggestion_id}/dismiss", status_code=204, responses=_ERRORS)
     async def dismiss_suggestion(
         suggestion_id: UUID,
         user: User = Depends(get_authenticated_user),
-    ) -> SuggestionItem:
+    ) -> None:
         """Dismiss a suggestion, for good and across every agent label.
 
-        No version bump: nothing about the taxonomy changed. The row is kept
-        because it *is* the decision — the re-proposal guard reads it so the same
-        dense sink cluster is not proposed again on every run.
+        The id comes from ``suggested_topics[].suggestion_id`` in a run report,
+        which is the only place it is published — the accept half of the same
+        review is keyed on the label instead (``POST /topics``).
+
+        **409** on an already decided one. The row is kept because it *is* the
+        decision — the re-proposal guard reads it so the same dense cluster is not
+        proposed again on every run.
         """
-        suggestion = await dismiss_topic_suggestion(suggestion_id, _owner_scope(user))
+        await dismiss_topic_suggestion(suggestion_id, owner_scope_ids(user))
 
         _telemetry(
             "Recall Coverage Suggestion Dismissed API Endpoint Invoked",
             user,
-            endpoint="POST /v1/recall-coverage/suggestions/{id}/dismiss",
+            endpoint="POST /v1/coverage/suggestions/{id}/dismiss",
             suggestion_id=str(suggestion_id),
-        )
-        return _suggestion_item(suggestion)
-
-    # 9 --------------------------------------------------------------------
-    @router.post(
-        "/curated-questions",
-        response_model=CuratedQuestionItem,
-        status_code=201,
-        responses=_ERRORS,
-    )
-    async def add_curated_question(
-        payload: CreateCuratedQuestionRequest,
-        user: User = Depends(get_authenticated_user),
-    ) -> CuratedQuestionItem:
-        """Add a curated question. **409** on a casefold-exact duplicate in the scope.
-
-        Refused rather than merged so the writer learns the question is already
-        covered; a silent merge would leave them believing they had added something.
-        """
-        question = await create_curated_question(
-            user,
-            payload.question_text,
-            payload.scope,
-            payload.agent_label,
-            config=_config(),
-        )
-
-        _telemetry(
-            "Recall Coverage Curated Question Added API Endpoint Invoked",
-            user,
-            endpoint="POST /v1/recall-coverage/curated-questions",
-            scope=question.scope,
-            agent_label=question.agent_label,
-        )
-        return _curated_item(question)
-
-    # 10 -------------------------------------------------------------------
-    @router.get("/curated-questions", response_model=list[CuratedQuestionItem], responses=_ERRORS)
-    async def get_curated_questions(
-        agent_label: Optional[str] = Query(
-            default=None, description="Narrow the agent-scoped half to one label."
-        ),
-        user: User = Depends(get_authenticated_user),
-    ) -> list[CuratedQuestionItem]:
-        """The caller's agent-scoped rows plus every shared row, newest first."""
-        questions = await list_curated_questions(user, agent_label, config=_config())
-        return [_curated_item(question) for question in questions]
-
-    # 11 -------------------------------------------------------------------
-    @router.delete("/curated-questions/{question_id}", status_code=204, responses=_ERRORS)
-    async def remove_curated_question(
-        question_id: UUID,
-        user: User = Depends(get_authenticated_user),
-    ) -> None:
-        """Delete one curated question. 404 outside the caller's owner scope."""
-        await delete_curated_question(user, question_id)
-
-        _telemetry(
-            "Recall Coverage Curated Question Deleted API Endpoint Invoked",
-            user,
-            endpoint="DELETE /v1/recall-coverage/curated-questions/{id}",
-            question_id=str(question_id),
-        )
-
-    # 12 -------------------------------------------------------------------
-    @router.get("/summary", response_model=BenchmarkMatrix, responses=_ERRORS)
-    async def get_benchmark_summary(
-        agent_labels: Optional[str] = Query(
-            default=None,
-            description="Comma-separated agent labels. Omitted means every label with a run.",
-            examples=["claude-code,codex"],
-        ),
-        user: User = Depends(get_authenticated_user),
-    ) -> BenchmarkMatrix:
-        """The datasets x agents matrix, over **shared curated** rows only.
-
-        A direct ``GROUP BY`` over each label's latest complete run. Restricted to
-        the benchmark set because identical prompts across agents is the only reason
-        two agents' numbers compare at all — an agent-scoped curated row is one
-        person's list for one tool.
-        """
-        config = _config()
-        labels = _requested_labels(agent_labels, user, config)
-
-        latest = await latest_complete_runs(_owner_scope(user), labels or None)
-        run_ids = {label: run.id for label, run in latest.items()}
-
-        # Each cell is converted on the scale its own run executed under, never on
-        # the deployment's current default. See :func:`_run_judge_score_max`.
-        current_judge_score_max = build_params(None, config).judge_score_max
-        scales = {
-            run.id: _run_judge_score_max(run, current_judge_score_max) for run in latest.values()
-        }
-        cells = await benchmark_cells(run_ids)
-
-        return BenchmarkMatrix(
-            judge_score_max=current_judge_score_max,
-            agent_labels=sorted(run_ids),
-            cells=[
-                _matrix_cell(cell, judge_score_max=scales.get(cell.run_id, current_judge_score_max))
-                for cell in cells
-            ],
         )
 
     return router

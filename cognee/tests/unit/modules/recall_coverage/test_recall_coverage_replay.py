@@ -67,8 +67,7 @@ def _question(
         user_id=user_id or uuid4(),
         dataset_id=dataset_id,
         source=source,
-        was_asked=source == QuestionSource.OBSERVED.value,
-        occurrence_count=1,
+        relevance=1 if source == QuestionSource.OBSERVED.value else 0,
         first_asked_at=None,
         last_asked_at=None,
         curated_question_id=None,
@@ -363,12 +362,14 @@ async def test_dataset_scoping_branches_on_the_rows_dataset_not_its_source():
     cache = ReplayUserCache(loader=lambda user_id: _resolved(SimpleNamespace(id=user_id)))
 
     questions = [
-        # A curated row that merged into a dataset partition replays against that
-        # dataset — the same memory the observed rows there were answered from.
-        _question("curated, merged", dataset_id=dataset_id, source=QuestionSource.CURATED.value),
-        # A curated row that merged with nothing has no dataset, so it replays
+        # A user-defined row that merged into a dataset partition replays against
+        # that dataset — the same memory the observed rows there were answered from.
+        _question(
+            "curated, merged", dataset_id=dataset_id, source=QuestionSource.USER_DEFINED.value
+        ),
+        # A user-defined row that merged with nothing has no dataset, so it replays
         # against everything the user can read, like the original ask did.
-        _question("curated, alone", dataset_id=None, source=QuestionSource.CURATED.value),
+        _question("curated, alone", dataset_id=None, source=QuestionSource.USER_DEFINED.value),
         _question("observed, scoped", dataset_id=dataset_id),
         _question("observed, unscoped", dataset_id=None),
     ]

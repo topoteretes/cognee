@@ -7,16 +7,22 @@ The invariants these protect are the ones that decide what the reported numbers
   ask per dataset and two teammates asking the same thing stay two rows;
 * the retry cooldown — not the fan-out rule — is the counting rule, and what it
   swallowed is reported rather than lost;
-* ``occurrence_count`` counts distinct asks, so the same question on three
-  separate days is demand while eight retries in five minutes is not;
+* ``relevance`` counts distinct asks, so the same question on three separate days
+  is demand while eight retries in five minutes is not — and it doubles as the
+  "was this asked at all" test, which is why there is no ``was_asked`` flag to
+  disagree with it;
 * the cost of dedup is bounded by ``max_questions``, not by how much history the
-  tenant has.
+  tenant has;
+* a row's ``session_id`` comes from the **earliest observed** member of its
+  cluster, never from the canonical one, because the canonical member is the
+  user-defined text and carries no session.
 
 Vectors are supplied explicitly (or from a hand-written fake engine) so every
 similarity in here is exact and the threshold assertions cannot drift.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from uuid import uuid4
 
 import numpy as np
@@ -24,7 +30,6 @@ import pytest
 
 from cognee.modules.recall_coverage.dedup import (
     Ask,
-    assign_question_groups,
     collapse_asks,
     collapse_text_key,
     dedup_asks,
@@ -74,6 +79,7 @@ def _row(
     dataset_id,
     created_at: datetime,
     query_type: str = "GRAPH_COMPLETION",
+    session_id: Optional[str] = None,
 ) -> QueryWindowRow:
     return QueryWindowRow(
         query_id=uuid4(),
@@ -82,6 +88,7 @@ def _row(
         user_id=user_id,
         dataset_id=dataset_id,
         created_at=created_at,
+        session_id=session_id,
     )
 
 
@@ -133,7 +140,7 @@ def test_one_fanned_ask_stays_three_rows_in_three_partitions():
     assert result.partition_count == 3
     assert len(result.questions) == 3
     assert {question.dataset_id for question in result.questions} == set(datasets)
-    assert [question.occurrence_count for question in result.questions] == [1, 1, 1]
+    assert [question.relevance for question in result.questions] == [1, 1, 1]
 
 
 def test_same_text_on_three_days_in_one_partition_counts_three_occurrences():
@@ -158,10 +165,9 @@ def test_same_text_on_three_days_in_one_partition_counts_three_occurrences():
 
     assert len(result.questions) == 1
     question = result.questions[0]
-    assert question.occurrence_count == 3
+    assert question.relevance == 3
     assert question.first_asked_at == BASE_TIME - timedelta(days=2)
     assert question.last_asked_at == BASE_TIME
-    assert question.was_asked is True
     assert question.source == QuestionSource.OBSERVED.value
     assert len(question.query_ids) == 3
 
@@ -184,7 +190,7 @@ def test_eight_identical_asks_inside_the_cooldown_collapse_to_one():
     assert len(collapsed.asks) == 1
     assert collapsed.distinct_ask_count == 1
     assert collapsed.collapsed_retry_count == 7
-    assert collapsed.recall_row_count == 8
+    assert collapsed.recall_count == 8
     assert collapsed.asks[0].retry_collapsed_count == 7
     assert len(collapsed.asks[0].query_ids) == 8
     # The ask spans the whole loop.
@@ -193,7 +199,7 @@ def test_eight_identical_asks_inside_the_cooldown_collapse_to_one():
 
     result = dedup_asks(collapsed.asks, _matrix(collapsed.asks), dedup_threshold=0.92)
 
-    assert [question.occurrence_count for question in result.questions] == [1]
+    assert [question.relevance for question in result.questions] == [1]
 
 
 def test_asks_outside_the_cooldown_stay_separate():
@@ -228,7 +234,7 @@ def test_rows_never_merge_across_different_users():
     assert collapsed.collapsed_retry_count == 0
     assert result.partition_count == 2
     assert {question.user_id for question in result.questions} == {anna, ben}
-    assert [question.occurrence_count for question in result.questions] == [1, 1]
+    assert [question.relevance for question in result.questions] == [1, 1]
 
 
 def test_rows_never_merge_across_different_datasets():
@@ -290,7 +296,7 @@ def test_near_duplicate_text_merges_inside_a_partition():
     result = dedup_asks(collapsed.asks, matrix, dedup_threshold=0.92)
 
     assert len(result.questions) == 2
-    merged = next(question for question in result.questions if question.occurrence_count == 2)
+    merged = next(question for question in result.questions if question.relevance == 2)
     # Canonical text is the earliest-asked member of the cluster.
     assert merged.text == RUNBOOKS_REPHRASED
     assert merged.first_asked_at == BASE_TIME - timedelta(hours=2)
@@ -301,7 +307,7 @@ def test_near_duplicate_text_merges_inside_a_partition():
     assert len(strict.questions) == 3
 
 
-def test_curated_member_supplies_the_canonical_text_and_counts_no_ask():
+def test_user_defined_member_supplies_the_canonical_text_and_counts_no_ask():
     user_id, dataset_id = uuid4(), uuid4()
     curated_id = uuid4()
     asks = [
@@ -317,7 +323,7 @@ def test_curated_member_supplies_the_canonical_text_and_counts_no_ask():
             text=RUNBOOKS_REPHRASED,
             user_id=user_id,
             dataset_id=dataset_id,
-            source=QuestionSource.CURATED.value,
+            source=QuestionSource.USER_DEFINED.value,
             curated_question_id=curated_id,
         ),
     ]
@@ -326,80 +332,184 @@ def test_curated_member_supplies_the_canonical_text_and_counts_no_ask():
 
     assert len(result.questions) == 1
     question = result.questions[0]
-    # A human wrote it, so the curated wording is the better label.
+    # A human wrote it, so the user-defined wording is the better label.
     assert question.text == RUNBOOKS_REPHRASED
-    assert question.source == QuestionSource.CURATED.value
+    assert question.source == QuestionSource.USER_DEFINED.value
     assert question.curated_question_id == curated_id
-    assert question.was_asked is True
-    # The curated member is not itself an ask.
-    assert question.occurrence_count == 1
+    # The user-defined member is not itself an ask, so relevance counts only the
+    # observed one — and being non-zero is exactly "somebody asked this".
+    assert question.relevance == 1
 
 
-def test_a_purely_curated_cluster_has_no_asks_and_no_timestamps():
+def test_a_purely_user_defined_cluster_has_no_asks_and_no_timestamps():
     asks = [
         Ask(
             text=CREDENTIALS,
             user_id=uuid4(),
             dataset_id=uuid4(),
-            source=QuestionSource.CURATED.value,
+            source=QuestionSource.USER_DEFINED.value,
             curated_question_id=uuid4(),
         )
     ]
 
     question = dedup_asks(asks, _matrix(asks), dedup_threshold=0.92).questions[0]
 
-    assert question.was_asked is False
-    assert question.occurrence_count == 0
+    # relevance 0 *is* "nobody asked this", which is what keeps the row out of
+    # every average without a second flag that could disagree.
+    assert question.relevance == 0
     assert question.first_asked_at is None
     assert question.last_asked_at is None
+    # No session, so the row reports no agent.
+    assert question.session_id is None
 
 
-def test_question_group_id_is_shared_across_partitions_for_matching_text():
-    """The UI collapses Anna's row and Ben's row on an id, not on exact text."""
-    anna, ben = uuid4(), uuid4()
-    dataset_id = uuid4()
+# --- session ids, i.e. per-row agent attribution -----------------------------
+
+
+def test_the_session_id_survives_the_collapse_onto_the_ask():
+    """The first link of the attribution chain: ``queries`` row -> ask."""
+    user_id, dataset_id = uuid4(), uuid4()
+    rows = [
+        _row(
+            RUNBOOKS,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            created_at=BASE_TIME,
+            session_id="codex_a1",
+        )
+    ]
+
+    collapsed = _collapse(rows)
+
+    assert [ask.session_id for ask in collapsed.asks] == ["codex_a1"]
+
+
+def test_a_retry_loop_keeps_one_session_on_the_surviving_ask():
+    """The cooldown key deliberately excludes the session, so one ask keeps one.
+
+    Adding the session to the key would change what ``relevance`` counts in order
+    to fix a label — attribution is a filter over a flat table, not a partition of
+    it. The walk is newest-first, so the newest row is the one that opened the ask.
+    """
+    user_id, dataset_id = uuid4(), uuid4()
+    rows = [
+        _row(
+            RUNBOOKS,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            created_at=BASE_TIME - timedelta(seconds=30 * step),
+            session_id="claude_a1",
+        )
+        for step in range(8)
+    ]
+
+    collapsed = _collapse(rows, cooldown=300)
+
+    assert len(collapsed.asks) == 1
+    assert collapsed.asks[0].session_id == "claude_a1"
+
+
+def test_two_agents_inside_the_cooldown_are_one_ask_attributed_to_the_newest():
+    """One ask, one session: the row that opened it wins, and nothing is counted twice."""
+    user_id, dataset_id = uuid4(), uuid4()
+    rows = [
+        _row(
+            RUNBOOKS,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            created_at=BASE_TIME,
+            session_id="codex_a1",
+        ),
+        _row(
+            RUNBOOKS,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            created_at=BASE_TIME - timedelta(seconds=10),
+            session_id="claude_a1",
+        ),
+    ]
+
+    collapsed = _collapse(rows, cooldown=300)
+
+    assert len(collapsed.asks) == 1
+    assert collapsed.asks[0].session_id == "codex_a1"
+    assert collapsed.asks[0].retry_collapsed_count == 1
+
+
+def test_a_cluster_takes_its_session_from_the_earliest_observed_member():
+    """Not from the canonical member — that one is the user-defined text.
+
+    ``_canonical_member`` prefers the user-defined wording, which carries no
+    session at all. Keying attribution off it would report ``agent: null`` for a
+    cluster real agents asked, which is the whole trap this guards.
+    """
+    user_id, dataset_id = uuid4(), uuid4()
     asks = [
         Ask(
             text=RUNBOOKS,
-            user_id=anna,
+            user_id=user_id,
             dataset_id=dataset_id,
             first_seen=BASE_TIME,
             last_seen=BASE_TIME,
+            query_ids=[uuid4()],
+            session_id="claude_a1",
         ),
-        # Different partition, and deliberately different canonical text: exact
-        # string matching in the UI would miss this pair.
         Ask(
             text=RUNBOOKS_REPHRASED,
-            user_id=ben,
+            user_id=user_id,
             dataset_id=dataset_id,
-            first_seen=BASE_TIME,
-            last_seen=BASE_TIME,
-        ),
-        Ask(
-            text=CREDENTIALS,
-            user_id=ben,
-            dataset_id=dataset_id,
-            first_seen=BASE_TIME,
-            last_seen=BASE_TIME,
+            source=QuestionSource.USER_DEFINED.value,
+            curated_question_id=uuid4(),
         ),
     ]
-    matrix = _matrix(asks)
-    result = dedup_asks(asks, matrix, dedup_threshold=0.92)
 
-    assert result.partition_count == 2
-    assert len(result.questions) == 3
+    question = dedup_asks(asks, _matrix(asks), dedup_threshold=0.92).questions[0]
 
-    group_count = assign_question_groups(result.questions, matrix, dedup_threshold=0.92)
+    assert question.text == RUNBOOKS_REPHRASED
+    assert question.session_id == "claude_a1"
 
-    by_text = {question.text: question for question in result.questions}
-    assert group_count == 2
-    assert by_text[RUNBOOKS].question_group_id == by_text[RUNBOOKS_REPHRASED].question_group_id
-    assert by_text[CREDENTIALS].question_group_id != by_text[RUNBOOKS].question_group_id
-    # Every row carries one, its own when nothing matched.
-    assert all(question.question_group_id is not None for question in result.questions)
-    # Grouping never merges the rows themselves — every aggregate is a mean over
-    # rows, so a shared group id must not change any count.
-    assert [question.occurrence_count for question in result.questions] == [1, 1, 1]
+
+def test_a_cluster_spanning_two_agents_is_attributed_to_the_first_asker():
+    """One ``agent`` column means a tie-break, and it is the same one ``first_asked_at`` uses."""
+    user_id, dataset_id = uuid4(), uuid4()
+    asks = [
+        Ask(
+            text=RUNBOOKS,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            first_seen=BASE_TIME,
+            last_seen=BASE_TIME,
+            session_id="codex_a1",
+        ),
+        Ask(
+            text=RUNBOOKS_REPHRASED,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            first_seen=BASE_TIME - timedelta(hours=2),
+            last_seen=BASE_TIME - timedelta(hours=2),
+            session_id="claude_a1",
+        ),
+    ]
+
+    question = dedup_asks(asks, _matrix(asks), dedup_threshold=0.92).questions[0]
+
+    assert question.relevance == 2
+    assert question.first_asked_at == BASE_TIME - timedelta(hours=2)
+    assert question.session_id == "claude_a1"
+
+
+def test_an_observed_row_with_no_session_carries_none_rather_than_a_label():
+    """dedup is config-free: it carries the raw id, and the label is resolved above it."""
+    user_id, dataset_id = uuid4(), uuid4()
+    rows = [_row(RUNBOOKS, user_id=user_id, dataset_id=dataset_id, created_at=BASE_TIME)]
+
+    collapsed = _collapse(rows)
+    question = dedup_asks(collapsed.asks, _matrix(collapsed.asks), dedup_threshold=0.92).questions[
+        0
+    ]
+
+    assert question.relevance == 1
+    assert question.session_id is None
 
 
 @pytest.mark.parametrize("history_size", [50, 500, 5000])
@@ -422,7 +532,7 @@ def test_comparison_count_is_bounded_by_max_questions(history_size):
 
     collapsed = _collapse(rows, max_questions=max_questions)
 
-    assert collapsed.recall_row_count == history_size
+    assert collapsed.recall_count == history_size
     assert collapsed.distinct_ask_count == history_size
     assert len(collapsed.asks) == max_questions
     assert collapsed.dropped_ask_count == history_size - max_questions
@@ -460,11 +570,10 @@ def test_empty_window_collapses_and_dedups_to_nothing():
     collapsed = _collapse([])
     result = dedup_asks(collapsed.asks, normalize_rows([]), dedup_threshold=0.92)
 
-    assert collapsed.recall_row_count == 0
+    assert collapsed.recall_count == 0
     assert collapsed.distinct_ask_count == 0
     assert result.questions == []
     assert result.comparison_count == 0
-    assert assign_question_groups(result.questions, normalize_rows([]), dedup_threshold=0.92) == 0
 
 
 @pytest.mark.asyncio

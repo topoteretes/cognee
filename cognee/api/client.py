@@ -315,8 +315,8 @@ app.include_router(get_remember_router(), prefix="/api/v1/remember", tags=["reme
 app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"])
 app.include_router(
     get_recall_coverage_router(),
-    prefix="/api/v1/recall-coverage",
-    tags=["recall-coverage"],
+    prefix="/api/v1/coverage",
+    tags=["coverage"],
 )
 app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
 app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"])

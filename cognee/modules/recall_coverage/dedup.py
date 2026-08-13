@@ -7,8 +7,13 @@ their text is similar AND they came from the same user AND they were asked
 against the same dataset, because a question row *is*
 ``(user_id, dataset_id, canonical text)``: the same text from two teammates, or
 against two brains, is two rows and two independent coverage answers. Rows whose
-``dataset_id`` is NULL — a search that spanned several datasets, or a curated
+``dataset_id`` is NULL — a search that spanned several datasets, or a user-defined
 question — form their own partition rather than being special-cased.
+
+The session id is **not** part of any key. Which agent asked something is
+attribution, reported as a column and filtered on; it is not a dimension of what
+a question row is. So a cluster may span agents, and it carries the session of
+the member that asked first.
 
 Dedup stays non-quadratic because the input is capped at ``max_questions``, not
 because of an index: there is no ANN index anywhere in this repo and no LSH here.
@@ -33,9 +38,9 @@ class Ask:
     """One distinct ask against one ``(user_id, dataset_id)`` partition.
 
     Produced by :func:`collapse_asks` from observed ``queries`` rows, and
-    constructed directly for curated questions (``source = "curated"``,
-    ``first_seen = None``, no ``query_ids``), which enter the same dedup as
-    everything else.
+    constructed directly for user-defined questions (``source = "user_defined"``,
+    ``first_seen = None``, no ``query_ids``, no ``session_id``), which enter the
+    same dedup as everything else.
     """
 
     text: str
@@ -47,6 +52,10 @@ class Ask:
     query_ids: list[UUID] = field(default_factory=list)
     source: str = QuestionSource.OBSERVED.value
     curated_question_id: Optional[UUID] = None
+    # Raw session id of the recall that opened this ask, carried so the row can be
+    # attributed to an agent one layer up. Deliberately raw: this module is
+    # config-free and DB-free, and resolving a label needs the prefix map.
+    session_id: Optional[str] = None
 
     # Shared by the asks that are one search fanned across several datasets. See
     # the fan-out comment in ``collapse_asks``: provenance only, never counted.
@@ -67,15 +76,20 @@ class Ask:
 
 @dataclass(frozen=True)
 class CollapseResult:
-    """What one window collapsed into, plus the counters the run row reports."""
+    """What one window collapsed into.
+
+    Only ``recall_count`` reaches the run row; the rest are here because the
+    collapse computed them anyway and they are what the debug log and the
+    truncation warning are made of.
+    """
 
     asks: list[Ask]
     # Raw ``queries`` rows in the window, before any collapsing.
-    recall_row_count: int
+    recall_count: int
     # Asks after the retry cooldown, before ``max_questions`` truncation.
     distinct_ask_count: int
-    # Rows the retry cooldown swallowed. Reported so a reader can see how much
-    # of the traffic was one agent looping.
+    # Rows the retry cooldown swallowed, i.e. how much of the traffic was one
+    # agent looping.
     collapsed_retry_count: int
     # Asks dropped by the ``max_questions`` truncation (oldest first).
     dropped_ask_count: int
@@ -91,22 +105,27 @@ class DedupedQuestion:
     user_id: UUID
     dataset_id: Optional[UUID]
     source: str
-    was_asked: bool
-    # Distinct *asks* in the cluster, never rows, and never counting curated
-    # members — a human adding a question is not demand for it.
-    occurrence_count: int
+    # Distinct *asks* in the cluster, never rows, and never counting a
+    # user-defined member — a human writing a question is not demand for it. This
+    # is what the report calls ``relevance``, and it doubles as the "was it
+    # actually asked" test: ``relevance > 0``.
+    relevance: int
     first_asked_at: Optional[datetime]
     last_asked_at: Optional[datetime]
     curated_question_id: Optional[UUID]
     # Row of the embedding matrix holding this question's canonical vector, so
-    # later phases (question groups, topic assignment) reuse it instead of
+    # later phases (topic assignment, sink clustering) reuse it instead of
     # re-embedding.
     canonical_index: int
     # Indices into the ``asks`` list this cluster was built from.
     ask_indices: list[int]
     query_ids: list[UUID]
-    # Stamped by :func:`assign_question_groups`, after every partition is done.
-    question_group_id: Optional[UUID] = None
+    # Session of the **earliest observed** member, so the row can be attributed to
+    # an agent. Not the canonical member's: :func:`_canonical_member` prefers the
+    # user-defined member for its wording, which carries no session, and keying
+    # attribution off it would report ``agent: null`` for clusters agents really
+    # asked. ``None`` when no member was observed.
+    session_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -163,8 +182,14 @@ def collapse_asks(
     longer than the cooldown is not — chosen because over-counting retries would
     make every broken agent look like a popular question. It chains: each row is
     compared against the running ask's earliest occurrence, so a tight loop
-    collapses entirely however long it ran. What it swallowed is reported as
-    ``collapsed_retry_count`` instead of being thrown away.
+    collapses entirely however long it ran.
+
+    **``session_id`` is deliberately not in the cooldown key.** Two agents asking
+    identical text against the same dataset inside the cooldown are one ask, and
+    the surviving ask keeps the session of the row that opened it (the walk is
+    newest-first, so that is the newest row). Attribution is a filter over a flat
+    table, not a partition of it: adding the session here would change what
+    ``relevance`` counts in order to fix a label.
 
     Truncation to ``max_questions`` happens last, newest first, and is what keeps
     the dedup matmul bounded.
@@ -219,6 +244,7 @@ def collapse_asks(
                 query_ids=[row.query_id],
                 source=QuestionSource.OBSERVED.value,
                 fanout_group_id=fanout_group_id,
+                session_id=row.session_id,
             )
         )
         open_ask[cooldown_key] = len(asks) - 1
@@ -228,7 +254,7 @@ def collapse_asks(
 
     return CollapseResult(
         asks=kept,
-        recall_row_count=len(ordered),
+        recall_count=len(ordered),
         distinct_ask_count=distinct_ask_count,
         collapsed_retry_count=collapsed_retry_count,
         dropped_ask_count=distinct_ask_count - len(kept),
@@ -286,12 +312,30 @@ def group_by_similarity(vectors: np.ndarray, threshold: float) -> tuple[list[lis
     return [groups[root] for root in sorted(groups)], comparison_count
 
 
-def _canonical_member(asks: Sequence[Ask], members: Sequence[int]) -> int:
-    """Pick the cluster's canonical ask: the curated member, else the earliest asked.
+def _earliest_observed(asks: Sequence[Ask], members: Sequence[int]) -> Optional[int]:
+    """The first-asked observed member of a cluster, or ``None`` if none was asked.
 
-    A human wrote the curated text, so it is the better label for the cluster —
-    that is the whole reason a curated question merging into real traffic keeps
-    its own wording (spec section 4).
+    The cluster's attribution point. A cluster can legitimately span two agents —
+    same user, same dataset, similar wording, different tools — so one ``agent``
+    column means a first-asker-wins tie-break, on the same ``first_seen`` the
+    row's ``first_asked_at`` is taken from.
+    """
+    observed = [
+        index for index in members if asks[index].is_observed and asks[index].first_seen is not None
+    ]
+    if not observed:
+        return None
+    return min(observed, key=lambda index: asks[index].first_seen)
+
+
+def _canonical_member(asks: Sequence[Ask], members: Sequence[int]) -> int:
+    """Pick the cluster's canonical ask: the user-defined member, else earliest asked.
+
+    A human wrote the user-defined text, so it is the better label for the
+    cluster — that is the whole reason a user-defined question merging into real
+    traffic keeps its own wording. It is *only* the wording: the cluster's session
+    comes from :func:`_earliest_observed`, because the canonical member may well be
+    the one nobody asked.
     """
     curated = [index for index in members if not asks[index].is_observed]
     if curated:
@@ -314,16 +358,19 @@ def dedup_asks(
     ``normalized`` must be index-aligned with ``asks`` (row *i* is the embedding
     of ``asks[i].text``) and L2-normalized.
 
-    Per cluster, per the spec:
+    Per cluster:
 
-    * canonical text is the curated member's if there is one, else the
+    * canonical text is the user-defined member's if there is one, else the
       earliest-asked member's;
-    * ``source`` is ``curated`` when any member is curated, and that member's
+    * ``source`` is ``user_defined`` when any member is, and that member's
       ``curated_question_id`` is carried over;
-    * ``was_asked`` is true when any member is observed;
-    * ``occurrence_count`` counts distinct **asks**, never rows;
+    * ``relevance`` counts distinct **asks**, never rows, and never the
+      user-defined member — so it is also the "was this asked at all" test, and
+      there is no separate ``was_asked`` flag to disagree with it;
     * ``first_asked_at`` / ``last_asked_at`` are min/max over **observed**
-      members only, and NULL when the cluster is purely curated.
+      members only, and NULL when nobody asked;
+    * ``session_id`` is the earliest observed member's, so a cluster spanning two
+      agents is attributed to whoever asked first.
     """
     if not asks:
         return DedupResult(questions=[], comparison_count=0, partition_count=0)
@@ -348,6 +395,7 @@ def dedup_asks(
         for group in groups:
             members = [indices[position] for position in group]
             canonical = _canonical_member(asks, members)
+            first_asker = _earliest_observed(asks, members)
             observed = [asks[index] for index in members if asks[index].is_observed]
             curated = [asks[index] for index in members if not asks[index].is_observed]
 
@@ -360,16 +408,18 @@ def dedup_asks(
                     user_id=asks[canonical].user_id,
                     dataset_id=asks[canonical].dataset_id,
                     source=(
-                        QuestionSource.CURATED.value if curated else QuestionSource.OBSERVED.value
+                        QuestionSource.USER_DEFINED.value
+                        if curated
+                        else QuestionSource.OBSERVED.value
                     ),
-                    was_asked=bool(observed),
-                    occurrence_count=len(observed),
+                    relevance=len(observed),
                     first_asked_at=min(first_seen) if first_seen else None,
                     last_asked_at=max(last_seen) if last_seen else None,
                     curated_question_id=(curated[0].curated_question_id if curated else None),
                     canonical_index=canonical,
                     ask_indices=members,
                     query_ids=[query_id for index in members for query_id in asks[index].query_ids],
+                    session_id=(None if first_asker is None else asks[first_asker].session_id),
                 )
             )
 
@@ -378,34 +428,3 @@ def dedup_asks(
         comparison_count=comparison_count,
         partition_count=len(partitions),
     )
-
-
-def assign_question_groups(
-    questions: Sequence[DedupedQuestion], normalized: np.ndarray, *, dedup_threshold: float
-) -> int:
-    """Stamp a shared ``question_group_id`` on matching questions across partitions.
-
-    One similarity pass over the canonical vectors of every question row,
-    regardless of partition, at the same ``dedup_threshold``. Purely so the UI can
-    collapse Anna's row and Ben's row on an id instead of exact-string matching,
-    which would miss them whenever two partitions settled on different canonical
-    text. **No LLM calls and no effect on any score** — the rows stay separate
-    rows, and every aggregate is still a mean over rows.
-
-    Every question ends up with a group id: its own when nothing matched. Returns
-    the number of distinct groups.
-    """
-    if not questions:
-        return 0
-
-    canonical_rows = np.asarray(
-        [normalized[question.canonical_index] for question in questions], dtype=float
-    )
-    groups, _comparisons = group_by_similarity(canonical_rows, dedup_threshold)
-
-    for group in groups:
-        group_id = uuid4()
-        for position in group:
-            questions[position].question_group_id = group_id
-
-    return len(groups)

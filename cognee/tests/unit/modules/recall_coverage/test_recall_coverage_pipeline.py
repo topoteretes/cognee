@@ -3,9 +3,9 @@
 What this file pins down:
 
 * **A valid label with no traffic completes as an EMPTY run**, with
-  ``overall_score: null`` and no question rows — not an error, not a failure.
-  Until ``Query.session_id`` ships that is the *expected* outcome for every label
-  except ``all``, so it has to read as "nothing asked yet".
+  ``memory_score: null`` and no question rows — not an error, not a failure. It is
+  the *expected* outcome for an agent that has asked nothing in the window, so it
+  has to read as "nothing asked yet".
 * **The in-flight guard is per ``(owner, agent_label)``**, and the run row is
   written before the coroutine is scheduled — otherwise the guard cannot see it
   and two requests a second apart both replay and judge the same window.
@@ -16,6 +16,9 @@ What this file pins down:
   a single replay or judge call is paid for.
 * **The four phase outputs stay index-aligned** all the way into the persisted
   rows, and the counters describe the window rather than the sample.
+* **Each row is attributed to its own session's agent**, not to the run's label:
+  the default run is ``all``, and narrowing one flat table to one agent is the
+  entire point of the column.
 * **A failure marks the run ``failed``** with the reason in ``summary``, and
   re-raises so the caller still sees it.
 
@@ -58,7 +61,6 @@ from cognee.modules.recall_coverage.types import (
     AgentScope,
     AgentScopeMode,
     CoverageParams,
-    CuratedScope,
     QuestionSource,
     RunStatus,
 )
@@ -122,7 +124,9 @@ def _scope(label: str = "all", mode: AgentScopeMode = AgentScopeMode.ALL) -> Age
     return AgentScope(label=label, prefixes=(), mode=mode)
 
 
-def _window_row(text, *, user_id, dataset_id=None, created_at=BASE_TIME) -> QueryWindowRow:
+def _window_row(
+    text, *, user_id, dataset_id=None, created_at=BASE_TIME, session_id=None
+) -> QueryWindowRow:
     return QueryWindowRow(
         query_id=uuid4(),
         text=text,
@@ -130,6 +134,7 @@ def _window_row(text, *, user_id, dataset_id=None, created_at=BASE_TIME) -> Quer
         user_id=user_id,
         dataset_id=dataset_id,
         created_at=created_at,
+        session_id=session_id,
     )
 
 
@@ -213,19 +218,31 @@ def stub_pipeline(monkeypatch):
     return state
 
 
-def _llm_response(*, score=4, answered=True):
-    """One structured-output stand-in that satisfies all three judge calls."""
+def _llm_response(*, score=4):
+    """One structured-output stand-in that satisfies both judge calls."""
     return SimpleNamespace(
         score=score,
         reason="The context names the runbook location.",
         answer="The runbooks live in the infra-docs repository.",
-        answered=answered,
     )
 
 
-async def _run(user, scope, params):
+async def _run(user, scope, params, config=None):
     run = await repository.create_run(user.id, scope.label, params=params)
-    return await pipeline.run_recall_coverage(run.id, scope, user.id, params=params)
+    return await pipeline.run_recall_coverage(
+        run.id, scope, user.id, params=params, config=config or _config()
+    )
+
+
+async def _topic(owner_id, label, centroid, *, model=MODEL):
+    """A topic minted the way ``POST /topics`` mints one, centroid supplied."""
+    return await repository.create_topic(
+        owner_id,
+        label,
+        centroid=centroid,
+        embedding_model=model,
+        embedding_dimensions=DIMENSIONS,
+    )
 
 
 # --- the empty window --------------------------------------------------------
@@ -235,7 +252,7 @@ async def _run(user, scope, params):
 async def test_a_valid_label_with_no_traffic_completes_as_an_empty_run(
     coverage_engine, stub_pipeline
 ):
-    """The expected result for every label but ``all`` until ``session_id`` ships."""
+    """An agent that asked nothing in the window is not a failure."""
     user = _user()
     stub_pipeline.user = user
     params = _params()
@@ -243,10 +260,11 @@ async def test_a_valid_label_with_no_traffic_completes_as_an_empty_run(
     completed = await _run(user, _scope("claude-code", AgentScopeMode.PREFIX), params)
 
     assert completed.status == RunStatus.COMPLETE.value
-    assert completed.summary["overall_score"] is None
-    assert completed.question_row_count == 0
-    assert completed.recall_row_count == 0
-    assert completed.distinct_ask_count == 0
+    assert completed.summary["memory_score"] is None
+    assert completed.summary["topics"] == []
+    assert completed.summary["suggested_topics"] == []
+    assert completed.question_count == 0
+    assert completed.recall_count == 0
     assert await repository.load_run_questions(completed.id) == []
     # Nothing was embedded and nothing was replayed: an empty window costs nothing.
     assert stub_pipeline.engine.calls == []
@@ -271,8 +289,8 @@ async def test_the_window_is_the_configured_age_and_query_types(coverage_engine,
     # but that scope is bounded: a tenantless caller sees only themselves.
     assert "user_id" not in kwargs
     assert kwargs["user_ids"] == (stub_pipeline.user.id,)
-    # The fetch is bounded in SQL; when the cap is hit, recall_row_count is
-    # corrected by a COUNT(*) over the same filters.
+    # The fetch is bounded in SQL; when the cap is hit, recall_count is corrected
+    # by a COUNT(*) over the same filters.
     assert kwargs["limit"] == params.window_row_cap
 
 
@@ -311,30 +329,27 @@ async def test_a_run_persists_index_aligned_judged_rows_and_window_counters(
         completed = await _run(caller, _scope(), params)
 
     assert completed.status == RunStatus.COMPLETE.value
-    # Four raw rows, three distinct asks, one retry swallowed.
-    assert completed.recall_row_count == 4
-    assert completed.distinct_ask_count == 3
-    assert completed.collapsed_retry_count == 1
-    assert completed.question_row_count == 3
-    assert completed.user_count == 2
+    # Four raw rows in the window; three question rows judged. The gap is the
+    # retry the cooldown swallowed, and it is the only place that is visible.
+    assert completed.recall_count == 4
+    assert completed.question_count == 3
 
-    rows = {row.question_text: row for row in await repository.load_run_questions(completed.id)}
+    rows = {row.question: row for row in await repository.load_run_questions(completed.id)}
     assert set(rows) == {RUNBOOKS, CREDENTIALS, ESCALATION}
 
     # The row that retrieved nothing scores 0 with no LLM call, and 0 means no
     # answer — the alignment is what makes this assertion meaningful at all.
-    assert rows[ESCALATION].judge_score == 0
-    assert rows[ESCALATION].judge_answered is False
+    assert rows[ESCALATION].coverage_score == 0
     assert rows[ESCALATION].answer is None
-    assert rows[RUNBOOKS].judge_score == 4
+    assert rows[RUNBOOKS].coverage_score == 4
+    assert rows[RUNBOOKS].answer == "The runbooks live in the infra-docs repository."
     # The second runbooks row was a retry inside the cooldown: one ask, not two.
     # An agent looping on a question it cannot answer is not twice the demand.
-    assert rows[RUNBOOKS].occurrence_count == 1
+    assert rows[RUNBOOKS].relevance == 1
     assert rows[RUNBOOKS].retrieval_context == "The runbooks live in infra-docs."
-    assert rows[CREDENTIALS].occurrence_count == 1
-    # impact = occurrence_count * (judge_score_max - judge_score).
-    assert rows[RUNBOOKS].impact == 1.0
-    assert rows[ESCALATION].impact == 5.0
+    assert rows[CREDENTIALS].relevance == 1
+    # Two users' questions in one run: a run is tenant-wide and the UI filters.
+    assert {rows[ESCALATION].user_id, rows[RUNBOOKS].user_id} == {anna, ben}
 
 
 @pytest.mark.asyncio
@@ -350,13 +365,7 @@ async def test_curated_questions_join_the_same_run_without_displacing_traffic(
     stub_pipeline.rows = [_window_row(RUNBOOKS, user_id=caller.id, dataset_id=dataset_id)]
     stub_pipeline.contexts = {RUNBOOKS: "The runbooks live in infra-docs."}
 
-    await repository.create_curated_question(
-        caller,
-        ESCALATION,
-        CuratedScope.SHARED.value,
-        None,
-        config=_config(),
-    )
+    await repository.create_curated_question(caller, ESCALATION, config=_config())
 
     with patch.object(
         judge_module.LLMGateway,
@@ -366,21 +375,19 @@ async def test_curated_questions_join_the_same_run_without_displacing_traffic(
     ):
         completed = await _run(caller, _scope(), params)
 
-    rows = {row.question_text: row for row in await repository.load_run_questions(completed.id)}
+    rows = {row.question: row for row in await repository.load_run_questions(completed.id)}
 
-    # max_questions=1 kept the one observed ask, and the curated question was
+    # max_questions=1 kept the one observed ask, and the user-defined question was
     # appended after the truncation rather than instead of it.
     assert set(rows) == {RUNBOOKS, ESCALATION}
-    assert completed.curated_question_count == 1
-    assert rows[ESCALATION].source == QuestionSource.CURATED.value
-    assert rows[ESCALATION].was_asked is False
-    assert rows[ESCALATION].occurrence_count == 0
+    assert completed.question_count == 2
+    assert rows[ESCALATION].source == QuestionSource.USER_DEFINED.value
+    # Nobody asked it, so it carries no demand and no agent...
+    assert rows[ESCALATION].relevance == 0
+    assert rows[ESCALATION].agent_label is None
     assert rows[ESCALATION].dataset_id == dataset_id
-    assert rows[ESCALATION].impact == 0.0
-    # A shared curated row is the only curated row any aggregate reads.
-    assert completed.summary["benchmark_score_pct"] is not None
-    # ...and it never enters the observed breakdowns.
-    assert completed.summary["observed_question_count"] == 1
+    # ...and it feeds no average: only the observed row is counted.
+    assert [topic["question_count"] for topic in completed.summary["topics"]] == [1]
 
 
 @pytest.mark.asyncio
@@ -400,6 +407,103 @@ async def test_the_dataset_name_the_caller_can_see_is_written_onto_the_row(
     assert row.dataset_name == "infra-docs"
 
 
+# --- per-row agent attribution ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_all_run_attributes_each_row_to_its_own_sessions_agent(
+    coverage_engine, stub_pipeline
+):
+    """The whole point of the column: one flat table the UI narrows to one agent.
+
+    The run's own label is ``all``, so it says nothing about who asked what — only
+    the row's own ``session_id`` does. A row with no session at all is ``api``, and
+    that is the definition rather than a fallback.
+    """
+    caller = _user()
+    stub_pipeline.user = caller
+    stub_pipeline.rows = [
+        _window_row(RUNBOOKS, user_id=caller.id, session_id="claude_a1"),
+        _window_row(
+            CREDENTIALS,
+            user_id=caller.id,
+            created_at=BASE_TIME - timedelta(hours=1),
+            session_id="codex_a1",
+        ),
+        _window_row(
+            ESCALATION,
+            user_id=caller.id,
+            created_at=BASE_TIME - timedelta(hours=2),
+            session_id=None,
+        ),
+    ]
+
+    completed = await _run(caller, _scope(), _params())
+
+    rows = {
+        row.question: row.agent_label for row in await repository.load_run_questions(completed.id)
+    }
+
+    assert completed.agent_label == "all"
+    assert rows == {RUNBOOKS: "claude-code", CREDENTIALS: "codex", ESCALATION: "api"}
+
+
+@pytest.mark.asyncio
+async def test_the_label_follows_the_deployments_prefix_map(coverage_engine, stub_pipeline):
+    """Resolved through the config the run executed under, then stored.
+
+    Re-deriving it at read time would relabel history the moment a deployment
+    edits ``RECALL_COVERAGE_AGENT_PREFIX_MAP``; the label is frozen onto the row
+    for the same reason ``params`` and ``summary`` are.
+    """
+    caller = _user()
+    stub_pipeline.user = caller
+    stub_pipeline.rows = [_window_row(RUNBOOKS, user_id=caller.id, session_id="widget_7")]
+    config = _config(agent_prefix_map='{"widget": ["widget_"]}')
+
+    completed = await _run(caller, _scope(), _params(), config=config)
+
+    assert (await repository.load_run_questions(completed.id))[0].agent_label == "widget"
+
+
+@pytest.mark.asyncio
+async def test_the_ui_label_is_resolved_like_any_other_agent(coverage_engine, stub_pipeline):
+    """``ui`` is a human in the cloud search box, distinguishable only by its prefix."""
+    caller = _user()
+    stub_pipeline.user = caller
+    stub_pipeline.rows = [
+        _window_row(RUNBOOKS, user_id=caller.id, session_id="search-ui-1712345678901"),
+        _window_row(
+            CREDENTIALS,
+            user_id=caller.id,
+            created_at=BASE_TIME - timedelta(hours=1),
+            session_id="ui_abc",
+        ),
+    ]
+
+    completed = await _run(caller, _scope(), _params())
+
+    labels = {row.agent_label for row in await repository.load_run_questions(completed.id)}
+    assert labels == {"ui"}
+
+
+@pytest.mark.asyncio
+async def test_a_labelled_run_still_reads_the_label_off_each_row(coverage_engine, stub_pipeline):
+    """Not from ``scope.label``: a narrowed window happens to agree, and must not assume it.
+
+    The window's own predicate is what restricts the rows; if the label were taken
+    from the scope, the ``all`` run above would file every row under ``all``.
+    """
+    caller = _user()
+    stub_pipeline.user = caller
+    stub_pipeline.rows = [_window_row(RUNBOOKS, user_id=caller.id, session_id="claude_a1")]
+
+    completed = await _run(caller, _scope("claude-code", AgentScopeMode.PREFIX), _params())
+
+    assert completed.agent_label == "claude-code"
+    assert (await repository.load_run_questions(completed.id))[0].agent_label == "claude-code"
+
+
 # --- phase 2 before phase 3 --------------------------------------------------
 
 
@@ -412,21 +516,7 @@ async def test_a_stale_topic_centroid_fails_the_run_before_any_replay(
     stub_pipeline.user = caller
     stub_pipeline.rows = [_window_row(RUNBOOKS, user_id=caller.id)]
 
-    suggestion = (
-        await repository.create_topic_suggestions(
-            [
-                repository.SuggestionDraft(
-                    owner_id=caller.id,
-                    label="Runbooks",
-                    centroid=(1.0, 0.0, 0.0),
-                    embedding_model="some/older-model",
-                    embedding_dimensions=DIMENSIONS,
-                    question_count=6,
-                )
-            ]
-        )
-    )[0]
-    await repository.accept_topic_suggestion(suggestion.id, [caller.id])
+    await _topic(caller.id, "Runbooks", (1.0, 0.0, 0.0), model="some/older-model")
 
     with pytest.raises(EmbeddingFingerprintMismatchError):
         await _run(caller, _scope(), _params())
@@ -449,30 +539,17 @@ async def test_questions_are_assigned_to_the_owners_topic_or_to_the_sink(
         _window_row(ESCALATION, user_id=caller.id),
     ]
 
-    suggestion = (
-        await repository.create_topic_suggestions(
-            [
-                repository.SuggestionDraft(
-                    owner_id=caller.id,
-                    label="Runbooks",
-                    centroid=(1.0, 0.0, 0.0),
-                    embedding_model=MODEL,
-                    embedding_dimensions=DIMENSIONS,
-                    question_count=6,
-                )
-            ]
-        )
-    )[0]
-    topic, _ = await repository.accept_topic_suggestion(suggestion.id, [caller.id])
+    topic = await _topic(caller.id, "Runbooks", (1.0, 0.0, 0.0))
 
     completed = await _run(caller, _scope(), _params())
 
-    rows = {row.question_text: row for row in await repository.load_run_questions(completed.id)}
+    rows = {row.question: row for row in await repository.load_run_questions(completed.id)}
     assert rows[RUNBOOKS].topic_id == topic.id
-    # Orthogonal to the only topic, so the sink — stored as NULL, never "other".
+    # Orthogonal to the only topic, so the sink — stored as NULL, and reported as
+    # a topic_id: null member of topics[] labelled "Uncategorized".
     assert rows[ESCALATION].topic_id is None
-    assert completed.topic_count == 1
-    assert completed.taxonomy_version == topic.taxonomy_version
+    reported = {cell["topic_id"]: cell["topic"] for cell in completed.summary["topics"]}
+    assert reported == {str(topic.id): "Runbooks", None: "Uncategorized"}
 
 
 @pytest.mark.asyncio
@@ -506,9 +583,30 @@ async def test_a_dense_sink_cluster_becomes_a_pending_suggestion(coverage_engine
     assert pending[0].question_count == 3
     assert pending[0].run_id == completed.id
     assert pending[0].agent_label == "all"
-    # Every row went to the sink, and the sink's share says so.
-    assert completed.summary["sink"]["question_count"] == 3
-    assert completed.summary["sink"]["share"] == 1.0
+    # The suggestion is frozen into this run's report: the review queue moves as
+    # the owner accepts and dismisses, and a historical run must keep showing what
+    # it actually proposed. ``cohesion`` is not in it — it orders candidates and
+    # says nothing about memory. The id is, because the dismiss route takes it and
+    # the report is the only place it is published.
+    assert completed.summary["suggested_topics"] == [
+        {
+            "suggestion_id": str(pending[0].id),
+            "label": "Credential rotation",
+            "question_count": 3,
+        }
+    ]
+    # Every row went to the sink, which is one member row of topics[] — it reports
+    # its own average (nothing was retrieved for any of them, so 0.0) and is still
+    # excluded from the headline, because it is the absence of a topic.
+    assert completed.summary["topics"] == [
+        {
+            "topic_id": None,
+            "topic": "Uncategorized",
+            "question_count": 3,
+            "memory_score": 0.0,
+        }
+    ]
+    assert completed.summary["memory_score"] is None
 
 
 # --- starting a run ----------------------------------------------------------
@@ -522,7 +620,9 @@ async def test_start_writes_a_pending_row_before_scheduling_anything(coverage_en
     monkeypatch.setattr(
         pipeline,
         "schedule_recall_coverage_run",
-        lambda run_id, scope, user_id, *, params: scheduled.append((run_id, scope.label, user_id)),
+        lambda run_id, scope, user_id, *, params, config=None: scheduled.append(
+            (run_id, scope.label, user_id)
+        ),
     )
 
     run = await pipeline.start_recall_coverage_run(caller, None, config=_config())
@@ -587,7 +687,7 @@ async def test_an_unknown_parameter_is_rejected_rather_than_ignored(coverage_eng
 async def test_an_override_above_its_ceiling_is_rejected(coverage_engine, monkeypatch):
     """The field bounds stop meaningless runs; the ceilings stop unaffordable ones.
 
-    ``POST /runs`` takes per-run overrides, so without a ceiling any authenticated
+    ``POST /api/v1/coverage`` takes per-run overrides, so without a ceiling any authenticated
     caller can ask for a 200000-row window — a 200000 x 200000 similarity matrix
     before an LLM call — or a semaphore of 50000, and the ``(owner, agent_label)``
     guard bounds neither labels nor owners.
@@ -627,11 +727,13 @@ async def test_overrides_are_snapshotted_onto_the_run_row(coverage_engine, monke
     monkeypatch.setattr(pipeline, "schedule_recall_coverage_run", lambda *a, **k: None)
 
     run = await pipeline.start_recall_coverage_run(
-        caller, None, params={"max_questions": 7, "judge_score_max": 10}, config=_config()
+        caller, None, params={"max_questions": 7, "judge_score_max": 4}, config=_config()
     )
 
     assert run.params["max_questions"] == 7
-    assert run.params["judge_score_max"] == 10
+    # A run's scores are only comparable to another's when both snapshotted the
+    # same scale, which is exactly why the scale is snapshotted.
+    assert run.params["judge_score_max"] == 4
 
 
 # --- the background task -----------------------------------------------------
@@ -643,7 +745,7 @@ async def test_the_background_run_is_anchored_until_it_finishes(coverage_engine,
     release = asyncio.Event()
     caller = _user()
 
-    async def fake_run(run_id, scope, user_id, *, params):
+    async def fake_run(run_id, scope, user_id, *, params, config=None):
         await release.wait()
 
     monkeypatch.setattr(pipeline, "run_recall_coverage", fake_run)
@@ -724,10 +826,8 @@ async def test_a_row_whose_replay_failed_is_persisted_unjudged(coverage_engine, 
             completed = await _run(caller, _scope(), _params())
 
     assert completed.status == RunStatus.COMPLETE.value
-    rows = {row.question_text: row for row in await repository.load_run_questions(completed.id)}
+    rows = {row.question: row for row in await repository.load_run_questions(completed.id)}
 
-    assert rows[RUNBOOKS].judge_score is None
-    assert rows[RUNBOOKS].judge_answered is None
-    assert rows[RUNBOOKS].impact is None
+    assert rows[RUNBOOKS].coverage_score is None
     assert rows[RUNBOOKS].error == "dataset is not readable"
-    assert rows[CREDENTIALS].judge_score == 5
+    assert rows[CREDENTIALS].coverage_score == 5

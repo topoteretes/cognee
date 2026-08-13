@@ -47,6 +47,13 @@ class QueryWindowRow:
     user_id: UUID
     dataset_id: Optional[UUID]
     created_at: datetime
+    # Selected as well as filtered on: recall coverage reports which agent asked
+    # each row, and that label is derived from this id
+    # (``recall_coverage.agent_scope.classify_session``). A window filtered to one
+    # agent could infer it from the request, but the default window is every
+    # session, and then only the row itself knows. NULL on rows written before the
+    # column shipped, and on any recall that carried no session.
+    session_id: Optional[str] = None
 
 
 def build_session_predicate(
@@ -191,6 +198,7 @@ async def get_queries(
         Query.user_id,
         Query.dataset_id,
         Query.created_at,
+        Query.session_id,
     ).where(*_window_terms(user_id, since, query_types, session_scope, user_ids))
 
     # Newest first: the window is "the last N asks", so a limit must drop the
@@ -211,6 +219,7 @@ async def get_queries(
             user_id=row.user_id,
             dataset_id=row.dataset_id,
             created_at=row.created_at,
+            session_id=row.session_id,
         )
         for row in rows
     ]

@@ -21,17 +21,20 @@ from cognee.exceptions import (
 
 
 class UnknownAgentLabelError(CogneeValidationError):
-    """An ``agent_label`` that is neither in the prefix map nor a known literal.
+    """An ``agent_label`` that is neither in the prefix map nor a reserved literal.
 
-    404 rather than an empty report: a typo must not look like "this agent asked
-    nothing", which is a legitimate answer for a real label.
+    Rejected rather than resolved to an empty report: a typo must not look like
+    "this agent asked nothing", which is a legitimate answer for a real label.
+    422 rather than 404 because the label is a *parameter value*, not a resource —
+    ``POST /api/v1/coverage?agent_label=cluade-code`` addresses a route that
+    exists, with a value it will not accept.
     """
 
     def __init__(
         self,
         message: str = "Unknown agent label.",
         name: str = "UnknownAgentLabelError",
-        status_code: int = status.HTTP_404_NOT_FOUND,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
         log_level: str = "WARNING",
     ):
         super().__init__(message, name, status_code, log_level=log_level)
@@ -98,14 +101,39 @@ class CoverageTopicNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code, log_level=log_level)
 
 
-class SinkTopicNotEditableError(CogneeValidationError):
-    """The sink is the wire literal ``"other"``, not a row, so it cannot be deleted."""
+class EmptyTopicLabelError(CogneeValidationError):
+    """``POST /topics`` with a blank label.
+
+    Rejected rather than stored: a topic's centroid is the embedding of its own
+    label (see :func:`cognee.modules.recall_coverage.suggest.create_topic_from_label`),
+    so a blank label is a topic that means nothing and can attract nothing.
+    """
 
     def __init__(
         self,
-        message: str = "The 'other' topic is not a stored topic and cannot be modified.",
-        name: str = "SinkTopicNotEditableError",
+        message: str = "A topic needs a non-empty label.",
+        name: str = "EmptyTopicLabelError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        log_level: str = "WARNING",
+    ):
+        super().__init__(message, name, status_code, log_level=log_level)
+
+
+class DuplicateTopicError(CogneeValidationError):
+    """An active topic of this owner already carries this label (casefold-exact).
+
+    Refused rather than allowed as a second row, because two topics with nearly
+    identical centroids are worse than one: the assignment margin rule cannot
+    separate them, so every question about that theme goes to the *sink* instead
+    of to either topic. A duplicate label does not add a topic, it silently
+    disables one.
+    """
+
+    def __init__(
+        self,
+        message: str = "A topic with this label already exists.",
+        name: str = "DuplicateTopicError",
+        status_code: int = status.HTTP_409_CONFLICT,
         log_level: str = "WARNING",
     ):
         super().__init__(message, name, status_code, log_level=log_level)
@@ -155,11 +183,11 @@ class CuratedQuestionNotFoundError(CogneeValidationError):
 
 
 class DuplicateCuratedQuestionError(CogneeValidationError):
-    """The same question text already exists in this scope (casefold-exact)."""
+    """This owner's list already holds the same question text (casefold-exact)."""
 
     def __init__(
         self,
-        message: str = "This curated question already exists in this scope.",
+        message: str = "This question is already in your list.",
         name: str = "DuplicateCuratedQuestionError",
         status_code: int = status.HTTP_409_CONFLICT,
         log_level: str = "WARNING",
@@ -168,16 +196,16 @@ class DuplicateCuratedQuestionError(CogneeValidationError):
 
 
 class CuratedQuestionLimitError(CogneeValidationError):
-    """The scope bucket already holds the configured maximum of curated questions.
+    """This owner's list already holds the configured maximum.
 
-    Refused at creation because the curated set is a per-run cost multiplier:
-    each question becomes one replay plus up to three judge LLM calls per
+    Refused at creation because the list is a per-run cost multiplier: each
+    question becomes one replay plus a judge call plus an answer completion, per
     readable dataset, on every future run.
     """
 
     def __init__(
         self,
-        message: str = "This scope already holds the maximum number of curated questions.",
+        message: str = "Your list already holds the maximum number of questions.",
         name: str = "CuratedQuestionLimitError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
         log_level: str = "WARNING",
@@ -186,30 +214,17 @@ class CuratedQuestionLimitError(CogneeValidationError):
 
 
 class EmptyCuratedQuestionError(CogneeValidationError):
-    """A curated question with no question text.
+    """A user-defined question with no text.
 
     Rejected rather than stored: an empty question embeds to a meaningless
-    vector, would be replicated into every dataset partition, and would drag
-    ``benchmark_score_pct`` down with rows nobody can answer.
+    vector, is replicated into every dataset partition, and adds a row nobody can
+    answer to every future run.
     """
 
     def __init__(
         self,
-        message: str = "A curated question needs non-empty question text.",
+        message: str = "A question needs non-empty text.",
         name: str = "EmptyCuratedQuestionError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
-        log_level: str = "WARNING",
-    ):
-        super().__init__(message, name, status_code, log_level=log_level)
-
-
-class InvalidCuratedQuestionScopeError(CogneeValidationError):
-    """``scope="agent"`` needs an ``agent_label``; ``scope="shared"`` forbids one."""
-
-    def __init__(
-        self,
-        message: str = "Curated question scope and agent label are inconsistent.",
-        name: str = "InvalidCuratedQuestionScopeError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
         log_level: str = "WARNING",
     ):

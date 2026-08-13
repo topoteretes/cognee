@@ -5,10 +5,10 @@ Revises: a7c3e9f1b5d8
 Create Date: 2026-08-12 00:00:00.000000
 
 Creates the five recall-coverage tables: runs, judged question rows, the
-owner-scoped topic taxonomy, its pending suggestions, and human-curated
+owner-scoped topic taxonomy, its pending suggestions, and user-defined
 questions.
 
-Statuses and scopes are plain strings, not native enums, so adding a value later
+Statuses and sources are plain strings, not native enums, so adding a value later
 is an application change rather than a raw-DDL migration (compare
 ``1d0bb7fede17_add_pipeline_run_status.py``). Owner/user/dataset ids are bare
 indexed UUIDs with no foreign keys, matching ``queries``.
@@ -49,15 +49,8 @@ def _create_runs() -> None:
         sa.Column("params", sa.JSON(), nullable=True),
         sa.Column("summary", sa.JSON(), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("recall_row_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("distinct_ask_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("collapsed_retry_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("question_row_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("curated_question_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("topic_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("dataset_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("user_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("taxonomy_version", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("recall_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("question_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -73,34 +66,26 @@ def _create_questions() -> None:
         "recall_coverage_questions",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("run_id", sa.UUID(), nullable=False),
-        sa.Column("question_group_id", sa.UUID(), nullable=True),
         sa.Column("user_id", sa.UUID(), nullable=False),
         sa.Column("dataset_id", sa.UUID(), nullable=True),
         sa.Column("dataset_name", sa.String(), nullable=True),
-        sa.Column("question_text", sa.Text(), nullable=False),
+        sa.Column("question", sa.Text(), nullable=False),
+        sa.Column("agent_label", sa.String(), nullable=True),
         sa.Column("source", sa.String(), nullable=False, server_default="observed"),
-        sa.Column("was_asked", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("curated_question_id", sa.UUID(), nullable=True),
         sa.Column("answer", sa.Text(), nullable=True),
-        sa.Column("judge_score", sa.Integer(), nullable=True),
-        sa.Column("judge_answered", sa.Boolean(), nullable=True),
+        sa.Column("coverage_score", sa.Integer(), nullable=True),
         sa.Column("retrieval_context", sa.Text(), nullable=True),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("topic_id", sa.UUID(), nullable=True),
         sa.Column("first_asked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_asked_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("occurrence_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("impact", sa.Float(), nullable=True),
+        sa.Column("relevance", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_recall_coverage_questions_run_id", "recall_coverage_questions", ["run_id"])
-    op.create_index(
-        "ix_recall_coverage_questions_question_group_id",
-        "recall_coverage_questions",
-        ["question_group_id"],
-    )
     op.create_index(
         "ix_recall_coverage_questions_user_id", "recall_coverage_questions", ["user_id"]
     )
@@ -121,18 +106,10 @@ def _create_topics() -> None:
         sa.Column("centroid", sa.JSON(), nullable=False),
         sa.Column("embedding_model", sa.String(), nullable=False),
         sa.Column("embedding_dimensions", sa.Integer(), nullable=False),
-        sa.Column("seed_question_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("taxonomy_version", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        # Backstop for the read-then-write version bump: two concurrent accepts
-        # or deletes computing the same ``max + 1`` fail loudly instead of two
-        # topics silently claiming one version. See the model's __table_args__.
-        sa.UniqueConstraint(
-            "owner_id", "taxonomy_version", name="uq_recall_coverage_topics_owner_version"
-        ),
     )
     op.create_index("ix_recall_coverage_topics_owner_id", "recall_coverage_topics", ["owner_id"])
     op.create_index(
@@ -183,9 +160,7 @@ def _create_curated_questions() -> None:
         "recall_coverage_curated_questions",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("owner_id", sa.UUID(), nullable=False),
-        sa.Column("scope", sa.String(), nullable=False, server_default="agent"),
-        sa.Column("agent_label", sa.String(), nullable=True),
-        sa.Column("question_text", sa.Text(), nullable=False),
+        sa.Column("question", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -194,11 +169,6 @@ def _create_curated_questions() -> None:
         "ix_recall_coverage_curated_questions_owner_id",
         "recall_coverage_curated_questions",
         ["owner_id"],
-    )
-    op.create_index(
-        "ix_recall_coverage_curated_questions_owner_scope",
-        "recall_coverage_curated_questions",
-        ["owner_id", "scope"],
     )
 
 

@@ -2,7 +2,7 @@
 
 Two jobs:
 
-* the string enums behind the ``Column(String)`` status/scope/source columns in
+* the string enums behind the ``Column(String)`` status/source columns in
   :mod:`cognee.modules.recall_coverage.models` — kept out of the database as a
   native type on purpose, because adding one value to a Postgres ``ENUM`` needs
   raw DDL (see ``cognee/alembic/versions/1d0bb7fede17_add_pipeline_run_status.py``);
@@ -20,11 +20,12 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# The sink is a wire-level literal, not a row in ``recall_coverage_topics``:
-# questions that matched no topic carry ``topic_id = NULL`` in the database and
-# are reported under this id, so the sink can never be deleted or accepted.
-SINK_TOPIC_ID = "other"
-SINK_TOPIC_LABEL = "Other"
+# The sink is not a row in ``recall_coverage_topics``: questions that matched no
+# topic carry ``topic_id = NULL`` in the database and are reported with
+# ``topic_id: null`` plus this label, so the sink can never be deleted or
+# accepted. There is deliberately no ``SINK_TOPIC_ID`` constant — the sink's wire
+# id is the absence of one, so nothing can mistake a literal for a topic id.
+SINK_TOPIC_LABEL = "Uncategorized"
 
 # Escape character passed as SQL ``LIKE ... ESCAPE`` when matching session-id
 # prefixes. ``_`` is a single-character wildcard in LIKE, so an unescaped
@@ -46,10 +47,16 @@ class RunStatus(str, Enum):
 
 
 class QuestionSource(str, Enum):
-    """Where a question row came from."""
+    """Where a question row's text came from.
+
+    ``USER_DEFINED`` is provenance, not participation: a user-defined question
+    that landed within ``dedup_threshold`` of real traffic keeps the human's
+    wording and the partition's ``relevance``, so "was this actually asked" is
+    ``relevance > 0`` and never ``source``.
+    """
 
     OBSERVED = "observed"
-    CURATED = "curated"
+    USER_DEFINED = "user_defined"
 
 
 class SuggestionStatus(str, Enum):
@@ -58,18 +65,6 @@ class SuggestionStatus(str, Enum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     DISMISSED = "dismissed"
-
-
-class CuratedScope(str, Enum):
-    """Scope of a curated question.
-
-    ``AGENT`` rows belong to one ``agent_label``. ``SHARED`` rows are the
-    benchmark set — identical prompts across every agent, which is the only
-    reason ``benchmark_score_pct`` is comparable between agents at all.
-    """
-
-    AGENT = "agent"
-    SHARED = "shared"
 
 
 class AgentScopeMode(str, Enum):
@@ -155,14 +150,13 @@ class CoverageParams(BaseModel):
     replay_max_concurrent: int = Field(ge=1)
     judge_max_concurrent: int = Field(ge=1)
     judge_max_retries: int = Field(ge=0)
-    # At least a 0..1 scale: every aggregate divides by this.
+    # Upper anchor of the coverage rubric (10 by default). ``memory_score`` and
+    # every topic average are reported on this scale, so a run's numbers are only
+    # comparable to another run's when both snapshotted the same value — which is
+    # exactly why it is snapshotted.
     judge_score_max: int = Field(ge=1)
     judge_reason_max_chars: int = Field(ge=1)
     store_context_max_chars: int = Field(ge=0)
-
-    # Phase 4 — alert thresholds.
-    sink_share_alert: float = Field(ge=0.0, le=1.0)
-    sink_cluster_alert_size: int = Field(ge=0)
 
     @classmethod
     def from_config(cls, config: Optional[Any] = None, **overrides: Any) -> "CoverageParams":

@@ -1,8 +1,8 @@
 """Assign question rows to the owner's topics, or to the sink.
 
-Phase 2 step 7 of the recall-coverage spec. Pure numpy and value objects: no
-database access (that is :mod:`cognee.modules.recall_coverage.repository`) and no
-LLM calls (topic *labels* are written once, on accept — see
+Phase 2 of a recall-coverage run. Pure numpy and value objects: no database
+access (that is :mod:`cognee.modules.recall_coverage.repository`) and no LLM calls
+(a topic *label* is written once, when the topic is created — see
 :mod:`cognee.modules.recall_coverage.suggest`).
 
 Four rules, each of which exists because its absence produces a plausible-looking
@@ -12,15 +12,16 @@ wrong number:
   similarity clears ``assignment_threshold`` *and* beats the runner-up by
   ``assignment_margin``. The threshold alone would assign a question sitting
   almost exactly between two topics to whichever one won by 0.001 — and since
-  ``topics[].avg_score`` is a mean over assigned rows, that coin flip moves two
+  ``topics[].memory_score`` is a mean over assigned rows, that coin flip moves two
   topic scores. Such a question belongs in the sink, which is precisely the
   signal that the taxonomy is missing something.
 * **One question, one topic.** No multi-label assignment, no max-over-topics:
   every headline number is a mean over rows, and a row counted under two topics
   would be double counted.
-* **The sink is the wire literal ``"other"``**, not a row in
-  ``recall_coverage_topics``. Unassigned rows carry ``topic_id = NULL`` in the
-  database, so the sink can never be deleted, accepted, or renamed.
+* **The sink is not a row in ``recall_coverage_topics``.** Unassigned rows carry
+  ``topic_id = NULL`` in the database and are reported as ``topic_id: null`` with
+  the label ``"Uncategorized"``, so the sink can never be deleted, accepted, or
+  renamed — there is no id to address it by.
 * **A fingerprint mismatch fails the run.** Comparing a centroid embedded by one
   model against a question embedded by another yields a confident, meaningless
   similarity. Re-embedding the topics instead would silently move every stored
@@ -37,7 +38,7 @@ import numpy as np
 from cognee.modules.recall_coverage.dedup import DedupedQuestion
 from cognee.modules.recall_coverage.embedding import EmbeddingFingerprint
 from cognee.modules.recall_coverage.exceptions import EmbeddingFingerprintMismatchError
-from cognee.modules.recall_coverage.types import SINK_TOPIC_ID, SINK_TOPIC_LABEL
+from cognee.modules.recall_coverage.types import SINK_TOPIC_LABEL
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("recall_coverage")
@@ -67,7 +68,10 @@ class TopicAssignment:
     """
 
     topic_id: Optional[UUID]
-    topic_label: str
+    # The topic's label, or ``"Uncategorized"`` for the sink. Named ``topic``
+    # because this is what the report calls it, and because a row that carries no
+    # topic id has nothing else to be identified by.
+    topic: str
     similarity: float
     # ``None`` when there was no second topic to compare against, in which case
     # the margin rule has nothing to reject and is treated as satisfied.
@@ -76,11 +80,6 @@ class TopicAssignment:
     @property
     def is_sink(self) -> bool:
         return self.topic_id is None
-
-    @property
-    def wire_topic_id(self) -> str:
-        """The id the API reports: a topic UUID as a string, or ``"other"``."""
-        return SINK_TOPIC_ID if self.topic_id is None else str(self.topic_id)
 
 
 @dataclass(frozen=True)
@@ -91,10 +90,6 @@ class AssignmentResult:
     # Positions of the questions that fell through to the sink. This is the input
     # to sink clustering, so it is returned rather than recomputed there.
     sink_indices: list[int]
-    # Topics that received at least one question, in the order the topics were
-    # given. ``topic_count`` on the run row counts these, not the taxonomy: a
-    # topic nobody asked about did not participate in this run.
-    assigned_topic_ids: tuple[UUID, ...]
 
     @property
     def sink_question_count(self) -> int:
@@ -188,23 +183,22 @@ def assign_topics(
     A question whose embedding failed is an all-zero row, so every similarity is
     0 and it lands in the sink. That is the correct outcome — a question we could
     not embed has not been shown to belong anywhere — and it is visible, because
-    the sink share is reported and alerted on.
+    the ``Uncategorized`` row of the report counts it.
     """
     question_count = int(question_vectors.shape[0]) if question_vectors.ndim == 2 else 0
     if question_count == 0:
-        return AssignmentResult(assignments=[], sink_indices=[], assigned_topic_ids=())
+        return AssignmentResult(assignments=[], sink_indices=[])
 
     sink = TopicAssignment(
-        topic_id=None, topic_label=SINK_TOPIC_LABEL, similarity=0.0, runner_up_similarity=None
+        topic_id=None, topic=SINK_TOPIC_LABEL, similarity=0.0, runner_up_similarity=None
     )
 
     if not topics:
-        # Everything is unassigned before the owner has accepted a single topic.
+        # Everything is unassigned before the owner has created a single topic.
         # Not an error: the first run's whole job is to propose the taxonomy.
         return AssignmentResult(
             assignments=[sink] * question_count,
             sink_indices=list(range(question_count)),
-            assigned_topic_ids=(),
         )
 
     require_matching_fingerprint(topics, fingerprint)
@@ -214,7 +208,6 @@ def assign_topics(
 
     assignments: list[TopicAssignment] = []
     sink_indices: list[int] = []
-    assigned: list[UUID] = []
 
     for index in range(question_count):
         row = similarity[index]
@@ -234,19 +227,17 @@ def assign_topics(
             assignments.append(
                 TopicAssignment(
                     topic_id=topic.id,
-                    topic_label=topic.label,
+                    topic=topic.label,
                     similarity=best,
                     runner_up_similarity=runner_up,
                 )
             )
-            if topic.id not in assigned:
-                assigned.append(topic.id)
             continue
 
         assignments.append(
             TopicAssignment(
                 topic_id=None,
-                topic_label=SINK_TOPIC_LABEL,
+                topic=SINK_TOPIC_LABEL,
                 similarity=best,
                 runner_up_similarity=runner_up,
             )
@@ -260,11 +251,7 @@ def assign_topics(
         len(topics),
     )
 
-    return AssignmentResult(
-        assignments=assignments,
-        sink_indices=sink_indices,
-        assigned_topic_ids=tuple(assigned),
-    )
+    return AssignmentResult(assignments=assignments, sink_indices=sink_indices)
 
 
 __all__ = [

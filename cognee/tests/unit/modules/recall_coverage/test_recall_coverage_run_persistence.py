@@ -8,7 +8,7 @@ Four invariants:
   and destroy the trend that stable topic ids exist to carry, so this file asserts
   the stored dict still names a topic after that topic is gone.
 * **Rows and summary land together.** One transaction, so a reader never sees a
-  table full of scores under an ``overall_score: null`` that would read as
+  table full of scores under a ``memory_score: null`` that would read as
   "memory answered nothing".
 * **Owner scope is part of every id-keyed read**, and a miss is 404, never 403.
 * **The default report order is a read-side property.** There is no ordering
@@ -33,7 +33,7 @@ from cognee.infrastructure.databases.relational.create_relational_engine import 
 )
 from cognee.modules.recall_coverage.aggregate import (
     CoverageRow,
-    row_impact,
+    SuggestedTopic,
     run_counters,
     summarize,
 )
@@ -62,32 +62,30 @@ def _row(
     dataset_id=None,
     dataset_name=None,
     topic_id=None,
-    judge_score=3,
-    occurrence_count=2,
+    coverage_score=3,
+    relevance=2,
     source: str = QuestionSource.OBSERVED.value,
+    agent_label="claude-code",
     text: str = "Where are the runbooks?",
     error=None,
 ) -> CoverageRow:
     return CoverageRow(
-        question_text=text,
+        question=text,
         user_id=user_id,
         dataset_id=dataset_id,
         dataset_name=dataset_name,
-        question_group_id=uuid4(),
+        agent_label=agent_label if relevance > 0 else None,
         source=source,
-        was_asked=source == QuestionSource.OBSERVED.value,
         curated_question_id=None if source == QuestionSource.OBSERVED.value else uuid4(),
         topic_id=topic_id,
-        topic_label="Runbooks" if topic_id else "Other",
-        answer="An answer." if judge_score else None,
-        judge_score=judge_score,
-        judge_answered=None if judge_score is None else judge_score > 0,
-        retrieval_context="Some context." if judge_score else None,
+        topic="Runbooks" if topic_id else "Uncategorized",
+        answer="An answer." if coverage_score else None,
+        coverage_score=coverage_score,
+        retrieval_context="Some context." if coverage_score else None,
         error=error,
         first_asked_at=BASE_TIME,
         last_asked_at=BASE_TIME,
-        occurrence_count=occurrence_count,
-        impact=row_impact(occurrence_count, judge_score, 5),
+        relevance=relevance,
     )
 
 
@@ -125,13 +123,14 @@ async def test_create_run_inserts_a_pending_row_carrying_its_params(run_engine):
     owner_id = uuid4()
     params = _params(max_questions=42)
 
-    run = await repository.create_run(owner_id, AGENT_LABEL, params=params, taxonomy_version=3)
+    run = await repository.create_run(owner_id, AGENT_LABEL, params=params)
 
     assert run.status == RunStatus.PENDING.value
     assert run.is_in_flight
     assert run.agent_label == AGENT_LABEL
     assert run.owner_id == owner_id
-    assert run.taxonomy_version == 3
+    assert run.recall_count == 0
+    assert run.question_count == 0
     assert run.finished_at is None
     # Persisted in JSON mode, so the snapshot survives a round trip unchanged.
     assert run.params["max_questions"] == 42
@@ -148,46 +147,35 @@ async def test_mark_run_running_then_persist_completes_the_run(run_engine):
     assert running.status == RunStatus.RUNNING.value
     assert running.is_in_flight
 
-    rows = [_row(user_id=uuid4(), topic_id=uuid4(), judge_score=4)]
-    summary = summarize(rows, params=params, distinct_ask_count=5)
-    counters = run_counters(
-        rows,
-        recall_row_count=9,
-        distinct_ask_count=5,
-        collapsed_retry_count=4,
-        taxonomy_version=2,
-    )
+    rows = [_row(user_id=uuid4(), topic_id=uuid4(), coverage_score=4)]
+    summary = summarize(rows, params=params)
+    counters = run_counters(rows, recall_count=9)
 
     completed = await repository.persist_run_results(run.id, rows, summary, counters)
 
     assert completed.status == RunStatus.COMPLETE.value
     assert not completed.is_in_flight
     assert completed.finished_at is not None
-    assert completed.recall_row_count == 9
-    assert completed.distinct_ask_count == 5
-    assert completed.collapsed_retry_count == 4
-    assert completed.question_row_count == 1
-    assert completed.taxonomy_version == 2
-    assert completed.summary["overall_score"] == 4.0
+    assert completed.recall_count == 9
+    assert completed.question_count == 1
+    assert completed.summary["memory_score"] == 4.0
 
 
 @pytest.mark.asyncio
 async def test_an_empty_window_completes_with_a_null_score_and_no_questions(run_engine):
-    """The expected result for every label but ``all`` until ``session_id`` ships."""
+    """ "Nothing asked yet" is a complete run, not a failure and not a score of zero."""
     params = _params()
     run = await repository.create_run(uuid4(), AGENT_LABEL, params=params)
     await repository.mark_run_running(run.id)
 
     summary = summarize([], params=params)
-    counters = run_counters(
-        [], recall_row_count=0, distinct_ask_count=0, collapsed_retry_count=0, taxonomy_version=0
-    )
+    counters = run_counters([], recall_count=0)
 
     completed = await repository.persist_run_results(run.id, [], summary, counters)
 
     assert completed.status == RunStatus.COMPLETE.value
-    assert completed.summary["overall_score"] is None
-    assert completed.question_row_count == 0
+    assert completed.summary["memory_score"] is None
+    assert completed.question_count == 0
     assert await repository.load_run_questions(run.id) == []
 
 
@@ -201,16 +189,14 @@ async def test_fail_run_records_why_and_leaves_the_counters_alone(run_engine):
     assert failed.status == RunStatus.FAILED.value
     assert failed.finished_at is not None
     assert "zero vectors" in failed.summary["error"]
-    assert failed.question_row_count == 0
+    assert failed.question_count == 0
 
 
 @pytest.mark.asyncio
 async def test_persisting_into_a_missing_run_raises_not_found(run_engine):
     params = _params()
     summary = summarize([], params=params)
-    counters = run_counters(
-        [], recall_row_count=0, distinct_ask_count=0, collapsed_retry_count=0, taxonomy_version=0
-    )
+    counters = run_counters([], recall_count=0)
 
     with pytest.raises(CoverageRunNotFoundError):
         await repository.persist_run_results(uuid4(), [], summary, counters)
@@ -223,13 +209,13 @@ async def test_persisting_into_a_missing_run_raises_not_found(run_engine):
 
 
 @pytest.mark.asyncio
-async def test_the_stored_summary_names_the_topic_dataset_and_user_verbatim(run_engine):
+async def test_the_stored_summary_names_the_topic_verbatim(run_engine):
     """Why freezing works: nothing needs to still exist for the report to render.
 
-    The stored JSON carries the topic id and label, the dataset id and name and
-    the asker's id as literals, so deleting the topic or losing access to the
-    dataset later cannot rewrite this run. (The delete itself is commit 8's; this
-    asserts the property that makes it harmless.)
+    The stored JSON carries the topic id *and its label* as literals, so deleting
+    the topic later cannot rewrite this run — and the read endpoint resolves each
+    question row's topic name out of here rather than out of a live join, which is
+    what makes that true.
     """
     owner_id = uuid4()
     user_id = uuid4()
@@ -244,19 +230,13 @@ async def test_the_stored_summary_names_the_topic_dataset_and_user_verbatim(run_
             dataset_id=dataset_id,
             dataset_name="infra-docs",
             topic_id=topic_id,
-            judge_score=score,
+            coverage_score=score,
             text=f"q{score}",
         )
         for score in (4, 2)
     ]
-    summary = summarize(rows, params=params, distinct_ask_count=7)
-    counters = run_counters(
-        rows,
-        recall_row_count=7,
-        distinct_ask_count=7,
-        collapsed_retry_count=0,
-        taxonomy_version=1,
-    )
+    summary = summarize(rows, params=params)
+    counters = run_counters(rows, recall_count=7)
 
     await repository.persist_run_results(run.id, rows, summary, counters)
 
@@ -264,20 +244,24 @@ async def test_the_stored_summary_names_the_topic_dataset_and_user_verbatim(run_
     # nothing needs to still exist for the report to render.
     stored = (await repository.get_run(run.id, [owner_id])).summary
 
-    assert stored["overall_score"] == 3.0
+    assert stored["memory_score"] == 3.0
     assert stored["topics"] == [
         {
             "topic_id": str(topic_id),
-            "label": "Runbooks",
+            "topic": "Runbooks",
             "question_count": 2,
-            "scored_question_count": 2,
-            "avg_score": 3.0,
+            "memory_score": 3.0,
         }
     ]
-    assert stored["datasets"][0]["dataset_id"] == str(dataset_id)
-    assert stored["datasets"][0]["dataset_name"] == "infra-docs"
-    assert stored["users"][0]["user_id"] == str(user_id)
-    assert stored["unscoped_ask_share"] == 0.0
+    # This run proposed nothing, and that is an empty list rather than a null.
+    assert stored["suggested_topics"] == []
+    # The dataset and the asker travel on the question rows, not in the summary:
+    # the report is one flat table the UI groups, so there is no per-dataset block
+    # to keep in step with it.
+    assert set(stored) == {"memory_score", "topics", "suggested_topics"}
+    stored_rows = await repository.load_run_questions(run.id)
+    assert {row.dataset_name for row in stored_rows} == {"infra-docs"}
+    assert {row.user_id for row in stored_rows} == {user_id}
 
 
 @pytest.mark.asyncio
@@ -286,11 +270,9 @@ async def test_the_question_rows_and_the_summary_land_in_one_transaction(run_eng
     params = _params(min_scored_questions_per_topic=1)
     run = await repository.create_run(owner_id, AGENT_LABEL, params=params)
 
-    rows = [_row(user_id=uuid4(), judge_score=index, text=f"q{index}") for index in range(3)]
+    rows = [_row(user_id=uuid4(), coverage_score=index, text=f"q{index}") for index in range(3)]
     summary = summarize(rows, params=params)
-    counters = run_counters(
-        rows, recall_row_count=3, distinct_ask_count=3, collapsed_retry_count=0, taxonomy_version=0
-    )
+    counters = run_counters(rows, recall_count=3)
 
     await repository.persist_run_results(run.id, rows, summary, counters)
 
@@ -310,7 +292,7 @@ async def test_the_question_rows_and_the_summary_land_in_one_transaction(run_eng
 
     assert len(stored_rows) == 3
     assert stored_run.status == RunStatus.COMPLETE.value
-    assert stored_run.summary["scored_question_count"] == 3
+    assert stored_run.summary["topics"][0]["question_count"] == 3
 
 
 # --- question rows -----------------------------------------------------------
@@ -330,83 +312,114 @@ async def test_persisted_question_rows_round_trip_every_judged_field(run_engine)
         dataset_id=dataset_id,
         dataset_name="infra-docs",
         topic_id=topic_id,
-        judge_score=1,
-        occurrence_count=4,
+        coverage_score=1,
+        relevance=4,
     )
     summary = summarize([row], params=params)
-    counters = run_counters(
-        [row], recall_row_count=4, distinct_ask_count=4, collapsed_retry_count=0, taxonomy_version=0
-    )
+    counters = run_counters([row], recall_count=4)
 
     await repository.persist_run_results(run.id, [row], summary, counters)
     stored = (await repository.load_run_questions(run.id))[0]
 
     assert stored.run_id == run.id
-    assert stored.question_text == row.question_text
+    assert stored.question == row.question
     assert stored.user_id == user_id
     assert stored.dataset_id == dataset_id
     assert stored.dataset_name == "infra-docs"
-    assert stored.question_group_id == row.question_group_id
     assert stored.source == QuestionSource.OBSERVED.value
-    assert stored.was_asked is True
     assert stored.topic_id == topic_id
-    assert stored.judge_score == 1
-    assert stored.judge_answered is True
+    assert stored.coverage_score == 1
     assert stored.retrieval_context == "Some context."
-    assert stored.occurrence_count == 4
-    # 4 asks x (5 - 1) missing score.
-    assert stored.impact == 16.0
+    assert stored.relevance == 4
     assert stored.error is None
     assert stored.first_asked_at is not None
+    # Persisted rather than re-derived at read time: the label came from the
+    # prefix map as configured when the run executed, so deriving it later would
+    # relabel history the moment a deployment edits that map.
+    assert stored.agent_label == "claude-code"
 
 
 @pytest.mark.asyncio
-async def test_an_unjudged_row_persists_null_scores_and_a_null_impact(run_engine):
+async def test_the_topic_label_is_not_persisted_on_the_question_row(run_engine):
+    """The label lives on the topic row, and "Uncategorized" is not a row at all.
+
+    Storing it per question would let a run's copy drift from the thing it
+    describes; the report reads it out of the frozen summary instead.
+    """
     params = _params()
     run = await repository.create_run(uuid4(), AGENT_LABEL, params=params)
-    row = _row(user_id=uuid4(), judge_score=None, error="replay failed", occurrence_count=9)
+    row = _row(user_id=uuid4(), topic_id=uuid4())
+
+    await repository.persist_run_results(
+        run.id, [row], summarize([row], params=params), run_counters([row], recall_count=1)
+    )
+
+    assert "topic" not in {column.name for column in RecallCoverageQuestion.__table__.columns}
+    assert not hasattr((await repository.load_run_questions(run.id))[0], "topic")
+
+
+@pytest.mark.asyncio
+async def test_a_user_defined_row_nobody_asked_persists_a_null_agent(run_engine):
+    """Nobody asked it, so no agent can be responsible for it."""
+    params = _params()
+    run = await repository.create_run(uuid4(), AGENT_LABEL, params=params)
+    row = _row(user_id=uuid4(), source=QuestionSource.USER_DEFINED.value, relevance=0)
+
+    await repository.persist_run_results(
+        run.id, [row], summarize([row], params=params), run_counters([row], recall_count=0)
+    )
+    stored = (await repository.load_run_questions(run.id))[0]
+
+    assert stored.agent_label is None
+    assert stored.relevance == 0
+    assert stored.is_curated
+
+
+@pytest.mark.asyncio
+async def test_an_unjudged_row_persists_a_null_score_and_its_error(run_engine):
+    """ "We could not ask" is a NULL score, never a zero — a zero is a real verdict."""
+    params = _params()
+    run = await repository.create_run(uuid4(), AGENT_LABEL, params=params)
+    row = _row(user_id=uuid4(), coverage_score=None, error="replay failed", relevance=9)
 
     summary = summarize([row], params=params)
-    counters = run_counters(
-        [row], recall_row_count=9, distinct_ask_count=9, collapsed_retry_count=0, taxonomy_version=0
-    )
+    counters = run_counters([row], recall_count=9)
     await repository.persist_run_results(run.id, [row], summary, counters)
 
     stored = (await repository.load_run_questions(run.id))[0]
 
-    assert stored.judge_score is None
-    assert stored.judge_answered is None
-    assert stored.impact is None
+    assert stored.coverage_score is None
     assert stored.error == "replay failed"
+    assert stored.relevance == 9
 
 
 @pytest.mark.asyncio
-async def test_load_run_questions_pins_curated_rows_above_observed_rows(run_engine):
+async def test_load_run_questions_pins_user_defined_rows_above_observed_rows(run_engine):
     """The read side re-applies the default order; the table has no ordering column."""
     params = _params()
     run = await repository.create_run(uuid4(), AGENT_LABEL, params=params)
 
     rows = [
-        _row(user_id=uuid4(), judge_score=5, occurrence_count=1, text="best observed"),
-        _row(user_id=uuid4(), judge_score=1, occurrence_count=8, text="worst observed"),
+        _row(user_id=uuid4(), coverage_score=5, relevance=1, text="best observed"),
+        _row(user_id=uuid4(), coverage_score=1, relevance=8, text="worst observed"),
         _row(
             user_id=uuid4(),
-            source=QuestionSource.CURATED.value,
-            judge_score=0,
-            occurrence_count=0,
-            text="curated",
+            source=QuestionSource.USER_DEFINED.value,
+            coverage_score=0,
+            relevance=0,
+            text="user defined",
         ),
-        _row(user_id=uuid4(), judge_score=None, error="boom", occurrence_count=99, text="unjudged"),
+        _row(user_id=uuid4(), coverage_score=None, error="boom", relevance=99, text="unjudged"),
     ]
     summary = summarize(rows, params=params)
-    counters = run_counters(
-        rows, recall_row_count=9, distinct_ask_count=9, collapsed_retry_count=0, taxonomy_version=0
-    )
+    counters = run_counters(rows, recall_count=9)
     await repository.persist_run_results(run.id, rows, summary, counters)
 
-    ordered = [record.question_text for record in await repository.load_run_questions(run.id)]
+    ordered = [record.question for record in await repository.load_run_questions(run.id)]
 
-    assert ordered == ["curated", "worst observed", "best observed", "unjudged"]
+    # The read side and the write side are duck-typed on the same key, so a drift
+    # between them cannot hide: user-defined first, then by demand.
+    assert ordered == ["user defined", "unjudged", "worst observed", "best observed"]
 
 
 @pytest.mark.asyncio
@@ -422,16 +435,10 @@ async def test_load_run_questions_is_scoped_to_one_run(run_engine):
             run.id,
             rows,
             summarize(rows, params=params),
-            run_counters(
-                rows,
-                recall_row_count=1,
-                distinct_ask_count=1,
-                collapsed_retry_count=0,
-                taxonomy_version=0,
-            ),
+            run_counters(rows, recall_count=1),
         )
 
-    assert [row.question_text for row in await repository.load_run_questions(first.id)] == [
+    assert [row.question for row in await repository.load_run_questions(first.id)] == [
         "claude question"
     ]
 
@@ -498,13 +505,7 @@ async def test_runs_in_flight_sees_pending_and_running_but_not_settled_runs(run_
         pending.id,
         [],
         summarize([], params=params),
-        run_counters(
-            [],
-            recall_row_count=0,
-            distinct_ask_count=0,
-            collapsed_retry_count=0,
-            taxonomy_version=0,
-        ),
+        run_counters([], recall_count=0),
     )
     assert await repository.runs_in_flight(owner_id, AGENT_LABEL) == []
 
@@ -564,39 +565,57 @@ async def test_a_run_killed_in_flight_stops_blocking_after_the_staleness_bound(r
 
 
 @pytest.mark.asyncio
-async def test_the_counters_count_participants_not_taxonomy_size(run_engine):
+async def test_the_two_counters_are_the_window_and_the_rows_it_judged(run_engine):
+    """A window truncated by ``window_row_cap`` is only visible in the gap between them.
+
+    Everything else the collapse counted — distinct asks, swallowed retries, how
+    many topics or datasets took part — is derivable from the rows or is not
+    reported at all, so the run row carries these two and nothing more.
+    """
     owner_id = uuid4()
     anna, ben = uuid4(), uuid4()
-    dataset_id = uuid4()
-    topic_id = uuid4()
     params = _params()
 
     rows = [
-        _row(user_id=anna, dataset_id=dataset_id, topic_id=topic_id, text="a"),
-        _row(user_id=ben, dataset_id=dataset_id, topic_id=None, text="b"),
-        _row(user_id=ben, dataset_id=None, source=QuestionSource.CURATED.value, text="c"),
+        _row(user_id=anna, dataset_id=uuid4(), topic_id=uuid4(), text="a"),
+        _row(user_id=ben, topic_id=None, text="b"),
+        _row(user_id=ben, source=QuestionSource.USER_DEFINED.value, relevance=0, text="c"),
     ]
-    counters = run_counters(
-        rows,
-        recall_row_count=11,
-        distinct_ask_count=6,
-        collapsed_retry_count=5,
-        taxonomy_version=4,
-    )
 
     run = await repository.create_run(owner_id, AGENT_LABEL, params=params)
     stored = await repository.persist_run_results(
-        run.id, rows, summarize(rows, params=params), counters
+        run.id, rows, summarize(rows, params=params), run_counters(rows, recall_count=11)
     )
 
-    assert stored.question_row_count == 3
-    assert stored.curated_question_count == 1
-    # One topic received a row; the sink is not a topic and the curated row's
-    # dataset is NULL, so neither is counted.
-    assert stored.topic_count == 1
-    assert stored.dataset_count == 1
-    assert stored.user_count == 2
-    assert stored.recall_row_count == 11
-    assert stored.distinct_ask_count == 6
-    assert stored.collapsed_retry_count == 5
-    assert stored.taxonomy_version == 4
+    assert stored.recall_count == 11
+    # Every row the run judged, including the one nobody asked.
+    assert stored.question_count == 3
+
+
+@pytest.mark.asyncio
+async def test_the_runs_own_suggestions_are_frozen_onto_it(run_engine):
+    """A suggestion is a per-run output: the queue moves, a historical run must not."""
+    owner_id = uuid4()
+    suggestion_id = uuid4()
+    params = _params(min_scored_questions_per_topic=1)
+    run = await repository.create_run(owner_id, AGENT_LABEL, params=params)
+
+    rows = [_row(user_id=uuid4(), topic_id=None, text="unplaceable")]
+    summary = summarize(
+        rows,
+        params=params,
+        suggested_topics=[
+            SuggestedTopic(suggestion_id=suggestion_id, label="Deploy rollbacks", question_count=7)
+        ],
+    )
+
+    await repository.persist_run_results(run.id, rows, summary, run_counters(rows, recall_count=1))
+    stored = (await repository.get_run(run.id, [owner_id])).summary
+
+    assert stored["suggested_topics"] == [
+        {
+            "suggestion_id": str(suggestion_id),
+            "label": "Deploy rollbacks",
+            "question_count": 7,
+        }
+    ]

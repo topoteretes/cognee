@@ -27,20 +27,21 @@ from cognee.modules.recall_coverage.exceptions import (
     CoverageSuggestionNotFoundError,
     CoverageSuggestionNotPendingError,
     CoverageTopicNotFoundError,
+    CuratedQuestionLimitError,
     CuratedQuestionNotFoundError,
     DegenerateEmbeddingError,
     DuplicateCuratedQuestionError,
+    DuplicateTopicError,
     EmbeddingFingerprintMismatchError,
-    InvalidCuratedQuestionScopeError,
-    SinkTopicNotEditableError,
+    EmptyCuratedQuestionError,
+    EmptyTopicLabelError,
     UnknownAgentLabelError,
 )
 from cognee.modules.recall_coverage.types import (
-    SINK_TOPIC_ID,
+    SINK_TOPIC_LABEL,
     AgentScope,
     AgentScopeMode,
     CoverageParams,
-    CuratedScope,
     QuestionSource,
     RunStatus,
     SuggestionStatus,
@@ -54,12 +55,12 @@ def _config(**overrides) -> RecallCoverageConfig:
 def test_documented_defaults():
     """The defaults the spec fixes by number, so a silent retune is visible."""
     config = _config()
-    assert config.max_questions == 150
+    assert config.max_questions == 500
     assert config.max_age_days == 30
     assert config.replay_top_k == 15
-    assert config.judge_score_max == 5
+    # The coverage rubric is 0-10; every reported score is on this scale.
+    assert config.judge_score_max == 10
     assert config.min_questions_per_topic == 5
-    assert config.agents_list_default_limit == 5
     assert config.fanout_window_seconds == 5
     assert config.retry_cooldown_seconds == 300
 
@@ -74,7 +75,7 @@ def test_similarity_thresholds_are_bounded():
 def test_env_vars_are_namespaced(monkeypatch):
     """Short names like max_questions must not collide with unrelated env vars."""
     monkeypatch.setenv("MAX_QUESTIONS", "3")
-    assert _config().max_questions == 150
+    assert _config().max_questions == 500
 
     monkeypatch.setenv("RECALL_COVERAGE_MAX_QUESTIONS", "7")
     assert _config().max_questions == 7
@@ -84,10 +85,13 @@ def test_default_prefix_map_keeps_claude_code_and_desktop_separate():
     prefix_map = _config().prefix_map()
     assert prefix_map["claude-code"] == ("claude_", "cc_")
     assert prefix_map["claude-desktop"] == ("claude_desktop_",)
-    assert prefix_map["ui"] == ("search-ui-",)
+    # ``ui`` carries both the prefix the shipped frontend mints and the reserved
+    # one, so a deployment map has a stable name for the same surface.
+    assert prefix_map["ui"] == ("search-ui-", "ui_")
     assert set(prefix_map) == set(DEFAULT_AGENT_PREFIX_MAP)
 
-    # "api" and "all" are literals the backend never mints from a prefix.
+    # "api" and "all" are literals the backend never mints from a prefix. "ui"
+    # is reserved as a *name* but is genuinely prefix-based, hence its presence.
     assert "api" not in prefix_map
     assert "all" not in prefix_map
 
@@ -119,8 +123,8 @@ def test_malformed_prefix_map_fails_loudly(raw):
 def test_two_labels_may_not_claim_the_same_prefix():
     """ "Longest prefix wins" is only a partition when each prefix has one owner.
 
-    Two labels owning ``claude_`` match the same rows: ``GET /agents`` would report
-    the same traffic twice under two names, and two runs would replay and judge the
+    Two labels owning ``claude_`` match the same rows, so the same traffic would be
+    reported twice under two names — and two runs would replay and judge the
     identical window at double the LLM cost while presenting as two agents.
     """
     raw = json.dumps({"claude-code": ["claude_", "cc_"], "my-fork": ["claude_"]})
@@ -213,16 +217,16 @@ def test_agent_scope_defaults_to_all():
 def test_enum_wire_values():
     """These strings are written into String columns and read by the UI."""
     assert [status.value for status in RunStatus] == ["pending", "running", "complete", "failed"]
-    assert [source.value for source in QuestionSource] == ["observed", "curated"]
+    assert [source.value for source in QuestionSource] == ["observed", "user_defined"]
     assert [status.value for status in SuggestionStatus] == ["pending", "accepted", "dismissed"]
-    assert [scope.value for scope in CuratedScope] == ["agent", "shared"]
-    assert SINK_TOPIC_ID == "other"
+    # The sink has a label and deliberately no id: its wire id is the absence of
+    # one, so no literal can be mistaken for a topic id.
+    assert SINK_TOPIC_LABEL == "Uncategorized"
 
 
 @pytest.mark.parametrize(
     "error_class,status_code",
     [
-        (UnknownAgentLabelError, 404),
         (CoverageRunNotFoundError, 404),
         (CoverageTopicNotFoundError, 404),
         (CoverageSuggestionNotFoundError, 404),
@@ -230,9 +234,14 @@ def test_enum_wire_values():
         (CoverageRunInFlightError, 409),
         (CoverageSuggestionNotPendingError, 409),
         (DuplicateCuratedQuestionError, 409),
+        (DuplicateTopicError, 409),
         (EmbeddingFingerprintMismatchError, 409),
-        (SinkTopicNotEditableError, 422),
-        (InvalidCuratedQuestionScopeError, 422),
+        # A label is a parameter value, not a resource: the route exists, the
+        # value is not one it accepts.
+        (UnknownAgentLabelError, 422),
+        (EmptyCuratedQuestionError, 422),
+        (EmptyTopicLabelError, 422),
+        (CuratedQuestionLimitError, 422),
         (DegenerateEmbeddingError, 500),
     ],
 )

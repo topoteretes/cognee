@@ -7,9 +7,12 @@ is a number's honesty rather than a saving:
   coverage, which is a definition rather than an approximation;
 * a row that **scored 0 makes no completion call**, because there is nothing to
   have answered from and a generated answer would only be the model's own
-  knowledge;
+  knowledge; ``answer`` is ``null`` there;
 * the coverage prompt **never sees an answer**, because a fluent answer reads as
-  good coverage even when the context was thin.
+  good coverage even when the context was thin;
+* there is **one judgement per row**, on a 0-10 scale — the answer that follows it
+  is a generation nothing is scored from, so there is no second verdict to
+  disagree with the number every average is a mean of.
 
 Every LLM call is faked. ``MOCK_EMBEDDING``-style stand-ins are not used here:
 this module makes no embedding calls at all.
@@ -28,7 +31,6 @@ from cognee.modules.recall_coverage.judge import (
     MIN_JUDGE_SCORE,
     CoverageAnswer,
     JudgedRow,
-    answered_model,
     coverage_model,
     judge_row,
     judge_rows,
@@ -41,7 +43,6 @@ judge_module = importlib.import_module("cognee.modules.recall_coverage.judge")
 
 COVERAGE = "ContextCoverage"
 ANSWER = "CoverageAnswer"
-ANSWERED = "AnsweredVerdict"
 
 
 def _params(**overrides) -> CoverageParams:
@@ -54,8 +55,7 @@ def _question(text: str = "Where are the runbooks?") -> DedupedQuestion:
         user_id=uuid4(),
         dataset_id=None,
         source=QuestionSource.OBSERVED.value,
-        was_asked=True,
-        occurrence_count=1,
+        relevance=1,
         first_asked_at=None,
         last_asked_at=None,
         curated_question_id=None,
@@ -74,13 +74,12 @@ def _replayed(context="the runbooks live in infra-docs", *, error=None) -> Repla
 class _FakeLLM:
     """Dispatches on the requested ``response_model``, recording call order."""
 
-    def __init__(self, *, score=4, reason="context has it", answer="In infra-docs.", answered=True):
+    def __init__(self, *, score=4, reason="context has it", answer="In infra-docs."):
         self.calls: list[str] = []
         self.prompts: list[dict] = []
         self._score = score
         self._reason = reason
         self._answer = answer
-        self._answered = answered
 
     def __call__(self, *, text_input, system_prompt, response_model, **kwargs):
         name = response_model.__name__
@@ -93,8 +92,6 @@ class _FakeLLM:
             return response_model(score=self._score, reason=self._reason)
         if name == ANSWER:
             return response_model(answer=self._answer)
-        if name == ANSWERED:
-            return response_model(answered=self._answered, reason=self._reason)
         raise AssertionError(f"unexpected response model {name}")
 
 
@@ -121,8 +118,8 @@ async def test_an_empty_context_scores_zero_with_no_llm_call_at_all():
             row = await judge_row(_question().text, _replayed(empty), params=_params())
 
         mock_llm.assert_not_called()
-        assert row.judge_score == MIN_JUDGE_SCORE == 0
-        assert row.judge_answered is False
+        assert row.coverage_score == MIN_JUDGE_SCORE == 0
+        # Nothing was retrieved, so there is nothing an answer could come from.
         assert row.answer is None
         assert row.error is None
 
@@ -134,10 +131,9 @@ async def test_a_row_scoring_zero_makes_no_completion_call():
     with _patched(fake):
         row = await judge_row(_question().text, _replayed(), params=_params())
 
-    # Exactly one call, and it is the coverage call: no completion, no verdict.
+    # Exactly one call, and it is the coverage call: no completion follows a zero.
     assert fake.calls == [COVERAGE]
-    assert row.judge_score == 0
-    assert row.judge_answered is False
+    assert row.coverage_score == 0
     assert row.answer is None
     assert row.coverage_reason == "nothing relevant retrieved"
 
@@ -152,9 +148,7 @@ async def test_a_row_whose_replay_failed_is_not_judged_at_all():
         )
 
     mock_llm.assert_not_called()
-    assert row == JudgedRow(
-        judge_score=None, judge_answered=None, answer=None, error="retriever exploded"
-    )
+    assert row == JudgedRow(coverage_score=None, answer=None, error="retriever exploded")
     assert row.was_judged is False
 
 
@@ -192,7 +186,7 @@ async def test_the_judge_scores_the_whole_context_not_a_storage_bounded_excerpt(
 
     coverage_prompt = next(call for call in fake.prompts if call["model"] == COVERAGE)
     assert "ESCALATION goes to the on-call SRE." in coverage_prompt["text_input"]
-    assert row.judge_score == 5
+    assert row.coverage_score == 5
 
 
 # --------------------------------------------------------------------------
@@ -201,33 +195,22 @@ async def test_the_judge_scores_the_whole_context_not_a_storage_bounded_excerpt(
 
 
 @pytest.mark.asyncio
-async def test_a_scored_row_makes_exactly_three_calls_in_order():
-    fake = _FakeLLM(score=4, answer="They live in infra-docs.", answered=True)
+async def test_a_scored_row_makes_exactly_two_calls_in_order():
+    """One judgement, then one generation. There is no second verdict.
+
+    A separate ``answered`` boolean judged from the generated answer would be a
+    second, sloppier coverage score that could contradict the first — and the
+    first is the number every reported average is a mean of.
+    """
+    fake = _FakeLLM(score=4, answer="They live in infra-docs.")
 
     with _patched(fake):
         row = await judge_row(_question().text, _replayed(), params=_params())
 
-    assert fake.calls == [COVERAGE, ANSWER, ANSWERED]
-    assert row.judge_score == 4
-    assert row.judge_answered is True
+    assert fake.calls == [COVERAGE, ANSWER]
+    assert row.coverage_score == 4
     assert row.answer == "They live in infra-docs."
     assert row.was_judged is True
-
-
-@pytest.mark.asyncio
-async def test_the_answered_verdict_is_judged_from_the_generated_answer():
-    fake = _FakeLLM(score=2, answer="The context does not say.", answered=False)
-
-    with _patched(fake):
-        row = await judge_row(_question().text, _replayed(), params=_params())
-
-    answered_prompt = next(call for call in fake.prompts if call["model"] == ANSWERED)
-    assert "The context does not say." in answered_prompt["text_input"]
-    # The verdict is asked from (question, answer) only — the context is not in it,
-    # so ``answered`` cannot become a second, sloppier coverage score.
-    assert "the runbooks live in infra-docs" not in answered_prompt["text_input"]
-    assert row.judge_answered is False
-    assert row.judge_score == 2
 
 
 @pytest.mark.asyncio
@@ -243,13 +226,13 @@ async def test_the_question_reaches_every_prompt():
 
 @pytest.mark.asyncio
 async def test_an_empty_generated_answer_is_stored_as_null():
-    fake = _FakeLLM(score=3, answer="   ", answered=False)
+    fake = _FakeLLM(score=3, answer="   ")
 
     with _patched(fake):
         row = await judge_row(_question().text, _replayed(), params=_params())
 
     assert row.answer is None
-    assert row.judge_score == 3
+    assert row.coverage_score == 3
 
 
 # --------------------------------------------------------------------------
@@ -280,12 +263,12 @@ async def test_a_score_above_the_maximum_is_clamped(monkeypatch):
         score, reason = await score_context_coverage(
             "q",
             "context",
-            judge_score_max=5,
+            judge_score_max=10,
             judge_reason_max_chars=500,
             judge_max_retries=0,
         )
 
-    assert score == 5
+    assert score == 10
     assert reason == "over the top"
 
 
@@ -299,33 +282,34 @@ async def test_an_over_long_reason_is_truncated_rather_than_costing_the_score():
             _question().text, _replayed(), params=_params(judge_reason_max_chars=40)
         )
 
-    assert row.judge_score == 3
+    assert row.coverage_score == 3
     assert row.coverage_reason == "r" * 40
 
 
 def test_the_reason_length_is_not_a_hard_constraint():
     # A ``max_length`` here would turn a long rationale into a validation error
     # that burns every retry and leaves the row unscored.
-    assert coverage_model(5, 10)(score=1, reason="r" * 400).reason == "r" * 400
-    assert answered_model(10)(answered=True, reason="r" * 400).reason == "r" * 400
+    assert coverage_model(10, 10)(score=1, reason="r" * 400).reason == "r" * 400
 
 
 def test_the_score_bounds_come_from_the_configured_maximum():
-    model = coverage_model(7, 120)
-    assert model(score=7, reason="ok").score == 7
+    """0-10 by default, and the bound is the parameter rather than a literal."""
+    model = coverage_model(10, 120)
+    assert model(score=0, reason="ok").score == 0
+    assert model(score=10, reason="ok").score == 10
     with pytest.raises(Exception):
-        model(score=8, reason="ok")
+        model(score=11, reason="ok")
+    with pytest.raises(Exception):
+        model(score=-1, reason="ok")
 
     # Reason before score, so the model justifies first and scores second.
     assert list(model.model_fields) == ["reason", "score"]
-    assert list(answered_model(120).model_fields) == ["reason", "answered"]
     assert list(CoverageAnswer.model_fields) == ["answer"]
 
 
 def test_the_model_classes_are_cached_per_configured_bound():
-    assert coverage_model(5, 500) is coverage_model(5, 500)
-    assert coverage_model(5, 500) is not coverage_model(6, 500)
-    assert answered_model(500) is answered_model(500)
+    assert coverage_model(10, 500) is coverage_model(10, 500)
+    assert coverage_model(10, 500) is not coverage_model(6, 500)
 
 
 @pytest.mark.asyncio
@@ -349,7 +333,7 @@ async def test_a_flaky_judge_call_is_retried_up_to_judge_max_retries():
         row = await judge_row(_question().text, _replayed(), params=_params(judge_max_retries=2))
 
     assert attempts["count"] == 3
-    assert row.judge_score == 4
+    assert row.coverage_score == 4
 
 
 @pytest.mark.asyncio
@@ -365,21 +349,20 @@ async def test_a_permanently_failing_coverage_call_leaves_the_scores_null():
     ):
         row = await judge_row(_question().text, _replayed(), params=_params(judge_max_retries=1))
 
-    assert row.judge_score is None
-    assert row.judge_answered is None
+    assert row.coverage_score is None
     assert row.answer is None
     # Class-prefixed and bounded: this string is persisted and returned by the API.
     assert row.error == "RuntimeError: provider down"
 
 
 @pytest.mark.asyncio
-async def test_a_failing_verdict_keeps_the_coverage_score_that_already_succeeded():
+async def test_a_failing_answer_call_keeps_the_coverage_score_that_already_succeeded():
     fake = _FakeLLM(score=4)
 
     def fails_after_coverage(**kwargs):
         if kwargs["response_model"].__name__ == COVERAGE:
             return fake(**kwargs)
-        raise RuntimeError("verdict down")
+        raise RuntimeError("completion down")
 
     with patch.object(
         judge_module.LLMGateway,
@@ -390,11 +373,10 @@ async def test_a_failing_verdict_keeps_the_coverage_score_that_already_succeeded
         row = await judge_row(_question().text, _replayed(), params=_params(judge_max_retries=0))
 
     # The coverage score is the number every aggregate is a mean of, so it
-    # survives the failure of the verdict that follows it.
-    assert row.judge_score == 4
-    assert row.judge_answered is None
+    # survives the failure of the generation that follows it.
+    assert row.coverage_score == 4
     assert row.answer is None
-    assert row.error == "RuntimeError: verdict down"
+    assert row.error == "RuntimeError: completion down"
 
 
 # --------------------------------------------------------------------------
@@ -421,9 +403,7 @@ async def test_judge_rows_scores_each_row_against_its_own_context():
         if kwargs["response_model"].__name__ == COVERAGE:
             seen.append(kwargs["text_input"])
             return kwargs["response_model"](score=3, reason="ok")
-        if kwargs["response_model"].__name__ == ANSWER:
-            return kwargs["response_model"](answer="an answer")
-        return kwargs["response_model"](answered=True, reason="ok")
+        return kwargs["response_model"](answer="an answer")
 
     with patch.object(
         judge_module.LLMGateway,
@@ -433,8 +413,9 @@ async def test_judge_rows_scores_each_row_against_its_own_context():
     ):
         rows = await judge_rows(questions, replayed, params=_params())
 
-    assert [row.judge_score for row in rows] == [3, 0, 3]
-    assert rows[1].judge_answered is False
+    assert [row.coverage_score for row in rows] == [3, 0, 3]
+    # The zero-scoring row has no answer, because nothing was retrieved for it.
+    assert rows[1].answer is None
     # The empty-context row never reached the LLM.
     assert len(seen) == 2
     assert any("context a" in prompt for prompt in seen)
@@ -454,9 +435,7 @@ async def test_judging_is_bounded_by_judge_max_concurrent():
         in_flight -= 1
         if response_model.__name__ == COVERAGE:
             return response_model(score=3, reason="ok")
-        if response_model.__name__ == ANSWER:
-            return response_model(answer="an answer")
-        return response_model(answered=True, reason="ok")
+        return response_model(answer="an answer")
 
     questions = [_question(f"q{index}") for index in range(10)]
     replayed = [_replayed(f"context {index}") for index in range(10)]
@@ -494,7 +473,6 @@ def test_every_judge_prompt_file_exists_and_renders():
     for system_file in (
         judge_module.COVERAGE_SYSTEM_PROMPT,
         judge_module.ANSWER_SYSTEM_PROMPT,
-        judge_module.ANSWERED_SYSTEM_PROMPT,
     ):
         assert judge_module._system_prompt(system_file).strip()
 
@@ -504,23 +482,52 @@ def test_every_judge_prompt_file_exists_and_renders():
             "question": "Where are the runbooks?",
             "context": "infra-docs",
             "min_score": 0,
-            "max_score": 5,
+            "max_score": 10,
             "reason_max_chars": 500,
         },
     )
     assert "Where are the runbooks?" in coverage_input
-    assert "0 to 5" in coverage_input
+    # The endpoints are rendered from the parameters, so moving judge_score_max
+    # cannot leave the prompt describing a scale nothing is scored on.
+    assert "0 to 10" in coverage_input
 
     answer_input = judge_module._input_prompt(
         judge_module.ANSWER_INPUT_PROMPT, {"question": "q", "context": "c"}
     )
     assert "q" in answer_input and "c" in answer_input
 
-    answered_input = judge_module._input_prompt(
-        judge_module.ANSWERED_INPUT_PROMPT,
-        {"question": "q", "answer": "a", "reason_max_chars": 500},
-    )
-    assert "a" in answered_input
+
+def test_only_the_two_surviving_judge_prompts_are_shipped():
+    """The ``answered`` verdict is gone, and so are its prompt files."""
+    from pathlib import Path
+
+    from cognee.root_dir import get_absolute_path
+
+    directory = Path(get_absolute_path(judge_module.PROMPT_DIRECTORY))
+    shipped = {path.name for path in directory.glob("recall_coverage_judge_*.txt")}
+
+    assert shipped == {
+        judge_module.COVERAGE_SYSTEM_PROMPT,
+        judge_module.COVERAGE_INPUT_PROMPT,
+    }
+
+
+def test_preload_reads_every_system_prompt_before_anything_is_spent():
+    """Fail-before-spend: a packaging bug must not surface per row after the replay."""
+    judge_module.preload_judge_prompts()
+
+    with patch.object(judge_module, "read_query_prompt", lambda *args, **kwargs: None):
+        with pytest.raises(FileNotFoundError):
+            judge_module.preload_judge_prompts()
+
+
+def test_the_coverage_rubric_anchors_zero_on_the_context():
+    """0 = "the retrieved context cannot answer this at all", stated in the prompt."""
+    system = judge_module._system_prompt(judge_module.COVERAGE_SYSTEM_PROMPT)
+
+    assert "cannot answer this at all" in system
+    # And the whole scale is asked for, so scores do not cluster in the middle.
+    assert "Use the whole scale" in system
 
 
 def test_a_missing_system_prompt_fails_loudly(monkeypatch):

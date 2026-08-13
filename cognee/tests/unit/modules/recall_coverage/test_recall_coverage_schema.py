@@ -84,7 +84,6 @@ def test_exactly_five_tables_are_registered():
     [
         ("recall_coverage_runs", "status"),
         ("recall_coverage_topic_suggestions", "status"),
-        ("recall_coverage_curated_questions", "scope"),
         ("recall_coverage_questions", "source"),
     ],
 )
@@ -113,7 +112,7 @@ def test_no_foreign_keys_and_no_agent_id_column(model):
         ("recall_coverage_questions", "run_id"),
         ("recall_coverage_questions", "user_id"),
         ("recall_coverage_questions", "dataset_id"),
-        ("recall_coverage_questions", "question_group_id"),
+        ("recall_coverage_questions", "topic_id"),
         ("recall_coverage_topics", "owner_id"),
         ("recall_coverage_topic_suggestions", "owner_id"),
         ("recall_coverage_topic_suggestions", "status"),
@@ -131,13 +130,38 @@ def test_lookup_columns_are_indexed(table_name, column_name):
     assert column_name in indexed
 
 
-def test_composite_indexes_exist():
-    """Both composite indexes the read paths depend on are declared."""
+def test_the_one_composite_index_exists():
+    """``(owner_id, deleted_at)`` — the topic list's filter, and the only composite one.
+
+    User-defined questions are one flat list per owner, so ``owner_id`` alone is
+    the whole lookup and there is no second composite index to declare.
+    """
     topic_indexes = {index.name for index in RecallCoverageTopic.__table__.indexes}
     assert "ix_recall_coverage_topics_owner_deleted" in topic_indexes
 
     curated_indexes = {index.name for index in RecallCoverageCuratedQuestion.__table__.indexes}
-    assert "ix_recall_coverage_curated_questions_owner_scope" in curated_indexes
+    assert all(len(index.columns) == 1 for index in RecallCoverageCuratedQuestion.__table__.indexes)
+    assert not any("scope" in name for name in curated_indexes)
+
+
+def test_the_question_rows_agent_label_is_stored_and_unindexed():
+    """Per-row attribution is a column, and rows are only ever read by ``run_id``.
+
+    Stored rather than derived at read time so editing the prefix map cannot
+    relabel history; unindexed because one run's rows are a bounded set the caller
+    filters in memory.
+    """
+    questions = RecallCoverageQuestion.__table__
+    agent_label = questions.columns["agent_label"]
+
+    assert agent_label.nullable is True
+    single_column_indexes = {
+        column.name
+        for index in questions.indexes
+        for column in index.columns
+        if len(index.columns) == 1
+    }
+    assert "agent_label" not in single_column_indexes
 
 
 def test_dataset_id_is_nullable_and_user_id_is_not():
@@ -145,7 +169,8 @@ def test_dataset_id_is_nullable_and_user_id_is_not():
     questions = RecallCoverageQuestion.__table__
     assert questions.columns["dataset_id"].nullable is True
     assert questions.columns["user_id"].nullable is False
-    # NULL topic_id is the sink, which is the wire literal "other", not a row.
+    # NULL topic_id is the sink, reported as topic_id null with the label
+    # "Uncategorized" — never a row in recall_coverage_topics.
     assert questions.columns["topic_id"].nullable is True
 
 
@@ -162,9 +187,9 @@ def test_run_row_defaults_round_trip():
     with Session(engine) as session:
         run = session.get(RecallCoverageRun, run_id)
         assert run.status == "pending"
-        assert run.recall_row_count == 0
-        assert run.collapsed_retry_count == 0
-        assert run.taxonomy_version == 0
+        assert run.recall_count == 0
+        assert run.question_count == 0
+        assert run.summary is None
         assert run.finished_at is None
         assert run.created_at is not None
         assert run.updated_at is not None
@@ -185,7 +210,7 @@ def test_question_row_defaults_round_trip():
                 run_id=uuid4(),
                 user_id=uuid4(),
                 dataset_id=None,
-                question_text="What is our incident escalation path out of hours?",
+                question="What is our incident escalation path out of hours?",
             )
         )
         session.commit()
@@ -193,11 +218,12 @@ def test_question_row_defaults_round_trip():
     with Session(engine) as session:
         question = session.get(RecallCoverageQuestion, question_id)
         assert question.source == "observed"
-        assert question.was_asked is True
-        assert question.occurrence_count == 0
-        assert question.judge_score is None
-        assert question.judge_answered is None
-        assert question.impact is None
+        # relevance is also the "was it asked" test, so there is no was_asked
+        # column to disagree with it. It defaults to 0, not NULL: a user-defined
+        # question nobody asked is zero demand, not unknown demand.
+        assert question.relevance == 0
+        assert question.coverage_score is None
+        assert question.agent_label is None
         assert question.dataset_id is None
 
     engine.dispose()

@@ -131,8 +131,6 @@ async def _store_topic(engine, *, owner_id, centroid, label="Billing & invoices"
             centroid=list(centroid),
             embedding_model=MODEL,
             embedding_dimensions=3,
-            seed_question_count=5,
-            taxonomy_version=1,
         )
         session.add(row)
         await session.commit()
@@ -337,6 +335,63 @@ def test_a_settled_suggestion_from_another_embedding_space_is_ignored_not_fatal(
     )
 
     assert len(kept) == 1
+
+
+# --- the shared "same theme" primitives -------------------------------------
+#
+# ``best_match`` and ``usable_by_fingerprint`` are the single definition of "this
+# is the same theme as that suggestion", read by both the re-proposal guard and
+# ``POST /topics``. Two copies would drift, and the symptom would be a suggestion
+# a posted label cannot accept while the next run still suppresses it.
+
+
+def test_best_match_returns_the_closest_suggestion_above_the_threshold():
+    near = _settled((1.0, 0.0, 0.0), SuggestionStatus.PENDING.value)
+    nearer = _settled(tuple(normalize_rows([[1.0, 0.02, 0.0]])[0]), SuggestionStatus.PENDING.value)
+    far = _settled((0.0, 1.0, 0.0), SuggestionStatus.PENDING.value)
+
+    assert suggest.best_match([1.0, 0.02, 0.0], [near, nearer, far], threshold=0.90) is nearer
+    assert suggest.best_match([0.0, 0.0, 1.0], [near, nearer, far], threshold=0.90) is None
+
+
+def test_best_match_skips_a_centroid_of_a_different_width():
+    """A stored centroid that disagrees with its own width cannot be compared."""
+    wrong_width = _settled((1.0, 0.0), SuggestionStatus.PENDING.value, dimensions=2)
+
+    assert suggest.best_match([1.0, 0.0, 0.0], [wrong_width], threshold=0.5) is None
+    assert suggest.best_match([], [wrong_width], threshold=0.5) is None
+
+
+def test_usable_by_fingerprint_skips_a_stale_suggestion_rather_than_raising():
+    """A stale suggestion only weakens a match; unlike a topic centroid, it is not scored."""
+    live = _settled((1.0, 0.0, 0.0), SuggestionStatus.PENDING.value)
+    stale_model = _settled(
+        (1.0, 0.0, 0.0), SuggestionStatus.PENDING.value, model="openai/text-embedding-ada-002"
+    )
+    stale_width = _settled((1.0, 0.0), SuggestionStatus.PENDING.value, dimensions=2)
+
+    usable = suggest.usable_by_fingerprint([live, stale_model, stale_width], FINGERPRINT)
+
+    assert usable == [live]
+
+
+def test_the_reproposal_guard_and_the_accept_path_agree_on_the_same_theme():
+    """One threshold, one comparison: dismissing must suppress exactly what accepting takes.
+
+    If these two ever disagreed, a theme could be un-acceptable by its own label
+    and still be suppressed on every future run — a suggestion nobody can act on.
+    """
+    clusters = _candidate(normalize_rows(_tight_cluster(5, axis=0)))
+    pending = _settled(clusters[0].centroid, SuggestionStatus.PENDING.value)
+    settled = _settled(clusters[0].centroid, SuggestionStatus.DISMISSED.value)
+
+    matched = suggest.best_match(clusters[0].centroid, [pending], threshold=0.90)
+    suppressed = drop_reproposed(
+        clusters, [settled], fingerprint=FINGERPRINT, suggestion_dedup_threshold=0.90
+    )
+
+    assert matched is pending
+    assert suppressed == []
 
 
 # --- Label generation -------------------------------------------------------

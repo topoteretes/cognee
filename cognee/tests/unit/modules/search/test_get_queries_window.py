@@ -27,7 +27,6 @@ from cognee.infrastructure.databases.relational.create_relational_engine import 
 )
 from cognee.modules.recall_coverage.agent_scope import resolve_agent_scope
 from cognee.modules.recall_coverage.config import RecallCoverageConfig
-from cognee.modules.recall_coverage.types import AgentScopeMode
 from cognee.modules.search.models.Query import Query
 
 get_queries_mod = importlib.import_module("cognee.modules.search.operations.get_queries")
@@ -298,7 +297,7 @@ async def test_window_is_newest_first_and_truncates_the_oldest(queries_engine):
 async def test_window_rows_carry_the_replay_projection(queries_engine):
     """Everything the pipeline needs, as a value object rather than a live ORM row."""
     dataset_id = uuid4()
-    written = await _insert_query(queries_engine, dataset_id=dataset_id)
+    written = await _insert_query(queries_engine, dataset_id=dataset_id, session_id="codex_a1")
 
     (row,) = await get_queries_mod.get_queries()
 
@@ -308,6 +307,19 @@ async def test_window_rows_carry_the_replay_projection(queries_engine):
     assert row.user_id == written["user_id"]
     assert row.dataset_id == dataset_id
     assert row.created_at is not None
+    # Selected, not merely filtered on: recall coverage attributes each question
+    # row to an agent, and in an "all" run only the row itself knows its session.
+    assert row.session_id == "codex_a1"
+
+
+@pytest.mark.asyncio
+async def test_a_row_with_no_session_carries_none(queries_engine):
+    """NULL is a real case — rows predating the column, and plain API recalls."""
+    await _insert_query(queries_engine, session_id=None)
+
+    (row,) = await get_queries_mod.get_queries()
+
+    assert row.session_id is None
 
 
 @pytest.mark.asyncio

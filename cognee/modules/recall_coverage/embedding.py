@@ -17,7 +17,7 @@ pipeline needs them:
   topic assignment and sink clustering then all reduce to one matmul.
 * **Refuse degenerate embeddings.** ``MOCK_EMBEDDING=true`` makes every engine
   return all-zero vectors. Every pairwise similarity would be 0, dedup would
-  find nothing, every question would look unique with ``occurrence_count = 1``,
+  find nothing, every question would look unique with ``relevance = 1``,
   and the run would report a confident, fabricated coverage number. Raising is
   the only honest outcome, so :func:`embed_normalized` does.
 
