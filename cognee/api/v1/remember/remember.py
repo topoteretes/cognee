@@ -40,6 +40,14 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+# Strong refs for fire-and-forget background remember tasks. The event loop only
+# keeps a weak reference to a task, and the API router drops the RememberResult
+# (the sole other holder of the task) after serializing it — without anchoring
+# here the gc can collect an in-flight task before it completes, silently
+# aborting the background add+cognify run or session bridge (#4312). Tasks
+# remove themselves on done.
+_BACKGROUND_REMEMBER_TASKS: set[asyncio.Task] = set()
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -1237,6 +1245,8 @@ async def _remember_inner(
                     logger.warning("remember: session improve failed (non-fatal): %s", exc)
 
             result._task = asyncio.create_task(_session_improve())
+            _BACKGROUND_REMEMBER_TASKS.add(result._task)
+            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
 
         return result
 
@@ -1295,6 +1305,8 @@ async def _remember_inner(
                 logger.exception("Background remember failed")
 
         result._task = asyncio.create_task(_remember_background())
+        _BACKGROUND_REMEMBER_TASKS.add(result._task)
+        result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
         return result
 
     # Blocking mode
