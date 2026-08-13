@@ -247,6 +247,33 @@ jobs:
           DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_deduplication.py
 
+  run-dlt-mixed-input-test:
+    name: DLT Mixed Input E2E Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "dlt"
+
+      - name: Run DLT Mixed Input Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/tests/test_dlt_mixed_input_e2e.py
+
   run-s3-bucket-test:
       name: S3 Bucket Test
       runs-on: ubuntu-22.04
@@ -1829,6 +1856,12 @@ jobs:
       # the data migrations and the session persistence watermark takeover.
       COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
 
+      # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
+      # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
+      # blocks interpreter exit — observed as a phase-1 step hanging ~25 min
+      # AFTER printing "Phase 1 completed successfully".
+      RUNTIME__DLTHUB_TELEMETRY: "false"
+
       ENV: dev
       LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -1865,7 +1898,7 @@ jobs:
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
       - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
-        run: uv sync --extra api --extra docs --extra dev
+        run: uv sync --extra api --extra docs --extra dev --extra dlt
 
       - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         run: uv run python /tmp/compat_scripts/phase1_seed.py
@@ -1875,7 +1908,7 @@ jobs:
         run: git checkout ${{ github.sha }}
 
       - name: Install current branch dependencies
-        run: uv sync --extra api --extra docs --extra dev
+        run: uv sync --extra api --extra docs --extra dev --extra dlt
 
       - name: Run Alembic migrations (current branch schema → legacy version databases)
         working-directory: cognee
@@ -1910,6 +1943,12 @@ jobs:
     env:
       # Same pin as the sqlite job — see the comment there.
       COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+
+      # Phase 1/2 run real dlt pipelines; dlt's telemetry thread (default ON,
+      # posts to telemetry.scalevector.ai) is non-daemon and a wedged call
+      # blocks interpreter exit — observed as a phase-1 step hanging ~25 min
+      # AFTER printing "Phase 1 completed successfully".
+      RUNTIME__DLTHUB_TELEMETRY: "false"
 
       # Relational DB — PostgreSQL
       DB_PROVIDER: postgres
@@ -1964,7 +2003,7 @@ jobs:
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
       - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies (with postgres extra)
-        run: uv sync --extra api --extra docs --extra dev --extra postgres
+        run: uv sync --extra api --extra docs --extra dev --extra postgres --extra dlt
 
       - name: "Phase 1 — add, cognify, search (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} / postgres)"
         run: uv run python /tmp/compat_scripts/phase1_seed.py
@@ -1974,7 +2013,7 @@ jobs:
         run: git checkout ${{ github.sha }}
 
       - name: Install current branch dependencies (with postgres extra)
-        run: uv sync --extra api --extra docs --extra dev --extra postgres
+        run: uv sync --extra api --extra docs --extra dev --extra postgres --extra dlt
 
       - name: Run Alembic migrations (current branch schema → legacy version databases)
         working-directory: cognee

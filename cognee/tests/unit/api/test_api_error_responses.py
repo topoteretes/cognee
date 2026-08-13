@@ -36,6 +36,31 @@ MOCK_USER = SimpleNamespace(id=uuid4(), email="test@example.com", is_active=True
 MOCK_DATASET_ID = uuid4()
 MOCK_PIPELINE_RUN_ID = uuid4()
 
+# The tests below stub package-level API functions by plain assignment
+# (e.g. ``cognify_pkg.cognify = AsyncMock(...)``). Package modules are
+# process-global, so without restoration the stubs leak into every later
+# test module in the same pytest session — a leaked payment-error mock on
+# cognify() made unrelated remember() tests fail with a bogus 402.
+_STUBBED_API_FUNCTIONS = ("add", "cognify", "search", "memify", "update", "remember")
+
+
+_MISSING = object()  # some packages (memify) gain the attribute only via the stub
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_api_functions():
+    saved = []
+    for name in _STUBBED_API_FUNCTIONS:
+        package = importlib.import_module(f"cognee.api.v1.{name}")
+        saved.append((package, name, getattr(package, name, _MISSING)))
+    yield
+    for package, name, original in saved:
+        if original is _MISSING:
+            if hasattr(package, name):
+                delattr(package, name)
+        else:
+            setattr(package, name, original)
+
 
 def _make_completed(**kwargs):
     defaults = dict(

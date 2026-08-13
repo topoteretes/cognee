@@ -24,6 +24,13 @@ async def update(
     """
     Update existing data in Cognee.
 
+    The document keeps its ``data_id`` across updates: the replacement is
+    re-ingested pinned to the resolved id (exact, or the recorded pre-fork
+    ``legacy_id``), so externally held id mappings never break. Exactly one
+    document is replaced per call — lists of more than one item are rejected.
+    An id that resolves to no document raises ``UpdateTargetNotFoundError``
+    (404) — update() never creates documents; use add() for that.
+
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
         - **File paths**: Local file paths as strings in these formats:
@@ -57,8 +64,7 @@ async def update(
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
             - Binary file object: open("file.txt", "rb")
-        dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
-                    Create separate datasets to organize different knowledge domains.
+        dataset_id: UUID of the dataset holding the document (required).
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
@@ -66,7 +72,6 @@ async def update(
                  Used for grouping related data points in the knowledge graph.
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
-        dataset_id: Optional specific dataset UUID to use instead of dataset_name.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -78,14 +83,53 @@ async def update(
     if not user:
         user = await get_default_user()
 
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.methods import resolve_data_id
+    from cognee.modules.data.models import Data
+    from cognee.modules.ingestion.exceptions import IngestionError
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    if isinstance(data, list):
+        if len(data) != 1:
+            raise IngestionError(
+                f"update() replaces exactly one document; got a list of {len(data)} items."
+            )
+        data = data[0]
+
+    # The document KEEPS its data_id through updates. Resolve the incoming id
+    # (exact, then pre-fork legacy_id) and re-ingest pinned to the resolved
+    # id. An id that resolves to nothing is a caller error, not a create:
+    # ids are random uuid4s now, so a stale or mistyped id can never match —
+    # silently creating a second document would hide the mistake as
+    # duplication. add() is the path for new documents.
+    resolved_id = await resolve_data_id(dataset_id, data_id)
+    if resolved_id is None:
+        from cognee.api.v1.exceptions import UpdateTargetNotFoundError
+
+        raise UpdateTargetNotFoundError(data_id=data_id, dataset_id=dataset_id)
+    pinned_id = resolved_id
+
+    preserved_legacy_id = None
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        old_row = await session.get(Data, resolved_id)
+        if old_row is not None:
+            preserved_legacy_id = old_row.legacy_id
+
     await datasets.delete_data(
         dataset_id=dataset_id,
         data_id=data_id,
         user=user,
     )
 
+    if isinstance(data, DataItem):
+        data.data_id = pinned_id
+        pinned_item = data
+    else:
+        pinned_item = DataItem(data=data, data_id=pinned_id)
+
     await add(
-        data=data,
+        data=pinned_item,
         dataset_id=dataset_id,
         user=user,
         node_set=node_set,
@@ -95,6 +139,16 @@ async def update(
         incremental_loading=incremental_loading,
         data_cache=data_cache,
     )
+
+    # Restore fork lineage onto the recreated row: a fork document's pre-fork
+    # id must keep resolving across updates.
+    if preserved_legacy_id is not None:
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            new_row = await session.get(Data, pinned_id)
+            if new_row is not None and new_row.legacy_id is None:
+                new_row.legacy_id = preserved_legacy_id
+                await session.commit()
 
     cognify_run = await cognify(
         datasets=[dataset_id],

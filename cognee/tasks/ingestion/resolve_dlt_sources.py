@@ -1,11 +1,22 @@
-"""DLT adapter: expand DLT resources into standard DataItem objects.
+"""DLT adapter: resolve DLT resources into standard DataItem objects.
 
 Called *before* the add pipeline so that ingest_data never sees DLT types.
-One-to-many expansion (one DLT source → many rows) happens here; the
-per-item pipeline model downstream stays unchanged.
-"""
+A relational DLT source becomes a single manifest DataItem (one Data record
+per source); the manifest is a JSON document describing every unique row,
+materialized as individual graph/vector nodes later by the dedicated DLT
+cognify pipeline (see extract_dlt_source_edges). A source may instead opt
+into the document path — each row becomes a text document that flows through
+normal cognify — by declaring a document-source tag (see
+dlt_utils.document_source_tag)."""
 
+import hashlib
+import json
+import os
+import shutil
+import tempfile
 from typing import Any, Callable, List, Optional, Set
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
@@ -15,57 +26,73 @@ from cognee.shared.logging_utils import get_logger
 from .create_dlt_source import (
     is_connection_string,
     is_csv_path,
+    is_csv_upload,
+    csv_source_name,
     create_dlt_source_from_connection_string,
     create_dlt_source_from_csv,
 )
+from .config import get_ingestion_config
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
-from .ingest_dlt_source import ingest_dlt_source
 from .dlt_utils import document_source_tag
+from .ingest_dlt_source import ingest_dlt_source
 
 logger = get_logger("resolve_dlt_sources")
+
+# Cells longer than this never become ColumnValue nodes — long values are
+# free text, not categorical data, and would produce useless one-off nodes.
+MAX_COLUMN_VALUE_LENGTH = 256
 
 
 async def resolve_dlt_sources(
     data: Any,
     dataset_name: str,
     user: User,
+    dataset_id: UUID = None,
     **kwargs,
 ) -> Any:
-    """Expand DLT resources (and auto-detected structured data) into DataItems.
+    """Resolve DLT resources (and auto-detected structured data) into DataItems.
 
-    Non-DLT items pass through unchanged.  DLT resources are ingested via
-    ``ingest_dlt_source`` and each resulting row is wrapped in a ``DataItem``
-    with stable ``data_id``, enriched text, and ``external_metadata``.
+    Non-DLT items pass through unchanged. Each relational DLT resource is
+    ingested via ``ingest_dlt_source`` and wrapped in a *single* manifest
+    ``DataItem`` with a stable ``data_id``; the manifest carries all unique
+    rows, their enriched text, and resolved FK references. Document-tagged
+    sources instead yield one text-document DataItem per row, routed through
+    normal cognify.
 
     Returns a ``(data, orphan_cleanup)`` tuple. ``data`` is the (possibly
     expanded) data — a single item, a list, or unchanged if nothing was DLT.
     ``orphan_cleanup`` is an async callable that deletes dlt rows no longer in
     the source, or ``None`` when there is nothing to clean up; the caller must
-    await it *after* the fresh rows are committed (see Phase 3).
+    await it *after* the fresh rows are committed.
     """
     # Lazy-import DLT types so the dlt package is not a hard dependency
     try:
         from dlt.extract import DltResource, SourceFactory
         from dlt.extract.source import DltSource
     except ImportError:
-        # dlt not installed — nothing to resolve
+        # dlt not installed — nothing to resolve. Warn when inputs would have
+        # matched the auto-detection below: they silently degrade to plain
+        # (LLM-processed) document ingestion otherwise.
+        _log_structured_inputs_without_dlt(data if isinstance(data, list) else [data])
         return data, None
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
     write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "replace"
     query = kwargs["query"] if "query" in kwargs else None
     max_rows_per_table = kwargs.get("max_rows_per_table")
-
-    # --- Auto-detect structured data (CSV paths / connection strings) ------
-    if isinstance(data, str):
-        if is_csv_path(data):
-            data = create_dlt_source_from_csv(data)
-        elif is_connection_string(data):
-            data = create_dlt_source_from_connection_string(data, query=query)
+    column_value_columns = kwargs.get("column_value_columns")
 
     # Normalise to list for uniform processing
     data_list = data if isinstance(data, list) else [data]
+
+    # --- Auto-detect structured data (CSV paths / connection strings) ------
+    # Per item, so a mixed add like [csv_path, note_path] routes the CSV to
+    # the DLT manifest path instead of silently LLM-processing it as text.
+    # CSVs can arrive as local paths, file:// / s3:// locations, or file-like
+    # uploads; remote and streamed bytes are spooled into a temp directory so
+    # dlt's filesystem source can read them, deleted once ingestion is done.
+    data_list, spool_dir = await _normalize_structured_inputs(data_list, query)
 
     dlt_items = []
     non_dlt_items = []
@@ -82,22 +109,11 @@ async def resolve_dlt_sources(
 
     # A dlt source may opt into the document path (each row → a text document
     # that goes through normal cognify) by declaring a document-source tag;
-    # every other dlt source takes the relational schema-context path below.
+    # every other dlt source takes the relational manifest path below.
     document_items = [i for i in dlt_items if document_source_tag(i)]
     relational_items = [i for i in dlt_items if not document_source_tag(i)]
 
-    # --- Run DLT pipelines and collect rows ---------------------------------
-    all_rows: List[DltRowData] = []
-    for dlt_item in relational_items:
-        rows = await ingest_dlt_source(
-            dlt_item,
-            dataset_name,
-            primary_key=primary_key,
-            write_disposition=write_disposition,
-            max_rows_per_table=max_rows_per_table,
-        )
-        all_rows.extend(rows)
-
+    # --- Document-tagged sources: one text document per row -----------------
     # Document sources honour the caller's write_disposition so both sync models
     # work: "replace" for delete-feed-less snapshot sources (Notion/Slack — each
     # run rewrites staging with exactly the rows currently visible) and "merge"
@@ -106,121 +122,79 @@ async def resolve_dlt_sources(
     # back (max_rows_per_table=0) so orphan cleanup can forget rows that dropped
     # out of the current corpus. write_disposition/primary_key default to
     # "replace"/"id" (see the kwargs resolution above).
-    document_data_items: list[DataItem] = []
-    document_fresh_ids: Set[UUID] = set()
-    document_source_tags: set[str] = set()
-    for dlt_item in document_items:
-        source_tag = document_source_tag(dlt_item)
-        document_source_tags.add(source_tag)
-        rows = await ingest_dlt_source(
-            dlt_item,
-            dataset_name,
-            primary_key=primary_key or "id",
-            write_disposition=write_disposition,
-            max_rows_per_table=0,
-        )
-        for row in rows:
-            data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
-            document_fresh_ids.add(data_id)
-            document_data_items.append(_build_document_data_item(row, data_id, source_tag))
-
-    # --- Phase 1: compute stable data_ids for all rows (for FK resolution) --
-    # Primary lookup uses content_hash for uniqueness (handles tables with
-    # non-unique fallback PKs like junction tables).
-    row_id_lookup: dict[tuple[str, str, str], UUID] = {}
-    # FK lookup maps (table, pk_value) → data_id for foreign key resolution.
-    # When multiple rows share a PK value, the last one wins (best-effort).
-    fk_lookup: dict[tuple[str, str], UUID] = {}
-    for row in all_rows:
-        data_id = await get_unique_data_id(_dlt_row_identifier(row), user)
-        row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)] = data_id
-
-        fk_key = (row.table_name, row.primary_key_value)
-        existing = fk_lookup.get(fk_key)
-        if existing is not None and existing != data_id:
-            # Duplicate primary key within a table: row_id_lookup keeps both
-            # rows (it is keyed by content_hash too), but fk_lookup can only
-            # hold one target per (table, pk). FK edges pointing at this key
-            # will resolve to the last row seen; earlier rows are shadowed.
-            # ingest_dlt_source already warns on duplicate PKs at load time;
-            # warn here too so the ambiguity is visible at FK-resolution time.
-            logger.warning(
-                "Duplicate primary key during FK resolution: table=%s pk=%s. "
-                "FK edges targeting this key resolve to the last row "
-                "(content_hash=%s); earlier rows with this key are shadowed.",
-                row.table_name,
-                row.primary_key_value,
-                row.content_hash,
+    try:
+        document_data_items: list[DataItem] = []
+        document_fresh_ids: Set[UUID] = set()
+        document_source_tags: set[str] = set()
+        for dlt_item in document_items:
+            source_tag = document_source_tag(dlt_item)
+            document_source_tags.add(source_tag)
+            rows = await ingest_dlt_source(
+                dlt_item,
+                dataset_name,
+                primary_key=primary_key or "id",
+                write_disposition=write_disposition,
+                max_rows_per_table=0,
             )
-        fk_lookup[fk_key] = data_id
+            # Dataset-scoped ids with the pre-scoping adoption probe: rows are
+            # dataset-scoped with id as primary key, so a dataset-free
+            # derivation would pin the same id when one source loads into two
+            # datasets — a hard collision on the foreign-pin guard.
+            row_ids = await _stable_row_ids(rows, user, dataset_id)
+            for row, data_id in zip(rows, row_ids):
+                document_fresh_ids.add(data_id)
+                document_data_items.append(_build_document_data_item(row, data_id, source_tag))
 
-    # --- Phase 2: create DataItems ------------------------------------------
-    # Build table-level metadata once per table so all rows share the same
-    # schema_info/foreign_keys references instead of duplicating per row.
-    _table_meta_cache: dict[str, dict] = {}
+        # --- Relational sources: one manifest DataItem per source -----------
+        expanded_items: list[DataItem] = []
+        manifest_data_ids: Set[UUID] = set()
+        for dlt_item in relational_items:
+            rows = await ingest_dlt_source(
+                dlt_item,
+                dataset_name,
+                primary_key=primary_key,
+                write_disposition=write_disposition,
+                max_rows_per_table=max_rows_per_table,
+            )
+            source_name = getattr(dlt_item, "name", None) or dataset_name
+            item = await _build_source_manifest_item(
+                rows,
+                source_name,
+                dataset_name,
+                user,
+                column_value_columns=column_value_columns,
+            )
+            if item is not None:
+                if item.data_id in manifest_data_ids:
+                    # Stable ids are seeded from (dataset, source name): two
+                    # resources sharing a name would silently overwrite each
+                    # other's manifest. Fail loudly instead of last-write-wins.
+                    raise ValueError(
+                        f"Two DLT sources in one add() resolve to the same identity "
+                        f"(dataset {dataset_name!r}, source {source_name!r}). "
+                        "Give each source a unique name."
+                    )
+                expanded_items.append(item)
+                manifest_data_ids.add(item.data_id)
+    finally:
+        # Spooled CSV copies are only needed while dlt reads them (the ingest
+        # calls above); drop them even when ingestion fails.
+        if spool_dir is not None:
+            shutil.rmtree(spool_dir, ignore_errors=True)
 
-    def _get_table_meta(row: DltRowData) -> dict:
-        if row.table_name not in _table_meta_cache:
-            _table_meta_cache[row.table_name] = {
-                "schema_info": row.schema_info,
-                "schema_hash": row.schema_hash,
-                "foreign_keys": row.foreign_keys,
-                "dlt_db_name": row.dlt_db_name,
-            }
-        return _table_meta_cache[row.table_name]
-
-    expanded_items: list[DataItem] = []
-    # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
-    # was not loaded — collected here and reported once after the loop.
-    missing_fk_targets: list[tuple[str, str, str, str]] = []
-    for row in all_rows:
-        data_id = row_id_lookup[(row.table_name, row.primary_key_value, row.content_hash)]
-
-        enriched_text = _build_schema_context_text(row)
-        fk_references = _resolve_fk_references(row, fk_lookup, missing_fk_targets)
-        table_meta = _get_table_meta(row)
-
-        ext_metadata = {
-            "source": "dlt",
-            "table_name": row.table_name,
-            "primary_key_column": row.primary_key_column,
-            "primary_key_value": row.primary_key_value,
-            "schema_info": table_meta["schema_info"],
-            "schema_hash": table_meta["schema_hash"],
-            "foreign_keys": table_meta["foreign_keys"],
-            "fk_references": fk_references,
-            "dlt_db_name": table_meta["dlt_db_name"],
-            "content_hash": row.content_hash,
-        }
-
-        item = DataItem(
-            data=enriched_text,
-            label=f"{row.table_name}:{row.primary_key_value}",
-            external_metadata=ext_metadata,
-            data_id=data_id,
-        )
-        expanded_items.append(item)
-
-    logger.info("Resolved %d DLT source(s) into %d DataItems.", len(dlt_items), len(expanded_items))
-
-    if missing_fk_targets:
-        sample = ", ".join(
-            f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in missing_fk_targets[:5]
-        )
-        logger.warning(
-            "%d foreign key reference(s) could not be resolved to a loaded row "
-            "and were dropped (no edge created). The target row was likely not "
-            "ingested (e.g. it is beyond max_rows_per_table). "
-            "Sample (source_table.column -> ref_table:value): %s",
-            len(missing_fk_targets),
-            sample,
-        )
-
-    # Document rows (built above) skip the schema-context treatment: each is a
-    # text document (source == its document tag) that flows through normal cognify.
+    # Manifest source names, collected before document items join the list.
+    ingested_source_names = {item.system_metadata["source_name"] for item in expanded_items}
     expanded_items.extend(document_data_items)
 
-    # --- Phase 3: prepare deferred orphan cleanup ---------------------------
+    logger.info(
+        "Resolved %d DLT source(s) into %d DataItem(s) (%d manifest(s), %d document(s)).",
+        len(dlt_items),
+        len(expanded_items),
+        len(manifest_data_ids),
+        len(document_data_items),
+    )
+
+    # --- Prepare deferred orphan cleanup ------------------------------------
     # Deletion of orphaned dlt rows is deferred to *after* the fresh rows are
     # committed by the add pipeline, to avoid a data-loss window: if ingestion
     # failed between deletion and commit, the orphans would be gone and the
@@ -237,16 +211,20 @@ async def resolve_dlt_sources(
     # cannot be distinguished from a failed/misconfigured sync, and treating it
     # as "everything is an orphan" would wipe the whole corpus. Leaving stale
     # rows for one cycle is the safe failure mode.
-    relational_fresh: Set[UUID] = set(row_id_lookup.values())
-    do_relational_cleanup = write_disposition != "append" and bool(relational_fresh)
+    do_manifest_cleanup = write_disposition != "append" and bool(manifest_data_ids)
     do_document_cleanup = bool(document_fresh_ids)
 
     orphan_cleanup: Optional[Callable[[], Any]] = None
-    if do_relational_cleanup or do_document_cleanup:
+    if do_manifest_cleanup or do_document_cleanup:
 
         async def _cleanup() -> None:
-            if do_relational_cleanup:
-                await _delete_dlt_orphans(dataset_name, user, relational_fresh, sources=("dlt",))
+            if do_manifest_cleanup:
+                await _delete_dlt_orphans(
+                    dataset_name,
+                    user,
+                    manifest_data_ids,
+                    manifest_source_names=ingested_source_names,
+                )
             if do_document_cleanup:
                 await _delete_dlt_orphans(
                     dataset_name, user, document_fresh_ids, sources=tuple(document_source_tags)
@@ -258,9 +236,300 @@ async def resolve_dlt_sources(
     return result, orphan_cleanup
 
 
+async def _normalize_structured_inputs(data_list: list, query: Optional[str]) -> tuple:
+    """Wrap auto-detected structured inputs in dlt sources.
+
+    CSV inputs (local path strings, file:// / s3:// locations, and file-like
+    uploads) become dlt filesystem resources; connection strings become dlt
+    sql_database sources; everything else passes through unchanged. Returns
+    ``(normalized_list, spool_dir)`` where ``spool_dir`` (or None) is a temp
+    directory holding local copies of remote/streamed CSVs — the caller must
+    delete it once dlt has read the files.
+    """
+    spool_dir: Optional[str] = None
+    normalized = []
+    try:
+        for item in data_list:
+            if isinstance(item, str) and is_connection_string(item):
+                normalized.append(create_dlt_source_from_connection_string(item, query=query))
+            elif (isinstance(item, str) and is_csv_path(item)) or is_csv_upload(item):
+                local_path, spool_dir = await _as_local_csv_path(item, spool_dir)
+                normalized.append(create_dlt_source_from_csv(local_path))
+            else:
+                normalized.append(item)
+    except Exception:
+        if spool_dir is not None:
+            shutil.rmtree(spool_dir, ignore_errors=True)
+        raise
+    return normalized, spool_dir
+
+
+async def _as_local_csv_path(item, spool_dir: Optional[str]) -> tuple:
+    """Return a local path dlt's filesystem source can read for one CSV input.
+
+    Plain local path strings pass through untouched; file:// URIs are
+    unwrapped. s3:// paths and file-like uploads are spooled into a shared
+    temp directory (created on first use and returned for caller cleanup).
+    Spooled files are stored as ``{csv_source_name}.csv`` so the on-disk name,
+    dlt's file glob, and the manifest identity all agree.
+    """
+    if isinstance(item, str):
+        parsed = urlparse(item)
+        if parsed.scheme == "file":
+            return url2pathname(parsed.path), spool_dir
+        if parsed.scheme != "s3":
+            return item, spool_dir
+
+    filename = (
+        item
+        if isinstance(item, str)
+        else getattr(item, "filename", None) or getattr(item, "name", "")
+    )
+    if spool_dir is None:
+        spool_dir = tempfile.mkdtemp(prefix="cognee_dlt_csv_")
+    target = os.path.join(spool_dir, f"{csv_source_name(filename)}.csv")
+    if os.path.exists(target):
+        # Manifest identity is seeded from the source name, so two inputs
+        # landing on one spooled file would also collide there — fail loudly
+        # before the first one's bytes get overwritten.
+        raise ValueError(
+            f"Two CSV inputs in one add() resolve to the same source name "
+            f"{csv_source_name(filename)!r}. Give the files distinct names."
+        )
+
+    if isinstance(item, str):
+        # s3:// path — read through cognee's storage layer (configured
+        # credentials) instead of teaching dlt a second credential path.
+        from cognee.infrastructure.files.utils.open_data_file import open_data_file
+
+        async with open_data_file(item, mode="rb") as remote_file:
+            with open(target, "wb") as local_file:
+                shutil.copyfileobj(remote_file, local_file)
+    else:
+        stream = getattr(item, "file", None) or item
+        try:
+            stream.seek(0)
+        except (AttributeError, OSError, ValueError):
+            pass
+        with open(target, "wb") as local_file:
+            shutil.copyfileobj(stream, local_file)
+    return target, spool_dir
+
+
+def _log_structured_inputs_without_dlt(data_list: list) -> None:
+    """Warn when inputs that would auto-route to the DLT path are about to be
+    ingested as plain documents because dlt is not installed."""
+    names = []
+    for item in data_list:
+        if isinstance(item, str) and is_csv_path(item):
+            names.append(item)
+        elif isinstance(item, str) and is_connection_string(item):
+            # Never log the string itself — it may embed credentials.
+            names.append("<connection string>")
+        elif is_csv_upload(item):
+            names.append(getattr(item, "filename", None) or getattr(item, "name", "<upload>"))
+    if names:
+        logger.warning(
+            "dlt is not installed: %d structured input(s) (%s) will be ingested as plain "
+            "documents through the standard LLM pipeline instead of the DLT manifest path. "
+            'Install the dlt extra (pip install "cognee[dlt]") to route them through DLT.',
+            len(names),
+            ", ".join(str(name) for name in names[:5]),
+        )
+
+
+async def _build_source_manifest_item(
+    rows: List[DltRowData],
+    source_name: str,
+    dataset_name: str,
+    user: User,
+    column_value_columns: Optional[dict] = None,
+) -> Optional[DataItem]:
+    """Build a single manifest DataItem describing a whole DLT source.
+
+    Rows are deduplicated by identity (table, pk_value, content_hash) — DLT
+    child tables can contain rows that are byte-identical once dlt bookkeeping
+    columns are stripped. Each unique row keeps a stable ``node_id`` (the same
+    id the legacy per-row ingestion used as its Data id) so the graph/vector
+    node ids match the previous per-row pipeline output.
+
+    ``column_value_columns`` selects cells to record for ColumnValue node
+    emission ({"table": ["col", ...]}, "*" wildcards); None falls back to the
+    ``dlt_column_value_columns`` ingestion config setting.
+    """
+    if not rows:
+        return None
+
+    if column_value_columns is None:
+        column_value_columns = get_ingestion_config().dlt_column_value_columns
+
+    dlt_db_name = rows[0].dlt_db_name
+    unique_rows = _dedupe_rows(rows, source_name)
+
+    # Stable per-row node ids via the shared identifier formula. FK lookup
+    # maps (table, pk_value) → node_id; when multiple rows share a PK value,
+    # the last one wins (best-effort).
+    # TODO: add a batch variant of get_unique_data_id (one query per source
+    # instead of one per row) after the incremental load PR reshapes it.
+    node_ids: dict[tuple[str, str, str], UUID] = {
+        key: await get_unique_data_id(_dlt_row_identifier(row), user)
+        for key, row in unique_rows.items()
+    }
+
+    fk_lookup: dict[tuple[str, str], UUID] = {}
+    for key, row in unique_rows.items():
+        node_id = node_ids[key]
+        fk_key = (row.table_name, row.primary_key_value)
+        existing = fk_lookup.get(fk_key)
+        if existing is not None and existing != node_id:
+            logger.warning(
+                "Duplicate primary key during FK resolution: table=%s pk=%s. "
+                "FK edges targeting this key resolve to the last row "
+                "(content_hash=%s); earlier rows with this key are shadowed.",
+                row.table_name,
+                row.primary_key_value,
+                row.content_hash,
+            )
+        fk_lookup[fk_key] = node_id
+
+    tables: dict[str, dict] = {}
+    manifest_rows: list[dict] = []
+    # (source_table, fk_column, ref_table, fk_value) for FKs whose target row
+    # was not loaded — collected here and reported once after the loop.
+    missing_fk_targets: list[tuple[str, str, str, str]] = []
+    for key, row in unique_rows.items():
+        if row.table_name not in tables:
+            tables[row.table_name] = {
+                "schema_info": row.schema_info,
+                "foreign_keys": row.foreign_keys,
+                "dlt_db_name": row.dlt_db_name,
+            }
+
+        manifest_row = {
+            "node_id": str(node_ids[key]),
+            "table_name": row.table_name,
+            "primary_key_column": row.primary_key_column,
+            "primary_key_value": row.primary_key_value,
+            "content_hash": row.content_hash,
+            "text": _build_schema_context_text(row),
+            "fk_references": _resolve_fk_references(row, fk_lookup, missing_fk_targets),
+        }
+        column_values = _selected_column_values(row, column_value_columns)
+        if column_values:
+            manifest_row["column_values"] = column_values
+        manifest_rows.append(manifest_row)
+
+    if missing_fk_targets:
+        sample = ", ".join(
+            f"{src}.{col} -> {ref}:{val}" for src, col, ref, val in missing_fk_targets[:5]
+        )
+        logger.warning(
+            "%d foreign key reference(s) could not be resolved to a loaded row "
+            "and were dropped (no edge created). The target row was likely not "
+            "ingested (e.g. it is beyond max_rows_per_table). "
+            "Sample (source_table.column -> ref_table:value): %s",
+            len(missing_fk_targets),
+            sample,
+        )
+
+    # Deterministic ordering so the manifest content hash is stable across
+    # re-ingests of unchanged data (content change drives reprocessing).
+    manifest_rows.sort(key=lambda r: (r["table_name"], r["node_id"]))
+
+    manifest = {
+        "version": 1,
+        "source_name": source_name,
+        "tables": tables,
+        "rows": manifest_rows,
+    }
+    manifest_text = json.dumps(manifest, sort_keys=True, separators=(",", ":"), default=str)
+
+    # The data_id is STABLE — seeded from (dataset, source name) with no
+    # content hash — so a changed source updates its Data row in place instead
+    # of orphaning it (which left the source absent from the graph between add
+    # and cognify). Change detection travels separately: DataItem.content_hash
+    # pierces the add pipeline's incremental skip when it differs from the
+    # stored Data.content_hash, and the DLT cognify route purges the source's
+    # stale derived artifacts before re-emitting. Renaming a source (or
+    # dataset) changes this identity and is remove + add — a one-time full
+    # rebuild, by design.
+    manifest_hash = hashlib.md5(manifest_text.encode()).hexdigest()
+    data_id = await get_unique_data_id(f"dlt_source:{dataset_name}:{source_name}", user)
+
+    return DataItem(
+        data=manifest_text,
+        label=f"dlt_source:{source_name}",
+        system_metadata={
+            "source": "dlt_source",
+            "source_name": source_name,
+            "dlt_db_name": dlt_db_name,
+            "tables": sorted(tables),
+            "row_count": len(manifest_rows),
+        },
+        data_id=data_id,
+        content_hash=manifest_hash,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers (moved from ingest_data.py)
 # ---------------------------------------------------------------------------
+
+
+def _dedupe_rows(rows: List[DltRowData], source_name: str) -> dict[tuple, DltRowData]:
+    """Deduplicate rows by identity (table, pk_value, content_hash).
+
+    DLT child tables can contain rows that are byte-identical once dlt
+    bookkeeping columns are stripped. The last occurrence wins, matching the
+    previous FK-target behavior for duplicate keys.
+    """
+    unique_rows: dict[tuple[str, str, str], DltRowData] = {}
+    duplicates = 0
+    for row in rows:
+        key = (row.table_name, row.primary_key_value, row.content_hash)
+        if key in unique_rows:
+            duplicates += 1
+        unique_rows[key] = row
+
+    if duplicates:
+        logger.info(
+            "Source '%s': collapsed %d duplicate row(s) into %d unique row(s).",
+            source_name,
+            duplicates,
+            len(unique_rows),
+        )
+
+    return unique_rows
+
+
+def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> dict:
+    """Pick row cells that should become shared ColumnValue graph nodes.
+
+    ``selection`` maps table name to a column list; "*" is a wildcard for
+    either side. Primary-key and foreign-key columns are excluded (they are
+    row identity and edges already), as are null, empty, and overlong values.
+    """
+    if not selection:
+        return {}
+    columns = selection.get(dlt_row.table_name) or selection.get("*")
+    if not columns:
+        return {}
+    take_all = "*" in columns
+
+    fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
+    picked = {}
+    for column, value in dlt_row.row_data.items():
+        if column == dlt_row.primary_key_column or column in fk_columns:
+            continue
+        if not take_all and column not in columns:
+            continue
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text or len(text) > MAX_COLUMN_VALUE_LENGTH:
+            continue
+        picked[column] = text
+    return picked
 
 
 def _dlt_row_identifier(row: DltRowData) -> str:
@@ -272,29 +541,65 @@ def _dlt_row_identifier(row: DltRowData) -> str:
     return f"dlt:{row.table_name}:{row.primary_key_value}:{row.content_hash}"
 
 
+async def _stable_row_ids(rows: List[DltRowData], user: User, dataset_id: UUID) -> List[UUID]:
+    """Dataset-scoped stable ids for dlt rows, adopting pre-scoping rows in place.
+
+    Ids are derived from (dataset, table, pk, content_hash, user), so the same
+    source loaded into two datasets yields two independent id families and
+    dataset-scoped rows never collide across datasets (a cross-dataset
+    collision would trip ingestion's foreign-pin guard). Rows ingested before
+    ids were dataset-namespaced carry the old derivation as their primary id;
+    those are adopted — the old id kept — ONLY when the row lives in this
+    dataset, so unchanged rows stay stable through the upgrade instead of
+    being re-minted (and orphan-cleanup never mistakes them for stale rows).
+    A row of another dataset never matches the probe.
+    """
+    if not rows:
+        return []
+
+    new_ids = [await get_unique_data_id(_dlt_row_identifier(row), user, dataset_id) for row in rows]
+    old_ids = [await get_unique_data_id(_dlt_row_identifier(row), user) for row in rows]
+
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        adopted = set(
+            (
+                await session.execute(
+                    select(Data.id).filter(Data.id.in_(old_ids), Data.dataset_id == dataset_id)
+                )
+            ).scalars()
+        )
+    return [old_id if old_id in adopted else new_id for old_id, new_id in zip(old_ids, new_ids)]
+
+
 def _build_document_data_item(row: DltRowData, data_id: UUID, source_tag: str) -> DataItem:
     """Build a text-document DataItem from a document-source dlt row.
 
     The row is expected to carry ``title``/``content`` columns (and optionally
-    ``url``/``id``). Tagging ``external_metadata["source"] = source_tag`` (not
-    ``"dlt"``) routes the document through normal cognify entity extraction
-    rather than the deterministic dlt-row path (see ``is_dlt_sourced``).
+    ``url``/``id``). Tagging ``system_metadata["source"] = source_tag``
+    routes the document through normal cognify entity extraction rather
+    than the deterministic manifest path.
     """
     row_data = row.row_data
     title = _clean(row_data.get("title"))
     content = _clean(row_data.get("content"))
     text = f"# {title}\n\n{content}".strip() if title else content
 
-    external_metadata = {"source": source_tag, "title": title or None}
+    system_metadata = {"source": source_tag, "title": title or None}
     if row_data.get("url"):
-        external_metadata["url"] = row_data["url"]
+        system_metadata["url"] = row_data["url"]
     if row_data.get("id"):
-        external_metadata["external_id"] = str(row_data["id"])
+        system_metadata["external_id"] = str(row_data["id"])
 
     return DataItem(
         data=text,
         label=title or str(row_data.get("id")),
-        external_metadata=external_metadata,
+        system_metadata=system_metadata,
         data_id=data_id,
     )
 
@@ -309,7 +614,7 @@ def _build_schema_context_text(dlt_row: DltRowData) -> str:
 
     This text is stored as the document content and used for vector search.
     DLT rows bypass LLM extraction — their graph is built deterministically
-    from the relational schema by ``extract_dlt_fk_edges``.
+    from the relational schema by ``extract_dlt_source_edges``.
     """
     lines = []
     lines.append(f"Table: {dlt_row.table_name}")
@@ -359,11 +664,11 @@ def _resolve_fk_references(
     row_id_lookup: dict,
     missing_targets: Optional[list] = None,
 ) -> list:
-    """Resolve foreign key columns to target data_ids for graph edge creation.
+    """Resolve foreign key columns to target row node ids for graph edge creation.
 
     Returns a list of dicts:
     [{"column": "dept_id", "target_table": "departments", "target_pk_value": "10",
-      "target_data_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
+      "target_node_id": "uuid-string", "relationship_name": "dept_id_references_departments"}]
 
     When ``missing_targets`` is provided, FK references whose target row was not
     loaded are appended to it as ``(source_table, column, ref_table, value)`` so
@@ -385,9 +690,9 @@ def _resolve_fk_references(
 
         fk_value_str = str(fk_value)
         target_key = (ref_table, fk_value_str)
-        target_data_id = row_id_lookup.get(target_key)
+        target_node_id = row_id_lookup.get(target_key)
 
-        if target_data_id is not None:
+        if target_node_id is not None:
             relationship_name = f"{fk_column}_references_{ref_table}"
             references.append(
                 {
@@ -395,7 +700,7 @@ def _resolve_fk_references(
                     "target_table": ref_table,
                     "target_column": ref_column,
                     "target_pk_value": fk_value_str,
-                    "target_data_id": str(target_data_id),
+                    "target_node_id": str(target_node_id),
                     "relationship_name": relationship_name,
                 }
             )
@@ -409,19 +714,27 @@ async def _delete_dlt_orphans(
     dataset_name: str,
     user: User,
     fresh_data_ids: Set[UUID],
-    sources: tuple[str, ...] = ("dlt",),
+    # "dlt" stays in the sweep purely as residue cleanup: pre-manifest per-row
+    # records are unsupported (classification raises on them), and re-adding a
+    # source deletes any that linger.
+    sources: tuple[str, ...] = ("dlt", "dlt_source"),
+    manifest_source_names: Optional[Set[str]] = None,
 ) -> None:
     """Delete dlt-sourced Data records (and their graph/vector artifacts) that
-    are no longer present in the freshly-ingested dlt source.
+    are no longer present in the freshly-ingested dlt sources.
 
     This handles the case where rows are deleted from the upstream database
     and the user re-ingests.  dlt cleans its own staging DB, but cognee's
     relational, graph, and vector stores still hold stale data.
 
-    ``sources`` restricts cleanup to Data whose ``external_metadata["source"]``
-    is one of the given tags (e.g. ``("dlt",)`` for relational rows or
-    ``("notion",)`` for Notion pages), so reconciling one source never removes
-    the other's records.
+    ``sources`` restricts cleanup to Data whose ``system_metadata["source"]``
+    is one of the given tags: the default covers relational manifests and
+    legacy per-row records, while document cleanup passes its document tags
+    (e.g. ``("notion",)``) so reconciling one path never removes the other's
+    records. For manifests, ``manifest_source_names`` additionally restricts
+    candidates to those source names — a dataset can hold several DLT sources,
+    and re-ingesting one must not delete the others. Legacy per-row records
+    (source == "dlt") predate source attribution and are always migrated away.
     """
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -444,8 +757,19 @@ async def _delete_dlt_orphans(
 
     orphans = []
     for data_item in all_data:
-        ext = data_item.external_metadata
-        if not isinstance(ext, dict) or ext.get("source") not in sources:
+        # Deletion decisions key on system_metadata ONLY — external_metadata
+        # is user-writable and must never make a record deletable.
+        meta = data_item.system_metadata
+        if not isinstance(meta, dict):
+            continue
+        source = meta.get("source")
+        if source not in sources:
+            continue
+        if (
+            source == "dlt_source"
+            and manifest_source_names is not None
+            and meta.get("source_name") not in manifest_source_names
+        ):
             continue
         if data_item.id not in fresh_data_ids:
             orphans.append(data_item)
@@ -470,12 +794,10 @@ async def _delete_dlt_orphans(
     async with set_database_global_context_variables(dataset.id, dataset.owner_id):
         for orphan in orphans:
             try:
-                # Always attempt graph+vector cleanup. delete_data_nodes_and_edges
-                # handles both provenance modes and no-ops when there is nothing to
-                # remove; gating on has_data_related_nodes (a relational-ledger-only
-                # check) wrongly skipped cleanup for graph-provenance graphs (the
-                # default), leaving a forgotten row's chunks/entities in the graph +
-                # vector stores and still retrievable.
+                # Called unconditionally: gating on has_data_related_nodes would
+                # skip graphs whose provenance is stamped in-graph instead of the
+                # relational ledger (the function handles both paths and no-ops
+                # when nothing is related).
                 await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
                 await delete_data(orphan, dataset.id)
             except Exception:

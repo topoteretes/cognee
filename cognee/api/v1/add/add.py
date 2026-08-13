@@ -261,6 +261,7 @@ async def add(
         data,
         dataset_name=dataset_name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
 
@@ -276,7 +277,9 @@ async def add(
         data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
