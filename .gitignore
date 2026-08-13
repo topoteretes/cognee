@@ -211,3 +211,7 @@ deployment/helm/values-local.yml
 
 # Performance test results
 cognee/tests/performance/results
+
+# Bundled Ladybug extension binaries — populated by
+# scripts/build_ladybug_json_extension.sh, shipped in wheels via hatch artifacts
+cognee_db_workers/ladybug_extensions/**/*.lbug_extension
