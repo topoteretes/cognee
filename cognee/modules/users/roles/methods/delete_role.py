@@ -29,8 +29,13 @@ async def delete_role(role_id: UUID, owner_id: UUID):
         if not role:
             raise EntityNotFoundError(message="Role not found.")
 
-        await has_user_management_permission(requester_id=owner_id, tenant_id=role.tenant_id)
+        tenant_id = role.tenant_id
 
+    # has_user_management_permission opens its own session(s); run it OUTSIDE the
+    # session above so we never hold two pooled connections at once (#4197 class).
+    await has_user_management_permission(requester_id=owner_id, tenant_id=tenant_id)
+
+    async with db_engine.get_async_session() as session:
         # Remove all user-role associations
         await session.execute(delete(UserRole).where(UserRole.role_id == role_id))
 

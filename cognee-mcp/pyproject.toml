@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 dependencies = [
     # For local cognee repo usage remove comment below and add absolute path to cognee. Then run `uv sync --reinstall` in the mcp folder on local cognee changes.
     #"cognee[postgres,docs,neo4j] @ file:/Users/igorilic/Desktop/cognee",
-    "cognee[postgres-binary,docs,neo4j]>=1.1.0,<2.0.0",
+    "cognee[postgres-binary,docs,neo4j]>=1.4.2,<2.0.0",
     # FastMCP 3 ships tag-based visibility and the tool-search transform this
     # server relies on; the FastMCP vendored in the `mcp` SDK is an older fork
     # that has neither. `mcp` is still a direct dependency for its wire types.
@@ -88,6 +88,11 @@ constraint-dependencies = [
 
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
+# ...but never for cognee itself. The 2-day window is a supply-chain guard for
+# third-party packages; applying it to our own package meant a release-day
+# `uv lock` silently resolved cognee to the *previous* release, which is how
+# the lock drifted to 1.2.2 while the image was tagged 1.4.1 (issue #4360).
+exclude-newer-package = { cognee = "0 days" }
 
 [project.scripts]
 cognee = "src:main"

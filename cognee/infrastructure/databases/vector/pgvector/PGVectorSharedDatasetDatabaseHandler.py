@@ -13,7 +13,7 @@ from cognee.infrastructure.databases.postgres import (
     drop_pg_schema_if_exists,
     dataset_schema_name,
 )
-from cognee.infrastructure.databases.vector.create_vector_engine import evict_vector_engine
+from cognee.infrastructure.databases.vector.create_vector_engine import vector_engine_cache
 
 
 class PGVectorSharedDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -97,7 +97,7 @@ class PGVectorSharedDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         # Drop the cached adapter pinned to this schema (its reflection cache
         # would otherwise outlive the schema) before removing the schema itself.
-        evict_vector_engine(
+        vector_engine_cache.evict(
             vector_db_provider=dataset_database.vector_database_provider,
             vector_db_url=dataset_database.vector_database_url,
             vector_db_name=dataset_database.vector_database_name,

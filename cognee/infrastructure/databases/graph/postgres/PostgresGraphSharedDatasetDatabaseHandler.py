@@ -4,7 +4,7 @@ from typing import Optional
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
-    evict_graph_engine,
+    graph_engine_cache,
 )
 from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.infrastructure.databases.postgres import (
@@ -112,7 +112,7 @@ class PostgresGraphSharedDatasetDatabaseHandler:
         schema = info["graph_database_schema"]
         db_name = dataset_database.graph_database_name
 
-        evict_graph_engine(
+        graph_engine_cache.evict(
             graph_database_provider="postgres",
             graph_file_path="",
             graph_database_name=db_name,

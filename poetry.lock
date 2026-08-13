@@ -16530,4 +16530,4 @@ turso = ["libsql-experimental"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.15"
-content-hash = "cced1607f3d5335f342216e283380046bee8534b43a488d6594ff2d5d46682b3"
+content-hash = "fdcd672546936714368e16253d5ef2b3591ff589f10714f441aa69e6bc40fa79"

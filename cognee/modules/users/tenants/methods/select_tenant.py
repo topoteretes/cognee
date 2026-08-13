@@ -26,16 +26,20 @@ async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]) -> User:
 
     """
     db_engine = get_relational_engine()
+
+    # Resolve user + tenant (each opens its own session) BEFORE opening ours, so
+    # this request never holds two pooled connections at once — that overlap
+    # deadlocks the pool under concurrency (issue #4197 class).
+    user = await get_user(user_id)
+    tenant = await get_tenant(tenant_id) if tenant_id is not None else None
+
     async with db_engine.get_async_session() as session:
-        user = await get_user(user_id)
         if tenant_id is None:
             # If no tenant_id is provided set current Tenant to the single user-tenant
             user.tenant_id = None
             await session.merge(user)
             await session.commit()
             return user
-
-        tenant = await get_tenant(tenant_id)
 
         if not user:
             raise UserNotFoundError

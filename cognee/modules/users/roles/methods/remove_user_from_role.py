@@ -35,8 +35,13 @@ async def remove_user_from_role(user_id: UUID, role_id: UUID, owner_id: UUID):
         if not role:
             raise RoleNotFoundError
 
-        await has_user_management_permission(requester_id=owner_id, tenant_id=role.tenant_id)
+        tenant_id = role.tenant_id
 
+    # has_user_management_permission opens its own session(s); run it OUTSIDE the
+    # session above so we never hold two pooled connections at once (#4197 class).
+    await has_user_management_permission(requester_id=owner_id, tenant_id=tenant_id)
+
+    async with db_engine.get_async_session() as session:
         await session.execute(
             delete(UserRole).where(
                 UserRole.user_id == user_id,

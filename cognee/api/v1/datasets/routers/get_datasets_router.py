@@ -52,6 +52,8 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    label: Optional[str] = None
+    external_metadata: Optional[dict] = None
 
 
 class DatasetGraphSummaryDTO(OutDTO):
@@ -360,6 +362,9 @@ def get_datasets_router() -> APIRouter:
         - **mime_type**: MIME type of the data
         - **raw_data_location**: Storage location of the raw data
         - **dataset_id**: ID of the containing dataset
+        - **label**: Label attached to the data item at upload, if any
+        - **external_metadata**: Stored metadata dict (upload-provided keys merged over
+          loader-derived ones), if any
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access

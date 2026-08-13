@@ -672,9 +672,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return None
 
         async with self._get_write_lock(collection_name):
+            # Resolve the table BEFORE opening the session. get_table() checks out
+            # its own connection; doing it inside the session would hold two pooled
+            # connections at once and deadlock the pool under concurrency (same
+            # class as #4197). Mirrors retrieve()/search().
+            PGVectorDataPoint = await self.get_table(collection_name)
             async with self.get_async_session() as session:
-                PGVectorDataPoint = await self.get_table(collection_name)
-
                 results = None
                 if not data_point_ids:
                     results = await session.execute(

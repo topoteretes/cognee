@@ -388,7 +388,7 @@ jobs:
           prompt: "/pr-review"
           claude_args: >-
             --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
-            --max-turns 20
+            --max-turns 40
             --model claude-sonnet-4-5-20250929
 
       - name: DM review summary to PR author on Slack
