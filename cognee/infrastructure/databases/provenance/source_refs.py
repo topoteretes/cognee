@@ -31,13 +31,21 @@ class ParsedSourceRef(NamedTuple):
 
 
 def parse_source_ref_key(source_ref_key: str) -> ParsedSourceRef:
-    """Decompose a v1 or v2 source ref key into its components."""
-    if source_ref_key.startswith(f"{SOURCE_REF_PREFIX}:"):
-        _prefix, _version, dataset_id, data_id = source_ref_key.split(":", 3)
-        return ParsedSourceRef(1, UUID(dataset_id), UUID(data_id), None)
-    if source_ref_key.startswith(f"{CHUNK_SOURCE_REF_PREFIX}:"):
-        _prefix, _version, dataset_id, data_id, chunk_id = source_ref_key.split(":", 4)
-        return ParsedSourceRef(2, UUID(dataset_id), UUID(data_id), UUID(chunk_id))
+    """Decompose a v1 or v2 source ref key into its components.
+
+    Raises ``ValueError("Unsupported source ref key format")`` for any key
+    that does not decompose — unknown prefix, wrong segment count, malformed
+    ids — so callers can treat every undecomposable key uniformly.
+    """
+    try:
+        if source_ref_key.startswith(f"{SOURCE_REF_PREFIX}:"):
+            _prefix, _version, dataset_id, data_id = source_ref_key.split(":", 3)
+            return ParsedSourceRef(1, UUID(dataset_id), UUID(data_id), None)
+        if source_ref_key.startswith(f"{CHUNK_SOURCE_REF_PREFIX}:"):
+            _prefix, _version, dataset_id, data_id, chunk_id = source_ref_key.split(":", 4)
+            return ParsedSourceRef(2, UUID(dataset_id), UUID(data_id), UUID(chunk_id))
+    except ValueError:
+        raise ValueError("Unsupported source ref key format")
     raise ValueError("Unsupported source ref key format")
 
 
