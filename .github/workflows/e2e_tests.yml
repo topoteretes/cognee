@@ -286,11 +286,16 @@ jobs:
           uses: ./.github/actions/cognee_setup
           with:
             python-version: '3.11.x'
-            extra-dependencies: "aws"
+            # dlt: the test also covers CSV-from-S3 auto-detection into the
+            # DLT ingestion route, which is gated on the dlt extra.
+            extra-dependencies: "aws dlt"
 
         - name: Run S3 Bucket Test
           env:
             ENV: 'dev'
+            # dlt's telemetry thread is non-daemon and a wedged call blocks
+            # interpreter exit (see the backwards-compat jobs).
+            RUNTIME__DLTHUB_TELEMETRY: "false"
             LLM_MODEL: ${{ secrets.LLM_MODEL }}
             LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.LLM_API_KEY }}

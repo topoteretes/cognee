@@ -56,16 +56,34 @@ def create_dlt_source_from_connection_string(
     return source
 
 
+# fsspec-style URL scheme (s3://, gs://, az://, file://, memory://, ...).
+# http(s) is already excluded by is_csv_path. A URL must NOT go through
+# os.path.abspath below — abspath treats "s3://bucket/x.csv" as a relative
+# local path and mangles it into "<cwd>/s3:/bucket/x.csv".
+_URL_SCHEME = re.compile(r"^[a-z0-9]+://", re.IGNORECASE)
+
+
 def create_dlt_source_from_csv(csv_path: str):
-    """Auto-generate a dlt resource from a CSV file path."""
+    """Auto-generate a dlt resource from a CSV file path or fsspec URL.
+
+    Local paths are resolved to absolute file:// URLs. URL inputs (s3://,
+    gs://, az://, file://, ...) are split into parent-URL + filename and
+    passed to dlt's filesystem source as-is; the protocol's fsspec backend
+    must be installed (s3 ships with the ``aws`` extra) and credentials come
+    from the standard environment (e.g. AWS_ACCESS_KEY_ID / _SECRET / region
+    for s3).
+    """
     from dlt.sources.filesystem import filesystem, read_csv
 
-    parent_dir = os.path.dirname(os.path.abspath(csv_path))
-    filename = os.path.basename(csv_path)
+    if _URL_SCHEME.match(csv_path):
+        bucket_url, _, filename = csv_path.rpartition("/")
+    else:
+        bucket_url = f"file://{os.path.dirname(os.path.abspath(csv_path))}"
+        filename = os.path.basename(csv_path)
 
     return (
         filesystem(
-            bucket_url=f"file://{parent_dir}",
+            bucket_url=bucket_url,
             file_glob=filename,
         )
         | read_csv()
