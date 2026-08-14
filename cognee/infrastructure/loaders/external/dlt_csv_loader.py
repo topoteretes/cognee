@@ -19,7 +19,7 @@ routing keys on. Per-call dlt options (``primary_key``, ``write_disposition``,
 import hashlib
 from typing import Any, Optional
 
-import dlt  # noqa: F401 — hard gate: without the extra this loader must not register
+import dlt  # noqa: F401  # ty:ignore[unresolved-import] — hard gate: without the extra this loader must not register
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path

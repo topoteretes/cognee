@@ -68,7 +68,7 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
         Load and process the file, returning standardized result.
 
@@ -76,6 +76,10 @@ class LoaderInterface(ABC):
             file_path: Path to the file to be processed
             file_stream: If file stream is provided it will be used to process file instead
             **kwargs: Additional loader-specific configuration
+
+        Returns:
+            The stored derived-text path, or a ``LoaderResult`` for loaders
+            that also own the record's identity and route stamp (dlt).
 
         Raises:
             Exception: If file cannot be processed

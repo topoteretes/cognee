@@ -5,7 +5,7 @@ import filetype
 from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.shared.logging_utils import get_logger
 
-from .LoaderInterface import LoaderInterface
+from .LoaderInterface import LoaderInterface, LoaderResult
 
 logger = get_logger(__name__)
 
@@ -132,7 +132,7 @@ class LoaderEngine:
         file_path: str,
         preferred_loaders: dict[str, dict[str, Any]] | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> "str | LoaderResult":
         """
         Load file using appropriate loader.
 
