@@ -13,7 +13,7 @@ external_metadata is never consulted.
 from enum import Enum
 
 from cognee.tasks.documents.classify_documents import document_class_for
-from cognee.modules.data.processing.document_types import DltSourceDocument
+from cognee.modules.data.processing.document_types import CodeFileDocument, DltSourceDocument
 
 
 class CognifyRoute(Enum):
@@ -21,10 +21,12 @@ class CognifyRoute(Enum):
 
     STANDARD = "standard"
     DLT_SOURCE = "dlt_source"
+    CODE = "code"
 
 
 _ROUTE_BY_DOCUMENT_CLASS = {
     DltSourceDocument: CognifyRoute.DLT_SOURCE,
+    CodeFileDocument: CognifyRoute.CODE,
 }
 
 

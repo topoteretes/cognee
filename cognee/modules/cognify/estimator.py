@@ -226,12 +226,14 @@ def estimate_chunks(
     custom_prompt: Optional[str] = None,
     skipped_items: int = 0,
     skipped_dlt_chunks: int = 0,
+    skipped_code_items: int = 0,
 ) -> DryRunEstimate:
     """Estimate the per-chunk LLM stages of the default cognify pipeline.
 
-    DLT items never reach this function's chunk list: the cognify estimate
-    routes them out (same policy as execution — cognify_route_for) before any
-    document is read, and reports them via ``skipped_dlt_chunks``.
+    DLT and code items never reach this function's chunk list: the cognify
+    estimate routes them out (same policy as execution — cognify_route_for)
+    before any document is read, and reports them via ``skipped_dlt_chunks``
+    and ``skipped_code_items``.
     """
     tokenizer = _llm_tokenizer()
     model = get_llm_config().llm_model
@@ -289,6 +291,11 @@ def estimate_chunks(
             f"Skipped {skipped_dlt_chunks} DLT row chunk(s) because they do not use "
             "LLM extraction or summarization."
         )
+    if skipped_code_items:
+        warnings.append(
+            f"Skipped {skipped_code_items} code file(s) because they run the "
+            "deterministic code graph pipeline — no LLM calls."
+        )
     if output_multiplier != 1:
         warnings.append(
             f"{model} is a reasoning model: output tokens and cost include a rough "
@@ -305,7 +312,7 @@ def estimate_chunks(
         chunks=len(llm_chunks),
         chunk_tokens=chunk_tokens,
         stages=stages,
-        skipped_items=skipped_items + skipped_dlt_chunks,
+        skipped_items=skipped_items + skipped_dlt_chunks + skipped_code_items,
         warnings=warnings,
     )
 
@@ -476,18 +483,20 @@ async def _chunks_from_data_items(
     *,
     chunker: Type[Any],
     chunk_size: int,
-) -> tuple[list[DocumentChunk], int, int]:
-    """Chunk the LLM-bound items; DLT items are routed out BEFORE any read.
+) -> tuple[list[DocumentChunk], int, int, int]:
+    """Chunk the LLM-bound items; DLT and code items are routed out BEFORE any read.
 
     Uses the same routing policy as execution (cognify_route_for), so the
     estimate cannot drift from what cognify actually runs. Manifest chunk
     counts come from system_metadata["row_count"] — a dry run never opens
-    a (potentially multi-GB) manifest file.
+    a (potentially multi-GB) manifest file. Code files run the deterministic
+    code graph pipeline (no LLM calls), so they are counted, not chunked.
     """
     from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 
     llm_items: list[Data] = []
     skipped_dlt_chunks = 0
+    skipped_code_items = 0
     for data_item in data_items:
         route = cognify_route_for(data_item)
         if route is CognifyRoute.DLT_SOURCE:
@@ -503,6 +512,8 @@ async def _chunks_from_data_items(
                 )
                 row_count = 0
             skipped_dlt_chunks += row_count
+        elif route is CognifyRoute.CODE:
+            skipped_code_items += 1
         else:
             llm_items.append(data_item)
 
@@ -515,7 +526,7 @@ async def _chunks_from_data_items(
             continue
         async for chunk in document.read(chunker_cls=chunker, max_chunk_size=chunk_size):
             chunks.append(chunk)
-    return chunks, skipped, skipped_dlt_chunks
+    return chunks, skipped, skipped_dlt_chunks, skipped_code_items
 
 
 async def estimate_remember_dry_run(
@@ -561,13 +572,20 @@ async def estimate_cognify_dry_run(
     chunks: list[DocumentChunk] = []
     skipped = 0
     skipped_dlt = 0
+    skipped_code = 0
     for dataset in authorized_datasets:
-        dataset_chunks, skipped_items, skipped_dlt_chunks = await _chunks_from_data_items(
+        (
+            dataset_chunks,
+            skipped_items,
+            skipped_dlt_chunks,
+            skipped_code_items,
+        ) = await _chunks_from_data_items(
             await get_dataset_data(dataset.id), chunker=chunker, chunk_size=chunk_size
         )
         chunks.extend(dataset_chunks)
         skipped += skipped_items
         skipped_dlt += skipped_dlt_chunks
+        skipped_code += skipped_code_items
 
     return estimate_chunks(
         chunks,
@@ -576,4 +594,5 @@ async def estimate_cognify_dry_run(
         custom_prompt=custom_prompt,
         skipped_items=skipped,
         skipped_dlt_chunks=skipped_dlt,
+        skipped_code_items=skipped_code,
     )

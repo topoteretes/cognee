@@ -30,6 +30,9 @@ class LoaderEngine:
         self._mime_type_map: dict[str, list[LoaderInterface]] = {}
 
         self.default_loader_priority = [
+            # Before text_loader: code files content-sniff as plain text, so
+            # text_loader's content-detection fallback would claim them first.
+            "code_loader",
             "text_loader",
             "pypdf_loader",
             "image_loader",

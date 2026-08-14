@@ -175,13 +175,14 @@ async def test_dlt_items_are_routed_out_before_any_read(offline_estimator):
         extension=None,
         raw_data_location="does-not-exist://manifest.json",
     )
-    chunks, skipped, skipped_dlt = await estimator._chunks_from_data_items(
+    chunks, skipped, skipped_dlt, skipped_code = await estimator._chunks_from_data_items(
         [manifest_item], chunker=TextChunker, chunk_size=512
     )
 
     assert chunks == []
     assert skipped == 0
     assert skipped_dlt == 42  # manifest row_count, never read from disk
+    assert skipped_code == 0
 
 
 @pytest.mark.asyncio
@@ -193,11 +194,49 @@ async def test_manifest_without_row_count_warns_and_counts_zero(offline_estimato
         raw_data_location="does-not-exist://manifest.json",
     )
 
-    chunks, skipped, skipped_dlt = await estimator._chunks_from_data_items(
+    chunks, skipped, skipped_dlt, skipped_code = await estimator._chunks_from_data_items(
         [manifest_item], chunker=TextChunker, chunk_size=512
     )
 
-    assert chunks == [] and skipped == 0 and skipped_dlt == 0
+    assert chunks == [] and skipped == 0 and skipped_dlt == 0 and skipped_code == 0
+
+
+@pytest.mark.asyncio
+async def test_code_items_are_routed_out_before_any_read(offline_estimator):
+    """Code files contribute zero LLM cost and are NEVER opened.
+
+    Their raw_data_location points nowhere — if the estimator tried
+    document.read() on one, this test would explode. Same routing policy
+    as execution: system_metadata.source == "code" -> the code route.
+    """
+    code_item = SimpleNamespace(
+        system_metadata={"source": "code"},
+        extension="txt",
+        raw_data_location="does-not-exist://module.py",
+    )
+
+    chunks, skipped, skipped_dlt, skipped_code = await estimator._chunks_from_data_items(
+        [code_item], chunker=TextChunker, chunk_size=512
+    )
+
+    assert chunks == []
+    assert skipped == 0
+    assert skipped_dlt == 0
+    assert skipped_code == 1
+
+
+def test_estimate_chunks_reports_skipped_code_items(offline_estimator):
+    estimate = estimator.estimate_chunks(
+        [SimpleNamespace(text="normal text")],
+        operation="cognify",
+        graph_model=_TinyGraph,
+        skipped_code_items=2,
+    )
+
+    payload = estimate.to_dict()
+    assert payload["chunks"] == 1
+    assert payload["skipped_items"] == 2
+    assert any("code file" in warning for warning in payload["warnings"])
 
 
 # --------------------------------------------------------------------------- #

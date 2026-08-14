@@ -41,6 +41,11 @@ def _text_item():
     return SimpleNamespace(system_metadata=None, extension="txt")
 
 
+def _code_item():
+    # Tagged at add time by ingest_data for supported code file extensions.
+    return SimpleNamespace(system_metadata={"source": "code"}, extension="txt")
+
+
 class TestCognifyRouting:
     def test_manifest_routes_to_dlt_source(self):
         assert cognify_route_for(_manifest_item()) is CognifyRoute.DLT_SOURCE
@@ -53,6 +58,18 @@ class TestCognifyRouting:
 
     def test_plain_document_routes_standard(self):
         assert cognify_route_for(_text_item()) is CognifyRoute.STANDARD
+
+    def test_code_file_routes_to_code(self):
+        """system_metadata.source == "code" (set at add time for supported
+        code file extensions) sends the item down the enola code route."""
+        assert cognify_route_for(_code_item()) is CognifyRoute.CODE
+
+    def test_code_extension_without_tag_routes_standard(self):
+        """The routing fact is the add-time system_metadata tag, not the raw
+        extension: a pre-existing record added before code recognition keeps
+        routing standard instead of silently changing pipelines."""
+        untagged = SimpleNamespace(system_metadata=None, extension="py")
+        assert cognify_route_for(untagged) is CognifyRoute.STANDARD
 
     def test_user_external_metadata_cannot_steer_routing(self):
         """Routing keys on system_metadata ONLY. A user storing a 'source' key
@@ -69,6 +86,11 @@ class TestCognifyRouting:
             external_metadata={"source": "dlt"}, system_metadata=None, extension="txt"
         )
         assert cognify_route_for(legacy_smuggler) is CognifyRoute.STANDARD
+
+        code_smuggler = SimpleNamespace(
+            external_metadata={"source": "code"}, system_metadata=None, extension="txt"
+        )
+        assert cognify_route_for(code_smuggler) is CognifyRoute.STANDARD
 
 
 class TestCognifyMakesOneCall:
@@ -87,6 +109,9 @@ class TestCognifyMakesOneCall:
             ),
             patch.object(cognify_module, "get_default_tasks", new=AsyncMock(return_value=tasks)),
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
+            patch.object(
+                cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
+            ),
         ):
             result = await cognify_module.cognify(
                 datasets=["ds"],
@@ -109,6 +134,7 @@ class TestCognifyMakesOneCall:
         resolver = call["tasks"]
         assert callable(resolver)
         assert resolver(_manifest_item()) == "DLT_TASKS"
+        assert resolver(_code_item()) == "CODE_TASKS"
         assert resolver(_text_item()) == "STANDARD_TASKS"
 
     @pytest.mark.asyncio
@@ -140,6 +166,9 @@ class TestCognifyMakesOneCall:
                 cognify_module, "get_temporal_tasks", new=AsyncMock(return_value="TEMPORAL_TASKS")
             ),
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
+            patch.object(
+                cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
+            ),
         ):
             await cognify_module.cognify(
                 datasets=["ds"],
@@ -152,6 +181,7 @@ class TestCognifyMakesOneCall:
         resolver = call["tasks"]
         assert resolver(_text_item()) == "TEMPORAL_TASKS"
         assert resolver(_manifest_item()) == "DLT_TASKS"
+        assert resolver(_code_item()) == "CODE_TASKS"
 
 
 @pytest.mark.asyncio
