@@ -110,8 +110,8 @@ class CognifyPayloadDTO(InDTO):
         ),
     )
     data_per_batch: Optional[int] = Field(
-        default=20,
-        examples=[20],
+        default=2000,
+        examples=[2000],
         description="Maximum number of data items to process concurrently within a dataset.",
     )
 
@@ -157,7 +157,7 @@ def get_cognify_router() -> APIRouter:
           a size from the configured LLM and embedding limits.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **chunks_per_batch** (Optional[int]): Number of chunks to process per task batch in Cognify. Uses the pipeline default when omitted.
-        - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 20.
+        - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 2000.
 
         ## Response
         - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
@@ -255,7 +255,12 @@ def get_cognify_router() -> APIRouter:
                 )
                 detail = None
                 if first_err is not None:
-                    detail = getattr(first_err, "error", None) or str(first_err)
+                    # The failing task's error is carried on ``payload`` (set to
+                    # ``repr(error)`` by the pipeline runner); PipelineRunErrored
+                    # has no ``error`` attribute. Surface it so the client gets an
+                    # actionable message instead of the model's repr.
+                    payload = first_err.payload if isinstance(first_err.payload, str) else None
+                    detail = payload or str(first_err)
 
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

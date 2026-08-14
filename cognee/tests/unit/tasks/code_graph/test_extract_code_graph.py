@@ -458,16 +458,28 @@ async def test_extract_code_graph_without_repo_path_or_snapshot_dir_raises():
 async def test_add_code_graph_data_points_invalidates_cached_indexes(monkeypatch):
     add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
+    graph_engine_module = importlib.import_module(
+        "cognee.infrastructure.databases.graph.get_graph_engine"
+    )
     add_data_points_mock = AsyncMock(return_value=["stored"])
     invalidate_mock = MagicMock()
+    graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     monkeypatch.setattr(add_data_points_module, "add_data_points", add_data_points_mock)
     monkeypatch.setattr(
         code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
     )
+    monkeypatch.setattr(
+        graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
+    )
 
     result = await add_code_graph_data_points(["node"])
 
-    assert result == ["stored"]
+    # Passthrough of the full fact set (not add_data_points' return), so the
+    # edges task sees every fact and the carried pre-read state.
+    assert list(result) == ["node"]
+    assert result.node_delta["nodes_added"] == 1
+    assert result.existing_edge_keys == set()
     add_data_points_mock.assert_awaited_once_with(["node"], ctx=None, graph_only=True)
     invalidate_mock.assert_called_once_with()
 
@@ -480,6 +492,7 @@ async def test_add_code_graph_edges_writes_edges_and_passes_data_points_through(
     code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     invalidate_mock = MagicMock()
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
@@ -508,6 +521,7 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
     graph_methods_module = importlib.import_module("cognee.modules.graph.methods")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     monkeypatch.setattr(
         graph_engine_module, "get_graph_engine", AsyncMock(return_value=graph_engine)
     )
@@ -521,7 +535,9 @@ async def test_add_code_graph_edges_registers_edges_in_rollback_ledger(monkeypat
         pipeline_run_id=uuid4(),
     )
 
-    await add_code_graph_edges([], snapshot_dir=FIXTURES_DIR, ctx=ctx)
+    # Empty data_points now signals "extract skipped an unchanged snapshot",
+    # so pass a sentinel to exercise the ledger path.
+    await add_code_graph_edges(["sentinel"], snapshot_dir=FIXTURES_DIR, ctx=ctx)
 
     upsert_edges_mock.assert_awaited_once()
     call = upsert_edges_mock.await_args
@@ -551,6 +567,7 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
 
     graph_engine = AsyncMock()
+    graph_engine.get_graph_data.return_value = ([], [])
     vector_engine = MagicMock()
     unified_engine = SimpleNamespace(
         graph=graph_engine,
@@ -619,7 +636,11 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
 
     assert len(result) == 1
     assert len(result[0]) == 17
-    graph_engine.add_nodes.assert_awaited_once()
+    # One bulk node load, then the incremental-skip stamp on the repository node.
+    assert graph_engine.add_nodes.await_count == 2
+    stamped = graph_engine.add_nodes.await_args_list[-1].args[0]
+    assert [type(node).__name__ for node in stamped] == ["CodeRepository"]
+    assert stamped[0].last_snapshot_id is not None
     assert graph_engine.add_edges.await_count == 2
     add_data_points_module.get_unified_engine.assert_not_awaited()
     add_data_points_module.index_data_points.assert_not_awaited()

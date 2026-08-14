@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from cognee.api.v1.session import SessionQAEntry
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.recall.types.RecallResponse import ResponseQAEntry
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
@@ -608,6 +609,16 @@ def _get_recall_module():
     return importlib.import_module("cognee.api.v1.recall.recall")
 
 
+@pytest.fixture(autouse=True)
+def _stub_search_history():
+    """These tests mock recall/search internals (users, routed query types), and
+    the history write would bind those mocks into a real INSERT. History is not
+    under test here — it has its own coverage in test_recall_logs_query_history.py
+    — so stub it at its source module (recall imports it inside the function)."""
+    with patch("cognee.modules.search.operations.log_search_history", AsyncMock()):
+        yield
+
+
 class TestRecallSessionMode:
     @pytest.fixture(autouse=True)
     def _disable_telemetry(self, monkeypatch):
@@ -830,3 +841,144 @@ class TestRecallSessionMode:
 
         assert [result.source for result in results] == ["session", "graph"]
         assert authorized_search_mock.await_args.kwargs["dataset_ids"] == [dataset_id]
+
+
+class TestRecallResponseModelParam:
+    """recall(response_model=...) folds into retriever_specific_config."""
+
+    @pytest.fixture(autouse=True)
+    def _disable_telemetry(self, monkeypatch):
+        monkeypatch.setattr("cognee.shared.utils.send_telemetry", lambda *args, **kwargs: None)
+
+    @staticmethod
+    def _fake_model():
+        from pydantic import BaseModel
+
+        class Facts(BaseModel):
+            name: str
+
+        return Facts
+
+    @staticmethod
+    def _patched_graph_recall(recall_mod, authorized_search_mock):
+        user = MagicMock()
+        user.id = uuid4()
+        return (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(_mod_search_methods, "authorized_search", authorized_search_mock),
+        )
+
+    @pytest.mark.asyncio
+    async def test_response_model_forwards_into_retriever_config(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        authorized_search = AsyncMock(return_value=[])
+
+        p1, p2, p3 = self._patched_graph_recall(recall_mod, authorized_search)
+        with p1, p2, p3:
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                response_model=model,
+            )
+
+        forwarded = authorized_search.await_args.kwargs["retriever_specific_config"]
+        assert forwarded == {"response_model": model}
+
+    @pytest.mark.asyncio
+    async def test_response_model_merges_without_mutating_caller_config(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        caller_config = {"facts_top_k": 3}
+        authorized_search = AsyncMock(return_value=[])
+
+        p1, p2, p3 = self._patched_graph_recall(recall_mod, authorized_search)
+        with p1, p2, p3:
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                retriever_specific_config=caller_config,
+                response_model=model,
+            )
+
+        forwarded = authorized_search.await_args.kwargs["retriever_specific_config"]
+        assert forwarded == {"facts_top_k": 3, "response_model": model}
+        assert caller_config == {"facts_top_k": 3}
+
+    @pytest.mark.asyncio
+    async def test_conflicting_response_models_raise(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        other_model = self._fake_model()
+
+        with pytest.raises(CogneeValidationError):
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                retriever_specific_config={"response_model": other_model},
+                response_model=model,
+            )
+
+    @pytest.mark.asyncio
+    async def test_same_model_in_both_places_is_allowed(self):
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        authorized_search = AsyncMock(return_value=[])
+
+        p1, p2, p3 = self._patched_graph_recall(recall_mod, authorized_search)
+        with p1, p2, p3:
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                retriever_specific_config={"response_model": model},
+                response_model=model,
+            )
+
+        forwarded = authorized_search.await_args.kwargs["retriever_specific_config"]
+        assert forwarded == {"response_model": model}
+
+    @pytest.mark.asyncio
+    async def test_response_model_forwarded_as_schema_in_remote_mode(self):
+        """Remote mode sends model_json_schema(), not the class."""
+        recall_mod = _get_recall_module()
+        model = self._fake_model()
+        serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+        remote_client = MagicMock()
+        remote_client.recall = AsyncMock(return_value=[])
+
+        user = MagicMock()
+        user.id = uuid4()
+        with (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=remote_client)),
+        ):
+            await recall_mod.recall(
+                "test",
+                query_type=SearchType.GRAPH_COMPLETION,
+                response_model=model,
+            )
+
+        sent = remote_client.recall.await_args.kwargs["response_schema"]
+        assert sent == model.model_json_schema()
+
+    @pytest.mark.asyncio
+    async def test_no_response_model_sends_no_schema_in_remote_mode(self):
+        recall_mod = _get_recall_module()
+        serve_state = importlib.import_module("cognee.api.v1.serve.state")
+
+        remote_client = MagicMock()
+        remote_client.recall = AsyncMock(return_value=[])
+
+        user = MagicMock()
+        user.id = uuid4()
+        with (
+            patch.object(recall_mod, "get_default_user", AsyncMock(return_value=user)),
+            patch.object(recall_mod, "set_session_user_context_variable", AsyncMock()),
+            patch.object(serve_state, "get_remote_client", MagicMock(return_value=remote_client)),
+        ):
+            await recall_mod.recall("test", query_type=SearchType.GRAPH_COMPLETION)
+
+        assert remote_client.recall.await_args.kwargs["response_schema"] is None

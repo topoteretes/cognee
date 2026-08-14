@@ -917,9 +917,15 @@ class NeptuneGraphDB(GraphDBInterface):
             return existing_edges
 
         except Exception as e:
+            # A failed existence check is NOT an empty existence check: returning
+            # [] tells the cognify dedup that none of these edges exist, so it
+            # writes them; if the store is failing those writes fail too and the
+            # run reports success while persisting nothing (issue #4348). Surface
+            # the failure like the other backends do (neo4j re-raises;
+            # postgres/turso let it propagate) instead of masking it.
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edges existence: {error_msg}")
-            return []
+            raise
 
     async def get_edges(self, node_id: str) -> List[EdgeData]:
         """

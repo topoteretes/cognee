@@ -9,11 +9,12 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
-    extract_context_object_ids,
+    extract_context_object_ids as extract_hybrid_object_ids,
     format_hybrid_context,
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
 from cognee.modules.retrieval.hybrid.facts import edge_rank_by_id, select_facts
+from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
@@ -254,7 +255,7 @@ class HybridRetriever(BaseRetriever):
                 system_prompt=self.system_prompt,
                 response_model=self.response_model,
                 summarize_context=False,
-                used_graph_element_ids=extract_context_object_ids(retrieved_objects),
+                used_graph_element_ids=extract_hybrid_object_ids(retrieved_objects),
                 max_context_chars=getattr(self, "max_context_chars", None),
                 effective_query=effective_query,
                 turn_preparation=turn_preparation,
@@ -270,6 +271,18 @@ class HybridRetriever(BaseRetriever):
             response_model=self.response_model,
         )
         return [completion]
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_hybrid_results(
+            primary,
+            secondary,
+            chunks_limit=self.chunks_top_k,
+            entities_limit=self.entities_top_k,
+            facts_limit=self.facts_top_k,
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        return extract_hybrid_object_ids(retrieved_objects)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

@@ -7,6 +7,7 @@ deterministically extracts an architectural graph from a codebase.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -245,6 +246,26 @@ def _synthesize_insight_facts(snapshot_dir: Path) -> list:
             }
         )
     return facts
+
+
+def snapshot_identity(snapshot_dir: Union[str, Path], receipt: Optional[dict]) -> Optional[str]:
+    """Stable identity of a snapshot's content, used for incremental skip.
+
+    Prefers receipt.json's snapshot_id — a SHA-256 over enola's byte-stable
+    fact serialization, so an unchanged tree produces an unchanged id. Falls
+    back to hashing facts.jsonl directly when the receipt is missing. Returns
+    None when neither is available; callers must then treat the snapshot as
+    changed (load fully, never skip).
+    """
+    if receipt:
+        snapshot_id = receipt.get("snapshot_id")
+        if isinstance(snapshot_id, str) and snapshot_id:
+            return snapshot_id
+    facts_path = Path(snapshot_dir) / "facts.jsonl"
+    try:
+        return "sha256:" + hashlib.sha256(facts_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def normalize_relation(relation: dict) -> Optional[Tuple[str, str]]:

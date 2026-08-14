@@ -6,15 +6,27 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 
 class CodeRepository(DataPoint):
-    """The repository an enola snapshot was extracted from."""
+    """The repository an enola snapshot was extracted from.
+
+    last_snapshot_id records the enola snapshot identity of the last fully
+    loaded (and swept) ingestion; extract_code_graph skips re-loading when the
+    current snapshot carries the same id. It is stamped only after a load
+    completes, so a crashed run can never be mistaken for an up-to-date one.
+    """
 
     name: str
     path: str
+    last_snapshot_id: Optional[str] = None
+    last_delta: Optional[dict] = None
     metadata: dict = {"index_fields": ["name"]}
 
 
 class CodeGraphEntity(DataPoint):
-    """Common shape of every enola fact mapped into the graph."""
+    """Common shape of every enola fact mapped into the graph.
+
+    fact_hash fingerprints the derived fields, so re-ingestion can write only
+    the facts whose content actually changed (delta writes).
+    """
 
     name: str
     kind: str
@@ -23,6 +35,7 @@ class CodeGraphEntity(DataPoint):
     repo: Optional[str] = None
     description: Optional[str] = None
     fact_properties: dict[str, Any] = Field(default_factory=dict)
+    fact_hash: Optional[str] = None
     part_of: Optional[CodeRepository] = None
     metadata: dict = {"index_fields": ["name"]}
 
