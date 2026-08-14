@@ -223,7 +223,7 @@ jobs:
     name: "Large migration compat (${{ matrix.scenario }}, v1.2.0 → current)"
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     strategy:
       fail-fast: false
@@ -301,14 +301,15 @@ jobs:
       EMBEDDING_API_KEY: mock-key
 
       LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
-      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace.json
+      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace_large.json
       # Scale floors phase 2 asserts per dataset. Counts are pipeline-era
       # dependent: the v1.2.0 pipeline builds 2,338 nodes / 9,148 edges per
-      # dataset from the regular mock (measured in CI). Cross-dataset equality
-      # is the real integrity check; these floors just catch gross data loss.
-      # For the 27x large mock, raise to roughly "50000" / "180000".
-      MIN_NODES: "2000"
-      MIN_EDGES: "7000"
+      # dataset from the regular mock (measured in CI), so the 27x large mock
+      # lands around 63k / 247k. Cross-dataset equality is the real integrity
+      # check; these floors just catch gross data loss. (Regular-mock values:
+      # "2000" / "7000".)
+      MIN_NODES: "50000"
+      MIN_EDGES: "180000"
 
     steps:
       - name: Check out current branch
@@ -336,7 +337,7 @@ jobs:
         run: |
           mkdir -p /tmp/large_migration_fixtures
           aws s3 cp "s3://$BUCKET/$PREFIX/war_and_peace.json" "$LARGE_MEMORIES_FILE"
-          aws s3 cp "s3://$BUCKET/$PREFIX/mock_war_and_peace.json" "$LARGE_MOCK_FILE"
+          aws s3 cp "s3://$BUCKET/$PREFIX/mock_war_and_peace_large.json" "$LARGE_MOCK_FILE"
 
       # Scripts and the shared mock-ingestion module do not exist on the
       # legacy tag — save them (the module goes NEXT TO the phase scripts,
