@@ -42,9 +42,10 @@ instead of mutating stores the migration has not touched.
 
 Deliberate boundary: chunk POINT ids are untouched — nothing recomputes them
 from the document id on this code line. The payload sync goes through
-``index_data_points`` (cognify's own write path), so the stored row shape
-matches production writes on every vector backend; text is unchanged, so the
-re-embedded vector is equivalent.
+``index_data_points`` (cognify's own write path), batched the same way
+(``index_data_points_batched``), so the stored row shape matches production
+writes on every vector backend; text is unchanged, so the re-embedded vector
+is equivalent.
 
 Fork rows are rare (same user, identical content, several datasets, before
 the upgrade), so this is cheap: one indexed relational query in the common
@@ -69,6 +70,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.shared.logging_utils import get_logger
 
+from ._vector_rekey import index_data_points_batched
 from .namespace_entity_type_node_ids import _make_node, _migrate_graph
 
 logger = get_logger(__name__)
@@ -257,7 +259,7 @@ async def _sync_chunk_vector_payloads(
 
     if not await vector_engine.has_collection("DocumentChunk_text"):
         return
-    await vector_engine.index_data_points("DocumentChunk", "text", carriers)
+    await index_data_points_batched(vector_engine, "DocumentChunk", "text", carriers)
     logger.info(
         "rekey_fork_document_ids: synced document_id payload on %d chunk vector row(s)",
         len(carriers),
