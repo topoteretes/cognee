@@ -15,7 +15,6 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-from cognee.infrastructure.loaders.core.code_loader import CodeLoader
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
@@ -205,16 +204,6 @@ async def ingest_data(
                 storage_file_metadata = classified_data.get_metadata()
 
             data_point = existing_data_map.get(str(data_id))
-
-            # Recognize supported code files at add time, through the loader
-            # system: the code loader claiming the file IS the recognition.
-            # The routing fact lives in system_metadata (never user-writable
-            # external_metadata) so cognify can send the item down the CODE
-            # route. Explicit system_metadata (e.g. a DLT manifest) always
-            # wins, and so does a preferred_loaders override away from the
-            # code loader.
-            if item_system_metadata is None and loader_engine.loader_name == CodeLoader.loader_name:
-                item_system_metadata = {"source": "code"}
 
             # TODO: Maybe allow getting of external metadata through ingestion loader?
             ext_metadata = get_external_metadata_dict(data_item)

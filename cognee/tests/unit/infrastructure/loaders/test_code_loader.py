@@ -94,7 +94,9 @@ async def test_load_keeps_code_extension_in_storage_name(tmp_path, monkeypatch):
 
     assert stored["name"].startswith("code_") and stored["name"].endswith(".py")
     assert stored["content"] == "def hello():\n    pass\n"
-    assert result == f"/storage/{stored['name']}"
+    # The LoaderResult route stamp IS the recognition ingest_data writes.
+    assert result.file_path == f"/storage/{stored['name']}"
+    assert result.system_metadata == {"source": "code"}
 
 
 @pytest.mark.asyncio
@@ -122,11 +124,12 @@ async def test_s3_code_file_selects_code_loader(monkeypatch):
         code_loader_module, "get_storage_config", lambda: {"data_root_directory": "/storage"}
     )
 
-    storage_path, loader = await ditf.data_item_to_text_file("s3://bucket/src/payments.py")
+    loader_result, loader = await ditf.data_item_to_text_file("s3://bucket/src/payments.py")
 
     assert loader.loader_name == "code_loader"
     assert stored["name"].startswith("code_") and stored["name"].endswith(".py")
-    assert storage_path == f"/storage/{stored['name']}"
+    assert loader_result.file_path == f"/storage/{stored['name']}"
+    assert loader_result.system_metadata == {"source": "code"}
 
 
 def test_staging_never_overwrites_a_file_that_is_its_own_marker(tmp_path):

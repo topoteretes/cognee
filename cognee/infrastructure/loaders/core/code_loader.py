@@ -4,7 +4,7 @@ from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 
 # Source-file extensions of the languages enola extracts (its per-language
 # extractors and tree-sitter grammars; see https://github.com/enola-labs/enola
@@ -55,12 +55,14 @@ SUPPORTED_CODE_EXTENSIONS = frozenset(
 class CodeLoader(LoaderInterface):
     """Loader for source-code files the enola code graph pipeline can extract.
 
-    Selecting this loader IS the add-time recognition of code files:
-    ingest_data tags such Data records with system_metadata {"source": "code"},
-    which routes them down the cognify CODE route. Content is stored verbatim
-    (code is text), but under its real extension — content sniffing reports
-    code as plain text, so the storage file name is the only place the
-    extension survives for enola's language detection.
+    Selecting this loader IS the add-time recognition of code files: it
+    returns a ``LoaderResult`` carrying the ``system_metadata`` route stamp
+    ({"source": "code"}), which ingest_data writes onto the Data record and
+    cognify routes down the CODE route — the same mechanism the DLT CSV
+    loader uses. Content is stored verbatim (code is text), but under its
+    real extension — content sniffing reports code as plain text, so the
+    storage file name is the only place the extension survives for enola's
+    language detection.
 
     Must be matched by file-name extension only: content-based detection can
     never identify a code language, and the engine's content fallback reports
@@ -80,7 +82,9 @@ class CodeLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         return (extension or "").lower() in SUPPORTED_CODE_EXTENSIONS
 
-    async def load(self, file_path: str, encoding: str = "utf-8", **kwargs: Any) -> str:
+    async def load(
+        self, file_path: str, encoding: str = "utf-8", **kwargs: Any
+    ) -> "str | LoaderResult":
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -99,4 +103,5 @@ class CodeLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        return await storage.store(storage_file_name, content)
+        stored_path = await storage.store(storage_file_name, content)
+        return LoaderResult(file_path=stored_path, system_metadata={"source": "code"})
