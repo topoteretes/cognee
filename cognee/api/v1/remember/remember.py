@@ -41,6 +41,14 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+# Strong refs for fire-and-forget background remember tasks. The event loop only
+# keeps a weak reference to a task, and the API router drops the RememberResult
+# (the sole other holder of the task) after serializing it — without anchoring
+# here the gc can collect an in-flight task before it completes, silently
+# aborting the background add+cognify run or session bridge (#4312). Tasks
+# remove themselves on done.
+_BACKGROUND_REMEMBER_TASKS: set[asyncio.Task] = set()
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
@@ -1312,11 +1320,9 @@ async def _remember_inner(
         result.elapsed_seconds = time.monotonic() - result._started_at
 
         # Bridge session data to permanent graph in the background — debounced,
-        # and anchored in the background-task registry so it survives GC and can
-        # be drained at shutdown or via cognee.wait_for_background_tasks().
+        # and anchored in _BACKGROUND_REMEMBER_TASKS so it survives GC (#4312).
         if self_improvement and await _should_auto_improve(user, session_id):
             from cognee.api.v1.improve import improve
-            from cognee.infrastructure.background_tasks import spawn_background_task
 
             async def _session_improve():
                 try:
@@ -1330,9 +1336,9 @@ async def _remember_inner(
                     result.improve_error = str(exc)
                     logger.warning("remember: session improve failed (non-fatal): %s", exc)
 
-            result._task = spawn_background_task(
-                _session_improve(), name=f"improve-session:{session_id}"
-            )
+            result._task = asyncio.create_task(_session_improve())
+            _BACKGROUND_REMEMBER_TASKS.add(result._task)
+            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
 
         return result
 
@@ -1396,11 +1402,9 @@ async def _remember_inner(
                 result._fail(exc)
                 logger.exception("Background remember failed")
 
-        from cognee.infrastructure.background_tasks import spawn_background_task
-
-        result._task = spawn_background_task(
-            _remember_background(), name=f"remember:{dataset_name}"
-        )
+        result._task = asyncio.create_task(_remember_background())
+        _BACKGROUND_REMEMBER_TASKS.add(result._task)
+        result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
         return result
 
     # Blocking mode

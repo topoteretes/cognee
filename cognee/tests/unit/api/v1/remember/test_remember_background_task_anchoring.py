@@ -1,13 +1,13 @@
 """Guards the strong-reference anchor for background remember tasks (#4312).
 
 ``remember`` launches its background work (permanent add+cognify run, or the
-session→graph bridge) and keeps the task only on ``RememberResult._task``.
-The API router serializes the result and drops it, and the event loop keeps
-only a *weak* reference to a task — so unless the task is anchored elsewhere
-it can be garbage-collected mid-flight, silently aborting the run while the
-HTTP call already returned success. Both paths anchor through
-``spawn_background_task``, whose registry holds a strong reference until the
-task completes (and is drainable at shutdown).
+session→graph bridge) with ``asyncio.create_task`` and keeps the task only on
+``RememberResult._task``. The API router serializes the result and drops it,
+and the event loop keeps only a *weak* reference to a task — so unless the
+task is anchored elsewhere it can be garbage-collected mid-flight, silently
+aborting the run while the HTTP call already returned success. The fix
+anchors it in the module-level ``_BACKGROUND_REMEMBER_TASKS`` set and
+discards it on completion (same pattern as #3251).
 """
 
 import asyncio
@@ -17,8 +17,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-
-from cognee.infrastructure.background_tasks import _background_tasks
 
 remember_module = importlib.import_module("cognee.api.v1.remember.remember")
 
@@ -57,7 +55,7 @@ async def test_background_remember_task_is_anchored_until_done(monkeypatch):
 
     assert result.status == "running"
     task = result._task
-    assert task in _background_tasks
+    assert task in remember_module._BACKGROUND_REMEMBER_TASKS
 
     # The router drops the RememberResult after serializing it; the anchor must
     # keep the task alive through a garbage-collection pass.
@@ -65,13 +63,13 @@ async def test_background_remember_task_is_anchored_until_done(monkeypatch):
     gc.collect()
     await asyncio.sleep(0)
     assert not task.done()
-    assert task in _background_tasks
+    assert task in remember_module._BACKGROUND_REMEMBER_TASKS
 
     # Let the task finish; the done-callback must remove it from the anchor set.
     release.set()
     await task
     await asyncio.sleep(0)
-    assert task not in _background_tasks
+    assert task not in remember_module._BACKGROUND_REMEMBER_TASKS
 
 
 @pytest.mark.asyncio
@@ -100,15 +98,15 @@ async def test_session_bridge_task_is_anchored_until_done(monkeypatch):
 
     assert result.status == "session_stored"
     task = result._task
-    assert task in _background_tasks
+    assert task in remember_module._BACKGROUND_REMEMBER_TASKS
 
     del result
     gc.collect()
     await asyncio.sleep(0)
     assert not task.done()
-    assert task in _background_tasks
+    assert task in remember_module._BACKGROUND_REMEMBER_TASKS
 
     release.set()
     await task
     await asyncio.sleep(0)
-    assert task not in _background_tasks
+    assert task not in remember_module._BACKGROUND_REMEMBER_TASKS
