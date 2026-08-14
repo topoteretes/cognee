@@ -109,6 +109,7 @@ class LLMConfig(BaseSettings):
     llm_query_api_version: str | None = None
 
     llm_temperature: float = 0.0
+    llm_seed: int | None = None
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
 
@@ -198,6 +199,29 @@ class LLMConfig(BaseSettings):
                 from cognee.infrastructure.llm.exceptions import ProviderNotDeducibleError
 
                 raise ProviderNotDeducibleError(model)
+
+        return self
+
+    @model_validator(mode="after")
+    def fold_sampling_params_into_llm_args(self) -> "LLMConfig":
+        """
+        Fold ``llm_temperature`` / ``llm_seed`` into ``llm_args``, the dict every
+        adapter merges into each completion call — without this fold the two
+        fields are read by nothing and never reach the provider.
+
+        ``llm_temperature`` is folded only when set explicitly (env var or
+        kwarg): the default model family (gpt-5) rejects any temperature other
+        than the provider default, so an unset field must not silently send
+        ``0.0``. Keys given directly in ``LLM_ARGS`` win over the dedicated
+        fields.
+        """
+        folded: dict[str, Any] = {}
+        if "llm_temperature" in self.model_fields_set:
+            folded["temperature"] = self.llm_temperature
+        if self.llm_seed is not None:
+            folded["seed"] = self.llm_seed
+        if folded:
+            self.llm_args = {**folded, **(self.llm_args or {})}
 
         return self
 
@@ -324,6 +348,7 @@ class LLMConfig(BaseSettings):
             "api_key": self.llm_api_key,
             "api_version": self.llm_api_version,
             "temperature": self.llm_temperature,
+            "seed": self.llm_seed,
             "streaming": self.llm_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
