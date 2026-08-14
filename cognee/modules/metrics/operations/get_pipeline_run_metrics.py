@@ -47,9 +47,13 @@ async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_option
             cache_status = "cache hit"
         else:
             graph_metrics = await graph_engine.get_graph_metrics(include_optional)
+            # Use the current session for the token count; calling fetch_token_count
+            # here would open a second pooled connection while this one is held
+            # (#4197 class).
+            num_tokens = (await session.execute(select(func.sum(Data.token_count)))).scalar()
             metrics = GraphMetrics(
                 id=pipeline_run.pipeline_run_id,
-                num_tokens=await fetch_token_count(db_engine),
+                num_tokens=num_tokens,
                 num_nodes=graph_metrics["num_nodes"],
                 num_edges=graph_metrics["num_edges"],
                 mean_degree=graph_metrics["mean_degree"],

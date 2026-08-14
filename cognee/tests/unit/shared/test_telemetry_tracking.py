@@ -80,6 +80,46 @@ def test_send_telemetry_includes_api_key_tracking_id(monkeypatch):
     assert "provider-prefix-secret" not in str(payload)
 
 
+def test_send_telemetry_includes_origin_from_env(monkeypatch):
+    """telemetry_origin defaults to "sdk" when TELEMETRY_ORIGIN is unset and is
+    honored (e.g. "cloud") when set, so events can be segmented by origin."""
+    payloads: list[dict[str, Any]] = []
+
+    def capture_payload(payload: dict[str, Any]) -> Coroutine[Any, Any, None]:
+        payloads.append(payload)
+
+        async def noop() -> None:
+            return None
+
+        return noop()
+
+    class FakeTask:
+        def add_done_callback(self, callback) -> None:
+            callback(self)
+
+    class CapturingLoop:
+        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> "FakeTask":
+            coroutine.close()
+            return FakeTask()
+
+    monkeypatch.setenv("ENV", "prod")
+    monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
+    monkeypatch.setattr(utils, "get_anonymous_id", lambda: "anonymous-test-id")
+    monkeypatch.setattr(utils, "get_persistent_id", lambda: "persistent-test-id")
+    monkeypatch.setattr(utils, "_send_telemetry_request", capture_payload)
+    monkeypatch.setattr(utils.asyncio, "get_running_loop", lambda: CapturingLoop())
+
+    # Unset -> defaults to "sdk".
+    monkeypatch.delenv("TELEMETRY_ORIGIN", raising=False)
+    send_telemetry("test_event", "user-123")
+    assert payloads[-1]["properties"]["telemetry_origin"] == "sdk"
+
+    # Set -> honored (the managed cloud sets this to "cloud").
+    monkeypatch.setenv("TELEMETRY_ORIGIN", "cloud")
+    send_telemetry("test_event", "user-123")
+    assert payloads[-1]["properties"]["telemetry_origin"] == "cloud"
+
+
 @pytest.mark.asyncio
 async def test_send_telemetry_anchors_task_against_gc(monkeypatch):
     """The fire-and-forget telemetry task must be strongly referenced until

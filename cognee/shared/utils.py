@@ -266,6 +266,10 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
+    # Where this telemetry event originates. Defaults to "sdk"; deployments such
+    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
+    # segmented by origin.
+    telemetry_origin = os.getenv("TELEMETRY_ORIGIN", "sdk")
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -283,6 +287,7 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            "telemetry_origin": telemetry_origin,
             **additional_properties,
         },
     }

@@ -22,17 +22,31 @@ def _resolve_existing_local_path(item: str) -> Path | None:
 
 
 async def resolve_data_directories(
-    data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True
+    data: Union[BinaryIO, List[BinaryIO], str, List[str]],
+    include_subdirectories: bool = True,
+    user=None,
+    dataset_id=None,
 ):
     """
     Resolves directories by replacing them with their contained files.
 
+    A local directory that IS a code project (see
+    ``cognee.tasks.code_graph.code_repo.PROJECT_MARKERS``) is not flattened:
+    it resolves to ONE repo-level manifest DataItem (cognify runs a single
+    enola pass over the whole project) plus its document-like files as
+    individual items; VCS internals, caches, dotfiles, and binaries are
+    skipped. ``user``/``dataset_id`` pin the repo item's stable identity so
+    re-adds update one record — pass them when available (S3 paths and plain
+    directories are unaffected).
+
     Args:
         data: A single file, directory, or binary stream, or a list of such items.
         include_subdirectories: Whether to include files in subdirectories recursively.
+        user: Owner used to pin repo-manifest data ids (optional).
+        dataset_id: Dataset used to pin repo-manifest data ids (optional).
 
     Returns:
-        A list of resolved files and binary streams.
+        A list of resolved files, DataItems, and binary streams.
     """
     # Ensure `data` is a list
     if not isinstance(data, list):
@@ -82,6 +96,22 @@ async def resolve_data_directories(
 
             if local_path and local_path.is_dir():  # If it's a directory
                 if include_subdirectories:
+                    # A code project resolves to one repo item + its documents
+                    # instead of a flat file list. Deferred import: code_repo
+                    # reaches back into this package (dlt_utils).
+                    from cognee.tasks.code_graph.code_repo import (
+                        detect_code_project,
+                        resolve_code_repository,
+                    )
+
+                    if detect_code_project(local_path):
+                        manifest_item, document_paths, _skipped = await resolve_code_repository(
+                            local_path, user=user, dataset_id=dataset_id
+                        )
+                        resolved_data.append(manifest_item)
+                        resolved_data.extend(str(path) for path in document_paths)
+                        continue
+
                     # Recursively add all files in the directory and subdirectories
                     for file_path in local_path.rglob("*"):
                         if file_path.is_file():

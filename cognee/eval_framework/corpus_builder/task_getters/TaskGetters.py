@@ -12,7 +12,11 @@ from cognee.eval_framework.corpus_builder.task_getters.get_default_tasks_by_indi
 
 
 class TaskGetters(Enum):
-    """Enum mapping task getter types to their respective functions."""
+    """Enum mapping task getter types to their respective functions.
+
+    DEFAULT mirrors cognify's standard task list (DLT data routes to its own
+    deterministic pipeline in cognify; eval corpora contain none).
+    """
 
     DEFAULT = ("Default", get_default_tasks)
     CASCADE_GRAPH = ("CascadeGraph", get_cascade_graph_tasks)

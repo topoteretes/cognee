@@ -185,8 +185,8 @@ async def search(
 
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
         code_query: Structured deterministic CODE operation and arguments. Supported
-                    operations are query_facts, explore, traverse, find_path, and
-                    impact_analysis.
+                    operations are query_facts, explore, traverse, find_path,
+                    impact_analysis, and delta (what the last ingestion changed).
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
