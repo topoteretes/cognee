@@ -108,6 +108,7 @@ def _stage_code_file(data_item, staging_root, content: str) -> Path:
 async def extract_code_files_graph(
     data_documents: list,
     ctx: Optional["PipelineContext"] = None,
+    index_vectors: bool = False,
 ) -> list:
     """Cognify CODE-route adapter: run the enola pipeline on stored code files.
 
@@ -115,8 +116,9 @@ async def extract_code_files_graph(
     its original file name (enola detects languages by extension and only
     accepts directories), then the standard code graph tasks run on it:
     extract_code_graph -> add_code_graph_data_points -> add_code_graph_edges.
-    graph_only always: SearchType.CODE uses graph indexes, and the CODE route
-    must stay free of embedding calls like the rest of the enola pipeline.
+    No LLM calls ever; index_vectors additionally embeds code fact names so
+    completion/triplet search can seed from them (SearchType.CODE needs only
+    the graph indexes).
     """
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.tasks.code_graph.extract_code_graph import (
@@ -139,7 +141,9 @@ async def extract_code_files_graph(
             repo_dir = _stage_code_file(data_item, staging_root, content)
 
             data_points = await extract_code_graph(repo_path=repo_dir)
-            state = await add_code_graph_data_points(data_points, ctx=ctx, graph_only=True)
+            state = await add_code_graph_data_points(
+                data_points, ctx=ctx, graph_only=not index_vectors
+            )
             await add_code_graph_edges(state, repo_path=repo_dir, ctx=ctx)
 
         logger.info(
@@ -149,6 +153,11 @@ async def extract_code_files_graph(
     return data_documents
 
 
-def get_code_file_tasks() -> List[Task]:
-    """The cognify CODE-route task list: one adapter task, no LLM stages."""
-    return [Task(extract_code_files_graph)]
+def get_code_file_tasks(index_vectors: bool = False) -> List[Task]:
+    """The cognify CODE-route task list: one adapter task, no LLM stages.
+
+    index_vectors mirrors get_code_graph_tasks: opt-in embedding of code fact
+    names for completion/triplet search. cognify passes the deployment default
+    (CognifyConfig.code_route_index_vectors, env CODE_ROUTE_INDEX_VECTORS).
+    """
+    return [Task(extract_code_files_graph, index_vectors=index_vectors)]

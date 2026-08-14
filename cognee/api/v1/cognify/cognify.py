@@ -309,7 +309,9 @@ async def cognify(
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
-            CognifyRoute.CODE: get_code_file_tasks(),
+            CognifyRoute.CODE: get_code_file_tasks(
+                index_vectors=get_cognify_config().code_route_index_vectors
+            ),
         }
 
         def resolve_cognify_tasks(data_item):

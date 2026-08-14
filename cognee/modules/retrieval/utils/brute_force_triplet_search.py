@@ -280,6 +280,8 @@ async def brute_force_triplet_search(
         )
 
         if collections is None:
+            from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES
+
             collections = [
                 "Entity_name",
                 "TextSummary_text",
@@ -288,6 +290,11 @@ async def brute_force_triplet_search(
                 # DLT rows live in their own collection — chunk search
                 # is documents-only, but graph completion covers row text too.
                 "DltRow_text",
+                # Code facts live in per-type collections, indexed when the
+                # cognify CODE route runs with vector indexing on (the default;
+                # CODE_ROUTE_INDEX_VECTORS=false disables). Same pattern as
+                # DltRow; collections that were never created are skipped.
+                *[f"{node_type}_name" for node_type in CODE_NODE_TYPES],
             ]
 
         if "EdgeType_relationship_name" not in collections:
