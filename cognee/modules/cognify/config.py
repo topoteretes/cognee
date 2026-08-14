@@ -15,11 +15,6 @@ class CognifyConfig(BaseSettings):
     contradiction_detection: bool = False
     contradiction_confidence_threshold: float = 0.5
     contradiction_max_facts: int = 500
-    # Whether the cognify CODE route also vector-indexes code fact names so
-    # completion/triplet search can seed from them. Default ON; set
-    # CODE_ROUTE_INDEX_VECTORS=false for the embedding-free deterministic mode
-    # (code facts then stay reachable through SearchType.CODE only).
-    code_route_index_vectors: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -31,7 +26,6 @@ class CognifyConfig(BaseSettings):
             "contradiction_detection": self.contradiction_detection,
             "contradiction_confidence_threshold": self.contradiction_confidence_threshold,
             "contradiction_max_facts": self.contradiction_max_facts,
-            "code_route_index_vectors": self.code_route_index_vectors,
         }
 
 

@@ -160,15 +160,3 @@ def test_staging_writes_markers_next_to_ordinary_code_files(tmp_path):
 
     assert (repo_dir / "payments.py").read_text() == "def hello():\n    pass\n"
     assert (repo_dir / "requirements.txt").exists()
-
-
-def test_code_route_tasks_bind_the_index_vectors_choice():
-    """cognify passes CognifyConfig.code_route_index_vectors (default ON) into
-    the route's task list; the task must carry it to the enola load stage."""
-    from cognee.tasks.code_graph.code_files import get_code_file_tasks
-
-    (task_on,) = get_code_file_tasks(index_vectors=True)
-    (task_off,) = get_code_file_tasks()
-
-    assert task_on.default_params["kwargs"]["index_vectors"] is True
-    assert task_off.default_params["kwargs"]["index_vectors"] is False

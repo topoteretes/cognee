@@ -126,17 +126,12 @@ async def test_brute_force_triplet_search_default_collections():
     ):
         await brute_force_triplet_search(query="test")
 
-        from cognee.modules.retrieval.code_retriever import CODE_NODE_TYPES
-
         expected_collections = [
             "Entity_name",
             "TextSummary_text",
             "EntityType_name",
             "DocumentChunk_text",
             "DltRow_text",
-            # Code fact collections (cognify CODE route with vector indexing
-            # on, the default) participate in graph completion like DltRow.
-            *[f"{node_type}_name" for node_type in CODE_NODE_TYPES],
             "EdgeType_relationship_name",
         ]
 

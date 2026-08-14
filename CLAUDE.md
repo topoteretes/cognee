@@ -700,7 +700,7 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 ### Code Files (cognify CODE route)
 Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension list lives on `code_loader`) are recognized at add time through the loader system: the code loader claims the file, stores it under its real extension, and `ingest_data` tags the record with `system_metadata = {"source": "code"}`. Cognify then routes such items down the CODE route, which runs the deterministic enola code graph pipeline per file — typed `CodeSymbol`/`CodeModule`/… nodes with `calls`/`imports`/`has_method` edges, **no LLM calls**.
 
-- **Search**: `SearchType.CODE` (deterministic graph operations via `code_query`) always works. By default the route also vector-indexes code fact names so `GRAPH_COMPLETION`/triplet search cover code; `CODE_ROUTE_INDEX_VECTORS=false` disables that (embedding-free mode). Chunk-based search (`CHUNKS`, `RAG_COMPLETION`) never covers code — the route produces no chunks.
+- **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
 - **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
 - **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
 
