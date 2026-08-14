@@ -229,14 +229,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # kuzu-lancedb seeds the REGULAR mock: v1.2.0's ladybug adapter writes
+          # the whole graph as one UNWIND statement (chunking ships in v1.5.0),
+          # which cannot seed the 100k mock on a CI runner — measured >3h even
+          # with SUBPROCESS_CALL_TIMEOUT=0. Switch mock_file to the large mock
+          # once COGNEE_COMPATIBILITY_TEST_VERSION is a release containing
+          # COG-6112 (bf8ac13fb).
           - scenario: kuzu-lancedb
             graph_provider: ladybug
             vector_provider: lancedb
             db_provider: sqlite
+            mock_file: mock_war_and_peace.json
+            min_nodes: "2000"
+            min_edges: "7000"
           - scenario: postgres-pgvector
             graph_provider: postgres
             vector_provider: pgvector
             db_provider: postgres
+            mock_file: mock_war_and_peace_large.json
+            min_nodes: "50000"
+            min_edges: "180000"
 
     # One postgres service for the whole matrix; the kuzu-lancedb scenario
     # simply never connects to it.
@@ -301,15 +313,14 @@ jobs:
       EMBEDDING_API_KEY: mock-key
 
       LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
-      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace_large.json
-      # Scale floors phase 2 asserts per dataset. Counts are pipeline-era
-      # dependent: the v1.2.0 pipeline builds 2,338 nodes / 9,148 edges per
-      # dataset from the regular mock (measured in CI), so the 27x large mock
-      # lands around 63k / 247k. Cross-dataset equality is the real integrity
-      # check; these floors just catch gross data loss. (Regular-mock values:
-      # "2000" / "7000".)
-      MIN_NODES: "50000"
-      MIN_EDGES: "180000"
+      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/${{ matrix.mock_file }}
+      # Scale floors phase 2 asserts per dataset, sized to the scenario's mock.
+      # Counts are pipeline-era dependent: the v1.2.0 pipeline builds 2,338
+      # nodes / 9,148 edges per dataset from the regular mock (measured in CI),
+      # and ~102k / ~207k from the 27x large mock. Cross-dataset equality is
+      # the real integrity check; these floors just catch gross data loss.
+      MIN_NODES: ${{ matrix.min_nodes }}
+      MIN_EDGES: ${{ matrix.min_edges }}
 
     steps:
       - name: Check out current branch
@@ -337,7 +348,7 @@ jobs:
         run: |
           mkdir -p /tmp/large_migration_fixtures
           aws s3 cp "s3://$BUCKET/$PREFIX/war_and_peace.json" "$LARGE_MEMORIES_FILE"
-          aws s3 cp "s3://$BUCKET/$PREFIX/mock_war_and_peace_large.json" "$LARGE_MOCK_FILE"
+          aws s3 cp "s3://$BUCKET/$PREFIX/${{ matrix.mock_file }}" "$LARGE_MOCK_FILE"
 
       # Scripts and the shared mock-ingestion module do not exist on the
       # legacy tag — save them (the module goes NEXT TO the phase scripts,
