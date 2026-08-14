@@ -50,7 +50,12 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
-    data_per_batch: Optional[int] = 2000,
+    # 100, not unbounded: every in-flight item writes its Data row concurrently,
+    # and on the default SQLite backend hundreds of parallel read-then-write
+    # transactions hit WAL snapshot-upgrade conflicts ("database is locked"
+    # immediately, bypassing busy_timeout) — observed live at 448 concurrent
+    # items. 100 keeps ingestion fast while staying under that pressure.
+    data_per_batch: Optional[int] = 100,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
