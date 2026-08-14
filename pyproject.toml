@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.5.0.dev1"
+version = "1.5.0.dev2"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -57,16 +57,20 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    # ladybug 0.18.x publishes only macosx_15_0 wheels and its sdist needs C++20
-    # std::atomic_ref, which Apple Clang's libc++ on macOS <= 14 lacks — so the
-    # source-build fallback hard-fails there. Darwin 24 == macOS 15: older Macs
-    # stay on 0.17.x (storage code 41; the ladybug_migrate worker upgrades the
-    # on-disk format when they later move to 0.18). The '24.' (trailing dot) is
-    # deliberate: it is not a valid PEP 440 version, which forces PEP 508's
-    # string-comparison fallback — packaging evaluates BOTH sides of and/or, and
-    # version-comparing platform_release crashes pip on Linux kernels like
-    # "6.8.0-45-generic" (packaging.version.InvalidVersion).
-    "ladybug>=0.16.0,<=0.18.2 ; sys_platform != 'darwin' or platform_release >= '24.'",
+    # Unconditional on purpose — do NOT add an environment marker (guarded by
+    # cognee/tests/unit/test_ladybug_requirement.py). The old macOS-version
+    # marker (platform_release >= '24.') cannot be expressed correctly across
+    # installer generations: packaging <= 24.x string-compares the invalid
+    # '24.' literal (works) but crashes on valid literals against Linux kernel
+    # strings, while packaging >= 25 (vendored in current pip) dropped the
+    # string-ordering fallback, evaluated the marker False on macOS, and
+    # silently skipped ladybug — pip-installed cognee then failed at import.
+    # Consequence of no marker: macOS <= 14 (ladybug 0.18.x ships only
+    # macosx_15_0 wheels; its sdist needs C++20 std::atomic_ref that old Apple
+    # Clang lacks) now fails ladybug's sdist build at install time instead of
+    # being skipped. Escape hatch for those users: pre-install
+    # `ladybug==0.17.1` (macosx_13_0 wheels, satisfies this range) first.
+    "ladybug>=0.16.0,<=0.18.2",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
