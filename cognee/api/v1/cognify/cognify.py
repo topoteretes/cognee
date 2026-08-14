@@ -25,6 +25,7 @@ from cognee.tasks.documents import (
     extract_chunks_from_documents,
 )
 from cognee.tasks.code_graph.code_files import get_code_file_tasks
+from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
@@ -310,6 +311,7 @@ async def cognify(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
             CognifyRoute.CODE: get_code_file_tasks(),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
         }
 
         def resolve_cognify_tasks(data_item):

@@ -512,7 +512,7 @@ async def _chunks_from_data_items(
                 )
                 row_count = 0
             skipped_dlt_chunks += row_count
-        elif route is CognifyRoute.CODE:
+        elif route in (CognifyRoute.CODE, CognifyRoute.CODE_REPO):
             skipped_code_items += 1
         else:
             llm_items.append(data_item)

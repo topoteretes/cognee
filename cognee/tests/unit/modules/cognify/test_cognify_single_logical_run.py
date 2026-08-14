@@ -46,6 +46,11 @@ def _code_item():
     return SimpleNamespace(system_metadata={"source": "code"}, extension="txt")
 
 
+def _code_repo_item():
+    # One manifest item per detected code project (resolve_data_directories).
+    return SimpleNamespace(system_metadata={"source": "code_repo"}, extension="txt")
+
+
 class TestCognifyRouting:
     def test_manifest_routes_to_dlt_source(self):
         assert cognify_route_for(_manifest_item()) is CognifyRoute.DLT_SOURCE
@@ -63,6 +68,11 @@ class TestCognifyRouting:
         """system_metadata.source == "code" (set at add time for supported
         code file extensions) sends the item down the enola code route."""
         assert cognify_route_for(_code_item()) is CognifyRoute.CODE
+
+    def test_code_repo_manifest_routes_to_code_repo(self):
+        """system_metadata.source == "code_repo" (one item per detected code
+        project) sends the manifest down the repo-level enola route."""
+        assert cognify_route_for(_code_repo_item()) is CognifyRoute.CODE_REPO
 
     def test_code_extension_without_tag_routes_standard(self):
         """The routing fact is the add-time system_metadata tag, not the raw
@@ -92,6 +102,11 @@ class TestCognifyRouting:
         )
         assert cognify_route_for(code_smuggler) is CognifyRoute.STANDARD
 
+        repo_smuggler = SimpleNamespace(
+            external_metadata={"source": "code_repo"}, system_metadata=None, extension="txt"
+        )
+        assert cognify_route_for(repo_smuggler) is CognifyRoute.STANDARD
+
 
 class TestCognifyMakesOneCall:
     """cognify() issues ONE executor call; tasks IS the per-item resolver."""
@@ -111,6 +126,9 @@ class TestCognifyMakesOneCall:
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
             patch.object(
                 cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
+            ),
+            patch.object(
+                cognify_module, "get_code_repo_tasks", new=MagicMock(return_value="CODE_REPO_TASKS")
             ),
         ):
             result = await cognify_module.cognify(
@@ -135,6 +153,7 @@ class TestCognifyMakesOneCall:
         assert callable(resolver)
         assert resolver(_manifest_item()) == "DLT_TASKS"
         assert resolver(_code_item()) == "CODE_TASKS"
+        assert resolver(_code_repo_item()) == "CODE_REPO_TASKS"
         assert resolver(_text_item()) == "STANDARD_TASKS"
 
     @pytest.mark.asyncio
@@ -168,6 +187,9 @@ class TestCognifyMakesOneCall:
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
             patch.object(
                 cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
+            ),
+            patch.object(
+                cognify_module, "get_code_repo_tasks", new=MagicMock(return_value="CODE_REPO_TASKS")
             ),
         ):
             await cognify_module.cognify(

@@ -11,12 +11,14 @@ from cognee.modules.data.processing.document_types import (
     CsvDocument,
     DltSourceDocument,
     CodeFileDocument,
+    CodeRepoDocument,
 )
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.documents.exceptions import WrongDataDocumentInputError
 from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced, is_dlt_source_manifest
 from cognee.tasks.code_graph.code_files import is_code_sourced
+from cognee.tasks.code_graph.code_repo import is_code_repo_sourced
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -125,6 +127,8 @@ def document_class_for(data_item) -> type[Document]:
         )
     if is_code_sourced(data_item):
         return CodeFileDocument
+    if is_code_repo_sourced(data_item):
+        return CodeRepoDocument
     extension = (data_item.extension or "").lower()
     return EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
 
