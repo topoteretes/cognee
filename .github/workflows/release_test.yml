@@ -197,6 +197,15 @@ jobs:
     name: Dev Canary Release
     if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: load-tests
+    # The nested release-pypi job requests id-token/attestations write for
+    # provenance publishing (#3298); a caller must grant at least that or
+    # GitHub rejects the WHOLE workflow at run creation (startup_failure on
+    # every dispatch since that change).
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/dev_canary_release.yml
     secrets: inherit
 
