@@ -84,6 +84,31 @@ SKIP_DIRS = frozenset(
     }
 )
 
+# Audio/video inside a code project is demo/marketing material (logo loops,
+# promo clips), not knowledge — and transcription is fragile there: a silent
+# .mp4 has no audio stream, so whisper's ffmpeg extraction crashes and one
+# decorative asset aborts the whole add (observed on cognee's own repo).
+# Images stay documents: architecture diagrams and screenshots carry content.
+REPO_SKIPPED_MEDIA_EXTENSIONS = frozenset(
+    {
+        "aac",
+        "aiff",
+        "amr",
+        "avi",
+        "flac",
+        "m4a",
+        "m4v",
+        "mid",
+        "mkv",
+        "mov",
+        "mp3",
+        "mp4",
+        "ogg",
+        "wav",
+        "webm",
+    }
+)
+
 
 def is_code_repo_sourced(metadata) -> bool:
     """Check whether system_metadata indicates a repo manifest (source == "code_repo")."""
@@ -146,6 +171,8 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
         extension = file_path.suffix.lstrip(".").lower()
         if extension in SUPPORTED_CODE_EXTENSIONS or file_path.name in PROJECT_MANIFEST_FILES:
             covered.append(file_path)
+        elif extension in REPO_SKIPPED_MEDIA_EXTENSIONS:
+            skipped.append(file_path)
         elif extension in document_extensions:
             documents.append(file_path)
         else:

@@ -28,6 +28,9 @@ def _make_repo(tmp_path):
     (tmp_path / "__pycache__").mkdir()
     (tmp_path / "__pycache__" / "app.cpython-311.pyc").write_bytes(b"\xa7\x00binary")
     (tmp_path / "model.bin").write_bytes(b"\x00\x01\x02binary-blob")
+    # Silent decorative video: no audio stream, whisper transcription would
+    # crash on it — repo partition must skip media outright.
+    (tmp_path / "logo-loop.mp4").write_bytes(b"\x00\x00\x00 ftypisom")
     return tmp_path
 
 
@@ -57,7 +60,12 @@ def test_partition_buckets(tmp_path):
     assert document_names == {"README.md", "notes.txt"}
     # Dotfiles (secrets), caches, and binaries are never ingested — so one
     # .pyc can no longer abort a directory add.
-    assert skipped_names == {".env", "__pycache__/app.cpython-311.pyc", "model.bin"}
+    assert skipped_names == {
+        ".env",
+        "__pycache__/app.cpython-311.pyc",
+        "model.bin",
+        "logo-loop.mp4",
+    }
 
 
 def test_manifest_hash_tracks_code_content(tmp_path):
