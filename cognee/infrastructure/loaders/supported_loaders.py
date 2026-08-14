@@ -1,6 +1,7 @@
 from cognee.infrastructure.loaders import LoaderInterface
 from cognee.infrastructure.loaders.core import (
     AudioLoader,
+    CodeLoader,
     CsvLoader,
     ImageLoader,
     TextLoader,
@@ -12,6 +13,7 @@ from cognee.infrastructure.loaders.external import PyPdfLoader
 supported_loaders: dict[str, type[LoaderInterface]] = {
     PyPdfLoader.loader_name: PyPdfLoader,
     TextLoader.loader_name: TextLoader,
+    CodeLoader.loader_name: CodeLoader,
     ImageLoader.loader_name: ImageLoader,
     AudioLoader.loader_name: AudioLoader,
     VideoLoader.loader_name: VideoLoader,
