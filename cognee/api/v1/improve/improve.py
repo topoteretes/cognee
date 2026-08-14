@@ -290,37 +290,13 @@ async def improve(
                 # freshly accepted lessons are available as anchors, and before
                 # enrichment. Non-fatal — never blocks the rest of improve().
                 if build_truth_subspace:
-                    try:
-                        from cognee.modules.truth_subspace.build import (
-                            build_truth_subspace as _build_truth_subspace,
-                        )
-
-                        result_ts = await _build_truth_subspace(
+                    stage_records.append(
+                        await _build_truth_subspace_stage(
                             dataset=write_dataset_ref,
                             session_ids=session_ids,
                             user=user,
                         )
-                        logger.info("improve: truth subspace built -> %s", result_ts)
-                        skipped_reason = (result_ts or {}).get("skipped")
-                        if skipped_reason:
-                            stage_records.append(
-                                _stage_record(
-                                    "build_truth_subspace", "skipped", reason=skipped_reason
-                                )
-                            )
-                        else:
-                            stage_records.append(
-                                _stage_record(
-                                    "build_truth_subspace",
-                                    "ok",
-                                    count=(result_ts or {}).get("nodes_scored"),
-                                )
-                            )
-                    except Exception as e:
-                        logger.warning("improve: truth subspace build failed (non-fatal): %s", e)
-                        stage_records.append(
-                            _stage_record("build_truth_subspace", "failed", error=str(e))
-                        )
+                    )
 
             # Stage 3: default enrichment (triplet embeddings)
             from cognee.modules.memify import memify
@@ -363,6 +339,32 @@ async def improve(
                 from cognee.infrastructure.locks import release_improve_lock
 
                 await release_improve_lock(acquired_lock_for)
+
+
+async def _build_truth_subspace_stage(
+    dataset: Union[str, UUID],
+    session_ids: List[str],
+    user,
+) -> dict:
+    """Build the truth subspace from distilled session learnings (non-fatal)."""
+    try:
+        from cognee.modules.truth_subspace.build import build_truth_subspace
+
+        result_ts = await build_truth_subspace(
+            dataset=dataset,
+            session_ids=session_ids,
+            user=user,
+        )
+        logger.info("improve: truth subspace built -> %s", result_ts)
+        skipped_reason = (result_ts or {}).get("skipped")
+        if skipped_reason:
+            return _stage_record("build_truth_subspace", "skipped", reason=skipped_reason)
+        return _stage_record(
+            "build_truth_subspace", "ok", count=(result_ts or {}).get("nodes_scored")
+        )
+    except Exception as e:
+        logger.warning("improve: truth subspace build failed (non-fatal): %s", e)
+        return _stage_record("build_truth_subspace", "failed", error=str(e))
 
 
 async def _build_global_context_index(
@@ -450,6 +452,27 @@ async def _bridge_sessions(
     return stages
 
 
+async def _per_session_stage(stage: str, session_ids: List[str], run_one) -> dict:
+    """Run one per-session coroutine across sessions; fail-open per session.
+
+    ``run_one(session_id)`` returns that session's contribution to the stage
+    count. An error on one session never blocks the others or the rest of
+    ``improve()``; the stage is ``failed`` only when every session errored.
+    """
+    count = 0
+    errors = []
+    for session_id in session_ids:
+        try:
+            count += await run_one(session_id)
+        except Exception as e:
+            logger.warning("improve: %s failed for '%s' (non-fatal): %s", stage, session_id, e)
+            errors.append(f"{session_id}: {e}")
+
+    if errors and not count:
+        return _stage_record(stage, "failed", error="; ".join(errors))
+    return _stage_record(stage, "ok", count=count, error="; ".join(errors) or None)
+
+
 async def _extract_agent_context(
     session_ids: List[str],
     user,
@@ -459,8 +482,7 @@ async def _extract_agent_context(
     Delegates to ``agent_context_extraction.extract_pending_agent_context`` per session, which
     shares the same watermark used by mid-session trace extraction. ``min_new_traces=1`` makes
     improve/session-end flush any remaining unprocessed traces before distillation. Gated on
-    automatic session context and best-effort/fail-open: an error on one session never blocks the
-    others or the rest of ``improve()``. Returns the stage record with the number of lessons
+    automatic session context. Returns the stage record with the number of lessons
     created/linked.
     """
     from cognee.infrastructure.session.agent_context_extraction import (
@@ -473,33 +495,17 @@ async def _extract_agent_context(
         return _stage_record("extract_agent_context", "skipped", reason="auto_feedback_disabled")
 
     user_id = str(user.id)
-    touched = 0
-    errors = []
-    for session_id in session_ids:
-        try:
-            ids = await extract_pending_agent_context(
-                session_manager=session_manager,
-                user_id=user_id,
-                session_id=session_id,
-                min_new_traces=1,
-            )
-            touched += len(ids)
-        except Exception as e:
-            logger.warning(
-                "improve: agent-context extraction failed for '%s' (non-fatal): %s",
-                session_id,
-                e,
-            )
-            errors.append(f"{session_id}: {e}")
 
-    if errors and not touched:
-        return _stage_record("extract_agent_context", "failed", error="; ".join(errors))
-    return _stage_record(
-        "extract_agent_context",
-        "ok",
-        count=touched,
-        error="; ".join(errors) or None,
-    )
+    async def run_one(session_id: str) -> int:
+        ids = await extract_pending_agent_context(
+            session_manager=session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            min_new_traces=1,
+        )
+        return len(ids)
+
+    return await _per_session_stage("extract_agent_context", session_ids, run_one)
 
 
 async def _distill_sessions(
@@ -512,46 +518,26 @@ async def _distill_sessions(
     Delegates to ``session_distillation.distill_session`` per session: it loads
     the session's gated active-guidance entries, curates them into proposed
     lessons, writes/rejects each with entity anchoring, and add+cognifies the
-    accepted lessons into ``dataset`` (tagged ``session_learnings``).
-
-    Best-effort and fail-open: a session with no gated guidance simply yields no
-    lessons (status ``no_gated_entries``), and an error on one session never
-    blocks the others or the rest of ``improve()``. Returns the stage record with
-    the total number of lesson documents written across all sessions.
+    accepted lessons into ``dataset`` (tagged ``session_learnings``). A session
+    with no gated guidance simply yields no lessons (status ``no_gated_entries``).
+    Returns the stage record with the total number of lesson documents written.
 
     Note: ``distill_session`` runs its own ``add``/``cognify`` (it does not call
     ``improve``), so there is no recursion back into this function.
     """
     from cognee.modules.session_distillation import distill_session
 
-    distilled = 0
-    errors = []
-    for session_id in session_ids:
-        try:
-            result = await distill_session(session_id, dataset=dataset, user=user)
-            distilled += len(result.documents)
-            logger.info(
-                "improve: distilled session '%s' -> status=%s documents=%d",
-                session_id,
-                result.status,
-                len(result.documents),
-            )
-        except Exception as e:
-            logger.warning(
-                "improve: session distillation failed for '%s' (non-fatal): %s",
-                session_id,
-                e,
-            )
-            errors.append(f"{session_id}: {e}")
+    async def run_one(session_id: str) -> int:
+        result = await distill_session(session_id, dataset=dataset, user=user)
+        logger.info(
+            "improve: distilled session '%s' -> status=%s documents=%d",
+            session_id,
+            result.status,
+            len(result.documents),
+        )
+        return len(result.documents)
 
-    if errors and not distilled:
-        return _stage_record("distill_sessions", "failed", error="; ".join(errors))
-    return _stage_record(
-        "distill_sessions",
-        "ok",
-        count=distilled,
-        error="; ".join(errors) or None,
-    )
+    return await _per_session_stage("distill_sessions", session_ids, run_one)
 
 
 async def _persist_session_traces(

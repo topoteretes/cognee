@@ -420,22 +420,21 @@ async def _should_auto_improve(user, session_id: str) -> bool:
     from datetime import datetime, timezone
 
     from cognee.infrastructure.session.get_session_manager import get_session_manager
+    from cognee.infrastructure.session.session_persist_watermark import (
+        load_state_row,
+        save_state_row,
+    )
 
     session_manager = get_session_manager()
     if not session_manager.is_available:
         return True
     user_id = str(user.id)
     try:
-        rows = await session_manager.get_session_context_entries(
-            user_id=user_id, session_id=session_id
-        )
-        state = next(
-            (
-                row
-                for row in rows or []
-                if isinstance(row, dict) and row.get("id") == AUTO_IMPROVE_STATE_ID
-            ),
-            None,
+        state = await load_state_row(
+            session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            state_id=AUTO_IMPROVE_STATE_ID,
         )
         now = datetime.now(timezone.utc)
         entries_since_improve = 1
@@ -466,16 +465,9 @@ async def _should_auto_improve(user, session_id: str) -> bool:
             if due
             else (state or {}).get("last_improve_at") or now.isoformat(),
         }
-        updated = await session_manager.update_session_context_entry(
-            user_id=user_id,
-            session_id=session_id,
-            entry_id=AUTO_IMPROVE_STATE_ID,
-            merge=payload,
+        await save_state_row(
+            session_manager, user_id=user_id, session_id=session_id, payload=payload
         )
-        if not updated:
-            await session_manager.create_session_context_entry(
-                user_id=user_id, session_id=session_id, entry_dump=payload
-            )
         return due
     except Exception as error:
         logger.warning("remember: auto-improve debounce failed open: %s", error)

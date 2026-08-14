@@ -25,6 +25,10 @@ from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import coerce_active_context_entries
 from cognee.infrastructure.session.session_context_models import SessionContextEntry
+from cognee.infrastructure.session.session_persist_watermark import (
+    load_state_row,
+    save_state_row,
+)
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.truth_subspace.constants import truth_session_node_set
@@ -70,40 +74,31 @@ def _distillation_state_id(dataset_id: str) -> str:
 
 async def _load_processed_entry_ids(scope: "SessionDistillationScope") -> set:
     """Gated entry ids a previous distillation run already considered. Missing -> empty."""
-    session_manager = get_session_manager()
-    raw_entries = await session_manager.get_session_context_entries(
-        user_id=scope.user_id, session_id=scope.session_id
+    # No kind fallback: the state id is per dataset while the kind is shared,
+    # so a kind match could return another dataset's watermark.
+    row = await load_state_row(
+        get_session_manager(),
+        user_id=scope.user_id,
+        session_id=scope.session_id,
+        state_id=_distillation_state_id(scope.dataset_id),
     )
-    state_id = _distillation_state_id(scope.dataset_id)
-    for raw in raw_entries or []:
-        if isinstance(raw, dict) and raw.get("id") == state_id:
-            values = raw.get("processed_entry_ids")
-            return {value for value in (values or []) if isinstance(value, str)}
-    return set()
+    values = (row or {}).get("processed_entry_ids")
+    return {value for value in (values or []) if isinstance(value, str)}
 
 
 async def _save_processed_entry_ids(scope: "SessionDistillationScope", entry_ids: set) -> None:
     """Persist the watermark; advances only after a run completes without raising."""
-    session_manager = get_session_manager()
-    state_id = _distillation_state_id(scope.dataset_id)
-    payload = {
-        "id": state_id,
-        "kind": DISTILLATION_STATE_KIND,
-        "processed_entry_ids": sorted(entry_ids),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    updated = await session_manager.update_session_context_entry(
+    await save_state_row(
+        get_session_manager(),
         user_id=scope.user_id,
         session_id=scope.session_id,
-        entry_id=state_id,
-        merge=payload,
+        payload={
+            "id": _distillation_state_id(scope.dataset_id),
+            "kind": DISTILLATION_STATE_KIND,
+            "processed_entry_ids": sorted(entry_ids),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
     )
-    if not updated:
-        await session_manager.create_session_context_entry(
-            user_id=scope.user_id,
-            session_id=scope.session_id,
-            entry_dump=payload,
-        )
 
 
 @dataclass(frozen=True, slots=True)
