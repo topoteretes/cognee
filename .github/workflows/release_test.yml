@@ -355,6 +355,12 @@ jobs:
         run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
 
       - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
+        env:
+          # The LEGACY version's ladybug bulk writes pre-date the COG-6112
+          # chunking fix: at 100k scale its single-statement kuzu writes cannot
+          # fit the 300s worker deadline, so seeding disables it. Phase 2 keeps
+          # the default deadline — fitting it IS the acceptance criterion.
+          SUBPROCESS_CALL_TIMEOUT: "0"
         run: uv run python /tmp/release_migration_scripts/phase1_seed_large.py
 
       # ── Phase 2: migrate on the current branch and verify ────────────────

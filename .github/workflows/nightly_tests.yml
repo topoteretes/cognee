@@ -84,7 +84,7 @@ jobs:
   # the production-scale stress benchmark. Mock-only — the corpus IS a replay
   # artifact; a "real LLM" variant would re-extract 27 identical copies.
   perf-wap-large-mock:
-    name: Performance — War and Peace Large 100k (mock LLM)
+    name: Performance — Medium graph — Artificial 100k nodes/edges (mock LLM)
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -260,12 +260,12 @@ jobs:
             📊|File Based — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_small_mock }}
             📚|File Based — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_llm }}
             📚|File Based — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_mock }}
-            📚|File Based — War and Peace Large 100k — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_large_mock }}
+            📚|File Based — Medium graph - Artificial 100k nodes/edges — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_large_mock }}
             📊|Full Postgres — 50 Small Documents — Real LLM|${{ needs.perf-small-llm.result }}|${{ needs.perf-small-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_llm }}
             📊|Full Postgres — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_mock }}
             📚|Full Postgres — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_llm }}
             📚|Full Postgres — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_mock }}
-            📚|Full Postgres — War and Peace Large 100k — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_large_mock }}
+            📚|Full Postgres — Medium graph - Artificial 100k nodes/edges — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_large_mock }}
             📊|Cognee Cloud — 50 Small Documents|${{ needs.perf-small-cloud.result }}|${{ needs.perf-small-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_small }}
             📚|Cognee Cloud — War and Peace|${{ needs.perf-wap-cloud.result }}|${{ needs.perf-wap-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_wap }}
             📊|Rust SDK (file_based) — 50 Small Documents — Real LLM|${{ needs.perf-rust-llm.result }}|${{ needs.perf-rust-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_llm }}
