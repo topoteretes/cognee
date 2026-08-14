@@ -259,19 +259,28 @@ async def test_shared_handlers_create_and_delete_lifecycle():
     the shared handlers anchor to the relational configuration.
     """
     from cognee.infrastructure.databases.relational import get_relational_config
+    from cognee.infrastructure.databases.vector import get_vectordb_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
 
     if get_relational_config().db_provider != "postgres":
         pytest.skip("shared handler lifecycle requires DB_PROVIDER=postgres")
+    if get_vectordb_config().vector_db_provider != "pgvector":
+        pytest.skip("shared handler lifecycle requires VECTOR_DB_PROVIDER=pgvector")
+    if get_graph_config().graph_database_provider != "postgres":
+        pytest.skip("shared handler lifecycle requires GRAPH_DATABASE_PROVIDER=postgres")
     if not await _postgres_reachable():
         pytest.skip("Postgres not reachable")
 
-    from cognee.infrastructure.databases.vector.pgvector.PGVectorSharedDatasetDatabaseHandler import (
-        PGVectorSharedDatasetDatabaseHandler as VH,
-    )
-    from cognee.infrastructure.databases.graph.postgres.PostgresGraphSharedDatasetDatabaseHandler import (
-        PostgresGraphSharedDatasetDatabaseHandler as GH,
+    # Resolve the handlers through the registry (as production code does):
+    # importing a handler module directly here would re-enter its own
+    # in-progress import via the registry and raise a circular ImportError.
+    from cognee.infrastructure.databases.dataset_database_handler import (
+        supported_dataset_database_handlers,
     )
     from cognee.modules.users.models import DatasetDatabase
+
+    VH = supported_dataset_database_handlers["pgvector_shared"]["handler_instance"]
+    GH = supported_dataset_database_handlers["postgres_graph_shared"]["handler_instance"]
 
     dataset_id = uuid.uuid4()
     schema = dataset_schema_name(dataset_id)
