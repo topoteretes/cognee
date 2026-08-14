@@ -187,13 +187,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
                     # Ensure each attempt does not hang indefinitely. The
                     # deadline is TOTAL per attempt and starts before any
-                    # network I/O — under high cognify concurrency a request
-                    # can spend most of it queued in the local HTTP connection
-                    # pool, so 30s starved queued-but-healthy requests
-                    # (observed live on a 421-item run: 3,336 timeout retries,
-                    # then failure). 120s absorbs local queueing while still
-                    # catching a genuinely unreachable endpoint; the
-                    # OpenAI-compatible engine uses 300s for the same guard.
+                    # network I/O, so under large loads a request can spend
+                    # most of it queued client-side; 300s absorbs that while
+                    # still catching a genuinely hung request (matches the
+                    # OpenAI-compatible engine's deadline).
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
                         timeout=300.0,
