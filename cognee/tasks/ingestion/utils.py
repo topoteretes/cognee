@@ -38,11 +38,16 @@ async def _read_stream_bytes(stream: Any) -> bytes:
 
 async def materialize_stream_for_background(data_item: Any, index: int = 0) -> Any:
     if isinstance(data_item, DataItem):
+        # Copy EVERY DataItem field: dropping one here silently breaks the
+        # background path only (system_metadata carries the DLT routing stamp,
+        # content_hash pierces the incremental skip on changed stable-id items).
         return DataItem(
             data=await materialize_stream_for_background(data_item.data, index=index),
             label=data_item.label,
             external_metadata=data_item.external_metadata,
+            system_metadata=data_item.system_metadata,
             data_id=data_item.data_id,
+            content_hash=data_item.content_hash,
         )
 
     if isinstance(data_item, list):
