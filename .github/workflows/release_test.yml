@@ -201,17 +201,53 @@ jobs:
     secrets: inherit
 
   # ══ Large-scale migration compatibility (COG-6112) ═══════════════════════
-  # Codifies the 1.5.0 release validation: seed a production-shaped 2×~100k-node
+  # Codifies the 1.5.0 release validation: seed a production-shaped 2-dataset
   # system on the pinned LEGACY cognee (mock-replay ingestion — zero AI calls),
   # then run the current branch's full migration chain over it and verify the
   # dataset-scoping fork split + rekey_fork_document_ids complete with data
   # intact. Fixtures come from S3 (the perf-test war-and-peace corpus and its
-  # 27×-multiplied mock).
+  # mock; swap in mock_war_and_peace_large.json + 80000/200000 floors for the
+  # 27x large-scale variant once it is uploaded).
+  #
+  # Matrix covers the core adapter pairs (Neo4j deliberately excluded for now).
   large-migration-compat:
-    name: Large-scale migration compatibility (v1.2.0 → current)
+    name: "Large migration compat (${{ matrix.scenario }}, v1.2.0 → current)"
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: kuzu-lancedb
+            graph_provider: ladybug
+            vector_provider: lancedb
+            db_provider: sqlite
+          - scenario: postgres-pgvector
+            graph_provider: postgres
+            vector_provider: pgvector
+            db_provider: postgres
+
+    # One postgres service for the whole matrix; the kuzu-lancedb scenario
+    # simply never connects to it.
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
@@ -219,6 +255,24 @@ jobs:
       TELEMETRY_DISABLED: "1"
       RUNTIME__DLTHUB_TELEMETRY: "false"
       COGNEE_SKIP_CONNECTION_TEST: "true"
+
+      # Backend selection per matrix scenario. The DB_*/VECTOR_DB_* connection
+      # values are ignored by the sqlite/lancedb providers, and ladybug ignores
+      # GRAPH_DATABASE_URL — setting them unconditionally keeps the env static.
+      GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_provider }}
+      GRAPH_DATABASE_URL: postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+      VECTOR_DB_PROVIDER: ${{ matrix.vector_provider }}
+      VECTOR_DB_HOST: localhost
+      VECTOR_DB_PORT: 5432
+      VECTOR_DB_USERNAME: cognee
+      VECTOR_DB_PASSWORD: cognee
+      DB_PROVIDER: ${{ matrix.db_provider }}
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: cognee
+      DB_PASSWORD: cognee
+      DB_NAME: cognee_db
+
       # All AI calls are mock-replayed; keys are placeholders. The embedding
       # MODEL still matters: its tokenizer decides chunk boundaries, which must
       # match the mock capture (cl100k_base).
@@ -230,11 +284,11 @@ jobs:
       EMBEDDING_MODEL: openai/text-embedding-3-small
       EMBEDDING_DIMENSIONS: 1536
       EMBEDDING_API_KEY: mock-key
+
       LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
       LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace.json
-      # Scale floors phase 2 asserts per dataset. The regular mock seeds ~3.8k
-      # nodes / ~3.9k edges; when the 27x mock (mock_war_and_peace_large.json)
-      # lands on S3, swap the key below and raise these to 80000 / 200000.
+      # Scale floors phase 2 asserts per dataset (regular mock: ~3.8k nodes /
+      # ~3.9k edges per dataset).
       MIN_NODES: "3000"
       MIN_EDGES: "3000"
 
@@ -254,7 +308,7 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Download large mock fixtures from S3
+      - name: Download mock fixtures from S3
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
@@ -274,12 +328,12 @@ jobs:
           cp -r cognee/tests/release_migration /tmp/release_migration_scripts
           cp -r cognee/tests/utils/mock_ingestion /tmp/release_migration_scripts/mock_ingestion
 
-      # ── Phase 1: seed 2×~100k-node datasets on the legacy version ────────
+      # ── Phase 1: seed 2 datasets on the legacy version ────────────────────
       - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
         run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
 
       - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
-        run: uv sync --extra api --extra docs --extra dev --extra dlt
+        run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
 
       - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         run: uv run python /tmp/release_migration_scripts/phase1_seed_large.py
@@ -289,7 +343,7 @@ jobs:
         run: git checkout ${{ github.sha }}
 
       - name: Install current branch dependencies
-        run: uv sync --extra api --extra docs --extra dev --extra dlt
+        run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
 
       - name: "Phase 2 — run migrations, verify fork re-key and data integrity (current branch)"
         run: uv run python cognee/tests/release_migration/phase2_verify_large.py
