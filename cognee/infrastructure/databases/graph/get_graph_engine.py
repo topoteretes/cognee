@@ -378,6 +378,19 @@ def _create_graph_engine(
         if not graph_database_url:
             raise EnvironmentError("Missing required Neo4j URL.")
 
+        if graph_dataset_database_handler == "neo4j_community":
+            # Per-dataset Neo4j Community containers: the adapter's close()
+            # (triggered by cache eviction) also stops the dataset's container.
+            from .neo4j_driver.neo4j_community_adapter import Neo4jCommunityAdapter
+
+            return Neo4jCommunityAdapter(
+                graph_database_url=graph_database_url,
+                graph_database_username=graph_database_username or None,
+                graph_database_password=graph_database_password or None,
+                graph_database_name=graph_database_name or None,
+                graph_database_allow_anonymous=graph_database_allow_anonymous,
+            )
+
         from .neo4j_driver.adapter import Neo4jAdapter
 
         return Neo4jAdapter(
@@ -576,15 +589,20 @@ def _create_graph_engine(
 
 # Public cache-management API for graph engines: ``graph_engine_cache.evict``
 # / ``.touch`` / ``.is_cached`` / ``.evict_for_database`` /
-# ``.aevict_for_database``.
+# ``.aevict_for_database`` / ``.evict_for_url`` / ``.aevict_for_url``.
 #
 # Dependency injection: EngineCacheOps holds the shared procedure (which cache
-# method implements which operation), and this call supplies the three
+# method implements which operation), and this call supplies the
 # graph-specific dependencies — which cache to operate on (the decorated
 # factory), how a config dict becomes that cache's exact key (the key
-# builder), and which key field holds the per-dataset database name (for the
-# by-database evictions). The vector module builds its own instance from the
-# same class, so the procedure exists once and cannot drift between engines.
+# builder), which key field holds the per-dataset database name (for the
+# by-database evictions), and which key field holds the connection url (for
+# the by-url evictions the ``neo4j_community`` handler needs). The vector
+# module builds its own instance from the same class, so the procedure exists
+# once and cannot drift between engines.
 graph_engine_cache = EngineCacheOps(
-    _create_graph_engine, _graph_engine_key_args, "graph_database_name"
+    _create_graph_engine,
+    _graph_engine_key_args,
+    "graph_database_name",
+    database_url_field="graph_database_url",
 )

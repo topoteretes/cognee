@@ -4,6 +4,9 @@ from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jAuraDevDatasetDatab
 from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jDatasetDatabaseHandler import (
     Neo4jDatasetDatabaseHandler,
 )
+from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jCommunityDatasetDatabaseHandler import (
+    Neo4jCommunityDatasetDatabaseHandler,
+)
 from cognee.infrastructure.databases.vector.lancedb.LanceDBDatasetDatabaseHandler import (
     LanceDBDatasetDatabaseHandler,
 )
@@ -38,6 +41,10 @@ supported_dataset_database_handlers = {
     },
     "neo4j": {
         "handler_instance": Neo4jDatasetDatabaseHandler,
+        "handler_provider": "neo4j",
+    },
+    "neo4j_community": {
+        "handler_instance": Neo4jCommunityDatasetDatabaseHandler,
         "handler_provider": "neo4j",
     },
     "lancedb": {"handler_instance": LanceDBDatasetDatabaseHandler, "handler_provider": "lancedb"},
