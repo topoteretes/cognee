@@ -28,6 +28,7 @@ from cognee.tasks.code_graph.code_files import get_code_file_tasks
 from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph import detect_contradictions
+from cognee.tasks.provenance import record_provenance
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -361,6 +362,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     check_contradictions = cognify_config.contradiction_detection
+    track_provenance = cognify_config.provenance_tracking
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -391,6 +393,16 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             add_data_points,
             embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
+        ),
+        # COGNIFY (opt-in): append an audit-grade provenance ledger entry for every
+        # document/chunk/entity/relationship this ingestion produced. Runs right
+        # after add_data_points (node ids persisted and stable) and before the
+        # contradiction spread so the ledger never depends on contradiction edges.
+        # Default OFF.
+        *(
+            [Task(record_provenance, task_config={"batch_size": chunks_per_batch})]
+            if track_provenance
+            else []
         ),
         # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
         # already in the graph. Runs last so both new and existing facts are
