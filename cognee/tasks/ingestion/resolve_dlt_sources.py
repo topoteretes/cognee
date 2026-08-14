@@ -41,7 +41,6 @@ logger = get_logger("resolve_dlt_sources")
 
 # Cells longer than this never become ColumnValue nodes — long values are
 # free text, not categorical data, and would produce useless one-off nodes.
-MAX_COLUMN_VALUE_LENGTH = 256
 
 
 async def resolve_dlt_sources(
@@ -507,7 +506,9 @@ def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> d
 
     ``selection`` maps table name to a column list; "*" is a wildcard for
     either side. Primary-key and foreign-key columns are excluded (they are
-    row identity and edges already), as are null, empty, and overlong values.
+    row identity and edges already), as are null and empty values. A positive
+    ``dlt_max_column_value_length`` (default 0 = unlimited) additionally
+    skips values longer than the bound.
     """
     if not selection:
         return {}
@@ -515,6 +516,7 @@ def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> d
     if not columns:
         return {}
     take_all = "*" in columns
+    max_value_length = get_ingestion_config().dlt_max_column_value_length
 
     fk_columns = {fk.get("column", "") for fk in dlt_row.foreign_keys}
     picked = {}
@@ -526,7 +528,9 @@ def _selected_column_values(dlt_row: DltRowData, selection: Optional[dict]) -> d
         if value is None:
             continue
         text = str(value).strip()
-        if not text or len(text) > MAX_COLUMN_VALUE_LENGTH:
+        if not text:
+            continue
+        if max_value_length and len(text) > max_value_length:
             continue
         picked[column] = text
     return picked
