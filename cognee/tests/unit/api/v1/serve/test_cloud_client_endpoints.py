@@ -187,3 +187,92 @@ def test_users_me_resolves_principal():
     assert session.calls[0]["method"] == "GET"
     assert session.calls[0]["url"].endswith("/api/v1/users/me")
     assert result["email"] == "a@b.c"
+
+
+# ----- 401 → refresh_api_key retry -----
+
+
+class ClosableFakeSession(FakeSession):
+    closed = False
+
+    async def close(self):
+        self.closed = True
+
+
+def test_rejected_cached_key_is_replaced_once_and_request_retried():
+    client, _ = make_client()
+    denied = ClosableFakeSession(FakeResponse(status=401, text_body="invalid key"))
+    accepted = ClosableFakeSession(FakeResponse(json_body=[{"id": "d1"}]))
+    sessions = iter([denied, accepted])
+
+    async def next_session():
+        # Mirror the real _get_session: hand out and track the session so
+        # close() tears down the one currently in use.
+        client._session = next(sessions)
+        return client._session
+
+    client._session = None
+    client._get_session = next_session
+
+    refreshes = []
+
+    async def refresh():
+        refreshes.append(1)
+        return "ck_fresh"
+
+    client.refresh_api_key = refresh
+
+    result = asyncio.run(client.datasets_list())
+    assert result == [{"id": "d1"}]
+    assert refreshes == [1]
+    assert client.api_key == "ck_fresh"
+    # The old session was torn down so the retry carries the new key header.
+    assert denied.closed
+    assert accepted.calls[0]["url"].endswith("/api/v1/datasets")
+
+
+def test_second_401_after_refresh_raises():
+    client, _ = make_client()
+    denied = ClosableFakeSession(FakeResponse(status=401, text_body="invalid key"))
+    still_denied = ClosableFakeSession(FakeResponse(status=401, text_body="invalid key"))
+    sessions = iter([denied, still_denied])
+
+    async def next_session():
+        client._session = next(sessions)
+        return client._session
+
+    client._session = None
+    client._get_session = next_session
+
+    async def refresh():
+        return "ck_fresh"
+
+    client.refresh_api_key = refresh
+
+    from cognee.api.v1.serve.exceptions import CogneeAuthError
+
+    with pytest.raises(CogneeAuthError):
+        asyncio.run(client.datasets_list())
+
+
+def test_multipart_requests_are_not_retried_on_401():
+    from unittest.mock import AsyncMock
+
+    client, _ = make_client(FakeResponse(status=401, text_body="invalid key"))
+    refresh = AsyncMock(return_value="ck_fresh")
+    client.refresh_api_key = refresh
+
+    from cognee.api.v1.serve.exceptions import CogneeAuthError
+
+    with pytest.raises(CogneeAuthError):
+        asyncio.run(client.add("content", "ds"))
+    refresh.assert_not_awaited()
+
+
+def test_no_retry_without_refresh_hook():
+    client, _ = make_client(FakeResponse(status=401, text_body="invalid key"))
+
+    from cognee.api.v1.serve.exceptions import CogneeAuthError
+
+    with pytest.raises(CogneeAuthError):
+        asyncio.run(client.datasets_list())

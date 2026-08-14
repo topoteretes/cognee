@@ -337,3 +337,80 @@ def test_saved_key_still_reused_for_remote_host(isolated_credentials, quiet_clie
     )
     client = asyncio.run(_serve_direct("https://tenant-abc.cloud.cognee.ai"))
     assert client.api_key == "ck_cloud"
+
+
+# ----- env alias and refresh-hook wiring -----
+
+
+def test_serve_accepts_cognee_base_url_alias(monkeypatch):
+    import importlib
+    from unittest.mock import AsyncMock
+
+    serve_module = importlib.import_module("cognee.api.v1.serve.serve")
+
+    monkeypatch.delenv("COGNEE_SERVICE_URL", raising=False)
+    monkeypatch.setenv("COGNEE_BASE_URL", "http://localhost:8011")
+    monkeypatch.delenv("COGNEE_API_KEY", raising=False)
+    direct = AsyncMock(return_value="client")
+    monkeypatch.setattr(serve_module, "_serve_direct", direct)
+
+    result = asyncio.run(serve_module.serve())
+    assert result == "client"
+    assert direct.await_args.args[0] == "http://localhost:8011"
+
+
+def test_service_url_env_wins_over_base_url_alias(monkeypatch):
+    import importlib
+    from unittest.mock import AsyncMock
+
+    serve_module = importlib.import_module("cognee.api.v1.serve.serve")
+
+    monkeypatch.setenv("COGNEE_SERVICE_URL", "http://localhost:8000")
+    monkeypatch.setenv("COGNEE_BASE_URL", "http://localhost:8011")
+    direct = AsyncMock(return_value="client")
+    monkeypatch.setattr(serve_module, "_serve_direct", direct)
+
+    asyncio.run(serve_module.serve())
+    assert direct.await_args.args[0] == "http://localhost:8000"
+
+
+def test_cached_key_gets_refresh_hook_on_private_host(
+    isolated_credentials, quiet_client, monkeypatch
+):
+    from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    save_credentials(
+        CloudCredentials(access_token="", service_url="http://localhost:8011", api_key="ck_saved")
+    )
+    client = asyncio.run(_serve_direct("http://localhost:8011"))
+    assert client.refresh_api_key is not None
+
+
+def test_cached_key_gets_no_refresh_hook_on_remote_host(
+    isolated_credentials, quiet_client, monkeypatch
+):
+    from cognee.api.v1.serve.credentials import CloudCredentials, save_credentials
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.delenv("COGNEE_AUTH_BOOTSTRAP", raising=False)
+    save_credentials(
+        CloudCredentials(
+            access_token="",
+            service_url="https://tenant-abc.cloud.cognee.ai",
+            api_key="ck_cloud",
+        )
+    )
+    client = asyncio.run(_serve_direct("https://tenant-abc.cloud.cognee.ai"))
+    assert client.refresh_api_key is None
+
+
+def test_freshly_minted_key_gets_no_refresh_hook(isolated_credentials, quiet_client, monkeypatch):
+    from cognee.api.v1.serve import local_auth as local_auth_module
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.setattr(
+        local_auth_module, "login_and_mint_api_key", AsyncMock(return_value="ck_minted")
+    )
+    client = asyncio.run(_serve_direct("http://localhost:8011"))
+    assert client.refresh_api_key is None

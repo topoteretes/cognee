@@ -47,7 +47,9 @@ async def serve(
 
     Args:
         url: Direct URL of a Cognee instance. Skips Auth0 and tenant
-            discovery. Can also be set via ``COGNEE_SERVICE_URL`` env var.
+            discovery. Can also be set via the ``COGNEE_SERVICE_URL`` env
+            var (or ``COGNEE_BASE_URL``, the name the agent integrations
+            use).
         api_key: API key for authentication. Used with ``url`` for direct
             connections, or via ``COGNEE_API_KEY`` env var.
         management_url: Override the Management API URL (cloud mode only).
@@ -65,8 +67,10 @@ async def serve(
     Returns:
         CloudClient connected to the instance.
     """
-    # Resolve URL from arg or env
-    service_url = url or os.getenv("COGNEE_SERVICE_URL")
+    # Resolve URL from arg or env. COGNEE_SERVICE_URL is serve()'s own
+    # variable; COGNEE_BASE_URL is what the agent integrations already
+    # export, accepted as an alias so one .env serves both.
+    service_url = url or os.getenv("COGNEE_SERVICE_URL") or os.getenv("COGNEE_BASE_URL")
     resolved_api_key = api_key or os.getenv("COGNEE_API_KEY", "")
 
     if service_url:
@@ -106,11 +110,13 @@ async def _serve_direct(
 
     service_url = service_url.rstrip("/")
 
+    key_from_cache = False
     if not api_key:
-        saved = load_credentials()
-        if saved and saved.service_url == service_url and saved.api_key:
+        saved = load_credentials(service_url)
+        if saved and saved.api_key:
             logger.info("Reusing saved API key for %s", service_url)
             api_key = saved.api_key
+            key_from_cache = True
         elif not bootstrap_allowed(service_url, bootstrap_auth):
             logger.warning(
                 "No API key for %s and auth bootstrap is disabled for non-private hosts; "
@@ -132,6 +138,26 @@ async def _serve_direct(
                 )
 
     client = CloudClient(service_url, api_key)
+
+    # A key that was valid when saved can be revoked server-side. When the
+    # bootstrap gate allows minting for this host, let the client replace a
+    # rejected cached key once instead of failing every call with 401.
+    if key_from_cache and bootstrap_allowed(service_url, bootstrap_auth):
+
+        async def _refresh_api_key() -> str:
+            new_key = await login_and_mint_api_key(service_url)
+            save_credentials(
+                CloudCredentials(
+                    access_token="",
+                    service_url=service_url,
+                    api_key=new_key,
+                    email="local",
+                )
+            )
+            logger.info("Replaced rejected API key for %s", service_url)
+            return new_key
+
+        client.refresh_api_key = _refresh_api_key
 
     health_ok = await client._health_check()
     if not health_ok:
@@ -185,8 +211,9 @@ async def _serve_cloud(
     )
     mgmt_url = mgmt_url.rstrip("/")
 
-    # Step 1: Check for saved credentials
-    creds = load_credentials()
+    # Step 1: Check for saved cloud credentials (profiles saved by direct
+    # mode carry no Auth0 session and must not shadow the cloud one).
+    creds = load_credentials(cloud=True)
 
     if creds and creds.service_url and creds.api_key:
         if not is_token_expired(creds):

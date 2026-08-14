@@ -59,6 +59,12 @@ class CloudClient:
         self.service_url = service_url.rstrip("/")
         self.api_key = api_key
         self._session: Optional[aiohttp.ClientSession] = None
+        # Optional async () -> str hook, set by serve() when a cached key
+        # is in use and the host qualifies for auth bootstrap: called once
+        # on a 401 to replace a key that was revoked server-side, after
+        # which the request is retried. Multipart requests are excluded —
+        # their form bodies are consumed by the first attempt.
+        self.refresh_api_key = None
 
     # Default for ordinary API calls: aiohttp's standard 5-minute total,
     # with connect failures surfacing quickly.
@@ -114,6 +120,7 @@ class CloudClient:
         params: Any = None,
         timeout: Optional[float] = None,
         default_timeout: Optional[aiohttp.ClientTimeout] = None,
+        _retried_auth: bool = False,
     ) -> Any:
         """Send a request to the instance, mapping failures to typed errors."""
         session = await self._get_session()
@@ -136,6 +143,28 @@ class CloudClient:
                         body = json_module.loads(body)
                     except Exception:
                         pass
+                    if (
+                        resp.status == 401
+                        and self.refresh_api_key is not None
+                        and data is None
+                        and not _retried_auth
+                    ):
+                        new_key = await self.refresh_api_key()
+                        if new_key and new_key != self.api_key:
+                            self.api_key = new_key
+                            # The key travels in session headers; recreate
+                            # the session so the retry carries the new one.
+                            await self.close()
+                            return await self._request(
+                                method,
+                                operation,
+                                path,
+                                json=json,
+                                params=params,
+                                timeout=timeout,
+                                default_timeout=default_timeout,
+                                _retried_auth=True,
+                            )
                     raise http_error_for_status(resp.status, body, operation=operation)
                 if resp.status == 204:
                     return None
