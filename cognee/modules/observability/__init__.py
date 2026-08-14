@@ -40,6 +40,44 @@ from .tracing import (
     COGNEE_IMPROVE_STAGES,
     COGNEE_GRAPH_EDGES_SYNCED,
 )
+from .metrics import (
+    setup_metrics,
+    get_meter,
+    shutdown_metrics,
+    record_operation_duration,
+    increment_items_stored,
+    increment_items_retrieved,
+    increment_items_deleted,
+    record_query_results,
+    increment_bytes_stored,
+    increment_vector_searches,
+    increment_graph_edges,
+    increment_graph_nodes,
+    increment_operation_errors,
+    # metric name constants (memory-semconv v0.1.0)
+    MEMORY_OPERATION_DURATION,
+    MEMORY_ITEMS_STORED,
+    MEMORY_ITEMS_RETRIEVED,
+    MEMORY_ITEMS_DELETED,
+    MEMORY_QUERY_RESULT_COUNT,
+    MEMORY_DATA_BYTES_STORED,
+    MEMORY_VECTOR_SEARCHES,
+    MEMORY_GRAPH_EDGES_ADDED,
+    MEMORY_GRAPH_NODES_ADDED,
+    MEMORY_OPERATION_ERRORS,
+)
+from .logs import setup_log_bridge, shutdown_log_bridge
+
+# memory-semconv v0.1.0 span attribute keys
+MEMORY_SYSTEM = "memory.system"
+MEMORY_OPERATION = "memory.operation"
+MEMORY_QUERY_TEXT = "memory.query.text"
+MEMORY_QUERY_TYPE = "memory.query.type"
+MEMORY_RESULT_COUNT = "memory.result.count"
+MEMORY_DATA_SIZE = "memory.data.size"
+MEMORY_ITEM_COUNT = "memory.item.count"
+MEMORY_COLLECTION = "memory.collection"
+MEMORY_STORE_BACKEND = "memory.store.backend"
 
 
 try:

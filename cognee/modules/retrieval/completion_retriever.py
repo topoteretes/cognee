@@ -1,8 +1,9 @@
 from typing import Any, Dict, List, Optional, Type
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
@@ -29,6 +30,8 @@ class CompletionRetriever(BaseRetriever):
         session_id: Optional[str] = None,
         response_model: Type = str,
         include_references: bool = False,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -38,13 +41,20 @@ class CompletionRetriever(BaseRetriever):
         self.session_id = session_id
         self.response_model = response_model
         self.include_references = include_references
+        self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
 
     async def get_retrieved_objects(self, query: str) -> Any:
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
 
         try:
             found_chunks = await vector_engine.search(
-                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+                "DocumentChunk_text",
+                query,
+                limit=self.top_k,
+                include_payload=True,
+                node_name=self.node_name,
+                node_name_filter_operator=self.node_name_filter_operator,
             )
 
             return found_chunks
@@ -52,7 +62,15 @@ class CompletionRetriever(BaseRetriever):
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(
+            primary,
+            secondary,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids from ScoredResult-like list for session QA."""
         if isinstance(retrieved_objects, list) and retrieved_objects:
             return extract_from_scored_results(retrieved_objects)
@@ -100,6 +118,13 @@ class CompletionRetriever(BaseRetriever):
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
 
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )
+
     async def get_completion_from_context(
         self,
         query: str,
@@ -136,7 +161,7 @@ class CompletionRetriever(BaseRetriever):
 
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -159,8 +184,4 @@ class CompletionRetriever(BaseRetriever):
         # logged-in/cached calls also receive references. Evidence is grounded in
         # each completion's own text, so a cache-hit answer never cites chunks
         # that share nothing with it.
-        return append_chunk_evidence(
-            completions,
-            retrieved_objects,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return await self.append_references(completions, retrieved_objects)

@@ -1,0 +1,4 @@
+Facts:
+{{ facts }}
+
+Identify the pairs of facts that contradict each other.

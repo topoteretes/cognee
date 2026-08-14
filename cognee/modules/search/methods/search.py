@@ -1,9 +1,9 @@
 import asyncio
-import json
 from typing import Any, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
 from cognee import __version__ as cognee_version
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import (
     backend_access_control_enabled,
     set_database_global_context_variables,
@@ -24,7 +24,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
     SearchResult,
     SearchType,
@@ -34,6 +34,20 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
+
+
+def _single_dataset_id(dataset_ids: Union[list[UUID], UUID, None]) -> Optional[UUID]:
+    """Return the dataset a search is scoped to, when it is exactly one.
+
+    Searches fan out across every dataset they are given, and ``None`` means
+    "every dataset the user can read". Neither case has a single dataset to
+    attribute the logged query to, so both record ``None``.
+    """
+    if dataset_ids is None:
+        return None
+    if isinstance(dataset_ids, UUID):
+        return dataset_ids
+    return dataset_ids[0] if len(dataset_ids) == 1 else None
 
 
 async def search(
@@ -51,7 +65,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -75,7 +89,6 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    query = await log_query(query_text, query_type.value, user.id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
@@ -130,21 +143,11 @@ async def search(
         },
     )
 
-    # Log only the completion text (what the user sees), not the full
-    # serialized graph payload. The raw result_objects can be 50-100 KB
-    # each and cause unbounded DB growth in long-running deployments.
-    completions = []
-    for item in search_results:
-        payload = item[0] if isinstance(item, tuple) else item
-        if hasattr(payload, "completion") and payload.completion:
-            completions.append(payload.completion)
-        elif hasattr(payload, "context") and payload.context:
-            completions.append(payload.context)
-    await log_result(
-        query.id,
-        json.dumps(completions) if completions else "[]",
-        user.id,
-    )
+    # Logged after the search because only the results say which datasets were
+    # actually searched — dataset_ids=None means "every dataset the user can
+    # read". Only the completion text is stored, never the raw result_objects,
+    # which run 50-100 KB each and would grow the DB without bound.
+    await log_search_history(query_text, query_type.value, user.id, search_results)
 
     return _backwards_compatible_search_results(search_results, verbose)
 
@@ -164,7 +167,7 @@ async def authorized_search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -224,7 +227,7 @@ async def search_in_datasets_context(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = None,
@@ -251,7 +254,7 @@ async def search_in_datasets_context(
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
         neighborhood_seed_top_k: Optional[int] = None,
@@ -311,8 +314,31 @@ async def search_in_datasets_context(
                     include_references=include_references,
                 )
 
+    async def _report_code_seed_miss(dataset_search, dataset: Dataset) -> SearchResultPayload:
+        """Report a per-dataset CODE seed miss instead of failing the whole request.
+
+        A name/id seed that one dataset cannot resolve says nothing about the
+        other datasets being searched, so surface it as that dataset's result.
+        """
+        from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+
+        try:
+            return await dataset_search
+        except CodeSeedNotFoundError as error:
+            return SearchResultPayload(
+                result_object=None,
+                context=None,
+                completion={"seed_not_found": True, "error": str(error)},
+                search_type=query_type,
+                only_context=False,
+                dataset_name=dataset.name,
+                dataset_id=dataset.id,
+                dataset_tenant_id=dataset.tenant_id,
+            )
+
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
+    soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
     if backend_access_control_enabled():
         for dataset in search_datasets:
             tasks.append(
@@ -337,6 +363,8 @@ async def search_in_datasets_context(
                     include_references=include_references,
                 )
             )
+            if soften_code_seed_misses:
+                tasks[-1] = _report_code_seed_miss(tasks[-1], dataset)
     else:
         # Run search without setting database context in case access control is disabled
         # Needed for low level pipelines that need to run search without dataset context.
@@ -368,15 +396,13 @@ async def search_in_datasets_context(
             # still forward any per-call LLM/embedding overrides onto the async
             # context (set_database_global_context_variables applies these even
             # in single-tenant mode and ignores the dataset argument).
-            if llm_config is not None or embedding_config is not None:
-                async with set_database_global_context_variables(
-                    dataset.id if dataset else None,
-                    user.id,
-                    llm_config=llm_config,
-                    embedding_config=embedding_config,
-                ):
-                    return await get_retriever_output(**retriever_kwargs)
-            return await get_retriever_output(**retriever_kwargs)
+            async with set_database_global_context_variables(
+                dataset.id if dataset else None,
+                user.id,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            ):
+                return await get_retriever_output(**retriever_kwargs)
 
         tasks.append(_search_without_context())
 

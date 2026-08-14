@@ -26,6 +26,24 @@ _TELEMETRY_API_KEY_TRACKING_SALT_ENV = "TELEMETRY_API_KEY_TRACKING_SALT"
 _DEFAULT_TELEMETRY_API_KEY_TRACKING_SALT = b"cognee.telemetry.api-key-tracking.v1"
 _TELEMETRY_API_KEY_TRACKING_ITERATIONS = 100_000
 
+# Strong refs for fire-and-forget telemetry tasks. asyncio only holds a weak
+# reference to a task, so without anchoring here the gc can collect an
+# in-flight telemetry request mid-run. Tasks remove themselves on done.
+_TELEMETRY_TASKS: set = set()
+
+
+def as_uuid(value) -> UUID | None:
+    """Coerce ``value`` to a UUID, or return None when it is not one.
+
+    The tolerant counterpart to ``UUID(str(value))`` for identifiers that
+    arrive as UUIDs, strings, or context values that may legitimately hold
+    something else (e.g. a dataset *name* in ``current_dataset_id``).
+    """
+    try:
+        return UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
 
 def create_secure_ssl_context() -> ssl.SSLContext:
     """
@@ -248,6 +266,10 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
     anonymous_id = str(get_anonymous_id())
     persistent_id = str(get_persistent_id())
     api_key_tracking_id = _get_api_key_tracking_id()
+    # Where this telemetry event originates. Defaults to "sdk"; deployments such
+    # as the managed cloud set TELEMETRY_ORIGIN (e.g. "cloud") so events can be
+    # segmented by origin.
+    telemetry_origin = os.getenv("TELEMETRY_ORIGIN", "sdk")
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": anonymous_id,
@@ -265,12 +287,20 @@ def send_telemetry(event_name: str, user_id: str | UUID, additional_properties: 
             "persistent_id": persistent_id,
             "api_key_tracking_id": api_key_tracking_id,
             "api_key_hash": api_key_tracking_id,
+            "telemetry_origin": telemetry_origin,
             **additional_properties,
         },
     }
 
-    loop = asyncio.get_running_loop()
-    loop.create_task(_send_telemetry_request(payload))
+    try:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_send_telemetry_request(payload))
+        _TELEMETRY_TASKS.add(task)
+        task.add_done_callback(_TELEMETRY_TASKS.discard)
+    except RuntimeError:
+        # No running event loop (shutdown, sync context, etc.) — telemetry is
+        # best-effort; dropping the event is better than crashing the caller.
+        pass
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):

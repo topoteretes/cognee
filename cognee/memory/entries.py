@@ -16,6 +16,11 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from cognee.shared.logging_utils import get_logger
+
+
+logger = get_logger("memory.entries")
+
 
 class QAEntry(BaseModel):
     """A Q&A turn stored in the session cache.
@@ -131,11 +136,24 @@ MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
 RecallScope = Literal[
-    "auto", "graph", "session", "trace", "graph_context", "session_context", "all"
+    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools"
 ]
 
 
-_VALID_SCOPES = {"auto", "graph", "session", "trace", "graph_context", "session_context", "all"}
+_DEPRECATED_SCOPE_ALIASES = {"graph_context": "graph"}
+# "tools" is explicit opt-in only: it is valid here but deliberately NOT part
+# of the "all" expansion or the "auto" resolution — recall must never reach an
+# external database unless the caller asked for it by name.
+_VALID_SCOPES = {
+    "auto",
+    "graph",
+    "session",
+    "trace",
+    "graph_context",
+    "session_context",
+    "all",
+    "tools",
+}
 
 
 def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
@@ -143,7 +161,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
 
     Accepts ``None``, a single string, or a list of strings. Returns a
     deduplicated list of concrete sources (``graph``, ``session``,
-    ``trace``, ``graph_context``). ``None`` and ``"auto"`` expand later
+    ``trace``, ``session_context``). ``None`` and ``"auto"`` expand later
     based on whether a session_id is present; this function just
     canonicalizes the input.
 
@@ -162,8 +180,21 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
             f"Unknown recall scope(s): {unknown}. Valid values: {sorted(_VALID_SCOPES)}"
         )
 
+    if any(s in _DEPRECATED_SCOPE_ALIASES for s in scopes):
+        logger.warning(
+            "Recall scope 'graph_context' is deprecated and now maps to 'graph'. "
+            "Use scope='graph' instead."
+        )
+        scopes = [_DEPRECATED_SCOPE_ALIASES.get(s, s) for s in scopes]
+
     if "all" in scopes:
-        return ["graph", "session", "trace", "graph_context", "session_context"]
+        # "tools" never rides along with "all" — external-database access is
+        # explicit opt-in per call. Preserve it only when the caller combined
+        # it with "all" themselves (e.g. scope=["all", "tools"]).
+        expanded = ["graph", "session", "trace", "session_context"]
+        if "tools" in scopes:
+            expanded.append("tools")
+        return expanded
 
     # Dedupe while preserving order
     seen: set = set()

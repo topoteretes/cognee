@@ -1,49 +1,59 @@
 """Shared utilities for DLT ingestion."""
 
 import json
+from typing import Optional
 
-from cognee.shared.logging_utils import get_logger
+# A dlt source sets this attribute to opt into the "document" ingestion path:
+# each row becomes a text document that flows through normal cognify (LLM entity
+# extraction), instead of the default relational schema-context path. The value
+# is the ``system_metadata["source"]`` tag used for that source's rows. This
+# lets resolve_dlt_sources stay connector-agnostic — a connector declares its
+# own nature rather than the shared engine hard-coding connector names.
+DOCUMENT_SOURCE_ATTR = "cognee_document_source"
 
-logger = get_logger("dlt_utils")
+
+def document_source_tag(item) -> Optional[str]:
+    """Return the document-source tag a dlt source opted into, else ``None``."""
+    tag = getattr(item, DOCUMENT_SOURCE_ATTR, None)
+    return tag if isinstance(tag, str) and tag else None
+
+
+def _metadata_source(metadata) -> Optional[str]:
+    """Extract the ``source`` field from system metadata.
+
+    Accepts a dict, a JSON string, or an object with a ``system_metadata``
+    attribute (a Data record / DataItem). Returns None when the source cannot
+    be determined. Deliberately never reads external_metadata: that field is
+    user-writable, and routing/deletion decisions must not key on user bytes.
+    """
+    meta = getattr(metadata, "system_metadata", metadata)
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if isinstance(meta, dict):
+        return meta.get("source")
+    return None
 
 
 def is_dlt_sourced(metadata) -> bool:
-    """Check whether external_metadata indicates a DLT source.
+    """Check whether system_metadata indicates a legacy per-row DLT item (source == "dlt")."""
+    return _metadata_source(metadata) == "dlt"
 
-    Accepts a dict, a JSON string, or an object with an ``external_metadata``
-    attribute.  Returns True when ``source == "dlt"``.
+
+def is_dlt_source_manifest(metadata) -> bool:
+    """Check whether system_metadata indicates a DLT source manifest (source == "dlt_source")."""
+    return _metadata_source(metadata) == "dlt_source"
+
+
+async def load_dlt_manifest(raw_data_location: str) -> dict:
+    """Load a DLT source manifest from storage.
+
+    Single reader of the DLT source manifest format written by
+    ``resolve_dlt_sources._build_source_manifest_item``.
     """
-    ext = getattr(metadata, "external_metadata", metadata)
-    if isinstance(ext, dict):
-        return ext.get("source") == "dlt"
-    if isinstance(ext, str):
-        try:
-            return json.loads(ext).get("source") == "dlt"
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return False
+    from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
-
-def parse_external_metadata(obj) -> dict | None:
-    """Parse external_metadata from an object (may be JSON string or dict).
-
-    Returns the parsed dict or None if parsing fails / not present.
-    """
-    raw = getattr(obj, "external_metadata", None)
-    if not raw:
-        return None
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            # There WAS metadata but it could not be decoded — surface it so
-            # the lost FK edges are diagnosable rather than silently dropped.
-            logger.warning(
-                "Failed to parse external_metadata as JSON for object id=%s; "
-                "treating as absent. Any DLT FK edges for this row are skipped.",
-                getattr(obj, "id", "<unknown>"),
-            )
-            return None
-    return None
+    async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
+        return json.loads(file.read())

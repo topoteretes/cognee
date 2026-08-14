@@ -1,5 +1,23 @@
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from dataclasses import dataclass
+from typing import Any, ClassVar, Optional
+from uuid import UUID
+
+
+@dataclass
+class LoaderResult:
+    """Rich loader output for loaders that own more than text extraction.
+
+    ``load()`` normally returns the stored derived-text path as a plain str.
+    A loader that also owns the record's identity and routing (dlt: the
+    manifest's stable data_id and the ``system_metadata`` route stamp) returns
+    this instead; ``ingest_data`` pins the record to ``data_id`` and stamps
+    ``system_metadata`` exactly as it does for pinned ``DataItem``s.
+    """
+
+    file_path: str
+    data_id: Optional[UUID] = None
+    system_metadata: Optional[dict] = None
 
 
 class LoaderInterface(ABC):
@@ -20,7 +38,7 @@ class LoaderInterface(ABC):
         List of file extensions this loader supports.
 
         Returns:
-            List of extensions including the dot (e.g., ['.txt', '.md'])
+            List of extensions without the leading dot (e.g., ['txt', 'md'])
         """
         pass
 
@@ -50,7 +68,7 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
         Load and process the file, returning standardized result.
 
@@ -58,6 +76,10 @@ class LoaderInterface(ABC):
             file_path: Path to the file to be processed
             file_stream: If file stream is provided it will be used to process file instead
             **kwargs: Additional loader-specific configuration
+
+        Returns:
+            The stored derived-text path, or a ``LoaderResult`` for loaders
+            that also own the record's identity and route stamp (dlt).
 
         Raises:
             Exception: If file cannot be processed

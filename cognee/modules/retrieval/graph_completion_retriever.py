@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Type, Union
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
@@ -8,6 +9,11 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.merge_results import (
+    conversational_reserve,
+    edge_identity,
+    merge_ranked,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -51,7 +57,7 @@ class GraphCompletionRetriever(BaseRetriever):
         node_name_filter_operator: str = "OR",
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 6.5,
-        feedback_influence: float = 0.0,
+        feedback_influence: float = get_base_config().default_feedback_influence,
         session_id: Optional[str] = None,
         response_model: Type = str,
         neighborhood_depth: Optional[int] = None,
@@ -274,7 +280,16 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         return format_global_context_prelude(root_text, top_summaries)
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(
+            primary,
+            secondary,
+            identity=edge_identity,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
         if not isinstance(retrieved_objects, list) or not retrieved_objects:
             return None
@@ -320,6 +335,11 @@ class GraphCompletionRetriever(BaseRetriever):
             enabled=self.include_references and self.response_model is str,
         )
 
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        # Graph evidence is grounded in the answer text, not the retrieved edges, so
+        # retrieved_objects is deliberately unused here.
+        return await self._append_graph_evidence(completions)
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
@@ -350,7 +370,7 @@ class GraphCompletionRetriever(BaseRetriever):
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -375,7 +395,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # this method (including via super()) appends references once. Evidence is
         # grounded in each completion's own text, so a cache-hit answer never
         # cites chunks that share nothing with it.
-        return await self._append_graph_evidence(completions)
+        return await self.append_references(completions, retrieved_objects)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

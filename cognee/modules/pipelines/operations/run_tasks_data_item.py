@@ -63,10 +63,11 @@ async def run_tasks_data_item_incremental(
     db_engine = get_relational_engine()
 
     # If incremental_loading of data is set to True don't process documents already processed by pipeline
-    # If data is being added to Cognee for the first time calculate the id of the data
+    # If data is being added to Cognee for the first time resolve the id of the data
+    classified_data = None
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
-        # over the content-hash-based ID so lookups stay consistent.
+        # over the content lookup so lookups stay consistent.
         from cognee.tasks.ingestion.data_item import DataItem as DataItemType
 
         if isinstance(data_item, DataItemType) and data_item.data_id is not None:
@@ -76,8 +77,9 @@ async def run_tasks_data_item_incremental(
             # Ingest data and add metadata
             async with open_data_file(file_path) as file:
                 classified_data = ingestion.classify(file)
-                # data_id is the hash of file contents + owner id to avoid duplicate data
-                data_id = await ingestion.identify(classified_data, user)
+                # Dataset-scoped content lookup: an existing row's id, or None
+                # for content this dataset has not seen (ingestion mints the id).
+                data_id = await ingestion.identify(classified_data, user, dataset.id)
     else:
         # If data was already processed by Cognee get data id
         data_id = data_item.id
@@ -118,15 +120,21 @@ async def run_tasks_data_item_incremental(
                 payload=result,
             )
 
-        # Update pipeline status for Data element
+        # Update pipeline status for Data element. Fresh content had no row at
+        # the pre-check (data_id None); ingestion has created it since — resolve
+        # the id it was given.
+        if data_id is None and classified_data is not None:
+            data_id = await ingestion.identify(classified_data, user, dataset.id)
+
         async with db_engine.get_async_session() as session:
             data_point = (
                 await session.execute(select(Data).filter(Data.id == data_id))
             ).scalar_one_or_none()
-            status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
-            status_for_pipeline[str(dataset.id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-            await session.merge(data_point)
-            await session.commit()
+            if data_point is not None:
+                status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+                status_for_pipeline[str(dataset.id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+                await session.merge(data_point)
+                await session.commit()
 
         yield {
             "run_info": PipelineRunCompleted(
@@ -217,12 +225,13 @@ async def run_tasks_data_item(
     ctx: Optional[PipelineContext],
     user: User,
     incremental_loading: bool,
+    data_cache: bool,
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
 
     This is the main entry point for data item processing that delegates to either
-    incremental or regular processing based on the incremental_loading flag.
+    incremental or regular processing based on the data_cache/incremental_loading flags.
 
     Args:
         data_item: The data item to process
@@ -234,6 +243,7 @@ async def run_tasks_data_item(
         context: Optional context dictionary
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
+        data_cache: Whether to use incremental processing (data caching)
 
     Returns:
         Dict containing the final processing result, or None if processing was skipped
@@ -241,7 +251,7 @@ async def run_tasks_data_item(
     # Go through async generator and return data item processing result. Result can be PipelineRunAlreadyCompleted when data item is skipped,
     # PipelineRunCompleted when processing was successful and PipelineRunErrored if there were issues
     result = None
-    if incremental_loading:
+    if data_cache or incremental_loading:
         async for result in run_tasks_data_item_incremental(
             data_item=data_item,
             dataset=dataset,

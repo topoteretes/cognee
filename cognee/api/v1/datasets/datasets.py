@@ -3,6 +3,7 @@ from uuid import UUID
 from typing import Optional
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -14,6 +15,7 @@ from cognee.modules.graph.methods import (
     delete_dataset_nodes_and_edges,
     has_data_related_nodes,
     legacy_delete,
+    try_delete_data_by_graph_provenance,
 )
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
@@ -111,31 +113,15 @@ class datasets:
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
-        async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-            await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
+        # on this dataset and exclude concurrent deletes.
+        async with dataset_lock(dataset.id):
+            async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+                await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-            dataset_data = await get_dataset_data(dataset.id)
-
-            # Delete dataset record first while DatasetData junction rows still exist,
-            # so pipeline_status cleanup can find related Data records.
-            result = await delete_dataset(dataset)
-
-            # Delete individual data records; use return_exceptions so all are attempted
-            # even if some fail.
-            if dataset_data:
-                results = await asyncio.gather(
-                    *[delete_data(data, dataset_id) for data in dataset_data],
-                    return_exceptions=True,
-                )
-                deletion_errors = [r for r in results if isinstance(r, Exception)]
-                if deletion_errors:
-                    logger.error(
-                        "Failed to delete %d/%d data items from dataset %s: %s",
-                        len(deletion_errors),
-                        len(dataset_data),
-                        dataset_id,
-                        deletion_errors,
-                    )
+                # delete_dataset removes the dataset's scoped Data rows
+                # (files refcounted by raw_data_location) with the record.
+                result = await delete_dataset(dataset)
 
         return result
 
@@ -160,35 +146,51 @@ class datasets:
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
-        dataset_data = [data for data in await get_dataset_data(dataset.id) if data.id == data_id]
+        # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
+        # on this dataset and exclude concurrent deletes.
+        async with dataset_lock(dataset.id):
+            # Every id ever issued keeps resolving: exact id first, then the
+            # recorded original of a backfill-split row (legacy_id).
+            from cognee.modules.data.methods import resolve_data_id
 
-        data = dataset_data[0] if len(dataset_data) > 0 else None
+            resolved_id = await resolve_data_id(dataset.id, data_id)
+            if resolved_id is not None:
+                data_id = resolved_id
 
-        if not data:
-            # If data is not found in the system, user is using a custom graph model.
+            dataset_data = [
+                data for data in await get_dataset_data(dataset.id) if data.id == data_id
+            ]
+
+            data = dataset_data[0] if len(dataset_data) > 0 else None
+
+            if not data:
+                # If data is not found in the system, user is using a custom graph model.
+                async with set_database_global_context_variables(dataset_id, dataset.owner_id):
+                    await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+
+                    dataset_data = await get_dataset_data(dataset.id)
+                    if not dataset_data and delete_dataset_if_empty:
+                        await delete_dataset(dataset)
+
+                return {"status": "success"}
+
+            if str(data.dataset_id) != str(dataset_id):
+                raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
+
             async with set_database_global_context_variables(dataset_id, dataset.owner_id):
-                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+                # Delete mode is exclusive: ledger rows imply the relational-ledger
+                # path; only ledger-free data probes the graph marker to distinguish
+                # graph-provenance data from legacy data without graph ownership.
+                if await has_data_related_nodes(dataset_id, data_id):
+                    await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+                elif not await try_delete_data_by_graph_provenance(dataset_id, data_id):
+                    await legacy_delete(data, "soft")
+
+                await delete_data(data, dataset_id)
 
                 dataset_data = await get_dataset_data(dataset.id)
                 if not dataset_data and delete_dataset_if_empty:
                     await delete_dataset(dataset)
-
-            return {"status": "success"}
-
-        if not any(ds.id == dataset_id for ds in data.datasets):
-            raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
-
-        async with set_database_global_context_variables(dataset_id, dataset.owner_id):
-            if not await has_data_related_nodes(dataset_id, data_id):
-                await legacy_delete(data, "soft")
-            else:
-                await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
-
-            await delete_data(data, dataset_id)
-
-            dataset_data = await get_dataset_data(dataset.id)
-            if not dataset_data and delete_dataset_if_empty:
-                await delete_dataset(dataset)
 
         return {"status": "success"}
 

@@ -50,8 +50,8 @@ async def test_detag_called_with_removed_nodeset_names():
         ),
         patch.object(
             delete_from_graph_and_vector_module,
-            "get_vector_engine",
-            lambda: vector_engine,
+            "get_vector_engine_async",
+            AsyncMock(return_value=vector_engine),
         ),
         patch.object(
             delete_from_graph_and_vector_module,
@@ -92,8 +92,8 @@ async def test_detag_skipped_when_no_nodeset_in_batch():
         ),
         patch.object(
             delete_from_graph_and_vector_module,
-            "get_vector_engine",
-            lambda: vector_engine,
+            "get_vector_engine_async",
+            AsyncMock(return_value=vector_engine),
         ),
         patch.object(
             delete_from_graph_and_vector_module,
@@ -140,8 +140,8 @@ async def test_delete_uses_edge_text_for_edge_type_delete_ids():
         ),
         patch.object(
             delete_from_graph_and_vector_module,
-            "get_vector_engine",
-            lambda: vector_engine,
+            "get_vector_engine_async",
+            AsyncMock(return_value=vector_engine),
         ),
         patch.object(
             delete_from_graph_and_vector_module,

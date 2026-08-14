@@ -19,13 +19,13 @@ export default function MobileMenuButton() {
         width: "2.75rem",
         height: "2.75rem",
         borderRadius: "50%",
-        background: "#6510f4",
+        background: "#6510F4",
         color: "#fff",
         border: "none",
         cursor: "pointer",
         alignItems: "center",
         justifyContent: "center",
-        boxShadow: "0 2px 12px rgba(101,16,244,0.35)",
+        boxShadow: "0 2px 12px rgba(188,155,255,0.35)",
       }}
       className="flex sm:hidden"
     >

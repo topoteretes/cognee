@@ -7,6 +7,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.hints import hint_recall_empty
 
 
 class RecallCommand(SupportsCliCommand):
@@ -87,13 +88,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
 
             async def run_recall():
                 try:
-                    from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
-
                     session_kwargs = {}
                     if args.session_id is not None:
-                        user = await resolve_cli_user(getattr(args, "user_id", None))
-                        sid = scoped_session_id(user.id, args.session_id)
-                        session_kwargs["session_id"] = sid
+                        session_kwargs["session_id"] = args.session_id
 
                     if session_only:
                         # Pass query_type=None to trigger session-only search
@@ -129,6 +126,12 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             else:
                 if not results:
                     fmt.warning("No results found for your query.")
+                    # Hint scoped to the pretty output path: json/simple are
+                    # for scripting so an extra line would corrupt the sink.
+                    hint_dataset = (
+                        args.datasets[0] if getattr(args, "datasets", None) else "<dataset-name>"
+                    )
+                    hint_recall_empty(hint_dataset)
                     return
 
                 # Detect session results by _source tag

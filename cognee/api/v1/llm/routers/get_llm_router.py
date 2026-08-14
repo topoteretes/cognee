@@ -11,6 +11,7 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.modules.users.methods import get_authenticated_user
@@ -244,11 +245,21 @@ def get_llm_router() -> APIRouter:
             )
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+            )
         except ValueError as error:
-            return JSONResponse(status_code=400, content={"error": str(error)})
+            logger.warning("LLM custom prompt generation validation failed: %s", error)
+            return JSONResponse(
+                status_code=400, content={"error": "Invalid custom prompt request."}
+            )
         except Exception as error:
-            logger.error("LLM custom prompt generation request failed")
-            return JSONResponse(status_code=500, content={"error": str(error)})
+            logger.error("LLM custom prompt generation request failed: %s", error)
+            return JSONResponse(
+                status_code=500,
+                content={"error": "LLM custom prompt generation failed."},
+            )
 
     @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
     @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
@@ -344,17 +355,23 @@ def get_llm_router() -> APIRouter:
 
             return InferSchemaResponseDTO(graph_schema=schema_dict)
         except json.JSONDecodeError as error:
+            logger.warning("Invalid JSON in infer-schema parameters: %s", error)
             return JSONResponse(
                 status_code=422,
-                content={"error": f"Invalid JSON in request parameters: {error}"},
+                content={"error": "Invalid JSON in request parameters."},
             )
         except ValidationError as error:
+            logger.warning("LLM schema inference output validation failed: %s", error)
             return JSONResponse(
                 status_code=422,
-                content={"error": f"LLM output did not match expected schema: {error}"},
+                content={"error": "LLM output did not match expected schema."},
+            )
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)
-            return JSONResponse(status_code=500, content={"error": str(error)})
+            return JSONResponse(status_code=500, content={"error": "LLM schema inference failed."})
 
     return router

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.extraction import extract_summary
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.tasks.summarization.models import TextSummary
 
@@ -49,25 +50,14 @@ async def summarize_text(
     if len(data_chunks) == 0:
         return data_chunks
 
-    # Skip LLM summarization for DLT row chunks — structured data
-    # doesn't benefit from text summarization.
-    from cognee.modules.data.processing.document_types import DltRowDocument
-
-    non_dlt_chunks = [
-        c for c in data_chunks if not isinstance(getattr(c, "is_part_of", None), DltRowDocument)
-    ]
-    dlt_chunks = [c for c in data_chunks if c not in non_dlt_chunks]
-
-    if not non_dlt_chunks:
-        return data_chunks
-
     if summarization_model is None:
         cognee_config = get_cognify_config()
         summarization_model = cognee_config.summarization_model
 
-    chunk_summaries = await asyncio.gather(
-        *[extract_summary(chunk.text, summarization_model) for chunk in non_dlt_chunks]
-    )
+    with pipeline_stage("summarization"):
+        chunk_summaries = await asyncio.gather(
+            *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+        )
 
     summaries = [
         TextSummary(
@@ -78,7 +68,7 @@ async def summarize_text(
             text=chunk_summaries[chunk_index].summary,
             importance_weight=chunk.importance_weight,
         )
-        for (chunk_index, chunk) in enumerate(non_dlt_chunks)
+        for (chunk_index, chunk) in enumerate(data_chunks)
     ]
 
-    return summaries + dlt_chunks
+    return summaries

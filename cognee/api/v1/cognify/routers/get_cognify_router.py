@@ -2,8 +2,7 @@ import os
 import asyncio
 from uuid import UUID
 from pydantic import Field
-from typing import List, Optional
-from fastapi.encoders import jsonable_encoder
+from typing import Dict, List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
@@ -29,6 +28,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     initialize_queue,
     remove_queue,
 )
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.shared.usage_logger import log_usage
@@ -110,8 +110,8 @@ class CognifyPayloadDTO(InDTO):
         ),
     )
     data_per_batch: Optional[int] = Field(
-        default=20,
-        examples=[20],
+        default=2000,
+        examples=[2000],
         description="Maximum number of data items to process concurrently within a dataset.",
     )
 
@@ -121,7 +121,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=dict,
+        response_model=Dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -157,7 +157,7 @@ def get_cognify_router() -> APIRouter:
           a size from the configured LLM and embedding limits.
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **chunks_per_batch** (Optional[int]): Number of chunks to process per task batch in Cognify. Uses the pipeline default when omitted.
-        - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 20.
+        - **data_per_batch** (Optional[int]): Maximum number of data items to process concurrently within a dataset. Defaults to 2000.
 
         ## Response
         - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
@@ -255,7 +255,12 @@ def get_cognify_router() -> APIRouter:
                 )
                 detail = None
                 if first_err is not None:
-                    detail = getattr(first_err, "error", None) or str(first_err)
+                    # The failing task's error is carried on ``payload`` (set to
+                    # ``repr(error)`` by the pipeline runner); PipelineRunErrored
+                    # has no ``error`` attribute. Surface it so the client gets an
+                    # actionable message instead of the model's repr.
+                    payload = first_err.payload if isinstance(first_err.payload, str) else None
+                    detail = payload or str(first_err)
 
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -265,6 +270,14 @@ def get_cognify_router() -> APIRouter:
                     ).model_dump(),
                 )
             return cognify_run
+        except LLMPaymentRequiredError as error:
+            return JSONResponse(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                content=ErrorResponse(
+                    error="Token budget exhausted",
+                    detail=str(error),
+                ).model_dump(),
+            )
         except ValueError as e:
             # Ontology key not found (OntologyService raises ValueError)
             return JSONResponse(

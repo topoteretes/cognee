@@ -11,7 +11,7 @@ class CogneeApiError(Exception):
         self,
         message: str = "Service is unavailable.",
         name: str = "Cognee",
-        status_code=status.HTTP_418_IM_A_TEAPOT,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         log=True,
         log_level="ERROR",
     ):
@@ -21,13 +21,13 @@ class CogneeApiError(Exception):
 
         # Automatically log the exception details
         if log and (log_level == "ERROR"):
-            logger.error(f"{self.name}: {self.message} (Status code: {self.status_code})")
+            logger.error("%s raised (Status code: %s)", self.name, self.status_code)
         elif log and (log_level == "WARNING"):
-            logger.warning(f"{self.name}: {self.message} (Status code: {self.status_code})")
+            logger.warning("%s raised (Status code: %s)", self.name, self.status_code)
         elif log and (log_level == "INFO"):
-            logger.info(f"{self.name}: {self.message} (Status code: {self.status_code})")
+            logger.info("%s raised (Status code: %s)", self.name, self.status_code)
         elif log and (log_level == "DEBUG"):
-            logger.debug(f"{self.name}: {self.message} (Status code: {self.status_code})")
+            logger.debug("%s raised (Status code: %s)", self.name, self.status_code)
 
         super().__init__(self.message, self.name)
 

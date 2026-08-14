@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,11 +14,6 @@ class ResponseAgentTraceEntry(SessionAgentTraceEntry):
     source: Literal["trace"]
 
 
-class ResponseGraphContextEntry(BaseModel):
-    source: Literal["graph_context"]
-    content: str
-
-
 class ResponseSessionContextEntry(BaseModel):
     source: Literal["session_context"]
     content: str
@@ -29,11 +24,29 @@ class ResponseGraphEntry(SearchResultItem):
     source: Literal["graph"]
 
 
+class ResponseToolEntry(BaseModel):
+    """One tool invocation's result from the recall "tools" scope.
+
+    Generic across tools: ``tool_name`` discriminates the tool (only
+    ``text_to_sql`` in v1) and ``structured`` carries the tool-specific
+    payload, so adding a tool never changes this union. Secrets (connection
+    strings) never appear here.
+    """
+
+    source: Literal["tools"]
+    tool_name: str
+    question: str
+    text: str
+    success: bool = True
+    error: Optional[str] = None
+    structured: Optional[dict] = None
+
+
 RecallResponse = Annotated[
     ResponseQAEntry
     | ResponseAgentTraceEntry
-    | ResponseGraphContextEntry
     | ResponseSessionContextEntry
-    | ResponseGraphEntry,
+    | ResponseGraphEntry
+    | ResponseToolEntry,
     Field(discriminator="source"),
 ]

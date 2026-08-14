@@ -32,15 +32,18 @@ def _patch_side_effect_boundaries(monkeypatch, search_mod):
     Keep production logic; patch only unavoidable side-effect boundaries.
     """
 
-    async def dummy_log_query(_query_text, _query_type, _user_id):
+    async def dummy_log_query(*_args, **_kwargs):
         return types.SimpleNamespace(id="qid-1")
 
     async def dummy_log_result(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(search_mod, "send_telemetry", lambda *a, **k: None)
-    monkeypatch.setattr(search_mod, "log_query", dummy_log_query)
-    monkeypatch.setattr(search_mod, "log_result", dummy_log_result)
+    import importlib
+
+    history_mod = importlib.import_module("cognee.modules.search.operations.log_search_history")
+    monkeypatch.setattr(history_mod, "log_query", dummy_log_query)
+    monkeypatch.setattr(history_mod, "log_result", dummy_log_result)
 
     yield
 

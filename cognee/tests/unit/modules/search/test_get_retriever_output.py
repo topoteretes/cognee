@@ -4,10 +4,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
-from cognee.modules.search.methods.get_retriever_output import (
-    _count_retrieved_objects,
-    get_retriever_output,
-)
+from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
+from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.types import SearchType
 
 # Resolve the module object explicitly. The package __init__ re-exports the
@@ -77,6 +75,22 @@ class _NoAnswerRetriever:
         raise AssertionError("retrieval should be skipped")
 
 
+class _DeterministicRetriever:
+    supports_session_turn_preparation = False
+
+    async def prepare_session_turn_for_retrieval(self, query):
+        raise AssertionError("deterministic retrieval must not prepare a conversational turn")
+
+    async def get_retrieved_objects(self, query):
+        return {"operation": "query_facts", "facts": []}
+
+    async def get_context_from_objects(self, query, retrieved_objects):
+        return '{"facts":[],"operation":"query_facts"}'
+
+    async def get_completion_from_context(self, query, retrieved_objects, context):
+        return retrieved_objects
+
+
 @pytest.mark.asyncio
 async def test_get_retriever_output_uses_effective_query_before_retrieval():
     retriever = _EffectiveQueryRetriever()
@@ -133,13 +147,72 @@ async def test_get_retriever_output_skips_retrieval_for_no_answer_turn():
     assert result.completion == ["Thanks, I noted that."]
 
 
+@pytest.mark.asyncio
+async def test_get_retriever_output_can_bypass_session_preparation_without_only_context():
+    retriever = _DeterministicRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+    ):
+        result = await get_retriever_output(SearchType.CODE, "Checkout")
+
+    assert result.completion == {"operation": "query_facts", "facts": []}
+
+
+@pytest.mark.asyncio
+async def test_get_retriever_output_maps_door_result_without_extra_logic():
+    retriever = _NoAnswerRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=([{"id": "obj-1"}], "context", ["answer"]),
+        ) as run_door,
+    ):
+        result = await get_retriever_output(SearchType.RAG_COMPLETION, "question")
+
+    assert result.result_object == [{"id": "obj-1"}]
+    assert result.context == "context"
+    assert result.completion == ["answer"]
+    run_door.assert_awaited_once_with(
+        retriever,
+        raw_query="question",
+        original_search_type=SearchType.RAG_COMPLETION,
+        only_context=False,
+        search_type_for_spans=SearchType.RAG_COMPLETION,
+    )
+
+
 def test_count_retrieved_objects_counts_structured_lists():
-    assert _count_retrieved_objects({"chunks": [1, 2], "entities": [3]}) == 3
+    assert count_retrieved_objects({"chunks": [1, 2], "entities": [3]}) == 3
 
 
 def test_count_retrieved_objects_preserves_existing_shapes():
-    assert _count_retrieved_objects(None) == 0
-    assert _count_retrieved_objects(["a", "b"]) == 2
-    assert _count_retrieved_objects({"triplets": []}) == 0
-    assert _count_retrieved_objects({"metadata": "value"}) == 1
-    assert _count_retrieved_objects("answer") == 1
+    assert count_retrieved_objects(None) == 0
+    assert count_retrieved_objects(["a", "b"]) == 2
+    assert count_retrieved_objects({"triplets": []}) == 0
+    assert count_retrieved_objects({"metadata": "value"}) == 1
+    assert count_retrieved_objects("answer") == 1

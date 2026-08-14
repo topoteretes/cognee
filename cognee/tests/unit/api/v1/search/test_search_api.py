@@ -3,6 +3,7 @@ from uuid import uuid4, uuid5, NAMESPACE_OID
 
 import pytest
 
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.search.types import SearchType
 
 
@@ -85,3 +86,49 @@ async def test_api_graph_search_uses_updated_default_triplet_penalty(monkeypatch
     )
 
     assert out == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_api_code_search_merges_code_query_into_retriever_config(monkeypatch, api_search_mod):
+    user = _make_user()
+    dataset = _make_dataset()
+
+    async def dummy_set_session_user_context_variable(_user):
+        return None
+
+    async def dummy_search_function(**kwargs):
+        assert kwargs["retriever_specific_config"] == {
+            "existing": True,
+            "operation": "find_path",
+            "target": "PaymentStore",
+        }
+        return [{"found": True}]
+
+    monkeypatch.setattr(
+        api_search_mod,
+        "set_session_user_context_variable",
+        dummy_set_session_user_context_variable,
+    )
+    monkeypatch.setattr(api_search_mod, "search_function", dummy_search_function)
+
+    result = await api_search_mod.search(
+        query_text="CheckoutService",
+        query_type=SearchType.CODE,
+        user=user,
+        dataset_ids=[dataset.id],
+        retriever_specific_config={"existing": True},
+        code_query={"operation": "find_path", "target": "PaymentStore"},
+    )
+
+    assert result == [{"found": True}]
+
+
+@pytest.mark.asyncio
+async def test_api_code_query_rejects_non_code_search(api_search_mod):
+    with pytest.raises(CogneeValidationError, match="code_query requires"):
+        await api_search_mod.search(
+            query_text="CheckoutService",
+            query_type=SearchType.CHUNKS,
+            user=_make_user(),
+            code_query={"operation": "explore"},
+        )

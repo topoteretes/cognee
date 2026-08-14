@@ -11,10 +11,16 @@ from pydantic import BaseModel, Field, WithJsonSchema
 from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.tasks.ingestion.data_item import (
+    pair_labels_with_data,
+    parse_external_metadata,
+    parse_labels,
+)
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 
 logger = get_logger()
 
@@ -84,6 +90,11 @@ async def _import_cogx_archives(
         return jsonable_encoder(aggregate)
     except HTTPException:
         raise
+    except CogneeApiError:
+        # Cognee errors (e.g. permission denied) carry their own status code
+        # and actionable message; the global handler in cognee/api/client.py
+        # returns them.
+        raise
     except (ValueError, tarfile.TarError) as error:
         # Log the detail server-side; the response stays generic so exception
         # text / stack frames are not exposed to the caller (CodeQL py/stack-trace-exposure).
@@ -107,6 +118,33 @@ def get_remember_router() -> APIRouter:
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
+        labels: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                'Per-file labels, e.g. ["finance", "people", ""] — the Nth label applies '
+                "to the Nth uploaded file, one entry per file, an empty entry skips that "
+                'file. The comma-separated form "finance,people," is accepted '
+                "equivalently (it is what Swagger UI sends when you type a JSON array "
+                "here), so labels cannot contain commas unless the client sends real "
+                "JSON. Stored on each file's data record and returned when listing "
+                "dataset data. Only supported for normal ingestion — rejected when combined "
+                "with session_id or content_type."
+            ),
+        ),
+        external_metadata: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "JSON array of per-file metadata objects, e.g. "
+                '[{"source": "crm", "ticket": 42}, null]. Paired positionally like labels: '
+                "the Nth entry applies to the Nth uploaded file (null or {} skips that "
+                "file), and one entry per file is required when any is given. Merged into "
+                "the file's stored external_metadata (your keys win over loader-derived "
+                "ones; 'node_set' is reserved). Only supported for normal ingestion — "
+                "rejected when combined with session_id or content_type."
+            ),
+        ),
         datasetName: Optional[str] = Form(
             default=None,
             examples=["default_dataset"],
@@ -235,6 +273,15 @@ def get_remember_router() -> APIRouter:
 
         ## Request Parameters
         - **data** (List[UploadFile]): Files to upload and process.
+        - **labels** (Optional[str]): JSON array of per-file labels, e.g.
+          ["finance", "people", ""], paired positionally with the uploaded files (one
+          entry per file; an empty entry skips that file). Stored on each file's data
+          record. Normal ingestion only — rejected with session_id or content_type.
+        - **external_metadata** (Optional[str]): JSON array of per-file metadata objects,
+          e.g. [{"source": "crm"}, null], paired positionally with the uploaded files
+          (one entry per file; null or {} skips that file). Merged into each file's
+          stored external_metadata. Normal ingestion only — rejected with session_id
+          or content_type.
         - **datasetName** (Optional[str]): Name of the target dataset.
         - **datasetId** (Optional[UUID]): UUID of an existing dataset.
         - **session_id** (Optional[str]): Session to attribute this memory to. When set,
@@ -273,6 +320,30 @@ def get_remember_router() -> APIRouter:
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
             )
+
+        # Invalid JSON raises a CogneeApiError (400) via the global handler.
+        parsed_labels = parse_labels(labels)
+        parsed_metadata = parse_external_metadata(external_metadata)
+
+        # Labels and metadata live on the Data records that normal add+cognify
+        # ingestion creates. The session-cache, skills, and archive paths never
+        # create those records, so they would be silently dropped — reject
+        # instead.
+        if (any(parsed_labels or []) or any(entry for entry in (parsed_metadata or []))) and (
+            session_id or content_type
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "labels and external_metadata are only supported for normal ingestion — "
+                    "remove session_id and content_type to use them."
+                ),
+            )
+
+        # Labels and metadata ride on DataItems, which ingestion unwraps to
+        # store them on each file's Data record. A count mismatch raises a
+        # CogneeApiError (400), returned by the global handler.
+        data = pair_labels_with_data(data, parsed_labels, parsed_metadata)
 
         if content_type == "cogx-archive":
             if not data:
@@ -375,6 +446,10 @@ def get_remember_router() -> APIRouter:
                 )
 
             return jsonable_encoder(result.to_dict())
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except ValueError as error:
             logger.error("Remember endpoint validation error: %s", error, exc_info=True)
             return JSONResponse(
@@ -401,6 +476,13 @@ def get_remember_router() -> APIRouter:
             Field(discriminator="type"),
         ]
         dataset_name: str = "main_dataset"
+        dataset_id: Optional[UUID] = Field(
+            default=None,
+            description=(
+                "UUID of an existing writable dataset. Takes precedence over dataset_name "
+                "and is required to target a shared dataset by ID."
+            ),
+        )
         session_id: Optional[str] = Field(
             default=None,
             examples=["claude-code-1718000000"],
@@ -443,6 +525,7 @@ def get_remember_router() -> APIRouter:
             result = await cognee_remember(
                 payload.entry,
                 dataset_name=payload.dataset_name,
+                dataset_id=payload.dataset_id,
                 session_id=payload.session_id,
                 user=user,
                 skill_improvement=payload.skill_improvement,
@@ -450,10 +533,19 @@ def get_remember_router() -> APIRouter:
             return jsonable_encoder(result.to_dict())
         except ValueError as error:
             # Known validation errors: missing session_id, user not found, etc.
-            return JSONResponse(status_code=400, content={"error": str(error)})
+            logger.warning("Remember entry validation failed: %s", error)
+            return JSONResponse(status_code=400, content={"error": "Invalid remember request."})
         except RuntimeError as error:
             # Session cache unavailable
-            return JSONResponse(status_code=503, content={"error": str(error)})
+            logger.error("Remember entry runtime failure: %s", error)
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Remember service temporarily unavailable."},
+            )
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except Exception as error:
             logger.error("Remember entry endpoint error: %s", error, exc_info=True)
             return JSONResponse(

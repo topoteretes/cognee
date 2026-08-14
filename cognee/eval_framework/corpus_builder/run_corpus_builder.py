@@ -65,6 +65,7 @@ async def run_corpus_builder(
             chunk_size=chunk_size,
             load_golden_context=params.get("evaluating_contexts"),
             instance_filter=instance_filter,
+            seed=params.get("seed", 42),
         )
         with open(params["questions_path"], "w", encoding="utf-8") as f:
             json.dump(questions, f, ensure_ascii=False, indent=4)

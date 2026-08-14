@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, List, Optional, Type, Union
 
 from cognee.modules.observability import OtelStatusCode as StatusCode
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
@@ -54,7 +55,7 @@ async def get_memory_fragment(
     relevant_ids_to_filter: Optional[List[str]] = None,
     memory_fragment_filter: Optional[List[dict]] = None,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
@@ -225,7 +226,7 @@ async def brute_force_triplet_search(
     node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 6.5,
-    feedback_influence: float = 0.0,
+    feedback_influence: float = get_base_config().default_feedback_influence,
     unified_engine: Optional[UnifiedStoreEngine] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
@@ -284,7 +285,16 @@ async def brute_force_triplet_search(
                 "TextSummary_text",
                 "EntityType_name",
                 "DocumentChunk_text",
+                # DLT rows live in their own collection — chunk search
+                # is documents-only, but graph completion covers row text too.
+                "DltRow_text",
             ]
+        else:
+            # Copy so the caller's list is never mutated. Callers such as
+            # TripletSearchContextProvider pass a persistent ``self.collections``
+            # that is shared across concurrent per-entity searches; appending the
+            # edge collection in place would leak into that shared list.
+            collections = list(collections)
 
         if "EdgeType_relationship_name" not in collections:
             collections.append("EdgeType_relationship_name")

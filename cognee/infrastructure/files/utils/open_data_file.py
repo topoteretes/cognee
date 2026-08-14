@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
 
 @asynccontextmanager
@@ -15,8 +16,13 @@ async def open_data_file(
 ) -> AsyncGenerator[FileBufferedReader]:
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
     if file_path.startswith("file://"):
-        # Now split the actual filesystem path
-        actual_fs_path = get_data_file_path(file_path)
+        # Now split the actual filesystem path. Local reads go through the same
+        # allowlist as ingestion (cognee's own storage roots are always allowed);
+        # a path outside the allowed roots is reported as not found.
+        try:
+            actual_fs_path = os.fspath(resolve_local_path(get_data_file_path(file_path)))
+        except ValueError as error:
+            raise FileNotFoundError(file_path) from error
         file_dir_path = path.dirname(actual_fs_path)
         file_name = path.basename(actual_fs_path)
 
@@ -43,8 +49,13 @@ async def open_data_file(
             yield file
 
     else:
-        # Regular file path - normalize separators
-        normalized_path = get_data_file_path(file_path)
+        # Regular file path - normalize separators. Local reads go through the
+        # same allowlist as ingestion; a path outside the allowed roots is
+        # reported as not found.
+        try:
+            normalized_path = os.fspath(resolve_local_path(get_data_file_path(file_path)))
+        except ValueError as error:
+            raise FileNotFoundError(file_path) from error
         file_dir_path = path.dirname(normalized_path)
         file_name = path.basename(normalized_path)
 
