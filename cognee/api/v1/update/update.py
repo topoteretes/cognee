@@ -75,7 +75,10 @@ async def update(
         node_set: Optional list of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
         vector_db_config: Optional configuration for vector database (for custom setups).
+                 When provided, the update runs through the full rebuild flow —
+                 chunk-level updates on custom stores are a planned extension.
         graph_db_config: Optional configuration for graph database (for custom setups).
+                 Same routing note as vector_db_config.
         chunk_level_diff: When True (default), diff the new content against the stored
                  processed text and replace only the chunks the edit touched — unaffected
                  chunks keep their nodes, entities, and summaries. Falls back to the full
@@ -129,6 +132,15 @@ async def update(
         old_row = await session.get(Data, resolved_id)
         if old_row is not None:
             preserved_legacy_id = old_row.legacy_id
+
+    if chunk_level_diff and (vector_db_config is not None or graph_db_config is not None):
+        # Custom store configs are honored by the full flow's pipelines only:
+        # the incremental engine resolves its engines from global/dataset
+        # context and would silently read and write the DEFAULT stores. Route
+        # custom-store updates through the full rebuild until the incremental
+        # engine learns config injection.
+        logger.info("custom store configs provided; running the full update flow")
+        chunk_level_diff = False
 
     if chunk_level_diff:
         # Chunk-level incremental path: diff the new text against the stored

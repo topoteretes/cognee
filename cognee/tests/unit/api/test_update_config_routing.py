@@ -1,0 +1,95 @@
+"""Custom store configs route update() through the full rebuild flow.
+
+The incremental engine resolves its engines from global/dataset context, so
+it cannot honor per-call ``vector_db_config``/``graph_db_config`` — running
+it anyway would silently read and write the DEFAULT stores while the
+caller's stores never see the edit. update() must therefore skip the
+incremental attempt whenever either config is provided and take the full
+flow, whose pipelines apply the configs. Without configs the incremental
+path stays first choice.
+"""
+
+import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
+
+import pytest
+
+import cognee.api.v1.update.update  # noqa: F401  (bind the real submodule)
+
+update_module = sys.modules["cognee.api.v1.update.update"]
+data_methods_module = sys.modules["cognee.modules.data.methods"]
+
+pytestmark = pytest.mark.asyncio
+
+
+def _relational_engine_stub(row):
+    session = MagicMock()
+    session.get = AsyncMock(return_value=row)
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=session)
+    context.__aexit__ = AsyncMock(return_value=False)
+    engine = MagicMock()
+    engine.get_async_session = MagicMock(return_value=context)
+    return engine
+
+
+def _patches(data_id, incremental, full_result):
+    row = SimpleNamespace(id=data_id, legacy_id=None)
+    relational_module = sys.modules["cognee.infrastructure.databases.relational"]
+    return (
+        patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=data_id)),
+        patch.object(
+            relational_module,
+            "get_relational_engine",
+            MagicMock(return_value=_relational_engine_stub(row)),
+        ),
+        patch.object(update_module, "incremental_update", incremental),
+        patch.object(update_module, "datasets", SimpleNamespace(delete_data=AsyncMock())),
+        patch.object(update_module, "add", AsyncMock()),
+        patch.object(update_module, "cognify", AsyncMock(return_value=full_result)),
+    )
+
+
+async def test_custom_configs_skip_the_incremental_path():
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock()
+    full_result = {"run": "full"}
+
+    for config_kwargs in (
+        {"vector_db_config": {"vector_db_provider": "custom"}},
+        {"graph_db_config": {"graph_database_provider": "custom"}},
+        {
+            "vector_db_config": {"vector_db_provider": "custom"},
+            "graph_db_config": {"graph_database_provider": "custom"},
+        },
+    ):
+        incremental.reset_mock()
+        p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
+        with p1, p2, p3, p4, p5, p6:
+            result = await update_module.update(
+                data_id=data_id,
+                data="new content",
+                dataset_id=dataset_id,
+                user=SimpleNamespace(id=uuid4()),
+                **config_kwargs,
+            )
+        incremental.assert_not_called()
+        assert result == full_result, "custom-config updates must return the full-flow result"
+
+
+async def test_no_configs_take_the_incremental_path():
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock(return_value={"status": "incremental"})
+
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
+    with p1, p2, p3, p4, p5, p6:
+        result = await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
+    incremental.assert_awaited_once()
+    assert result == {"status": "incremental"}
