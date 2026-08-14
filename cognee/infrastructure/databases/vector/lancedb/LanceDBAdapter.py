@@ -424,7 +424,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection,
         incoming_dimension: int,
     ) -> None:
-        """Reject writes whose vectors cannot fit the collection's fixed-size schema."""
+        """Raise when the collection schema confirms a vector dimension mismatch."""
         schema = collection.schema()
         if inspect.isawaitable(schema):
             schema = await schema
@@ -455,11 +455,6 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
 
         vector_size = self.embedding_engine.get_vector_size()
-        await self._validate_collection_vector_dimension(
-            collection_name,
-            collection,
-            vector_size,
-        )
 
         data_vectors = await self.embed_data(
             [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
@@ -565,6 +560,22 @@ class LanceDBAdapter(VectorDBInterface):
                     .execute(self._records_for_write(lance_data_points))
                 )
         except (ValueError, OSError, RuntimeError) as e:
+            try:
+                await self._validate_collection_vector_dimension(
+                    collection_name,
+                    collection,
+                    vector_size,
+                )
+            except VectorDimensionMismatchError as mismatch_error:
+                raise mismatch_error from e
+            except Exception as diagnosis_error:
+                logger.debug(
+                    "Unable to verify vector dimensions for collection '%s' "
+                    "after a LanceDB write failure: %s",
+                    collection_name,
+                    diagnosis_error,
+                )
+
             # Two LanceDB schema-drift failure modes are recoverable by rebuilding
             # the table via Pydantic validation (which fills defaults from the
             # current DataPoint subclass):
