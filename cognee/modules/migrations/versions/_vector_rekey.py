@@ -46,12 +46,19 @@ async def index_data_points_batched(
         async with semaphore:
             await vector_engine.index_data_points(index_name, index_property_name, batch)
 
-    await asyncio.gather(
-        *(
-            asyncio.create_task(_index_batch(data_points[i : i + batch_size]))
-            for i in range(0, len(data_points), batch_size)
-        )
-    )
+    batches = [data_points[i : i + batch_size] for i in range(0, len(data_points), batch_size)]
+
+    # The FIRST batch runs alone: its write settles collection creation and any
+    # lazy schema migration. Migrations write into tables the per-dataset
+    # storage sync has not rebuilt yet, so on mismatch LanceDB drops and
+    # recreates the table mid-write — a concurrent batch's lock-free
+    # get_collection lands in that window and raises CollectionNotFoundError
+    # (and every concurrent batch would redo the table rewrite). Once settled,
+    # the remaining batches are plain merge-safe upserts and can overlap.
+    await _index_batch(batches[0])
+
+    if len(batches) > 1:
+        await asyncio.gather(*(asyncio.create_task(_index_batch(batch)) for batch in batches[1:]))
 
 
 class RekeyedPoint(DataPoint):

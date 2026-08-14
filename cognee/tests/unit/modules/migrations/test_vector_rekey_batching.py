@@ -59,6 +59,30 @@ async def test_splits_into_batches_of_engine_batch_size():
 
 
 @pytest.mark.asyncio
+async def test_first_batch_settles_before_others_start():
+    """The first batch runs alone so collection creation / lazy schema
+    migration settles before concurrent upserts (a concurrent get_collection
+    during LanceDB's mismatch-triggered table rewrite raises
+    CollectionNotFoundError)."""
+    events = []
+
+    async def _index(*args, **kwargs):
+        events.append("start")
+        await asyncio.sleep(0)
+        events.append("end")
+
+    engine = _make_engine(batch_size=2)
+    engine.index_data_points = AsyncMock(side_effect=_index)
+
+    with _config_patch(150):
+        await index_data_points_batched(engine, "DocumentChunk", "text", _make_points(10))
+
+    assert engine.index_data_points.await_count == 5
+    # First call fully completes before any other call starts.
+    assert events[0] == "start" and events[1] == "end"
+
+
+@pytest.mark.asyncio
 async def test_concurrency_derived_from_max_concurrent_data_points():
     """Concurrent batches = max_concurrent_data_points // batch_size (6 // 2 = 3)."""
     in_flight = 0
