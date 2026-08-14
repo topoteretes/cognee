@@ -13,7 +13,6 @@ from sqlalchemy import NullPool, event, text, select, MetaData, Table, delete, i
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
-from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -399,34 +398,19 @@ class SQLAlchemyAdapter:
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-            # Delete DatasetData instances referencing this data_id first to maintain referential integrity.
-            await session.execute(
-                delete(DatasetData).where(
-                    DatasetData.data_id == data_id,
-                    DatasetData.dataset_id == dataset_id,
-                )
-            )
-            # Flush to ensure the count in the next step is accurate within the transaction
-            await session.flush()
-
-            # Check if any references to this data_id still exist in the DatasetData table
-            remaining_refs = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(DatasetData)
-                    .where(DatasetData.data_id == data_id)
-                )
-            ).scalar()
-
-            # If there are still datasets using this data, we stop here.
-            if remaining_refs > 0:
-                await session.commit()
-                return
-
+            # Rows are dataset-scoped: the (data_id, dataset_id) pair must
+            # match — a mismatch means a mispinned id, not a membership to
+            # silently unlink.
             try:
-                data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
+                data_entity = (
+                    await session.scalars(
+                        select(Data).where(Data.id == data_id, Data.dataset_id == dataset_id)
+                    )
+                ).one()
             except (ValueError, NoResultFound) as e:
-                raise EntityNotFoundError(message=f"Entity not found: {str(e)}") from e
+                raise EntityNotFoundError(
+                    message=f"Data {data_id} not found in dataset {dataset_id}: {str(e)}"
+                ) from e
 
             # Check if other data objects point to the same raw data location
             raw_data_location_entities = (

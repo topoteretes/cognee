@@ -293,9 +293,8 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             new_callable=AsyncMock,
             return_value=graph,
         ),
-        patch.object(
-            retriever_output_module,
-            "update_node_access_timestamps",
+        patch(
+            "cognee.modules.retrieval.session_aware_completion.update_node_access_timestamps",
             new_callable=AsyncMock,
         ),
         patch(
@@ -324,7 +323,9 @@ async def test_hybrid_completion_get_retriever_output_smoke():
         payload.context == "## Relevant passages\nChunk context\n\n## Relevant entities\n### Entity"
     )
     assert payload.completion == ["answer"]
-    assert retriever_output_module._count_retrieved_objects(payload.result_object) == 2
+    from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
+
+    assert count_retrieved_objects(payload.result_object) == 2
 
 
 @pytest.mark.asyncio

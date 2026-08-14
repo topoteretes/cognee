@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -90,7 +91,15 @@ class TripletRetriever(BaseRetriever):
             logger.error("Triplet_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(
+            primary,
+            secondary,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Triplets are non-elementary graph objects; do not report IDs for session QA - object ids cannot be resolved"""
         return None
 
@@ -118,6 +127,13 @@ class TripletRetriever(BaseRetriever):
         kwargs = self._completion_kwargs(context)
         completion = await generate_completion(query=query, **kwargs)
         return [completion]
+
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        return append_chunk_evidence(
+            completions,
+            retrieved_objects,
+            enabled=self.include_references and self.response_model is str,
+        )
 
     async def get_completion_from_context(
         self,
@@ -155,7 +171,7 @@ class TripletRetriever(BaseRetriever):
 
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -175,8 +191,4 @@ class TripletRetriever(BaseRetriever):
             completions = await self._generate_completion_without_session(query, context)
 
         # Both the session/cache branch and the non-session branch rejoin here.
-        return append_chunk_evidence(
-            completions,
-            retrieved_objects,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return await self.append_references(completions, retrieved_objects)
