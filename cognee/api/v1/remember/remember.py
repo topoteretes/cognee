@@ -55,6 +55,8 @@ class RememberKwargs(TypedDict, total=False):
     graph_model: Any
     node_set: List[str]
     preferred_loaders: list
+    respect_gitignore: bool
+    exclude_patterns: List[str]
     incremental_loading: bool
     data_cache: bool
     data_per_batch: int
@@ -81,6 +83,8 @@ _ADD_ONLY = frozenset(
     {
         "node_set",
         "preferred_loaders",
+        "respect_gitignore",
+        "exclude_patterns",
         "importance_weight",
         "primary_key",
         "write_disposition",

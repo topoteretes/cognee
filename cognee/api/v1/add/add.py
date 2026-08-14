@@ -50,6 +50,8 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
+    respect_gitignore: bool = False,
+    exclude_patterns: Optional[List[str]] = None,
     data_per_batch: Optional[int] = 2000,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
@@ -110,6 +112,13 @@ async def add(
               Users can only access datasets they have permissions for.
         node_set: Optional list of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        respect_gitignore: When a directory is ingested, skip files matched by its
+                 top-level .gitignore (e.g. .venv, build artifacts). Defaults to False.
+        exclude_patterns: Gitignore-style patterns to skip when a directory is
+                 ingested, e.g. ["*.log", "node_modules/", "docs/generated/"].
+                 Explicitly passed files are never filtered. Directory expansion
+                 always skips version-control internals and binary files no
+                 registered loader supports, without any flag.
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
@@ -224,7 +233,12 @@ async def add(
         preferred_loaders = transformed
 
     tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
+        Task(
+            resolve_data_directories,
+            include_subdirectories=True,
+            respect_gitignore=respect_gitignore,
+            exclude_patterns=exclude_patterns,
+        ),
         Task(
             ingest_data,
             dataset_name,
@@ -295,6 +309,8 @@ async def add(
         graph_db_config=graph_db_config,
         use_pipeline_cache=False,
         incremental_loading=incremental_loading,
+        respect_gitignore=respect_gitignore,
+        exclude_patterns=exclude_patterns,
         data_per_batch=data_per_batch,
         llm_config=llm_config,
         embedding_config=embedding_config,

@@ -46,6 +46,8 @@ async def run_tasks(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
+    respect_gitignore: bool = False,
+    exclude_patterns: Optional[List[str]] = None,
 ):
     """Run a pipeline over a dataset as ONE logical run.
 
@@ -89,7 +91,11 @@ async def run_tasks(
                 data = [data]
 
             if data_cache or incremental_loading:
-                data = await resolve_data_directories(data)
+                data = await resolve_data_directories(
+                    data,
+                    respect_gitignore=respect_gitignore,
+                    exclude_patterns=exclude_patterns,
+                )
 
             # Build (item, item_tasks) work pairs: a resolver picks each
             # item's task list; a plain list applies uniformly. Validate each

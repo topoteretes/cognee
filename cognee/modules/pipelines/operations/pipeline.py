@@ -74,6 +74,8 @@ async def run_pipeline(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
     skip_connection_test: bool = False,
+    respect_gitignore: bool = False,
+    exclude_patterns: Optional[list[str]] = None,
 ):
     """``tasks`` is either the task list every data item runs, or a callable
     mapping one item to its task list (a task resolver — see ``run_tasks``);
@@ -106,6 +108,8 @@ async def run_pipeline(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            respect_gitignore=respect_gitignore,
+            exclude_patterns=exclude_patterns,
         ):
             yield run_info
 
@@ -123,6 +127,8 @@ async def run_pipeline_per_dataset(
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache=False,
+    respect_gitignore: bool = False,
+    exclude_patterns: Optional[list[str]] = None,
 ):
     # The actual work of a single run, factored out so it can run either under
     # the per-dataset lock (normal case) or directly (re-entrant case below).
@@ -153,6 +159,8 @@ async def run_pipeline_per_dataset(
             llm_config=llm_config,
             embedding_config=embedding_config,
             data_cache=data_cache,
+            respect_gitignore=respect_gitignore,
+            exclude_patterns=exclude_patterns,
         )
 
         async for pipeline_run_info in pipeline_run:

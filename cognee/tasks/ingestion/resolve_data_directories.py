@@ -1,7 +1,8 @@
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import List, Union, BinaryIO
+from typing import List, Optional, Union, BinaryIO
 
+from cognee.tasks.ingestion.directory_file_filters import filter_directory_files, filter_s3_keys
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
@@ -22,14 +23,27 @@ def _resolve_existing_local_path(item: str) -> Path | None:
 
 
 async def resolve_data_directories(
-    data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True
+    data: Union[BinaryIO, List[BinaryIO], str, List[str]],
+    include_subdirectories: bool = True,
+    respect_gitignore: bool = False,
+    exclude_patterns: Optional[List[str]] = None,
 ):
     """
     Resolves directories by replacing them with their contained files.
 
+    Expanded directories are filtered: version-control internals (.git and
+    friends) and binary files no registered loader supports are always
+    skipped, ``respect_gitignore=True`` additionally skips matches of the
+    directory's top-level .gitignore, and ``exclude_patterns`` skips
+    gitignore-style matches (e.g. ``*.log``, ``.venv/``). Explicitly passed
+    files are never filtered. S3 prefixes get pattern filtering only —
+    .gitignore and binary detection would require remote reads.
+
     Args:
         data: A single file, directory, or binary stream, or a list of such items.
         include_subdirectories: Whether to include files in subdirectories recursively.
+        respect_gitignore: Skip files matched by the directory's top-level .gitignore.
+        exclude_patterns: Gitignore-style patterns to skip when expanding directories.
 
     Returns:
         A list of resolved files and binary streams.
@@ -73,7 +87,7 @@ async def resolve_data_directories(
                                 s3_files.append("s3://" + key)
                             else:
                                 s3_files.append(key)
-                    resolved_data.extend(s3_files)
+                    resolved_data.extend(filter_s3_keys(item, s3_files, exclude_patterns))
                 else:
                     raise S3FileSystemNotFoundError()
                 continue
@@ -82,15 +96,22 @@ async def resolve_data_directories(
 
             if local_path and local_path.is_dir():  # If it's a directory
                 if include_subdirectories:
-                    # Recursively add all files in the directory and subdirectories
-                    for file_path in local_path.rglob("*"):
-                        if file_path.is_file():
-                            resolved_data.append(str(file_path))
+                    candidates = [
+                        file_path for file_path in local_path.rglob("*") if file_path.is_file()
+                    ]
                 else:
-                    # Add all files (not subdirectories) in the directory
-                    resolved_data.extend(
-                        str(file_path) for file_path in local_path.iterdir() if file_path.is_file()
+                    candidates = [
+                        file_path for file_path in local_path.iterdir() if file_path.is_file()
+                    ]
+                resolved_data.extend(
+                    str(file_path)
+                    for file_path in filter_directory_files(
+                        local_path,
+                        candidates,
+                        respect_gitignore=respect_gitignore,
+                        exclude_patterns=exclude_patterns,
                     )
+                )
             elif local_path and local_path.is_file():
                 resolved_data.append(str(local_path))
             else:  # If it's a file or text add it directly

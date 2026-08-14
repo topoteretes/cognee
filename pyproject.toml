@@ -32,6 +32,7 @@ dependencies = [
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "filelock>=3.12.0,<4.0.0",  # cross-process migration lock for SQLite (Linux/macOS/Windows)
+    "pathspec>=0.12.1,<1.2.0",  # gitignore-semantics matching for directory ingestion filters
     "tiktoken>=0.8.0,<1.0.0",
     "litellm>=1.83.7",
     "instructor>=1.9.1,<1.15.3",
