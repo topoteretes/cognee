@@ -231,7 +231,12 @@ jobs:
       EMBEDDING_DIMENSIONS: 1536
       EMBEDDING_API_KEY: mock-key
       LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
-      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace_large.json
+      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace.json
+      # Scale floors phase 2 asserts per dataset. The regular mock seeds ~3.8k
+      # nodes / ~3.9k edges; when the 27x mock (mock_war_and_peace_large.json)
+      # lands on S3, swap the key below and raise these to 80000 / 200000.
+      MIN_NODES: "3000"
+      MIN_EDGES: "3000"
 
     steps:
       - name: Check out current branch
@@ -259,7 +264,7 @@ jobs:
         run: |
           mkdir -p /tmp/large_migration_fixtures
           aws s3 cp "s3://$BUCKET/$PREFIX/war_and_peace.json" "$LARGE_MEMORIES_FILE"
-          aws s3 cp "s3://$BUCKET/$PREFIX/mock_war_and_peace_large.json" "$LARGE_MOCK_FILE"
+          aws s3 cp "s3://$BUCKET/$PREFIX/mock_war_and_peace.json" "$LARGE_MOCK_FILE"
 
       # Scripts and the shared mock-ingestion module do not exist on the
       # legacy tag — save them (the module goes NEXT TO the phase scripts,

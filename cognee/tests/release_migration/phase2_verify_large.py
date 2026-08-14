@@ -30,11 +30,11 @@ DATASET_B = "large_fork_b"
 MEMORIES_FILE = Path(os.environ["LARGE_MEMORIES_FILE"])
 MOCK_FILE = Path(os.environ["LARGE_MOCK_FILE"])
 
-# The seeded graph is ~100k nodes / ~290k edges per dataset on the 1.4.x
-# pipeline; older pipelines may shape slightly differently, so assert a floor
-# plus cross-dataset equality instead of exact counts.
-MIN_NODES = 80_000
-MIN_EDGES = 200_000
+# Scale floors come from the workflow (regular mock: ~3.8k nodes/dataset;
+# the 27x large mock: ~100k). Cross-dataset equality is asserted regardless,
+# so exact pipeline-era counts never need pinning.
+MIN_NODES = int(os.environ.get("MIN_NODES", "3000"))
+MIN_EDGES = int(os.environ.get("MIN_EDGES", "3000"))
 
 
 async def dataset_graph_counts(dataset_name: str):
