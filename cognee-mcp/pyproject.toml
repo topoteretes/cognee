@@ -81,9 +81,20 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 # split inside its [fastembed] extra, but cognee-mcp doesn't pull that
 # extra, so we must mirror the constraint here to keep `uv lock --upgrade`
 # from picking a 1.24.x for python<3.14.
+#
+# spacy/scipy are the same story: cognee's root pyproject constrains both for
+# python>=3.14, but uv's constraint-dependencies apply only to the project
+# doing the resolution — a dependent project does not inherit them. Without
+# the mirror, `uv sync` here on 3.14 fails outright, because unstructured
+# requires spacy on python>=3.13 and spacy 3.8.14 ships no cp314 wheel.
+# scipy currently resolves to a cp314-compatible 1.18.0 on its own; the pin
+# is a guard so `uv lock --upgrade` can't collapse <3.11 and >=3.14 onto the
+# latest cp310-compatible 1.15.3, which has no cp314 wheel.
 constraint-dependencies = [
     "onnxruntime<=1.23.2 ; python_version < '3.14'",
     "onnxruntime>=1.24.1 ; python_version >= '3.14'",
+    "spacy<3.8.14 ; python_version >= '3.14'",
+    "scipy>=1.16.1 ; python_version >= '3.14'",
 ]
 
 # Note: exclude newer packages that are less than 2 days old
