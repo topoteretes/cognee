@@ -21,11 +21,10 @@ class DatabaseNotCreatedError(CogneeSystemError):
         message: str = "The database has not been created yet. Please call `await setup()` first.",
         name: str = "DatabaseNotCreatedError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+        log: bool = True,
+        log_level: str = "ERROR",
     ):
-        # log=False: this is a recoverable signal — the CLI catches it and
-        # auto-creates the database (cognee/cli/user_resolution.py), so an
-        # ERROR log line here would alarm users on every fresh install.
-        super().__init__(message, name, status_code, log=False)
+        super().__init__(message, name, status_code, log=log, log_level=log_level)
 
 
 class UnsupportedProvenanceCapability(CogneeApiError):
