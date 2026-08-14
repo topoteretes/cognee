@@ -270,6 +270,12 @@ jobs:
       # GRAPH_DATABASE_URL — setting them unconditionally keeps the env static.
       GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_provider }}
       GRAPH_DATABASE_URL: postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+      # v1.2.0's postgres graph handler reads the discrete fields, not the URL
+      # (and its graph_database_port DEFAULTS to a literal placeholder 123).
+      GRAPH_DATABASE_HOST: localhost
+      GRAPH_DATABASE_PORT: 5432
+      GRAPH_DATABASE_USERNAME: cognee
+      GRAPH_DATABASE_PASSWORD: cognee
       VECTOR_DB_PROVIDER: ${{ matrix.vector_provider }}
       VECTOR_DB_HOST: localhost
       VECTOR_DB_PORT: 5432
@@ -296,10 +302,13 @@ jobs:
 
       LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
       LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace.json
-      # Scale floors phase 2 asserts per dataset (regular mock: ~3.8k nodes /
-      # ~3.9k edges per dataset).
-      MIN_NODES: "3000"
-      MIN_EDGES: "3000"
+      # Scale floors phase 2 asserts per dataset. Counts are pipeline-era
+      # dependent: the v1.2.0 pipeline builds 2,338 nodes / 9,148 edges per
+      # dataset from the regular mock (measured in CI). Cross-dataset equality
+      # is the real integrity check; these floors just catch gross data loss.
+      # For the 27x large mock, raise to roughly "50000" / "180000".
+      MIN_NODES: "2000"
+      MIN_EDGES: "7000"
 
     steps:
       - name: Check out current branch
