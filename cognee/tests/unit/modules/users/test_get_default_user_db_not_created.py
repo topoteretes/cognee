@@ -72,15 +72,29 @@ class TestGetDefaultUserDatabaseNotCreated:
             with pytest.raises(RuntimeError):
                 await gdu_mod.get_default_user()
 
-    def test_database_not_created_error_does_not_self_log(self):
-        # The exception base class logs itself on construction by default.
-        # DatabaseNotCreatedError is a recoverable signal (the CLI catches it
-        # and auto-creates the database), so it must stay silent — an ERROR
-        # line on stderr during a successful fresh-install `cognee-cli add`
-        # both alarms users and fails the CLI integration test.
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "unable to open database file",
+            "no such table: principals",
+        ],
+    )
+    async def test_fresh_install_classification_does_not_log(self, message):
+        # DatabaseNotCreatedError logs on construction by default, like every
+        # cognee exception, but the raises in get_default_user pass log=False:
+        # there it is a recoverable signal (the CLI catches it and
+        # auto-creates the database), so an ERROR line on stderr during a
+        # successful fresh-install `cognee-cli add` would both alarm users
+        # and fail the CLI integration test. Both classification branches —
+        # the "principals" schema-missing path and the sqlite fresh-install
+        # path — must stay silent.
         import cognee.exceptions.exceptions as exc_mod
 
-        with patch.object(exc_mod, "logger") as mock_logger:
-            DatabaseNotCreatedError()
+        engine = _engine_raising(_sqlite_operational_error(message))
+        with patch.object(gdu_mod, "get_relational_engine", return_value=engine):
+            with patch.object(exc_mod, "logger") as mock_logger:
+                with pytest.raises(DatabaseNotCreatedError):
+                    await gdu_mod.get_default_user()
         mock_logger.error.assert_not_called()
         mock_logger.warning.assert_not_called()
