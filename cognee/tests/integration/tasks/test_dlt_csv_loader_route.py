@@ -123,3 +123,39 @@ async def test_csv_takes_dlt_route_through_loader(clean_env):
 
     assert census.get("DltRow") == 3, f"expected 3 DltRow nodes, census: {census}"
     assert census.get("SchemaTable") == 1, f"schema node missing: {census}"
+
+
+@pytest.mark.asyncio
+async def test_two_csvs_in_one_add_stage_concurrently(clean_env, tmp_path):
+    """Two CSVs in one add() reach the dlt_csv_loader in parallel (the add
+    pipeline runs items concurrently). Staging serializes on the shared dlt
+    working directory — regression guard: dlt's normalize cleanup used to
+    race the sibling run's package folders and crash ingestion."""
+    first_csv = clean_env
+    second = pathlib.Path(tmp_path) / "sensors.csv"
+    second.write_text("id,kind,unit\n1,thermometer,C\n2,hygrometer,%\n3,anemometer,m/s\n")
+
+    await cognee.add([first_csv, str(second)], dataset_name="csv_pair_ds")
+
+    user = await get_default_user()
+    dataset = (
+        await get_authorized_existing_datasets(
+            user=user, permission_type="read", datasets=["csv_pair_ds"]
+        )
+    )[0]
+    manifests = [r for r in await get_dataset_data(dataset.id) if is_dlt_source_manifest(r)]
+    assert len(manifests) == 2, f"both CSVs must become manifests, got {len(manifests)}"
+    assert {m.system_metadata.get("source_name") for m in manifests} == {"instruments", "sensors"}
+    assert all(m.loader_engine == "dlt_csv_loader" for m in manifests)
+
+    await cognee.cognify(datasets=["csv_pair_ds"])
+
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    graph = await get_graph_engine()
+    nodes, _ = await graph.get_graph_data()
+    census: dict = {}
+    for _, props in nodes:
+        census[props.get("type", "?")] = census.get(props.get("type", "?"), 0) + 1
+    assert census.get("DltRow") == 6, f"3 rows per CSV expected, census: {census}"
+    assert census.get("SchemaTable") == 2, f"one schema table per CSV, census: {census}"
