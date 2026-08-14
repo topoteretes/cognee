@@ -5,7 +5,7 @@ from cognee.infrastructure.databases.exceptions.exceptions import EntityNotFound
 from sqlalchemy import select
 from sqlalchemy.sql import func
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Dataset, Data, DatasetData
+from cognee.modules.data.models import Dataset, Data
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_user
 from dataclasses import dataclass
@@ -26,6 +26,17 @@ async def get_deletion_counts(
     """
     counts = DeletionCountsPreview()
     relational_engine = get_relational_engine()
+
+    # Resolve the user (opens its own session) BEFORE opening ours so we don't
+    # hold a pooled connection across get_user — that overlap deadlocks the pool
+    # under concurrency (issue #4197 class).
+    user = None
+    if user_id and not dataset_name and not all_data:
+        try:
+            user = await get_user(user_id)
+        except (ValueError, EntityNotFoundError):
+            raise CliCommandException(f"No User exists with ID {user_id}", error_code=1)
+
     async with relational_engine.get_async_session() as session:
         if dataset_name:
             # Find the dataset by name
@@ -41,9 +52,7 @@ async def get_deletion_counts(
 
             # Count data entries linked to this dataset
             count_query = (
-                select(func.count())
-                .select_from(DatasetData)
-                .where(DatasetData.dataset_id == dataset.id)
+                select(func.count()).select_from(Data).where(Data.dataset_id == dataset.id)
             )
             data_entry_count = (await session.execute(count_query)).scalar_one()
             counts.users = 1
@@ -66,11 +75,6 @@ async def get_deletion_counts(
 
         # Placeholder for user_id logic
         elif user_id:
-            user = None
-            try:
-                user = await get_user(user_id)
-            except (ValueError, EntityNotFoundError):
-                raise CliCommandException(f"No User exists with ID {user_id}", error_code=1)
             counts.users = 1
             # Find all datasets owned by this user
             datasets_query = select(Dataset).where(Dataset.owner_id == user.id)
@@ -81,9 +85,7 @@ async def get_deletion_counts(
                 dataset_ids = [d.id for d in user_datasets]
                 # Count all data data_entries across all of the user's datasets
                 data_count_query = (
-                    select(func.count())
-                    .select_from(DatasetData)
-                    .where(DatasetData.dataset_id.in_(dataset_ids))
+                    select(func.count()).select_from(Data).where(Data.dataset_id.in_(dataset_ids))
                 )
                 data_entry_count = (await session.execute(data_count_query)).scalar_one()
                 counts.data_entries = data_entry_count

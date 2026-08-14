@@ -24,6 +24,9 @@ from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.modules.users.permissions.methods import (
+    authorized_get_principal_datasets as method_authorized_get_principal_datasets,
+)
 
 
 class SelectTenantDTO(InDTO):
@@ -138,6 +141,58 @@ def get_permissions_router() -> APIRouter:
 
         return JSONResponse(
             status_code=200, content={"message": "Permission revoked from principal"}
+        )
+
+    @permissions_router.get("/principals/{principal_id}/datasets")
+    async def get_principal_datasets(
+        principal_id: UUID,
+        permission_name: str = Query(
+            "read",
+            examples=["read"],
+            description="Permission to read back. One of 'read', 'write', 'delete', 'share'.",
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List the datasets a principal holds a permission on.
+
+        A principal is a user, a role or a tenant. What the caller may ask about
+        depends on which: themselves or any user if they can manage users; a role
+        of this tenant they belong to, or any of its roles if they can manage
+        users; and only the tenant they are currently in. Results are always
+        narrowed to the caller's current tenant.
+
+        ## Path Parameters
+        - **principal_id** (UUID): The principal UUID — a user, role or tenant.
+
+        ## Request Parameters
+        - **permission_name** (str): Permission to list. Defaults to "read".
+
+        ## Response
+        Returns a JSON list of dataset objects the principal has that permission on.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller may not ask about this principal
+        - **404 Not Found**: Principal does not exist in the caller's tenant
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/permissions/principals/{str(principal_id)}/datasets",
+                "principal_id": str(principal_id),
+                "permission_name": permission_name,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        datasets = await method_authorized_get_principal_datasets(
+            principal_id, permission_name, user.id
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content=[dataset.to_json() for dataset in datasets],
         )
 
     @permissions_router.post("/roles")
@@ -470,19 +525,17 @@ def get_permissions_router() -> APIRouter:
         user: User = Depends(get_authenticated_user),
     ):
         """
-        List all roles in a tenant.
+        List roles in a tenant.
 
-        The authenticated user must be the tenant owner or have user-management
-        permission (e.g. Admin role) in the tenant.
+        Callers who are the tenant owner or have user-management permission (e.g.
+        Admin role) see every role in the tenant. Other callers see only the roles
+        they are a member of.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
 
         ## Response
         Returns a JSON list of roles: [{"id", "name", "description", "user_count"}].
-
-        ## Error Codes
-        - **403 Forbidden**: Caller lacks user-management permission in the tenant
         """
         role_list = await method_get_tenant_roles(tenant_id=tenant_id, user=user)
 
@@ -497,7 +550,8 @@ def get_permissions_router() -> APIRouter:
         """
         List the users assigned to a role.
 
-        The authenticated user must have user-management permission in the tenant.
+        Visible to members of the role itself, and to callers with user-management
+        permission in the tenant.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant
@@ -507,7 +561,8 @@ def get_permissions_router() -> APIRouter:
         Returns a JSON list of users: [{"id", "name"}] (name is the user's email).
 
         ## Error Codes
-        - **403 Forbidden**: Caller lacks user-management permission in the tenant
+        - **403 Forbidden**: Caller is not a member of the role and lacks user-management permission
+        - **404 Not Found**: The role does not exist in this tenant
         """
         user_list = await method_get_users_in_roles(tenant_id=tenant_id, role_id=role_id, user=user)
         return JSONResponse(status_code=200, content=user_list)

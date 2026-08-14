@@ -24,7 +24,7 @@ async def test_database_context_sets_and_resets_current_dataset_id(monkeypatch):
     monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
 
     async with set_database_global_context_variables(dataset_id, user_id):
-        assert current_dataset_id.get() == str(dataset_id)
+        assert current_dataset_id.get() == dataset_id
 
     assert current_dataset_id.get() == "outer"
 
@@ -132,3 +132,33 @@ async def test_dataset_database_configs_persist_after_exit(monkeypatch):
     assert graph_db_config.get()["graph_database_name"] == "test_graph_db"
     assert vector_db_config.get()["vector_db_name"] == "test_vector_db"
     assert file_storage_config.get() is not None
+
+
+@pytest.mark.asyncio
+async def test_dataset_name_is_rejected(monkeypatch):
+    """Only a dataset id (UUID or UUID string) may enter the database context.
+    Names must be resolved by the caller first; the context variable is left
+    untouched when entry is refused."""
+    from cognee.exceptions import CogneeValidationError
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+    current_dataset_id.set(None)
+
+    with pytest.raises(CogneeValidationError, match="main_dataset"):
+        async with set_database_global_context_variables("main_dataset", uuid4()):
+            pass
+
+    assert current_dataset_id.get() is None
+
+
+@pytest.mark.asyncio
+async def test_uuid_string_dataset_is_rejected(monkeypatch):
+    """One input type: even a valid UUID in string form is refused — callers
+    hold real UUID objects, the boundary does no coercion."""
+    from cognee.exceptions import CogneeValidationError
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "false")
+
+    with pytest.raises(CogneeValidationError, match="must be a dataset id"):
+        async with set_database_global_context_variables(str(uuid4()), uuid4()):
+            pass

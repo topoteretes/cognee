@@ -28,6 +28,10 @@ except ImportError:
 
 logger = get_logger("ingest_dlt_source")
 
+# Serializes dlt staging runs: one shared pipeline name means one shared dlt
+# working directory, which concurrent runs corrupt (see the lock's use below).
+_staging_lock = asyncio.Lock()
+
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
@@ -88,13 +92,6 @@ async def ingest_dlt_source(
             "Only 'sqlite' and 'postgres' are supported."
         )
 
-    # Execute dlt pipeline with error handling
-    pipeline = dlt.pipeline(
-        pipeline_name="ingest_dlt_source",
-        destination=destination,
-        dataset_name=dataset_name,
-    )
-
     # Build run kwargs based on disposition
     run_kwargs = {
         "write_disposition": write_disposition,
@@ -105,14 +102,37 @@ async def ingest_dlt_source(
     if write_disposition == "merge" and primary_key:
         run_kwargs["primary_key"] = primary_key
 
-    try:
-        # dlt's pipeline.run() is synchronous and potentially long-running;
-        # run it in a thread to avoid blocking the async event loop.
-        load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
-    except Exception as e:
-        raise DLTIngestionError(
-            message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
-        ) from e
+    # Every staging run shares one dlt pipeline name, and dlt's working
+    # directory for a pipeline is NOT safe for concurrent runs: normalize's
+    # package cleanup deletes folders under the other run's feet. The add
+    # pipeline processes items concurrently (two CSVs in one add() reach the
+    # dlt_csv_loader in parallel), so staging must serialize here.
+    async with _staging_lock:
+        pipeline = dlt.pipeline(
+            pipeline_name="ingest_dlt_source",
+            destination=destination,
+            dataset_name=dataset_name,
+        )
+        try:
+            # dlt's pipeline.run() is synchronous and potentially long-running;
+            # run it in a thread to avoid blocking the async event loop.
+            load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
+        except Exception as e:
+            raise DLTIngestionError(
+                message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
+            ) from e
+
+    # Scope the read-back to the tables this source actually loaded. The
+    # staging DB is shared per dataset, so it can still hold tables from other
+    # sources ingested earlier; reading those would leak rows across sources.
+    # The package's completed jobs name exactly the tables this load wrote;
+    # the schema can't be used here — dlt persists it in pipeline state, so it
+    # accumulates tables across runs and sources.
+    loaded_tables: set = set()
+    if load_info is not None:
+        for package in load_info.load_packages:
+            for job in package.jobs.get("completed_jobs", []):
+                loaded_tables.add(job.job_file_info.table_name)
 
     # Validate load_info for failed jobs
     if load_info is not None:
@@ -130,7 +150,9 @@ async def ingest_dlt_source(
 
     # Extract schema from the dlt database
     try:
-        _, filtered_schema = await _extract_dlt_schema(relational_config, dlt_db_name, dataset_name)
+        _, filtered_schema = await _extract_dlt_schema(
+            relational_config, dlt_db_name, dataset_name, loaded_tables
+        )
     except Exception as e:
         raise DLTIngestionError(
             message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
@@ -158,8 +180,15 @@ async def ingest_dlt_source(
     return row_data_list
 
 
-async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name: str):
-    """Extract and filter schema from the dlt-populated database."""
+async def _extract_dlt_schema(
+    relational_config, dlt_db_name: str, dataset_name: str, allowed_tables: set
+):
+    """Extract and filter schema from the dlt-populated database.
+
+    Only tables in ``allowed_tables`` (the tables loaded by the current dlt
+    run) are kept — the staging DB is shared per dataset and may contain
+    tables from other sources.
+    """
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
@@ -185,10 +214,42 @@ async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name:
     )
     schema = await engine.extract_schema()
 
-    # Filter out dlt internal tables (those starting with _dlt_ or containing staging)
-    filtered_schema = {k: v for k, v in schema.items() if "_dlt_" not in k and "staging" not in k}
+    # Drop DLT's internal tables and tables not loaded by the current source.
+    # Postgres keys are schema-qualified ("dataset.table"), so the loaded-table
+    # check compares the last path component.
+    filtered_schema = {}
+    internal_tables = []
+    for qualified_name, table_info in schema.items():
+        if _is_dlt_internal_table(qualified_name):
+            internal_tables.append(qualified_name)
+            continue
+        if qualified_name.split(".")[-1] not in allowed_tables:
+            continue
+        filtered_schema[qualified_name] = table_info
+
+    if internal_tables:
+        logger.debug(
+            "Excluded %d DLT-internal table(s) from schema: %s",
+            len(internal_tables),
+            sorted(internal_tables),
+        )
 
     return schema, filtered_schema
+
+
+def _is_dlt_internal_table(qualified_name: str) -> bool:
+    """Identify DLT's own artifacts in the staging database.
+
+    DLT's bookkeeping tables are prefixed ``_dlt_`` (_dlt_loads, _dlt_version,
+    _dlt_pipeline_state); on schema-qualified destinations its staging copies
+    live in a schema named ``{dataset}_staging``. Exact prefix/suffix matching
+    only — substring checks would silently drop user tables whose names merely
+    contain "staging" or "_dlt_" (e.g. "staging_orders", "my_dlt_exports").
+    """
+    *schema_parts, table = qualified_name.split(".")
+    if table.startswith("_dlt_"):
+        return True
+    return bool(schema_parts) and schema_parts[-1].endswith("_staging")
 
 
 def _quote_identifier(name: str) -> str:
@@ -226,7 +287,7 @@ async def _read_rows_from_tables(
     schema: dict,
     primary_key: Optional[str],
     relational_config,
-    max_rows_per_table: int = 50,
+    max_rows_per_table: int = 0,
 ) -> List[DltRowData]:
     """Read rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
@@ -284,7 +345,7 @@ async def _read_single_table(
     dataset_name: str,
     dlt_db_name: str,
     relational_config,
-    max_rows: int = 50,
+    max_rows: int = 0,
 ) -> List[DltRowData]:
     """Read rows from a single table and return DltRowData objects.
 
@@ -419,8 +480,16 @@ def _resolve_primary_key(
     return "id"
 
 
+# Identity map over the identifier alphabet. Rebuilding the sanitized name from
+# these constant strings (dict values, not the input) makes the whitelist
+# guarantee visible to static dataflow analysis (CodeQL py/path-injection):
+# the result provably contains no path or SQL metacharacters.
+_SAFE_IDENT_CHARS = {c: c for c in "abcdefghijklmnopqrstuvwxyz0123456789_"}
+
+
 def _to_safe_ident(s: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
+    s = "".join(_SAFE_IDENT_CHARS.get(ch, "_") for ch in s)
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
     if s[0].isdigit():

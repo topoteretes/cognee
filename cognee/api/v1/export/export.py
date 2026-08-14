@@ -7,13 +7,14 @@ from uuid import UUID
 from cognee.modules.migration.export import ExportResult, export_dataset
 from cognee.modules.migration.snapshot import GraphSnapshot
 from cognee.modules.observability import new_span, COGNEE_DATASET_NAME
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 _FileFormat = Literal["cogx", "json", "graphml", "cypher"]
 
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     format: Literal["pydantic"] = "pydantic",
     destination: Optional[Union[str, Path]] = None,
     user=None,
@@ -35,7 +36,7 @@ async def export(
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     *,
     format: _FileFormat,
     destination: Optional[Union[str, Path]] = None,
@@ -46,7 +47,7 @@ async def export(
 
 
 async def export(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
     destination: Optional[Union[str, Path]] = None,
     user=None,

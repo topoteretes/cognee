@@ -28,6 +28,7 @@ from cognee.modules.migration.cogx import (
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
 from cognee.modules.migration.snapshot import GraphSnapshot, build_snapshot
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("migration.export")
 
@@ -193,7 +194,7 @@ def _write_cogx(
 
 
 async def export_dataset(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
     destination: Optional[Union[str, Path]] = None,
     user=None,

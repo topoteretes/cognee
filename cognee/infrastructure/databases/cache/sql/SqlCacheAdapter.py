@@ -9,7 +9,20 @@ from hashlib import sha256
 from typing import List, Optional
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine, delete, event, func, insert, or_, select, text, update
+from sqlalchemy import (
+    NullPool,
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    or_,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -41,6 +54,16 @@ _DEADLOCK_ATTEMPTS = 3
 
 # Advisory-lock id guarding the throttled global TTL sweep on Postgres.
 _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], "big", signed=True)
+
+# Fraction of the TTL window a row's expiry may lag behind the freshest write
+# before a sliding-TTL UPDATE re-stamps it. The slide is Redis EXPIRE parity,
+# but Redis EXPIRE is O(1) metadata on one key while the naive SQL translation
+# rewrites every session row per write — quadratic total write cost, and on the
+# SQLite WAL ~15,400x write amplification in a long agent session (issue #4393).
+# Skipping rows that are less than (fraction * ttl) stale bounds each row to at
+# most one re-stamp per slack window; rows then expire between (1 - fraction)
+# and 1.0 of the TTL after the session's last write.
+_TTL_REFRESH_FRACTION = 0.05
 
 
 def _is_deadlock_error(error: Exception) -> bool:
@@ -125,6 +148,11 @@ class SqlCacheAdapter(CacheDBInterface):
             pool_args: dict = (
                 dict(relational_config.pool_args) if relational_config.pool_args else {}
             )
+            # POOL_ARGS is shared configuration: the relational adapter accepts
+            # "nullpool" as a string and normalizes it to the pool class, so the
+            # same value must work here — SQLAlchemy itself needs the class.
+            if pool_args.get("poolclass", "").lower() == "nullpool":
+                pool_args["poolclass"] = NullPool
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.
@@ -225,13 +253,26 @@ class SqlCacheAdapter(CacheDBInterface):
         await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
 
     async def _refresh_session_ttl(self, session, table, user_id: str, session_id: str) -> None:
-        """Slide the whole session's expiry forward (Redis EXPIRE-on-write parity)."""
+        """Slide the session's expiry forward (Redis EXPIRE-on-write parity), lazily.
+
+        Only rows whose expiry lags the new target by more than the slack
+        window (_TTL_REFRESH_FRACTION of the TTL) are re-stamped, so a write
+        costs roughly its own bytes instead of rewriting the whole session
+        (see _TTL_REFRESH_FRACTION for the amplification math). NULL-expiry
+        rows (written while TTL was disabled) are stamped too, matching the
+        eager slide's behavior.
+        """
         if not self._ttl_enabled():
             return
+        new_expiry = self._session_expiry()
+        cutoff = new_expiry - timedelta(seconds=self.session_ttl_seconds * _TTL_REFRESH_FRACTION)
         await session.execute(
             update(table)
-            .where(self._session_filter(table, user_id, session_id))
-            .values(expires_at=self._session_expiry())
+            .where(
+                self._session_filter(table, user_id, session_id),
+                or_(table.c.expires_at.is_(None), table.c.expires_at < cutoff),
+            )
+            .values(expires_at=new_expiry)
         )
 
     async def _purge_session_expired(self, session, table, user_id: str, session_id: str) -> None:
@@ -302,7 +343,7 @@ class SqlCacheAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
@@ -835,16 +876,27 @@ class SqlCacheAdapter(CacheDBInterface):
     async def create_session_context_entry(
         self, user_id: str, session_id: str, entry_dump: dict
     ) -> None:
-        """Append one session-context entry (kind-discriminated dict) to the session.
+        """Create or replace one session-context entry (kind-discriminated dict).
 
         The caller validates the payload; we only promote its ``id`` to the
-        ``entry_id`` column so updates can target a single row directly.
+        ``entry_id`` column so updates can target a single row directly. Writes
+        upsert on (user_id, session_id, entry_id) — last writer wins — so racing
+        update-then-create flows (e.g. the session persist watermark) converge
+        on a single row instead of accumulating duplicates.
         """
         await self._ensure_initialized()
         # Redis/FS append regardless of "id" (an id-less entry is simply never
         # targetable by update). Mirror that: fall back to a synthetic entry_id
         # only to satisfy the NOT NULL column; the stored payload is untouched.
         entry_id = entry_dump.get("id") or str(uuid.uuid4())
+        insert_into = pg_insert if self._is_postgres else sqlite_insert
+        statement = insert_into(cache_session_context).values(
+            user_id=user_id,
+            session_id=session_id,
+            entry_id=entry_id,
+            payload=entry_dump,
+            expires_at=self._session_expiry(),
+        )
         try:
             async with self.sessionmaker() as session, session.begin():
                 await self._lock_session_writes(session, cache_session_context, user_id, session_id)
@@ -852,12 +904,12 @@ class SqlCacheAdapter(CacheDBInterface):
                     session, cache_session_context, user_id, session_id
                 )
                 await session.execute(
-                    insert(cache_session_context).values(
-                        user_id=user_id,
-                        session_id=session_id,
-                        entry_id=entry_id,
-                        payload=entry_dump,
-                        expires_at=self._session_expiry(),
+                    statement.on_conflict_do_update(
+                        index_elements=["user_id", "session_id", "entry_id"],
+                        set_={
+                            "payload": statement.excluded.payload,
+                            "expires_at": statement.excluded.expires_at,
+                        },
                     )
                 )
                 await self._refresh_session_ttl(session, cache_session_context, user_id, session_id)
@@ -901,6 +953,11 @@ class SqlCacheAdapter(CacheDBInterface):
                     await self._lock_session_writes(
                         session, cache_session_context, user_id, session_id
                     )
+                    # The unique index keeps this to one row; if duplicates predate the
+                    # backfill, resolve to the newest instead of raising
+                    # MultipleResultsFound — the permanent per-session 503 of issue
+                    # #4226. The UPDATE below still targets every duplicate, so
+                    # stragglers converge on the merged payload.
                     result = await session.execute(
                         select(cache_session_context.c.payload)
                         .where(
@@ -908,9 +965,11 @@ class SqlCacheAdapter(CacheDBInterface):
                             cache_session_context.c.entry_id == entry_id,
                             self._not_expired(cache_session_context),
                         )
+                        .order_by(cache_session_context.c.seq.desc())
+                        .limit(1)
                         .with_for_update()
                     )
-                    payload = result.scalar_one_or_none()
+                    payload = result.scalars().first()
                     if payload is None:
                         return False
                     merged = {**dict(payload), **merge}
@@ -995,11 +1054,21 @@ class SqlCacheAdapter(CacheDBInterface):
                     )
                 )
                 if expires_at is not None:
+                    # Same lazy slide as _refresh_session_ttl: Redis EXPIREs the
+                    # whole per-user list per logged call, but re-stamping every
+                    # row here turns each decorated API call into an
+                    # O(user's-log-history) write (issue #4393). Skip rows less
+                    # than the slack window stale.
+                    cutoff = expires_at - timedelta(seconds=ttl * _TTL_REFRESH_FRACTION)
                     await session.execute(
                         update(cache_usage_logs)
                         .where(
                             cache_usage_logs.c.log_key == self.log_key,
                             cache_usage_logs.c.user_id == user_id,
+                            or_(
+                                cache_usage_logs.c.expires_at.is_(None),
+                                cache_usage_logs.c.expires_at < cutoff,
+                            ),
                         )
                         .values(expires_at=expires_at)
                     )

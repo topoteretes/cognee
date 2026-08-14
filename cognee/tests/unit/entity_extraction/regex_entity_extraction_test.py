@@ -48,8 +48,10 @@ async def test_extract_urls(regex_extractor):
     url_entities = [e for e in entities if e.is_a.name == "URL"]
 
     assert len(url_entities) == 2
-    assert "https://www.example.com" in [e.name for e in url_entities]
-    assert "http://docs.example.org/help" in [e.name for e in url_entities]
+    assert {e.name for e in url_entities} == {
+        "https://www.example.com",
+        "http://docs.example.org/help",
+    }
 
 
 @pytest.mark.asyncio

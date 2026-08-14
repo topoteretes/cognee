@@ -6,6 +6,7 @@ from numbers import Number
 
 from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
+from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
 
@@ -91,8 +92,8 @@ class _GraphEngineHandle:
     CI) — so a fresh engine relies on the worker's open-retry
     (``SUBPROCESS_OPEN_LOCK_RETRIES``) for the overlap. Once a close is
     actually in flight, creators wait for it deterministically; the primary
-    multi-tenant teardown path (``dataset_queue._teardown_subprocess_engines``)
-    also ``await``s ``engine.close()`` to completion before any re-creation.
+    multi-tenant teardown path (``dataset_queue._evict_subprocess_engines``)
+    routes through plain cache eviction, so its closes register here too.
     """
 
     __slots__ = ("_config", "_last_initialized_id", "_pinned")
@@ -218,7 +219,7 @@ def _resolve_graph_engine_args(params: dict) -> tuple:
     Shared by the sync (:func:`create_graph_engine`) and async
     (:func:`acreate_graph_engine`) entry points so both produce the *identical*
     cache key (the positional tuple) — and so it matches the key built by
-    ``evict_graph_engine`` / ``is_graph_engine_cached``.
+    ``graph_engine_cache`` (evict / is_cached / ...).
     """
     normalized = _normalize_optional_create_graph_engine_params(params)
     return (
@@ -237,6 +238,7 @@ def _resolve_graph_engine_args(params: dict) -> tuple:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
+        normalized["graph_database_schema"],
     )
 
 
@@ -256,6 +258,7 @@ def create_graph_engine(
     kuzu_num_threads=0,
     kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
     kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
+    graph_database_schema="",
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -282,19 +285,14 @@ async def acreate_graph_engine(**kwargs):
     return await _create_graph_engine.acall(*_resolve_graph_engine_args(kwargs))
 
 
-def evict_graph_engine(**kwargs) -> bool:
-    """Evict a cached graph engine entry created via ``create_graph_engine``.
-
-    Mirrors ``create_graph_engine``'s normalization so the cache key
-    matches. Used by per-dataset deletion paths to drop the leased
-    adapter (and trigger its ``close()``) without disturbing the rest
-    of the cache.
-
-    Returns True if the entry existed.
-    """
+def _graph_engine_key_args(kwargs) -> tuple:
+    """Positional cache-key args for a ``create_graph_engine`` config dict,
+    normalized exactly the way ``create_graph_engine`` normalizes them so the
+    key matches. The single place this knowledge lives — every operation on
+    ``graph_engine_cache`` routes through it."""
     normalized = _normalize_optional_create_graph_engine_params(kwargs)
     provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
-    return _create_graph_engine.cache_evict(
+    return (
         provider,
         kwargs.get("graph_file_path"),
         normalized["graph_database_url"],
@@ -310,66 +308,7 @@ def evict_graph_engine(**kwargs) -> bool:
         normalized["kuzu_num_threads"],
         normalized["kuzu_buffer_pool_size"],
         normalized["kuzu_max_db_size"],
-    )
-
-
-def evict_graph_engines_for_database(graph_database_name: str) -> int:
-    """Evict every cached graph engine bound to *graph_database_name*.
-
-    The same per-dataset database can be cached under multiple keys: the
-    dataset-handler creation key and the pipeline's context-config key differ
-    in ``graph_file_path`` and ``graph_dataset_database_handler``, so key-exact
-    ``evict_graph_engine`` misses the pipeline's entry and leaves an engine
-    whose connection pool died with the dropped database. Per-dataset database
-    names are dataset UUIDs, so matching the name against key fields cannot
-    collide with other entries.
-
-    Returns the number of evicted entries.
-    """
-    if not graph_database_name:
-        raise ValueError("graph_database_name must be a non-empty database name")
-    return _create_graph_engine.cache_evict_matching(graph_database_name=graph_database_name)
-
-
-async def aevict_graph_engines_for_database(graph_database_name: str) -> int:
-    """Evict every cached graph engine bound to *graph_database_name* and wait
-    until their IN-FLIGHT closes have completed (workers exited, file locks
-    released). Use before removing the database's files so a teardown that is
-    already running cannot race the removal.
-
-    A close still deferred behind a live caller proxy (an idle engine handle)
-    is NOT waited on — see the ``closing_lru_cache`` module docstring. In that
-    case files are removed under an engine that closes later; on POSIX the
-    unlinked files stay valid for the holder and the eventual close writes to
-    nowhere, which is acceptable for a dataset being deleted.
-
-    Returns the number of evicted entries.
-    """
-    evicted = evict_graph_engines_for_database(graph_database_name)
-    await _create_graph_engine.cache_await_closed(graph_database_name=graph_database_name)
-    return evicted
-
-
-def is_graph_engine_cached(**kwargs) -> bool:
-    """Check whether a graph engine entry exists in the cache without creating."""
-    normalized = _normalize_optional_create_graph_engine_params(kwargs)
-    provider = _normalize_graph_database_provider(kwargs.get("graph_database_provider"))
-    return _create_graph_engine.cache_contains(
-        provider,
-        kwargs.get("graph_file_path"),
-        normalized["graph_database_url"],
-        normalized["graph_database_name"],
-        normalized["graph_database_username"],
-        normalized["graph_database_password"],
-        normalized["graph_database_host"],
-        normalized["graph_database_allow_anonymous"],
-        normalized["graph_database_port"],
-        normalized["graph_database_key"],
-        normalized["graph_dataset_database_handler"],
-        normalized["graph_database_subprocess_enabled"],
-        normalized["kuzu_num_threads"],
-        normalized["kuzu_buffer_pool_size"],
-        normalized["kuzu_max_db_size"],
+        normalized["graph_database_schema"],
     )
 
 
@@ -393,6 +332,7 @@ def _create_graph_engine(
     kuzu_num_threads=0,
     kuzu_buffer_pool_size=DEFAULT_KUZU_BUFFER_POOL_SIZE,
     kuzu_max_db_size=DEFAULT_KUZU_MAX_DB_SIZE,
+    graph_database_schema="",
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -448,6 +388,8 @@ def _create_graph_engine(
             graph_database_allow_anonymous=graph_database_allow_anonymous,
         )
 
+    # DEMO: Postgres as a graph store is not production-ready — use a graph-native
+    # backend (Kuzu, Neo4j) for production. See PostgresAdapter's docstring for details.
     elif graph_database_provider == "postgres":
         from cognee.context_global_variables import backend_access_control_enabled
 
@@ -503,7 +445,7 @@ def _create_graph_engine(
 
         from .postgres.adapter import PostgresAdapter
 
-        return PostgresAdapter(connection_string=connection_string)
+        return PostgresAdapter(connection_string=connection_string, schema=graph_database_schema)
 
     elif graph_database_provider in ("ladybug", "kuzu"):
         if not graph_file_path:
@@ -630,3 +572,19 @@ def _create_graph_engine(
         f"Unsupported graph database provider: {graph_database_provider}. "
         f"Supported providers are: {', '.join(all_providers)}"
     )
+
+
+# Public cache-management API for graph engines: ``graph_engine_cache.evict``
+# / ``.touch`` / ``.is_cached`` / ``.evict_for_database`` /
+# ``.aevict_for_database``.
+#
+# Dependency injection: EngineCacheOps holds the shared procedure (which cache
+# method implements which operation), and this call supplies the three
+# graph-specific dependencies — which cache to operate on (the decorated
+# factory), how a config dict becomes that cache's exact key (the key
+# builder), and which key field holds the per-dataset database name (for the
+# by-database evictions). The vector module builds its own instance from the
+# same class, so the procedure exists once and cannot drift between engines.
+graph_engine_cache = EngineCacheOps(
+    _create_graph_engine, _graph_engine_key_args, "graph_database_name"
+)
