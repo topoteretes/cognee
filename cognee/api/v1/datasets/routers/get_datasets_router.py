@@ -400,11 +400,15 @@ def get_datasets_router() -> APIRouter:
         if dataset_data is None:
             return []
 
+        # Dict literal, not dict(**data, dataset_id=...): Data now carries its
+        # own dataset_id column, and the kwarg form raises TypeError on the
+        # duplicate key. The requested dataset id still wins — the column is
+        # nullable, so the row's value cannot be relied on here.
         return [
-            dict(
+            {
                 **jsonable_encoder(data),
-                dataset_id=dataset_id,
-            )
+                "dataset_id": dataset_id,
+            }
             for data in dataset_data
         ]
 

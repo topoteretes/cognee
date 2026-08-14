@@ -28,6 +28,7 @@ from uuid import UUID, uuid4
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
     get_by_team,
     is_active,
@@ -128,13 +129,13 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
 
     owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
     if owner_user_id is None:
-        return _ephemeral(
-            "Link your own Cognee account first: `/cognee-link <api_key>` "
-            "(create a key from your Cognee account's API Keys settings)."
-        )
+        return _ephemeral(NOT_LINKED_MESSAGE)
 
     if not text:
-        return _ephemeral("Usage: `/cognee-ask <your question>`")
+        return _ephemeral(
+            "Ask me something and I'll check what you know — "
+            "e.g. `/cognee-ask why did we choose Neon for v2?`"
+        )
 
     task = asyncio.create_task(_search_and_respond(response_url, team_id, owner_user_id, text))
     _pending_searches.add(task)
@@ -144,7 +145,7 @@ async def handle_cognee_ask(raw_body: bytes) -> dict[str, Any]:
     # on the answer that follows, so this ack (and the "<@user> used
     # /cognee-ask ..." invocation line an in_channel response would trigger)
     # must not leak the question either.
-    return _ephemeral(f'Searching your memory for: "{_preview(text)}"…')
+    return _ephemeral(f"🔎 Recalling: _{_preview(text)}_")
 
 
 def _preview(text: str) -> str:
