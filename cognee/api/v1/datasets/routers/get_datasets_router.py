@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, Union
 from typing_extensions import Annotated
+from sqlalchemy import select, func
 from fastapi import status
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
@@ -24,7 +25,8 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.graph.methods import get_formatted_graph_data
-from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.data.models import GraphMetrics
+from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 
@@ -70,6 +72,17 @@ class GraphEdgeDTO(OutDTO):
 class GraphDTO(OutDTO):
     nodes: List[GraphNodeDTO]
     edges: List[GraphEdgeDTO]
+
+
+class GraphSummaryDTO(OutDTO):
+    dataset_id: UUID
+    pipeline_run_id: Optional[UUID] = None
+    num_nodes: int = 0
+    num_edges: int = 0
+    # ``None`` (while ``pipeline_run_id`` is null) means no metrics have been
+    # computed for the dataset yet. Serialized as ``computedAt`` for the
+    # dashboard's precomputed node/edge counts (frontend COG-5726).
+    computed_at: Optional[datetime] = None
 
 
 class DatasetCreationPayload(InDTO):
@@ -129,6 +142,117 @@ def get_datasets_router() -> APIRouter:
                 status_code=status.HTTP_418_IM_A_TEAPOT,
                 detail=f"Error retrieving datasets: {str(error)}",
             ) from error
+
+    @router.get("/graph-summary", response_model=list[GraphSummaryDTO])
+    async def get_datasets_graph_summary(
+        dataset_ids: Annotated[
+            List[UUID],
+            Query(
+                alias="dataset_ids",
+                description=(
+                    "Dataset UUIDs to summarize (from GET /api/v1/datasets)."
+                    " Omit to summarize every dataset you can read; foreign or"
+                    " unknown ids are silently omitted from the response."
+                ),
+                examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
+            ),
+        ] = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get precomputed node/edge counts for one or more datasets.
+
+        Backed by the cached ``GraphMetrics`` a cognify run writes, this is
+        orders of magnitude cheaper than ``/{dataset_id}/graph`` (which walks
+        the whole graph) and powers the dashboard's graph-size display.
+
+        ## Query Parameters
+        - **dataset_ids** (List[UUID], optional): Datasets to summarize. If
+          omitted, returns a summary for every dataset the user can read.
+          Foreign/unknown ids are silently dropped.
+
+        ## Response
+        Returns a list of per-dataset summaries containing:
+        - **dataset_id**: The dataset UUID
+        - **pipeline_run_id**: The run whose metrics are reported (``null`` if
+          no metrics have been computed for the dataset yet)
+        - **num_nodes** / **num_edges**: Cached counts (``0`` when uncomputed)
+        - **computed_at**: When the reported metrics were computed (``null``
+          when uncomputed)
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/graph-summary",
+                "cognee_version": cognee_version,
+            },
+        )
+
+        datasets = await get_authorized_existing_datasets(
+            dataset_ids or None, "read", user
+        )
+        authorized_ids = [dataset.id for dataset in datasets]
+
+        if not authorized_ids:
+            return []
+
+        # ``pipeline_run_id`` is not unique in ``pipeline_runs`` (there is one
+        # row per status transition), so collapse to a distinct run->dataset
+        # map before joining the metrics to avoid a fan-out.
+        run_datasets = (
+            select(
+                PipelineRun.pipeline_run_id.label("pipeline_run_id"),
+                PipelineRun.dataset_id.label("dataset_id"),
+            )
+            .filter(PipelineRun.dataset_id.in_(authorized_ids))
+            .distinct()
+            .subquery()
+        )
+
+        ranked = (
+            select(
+                run_datasets.c.dataset_id.label("dataset_id"),
+                GraphMetrics.id.label("pipeline_run_id"),
+                GraphMetrics.num_nodes.label("num_nodes"),
+                GraphMetrics.num_edges.label("num_edges"),
+                GraphMetrics.created_at.label("computed_at"),
+                func.row_number()
+                .over(
+                    partition_by=run_datasets.c.dataset_id,
+                    order_by=GraphMetrics.created_at.desc(),
+                )
+                .label("rn"),
+            )
+            .join(GraphMetrics, GraphMetrics.id == run_datasets.c.pipeline_run_id)
+            .subquery()
+        )
+
+        db_engine = get_relational_engine()
+        async with db_engine.get_async_session() as session:
+            rows = (
+                await session.execute(select(ranked).filter(ranked.c.rn == 1))
+            ).all()
+
+        metrics_by_dataset = {row.dataset_id: row for row in rows}
+
+        summaries: list[GraphSummaryDTO] = []
+        for dataset_id in authorized_ids:
+            row = metrics_by_dataset.get(dataset_id)
+            if row is None:
+                summaries.append(GraphSummaryDTO(dataset_id=dataset_id))
+            else:
+                summaries.append(
+                    GraphSummaryDTO(
+                        dataset_id=dataset_id,
+                        pipeline_run_id=row.pipeline_run_id,
+                        num_nodes=row.num_nodes or 0,
+                        num_edges=row.num_edges or 0,
+                        computed_at=row.computed_at,
+                    )
+                )
+
+        return summaries
 
     @router.post("", response_model=DatasetDTO)
     async def create_new_dataset(
