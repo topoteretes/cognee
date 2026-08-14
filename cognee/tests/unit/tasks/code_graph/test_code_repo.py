@@ -7,6 +7,7 @@ the document pipeline, and binaries/dotfiles can never abort an add.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -97,7 +98,7 @@ async def test_directory_with_project_resolves_to_repo_item_plus_documents(tmp_p
     assert len(manifest_items) == 1
     assert manifest_items[0].system_metadata["source"] == "code_repo"
     assert manifest_items[0].system_metadata["file_count"] == 3
-    assert {item.rsplit("/", 1)[-1] for item in file_items} == {"README.md", "notes.txt"}
+    assert {Path(item).name for item in file_items} == {"README.md", "notes.txt"}
 
 
 @pytest.mark.asyncio
@@ -109,7 +110,7 @@ async def test_directory_without_project_still_flattens(tmp_path):
 
     resolved = await resolve_data_directories([str(tmp_path)])
 
-    assert sorted(item.rsplit("/", 1)[-1] for item in resolved) == ["a.md", "b.txt"]
+    assert sorted(Path(item).name for item in resolved) == ["a.md", "b.txt"]
 
 
 @pytest.mark.asyncio
