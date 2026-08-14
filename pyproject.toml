@@ -73,7 +73,7 @@ dependencies = [
     # closed, and any future macOS falls through to the newest-ladybug line.
     # Guarded by cognee/tests/unit/test_ladybug_requirement.py.
     "ladybug>=0.17.0,<0.18 ; sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or 'Darwin Kernel Version 23.' in platform_version)",
-    "ladybug>=0.16.0,<=0.18.2 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
+    "ladybug>=0.17.0,<=0.18.2 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
