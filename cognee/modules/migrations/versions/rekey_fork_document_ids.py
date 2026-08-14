@@ -156,18 +156,29 @@ async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
         except UnsupportedProvenanceCapability:
             return
 
+        # Group artifacts by pipeline run id and attach per group: a dataset's
+        # subgraph overwhelmingly carries one run id, so this collapses the
+        # 100k-node / 295k-edge per-item loops — each a write+checkpoint
+        # subprocess round-trip whose page churn alone could exhaust kuzu's
+        # max_db_size — into a handful of batched calls.
         if node_ids:
             snapshots = await graph_engine.get_node_delete_data(node_ids)
+            nodes_by_run: dict = {}
             for node_id in node_ids:
                 run_id = _run_id_for_key(snapshots.get(node_id), old_key)
-                await graph_engine.attach_node_source_refs([node_id], [new_key], run_id)
+                nodes_by_run.setdefault(run_id, []).append(node_id)
+            for run_id, grouped_ids in nodes_by_run.items():
+                await graph_engine.attach_node_source_refs(grouped_ids, [new_key], run_id)
             await graph_engine.remove_node_source_refs(node_ids, [old_key])
 
         if edge_identities:
             edge_snapshots = await graph_engine.get_edge_delete_data(edge_identities)
+            edges_by_run: dict = {}
             for edge in edge_identities:
                 run_id = _run_id_for_key(edge_snapshots.get(edge), old_key)
-                await graph_engine.attach_edge_source_refs([edge], [new_key], run_id)
+                edges_by_run.setdefault(run_id, []).append(edge)
+            for run_id, grouped_edges in edges_by_run.items():
+                await graph_engine.attach_edge_source_refs(grouped_edges, [new_key], run_id)
             await graph_engine.remove_edge_source_refs(edge_identities, [old_key])
 
         logger.info(

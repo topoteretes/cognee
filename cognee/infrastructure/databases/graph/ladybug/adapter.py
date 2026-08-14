@@ -1237,30 +1237,37 @@ class LadybugAdapter(GraphDBInterface):
         self, node_ids: List[str]
     ) -> Dict[str, Tuple[List[str], List[str]]]:
         """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
-        rows = await self.query(
-            """
-            MATCH (n:Node) WHERE n.id IN $ids
-            RETURN n.id, n.source_ref_keys, n.source_run_refs
-            """,
-            {"ids": list(node_ids)},
-        )
+        ids = list(node_ids)
+        rows = []
+        for start in range(0, len(ids), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $ids AS nid
+                    MATCH (n:Node {id: nid})
+                    RETURN n.id, n.source_ref_keys, n.source_run_refs
+                    """,
+                    {"ids": ids[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         return {row[0]: (_decode_refs(row[1]), _decode_refs(row[2])) for row in rows}
 
     async def _write_node_provenance(self, batch: List[dict]) -> None:
         if not batch:
             return
         encoded_batch = [_encode_provenance_row(row) for row in batch]
-        await self.query(
-            """
-            UNWIND $batch AS row
-            MATCH (n:Node) WHERE n.id = row.id
-            SET n.source_ref_keys = row.refs,
-                n.source_dataset_ids = row.datasets,
-                n.source_run_ids = row.runs,
-                n.source_run_refs = row.run_refs
-            """,
-            {"batch": encoded_batch},
-        )
+        for start in range(0, len(encoded_batch), _WRITE_CHUNK_SIZE):
+            await self.query(
+                """
+                UNWIND $batch AS row
+                MATCH (n:Node {id: row.id})
+                SET n.source_ref_keys = row.refs,
+                    n.source_dataset_ids = row.datasets,
+                    n.source_run_ids = row.runs,
+                    n.source_run_refs = row.run_refs
+                """,
+                {"batch": encoded_batch[start : start + _WRITE_CHUNK_SIZE]},
+            )
         await self.checkpoint()
 
     async def _read_edge_provenance(
@@ -1271,15 +1278,19 @@ class LadybugAdapter(GraphDBInterface):
             {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
             for edge in edges
         ]
-        rows = await self.query(
-            """
-            UNWIND $edges AS e
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
-            RETURN a.id, b.id, r.relationship_name, r.source_ref_keys, r.source_run_refs
-            """,
-            {"edges": edge_params},
-        )
+        rows = []
+        for start in range(0, len(edge_params), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (a:Node {id: e.s})-[r:EDGE]->(b:Node {id: e.t})
+                    WHERE r.relationship_name = e.rel
+                    RETURN a.id, b.id, r.relationship_name, r.source_ref_keys, r.source_run_refs
+                    """,
+                    {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
         for row in rows:
             edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
@@ -1290,18 +1301,19 @@ class LadybugAdapter(GraphDBInterface):
         if not batch:
             return
         encoded_batch = [_encode_provenance_row(row) for row in batch]
-        await self.query(
-            """
-            UNWIND $batch AS row
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = row.s AND b.id = row.t AND r.relationship_name = row.rel
-            SET r.source_ref_keys = row.refs,
-                r.source_dataset_ids = row.datasets,
-                r.source_run_ids = row.runs,
-                r.source_run_refs = row.run_refs
-            """,
-            {"batch": encoded_batch},
-        )
+        for start in range(0, len(encoded_batch), _WRITE_CHUNK_SIZE):
+            await self.query(
+                """
+                UNWIND $batch AS row
+                MATCH (a:Node {id: row.s})-[r:EDGE]->(b:Node {id: row.t})
+                WHERE r.relationship_name = row.rel
+                SET r.source_ref_keys = row.refs,
+                    r.source_dataset_ids = row.datasets,
+                    r.source_run_ids = row.runs,
+                    r.source_run_refs = row.run_refs
+                """,
+                {"batch": encoded_batch[start : start + _WRITE_CHUNK_SIZE]},
+            )
         await self.checkpoint()
 
     @staticmethod
@@ -1429,28 +1441,35 @@ class LadybugAdapter(GraphDBInterface):
         ]
         # DELETE r (not DETACH DELETE) removes only the matched relationships and
         # preserves the endpoint nodes.
-        await self.query(
-            """
-            UNWIND $edges AS e
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
-            DELETE r
-            """,
-            {"edges": edge_params},
-        )
+        for start in range(0, len(edge_params), _WRITE_CHUNK_SIZE):
+            await self.query(
+                """
+                UNWIND $edges AS e
+                MATCH (a:Node {id: e.s})-[r:EDGE]->(b:Node {id: e.t})
+                WHERE r.relationship_name = e.rel
+                DELETE r
+                """,
+                {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
+            )
         await self.checkpoint()
 
     async def get_node_delete_data(self, node_ids: list[str]) -> dict[str, NodeDeleteData]:
         if not node_ids:
             return {}
-        rows = await self.query(
-            """
-            MATCH (n:Node) WHERE n.id IN $ids
-            RETURN n.id, n.name, n.type, n.properties,
-                   n.source_ref_keys, n.source_dataset_ids, n.source_run_ids, n.source_run_refs
-            """,
-            {"ids": list(node_ids)},
-        )
+        ids = list(node_ids)
+        rows = []
+        for start in range(0, len(ids), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $ids AS nid
+                    MATCH (n:Node {id: nid})
+                    RETURN n.id, n.name, n.type, n.properties,
+                           n.source_ref_keys, n.source_dataset_ids, n.source_run_ids, n.source_run_refs
+                    """,
+                    {"ids": ids[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         result: dict[str, NodeDeleteData] = {}
         for row in rows:
             node_id, name, node_type, raw_props = row[0], row[1], row[2], row[3]
@@ -1485,16 +1504,20 @@ class LadybugAdapter(GraphDBInterface):
             {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
             for edge in edges
         ]
-        rows = await self.query(
-            """
-            UNWIND $edges AS e
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
-            RETURN a.id, b.id, r.relationship_name, r.properties,
-                   r.source_ref_keys, r.source_dataset_ids, r.source_run_ids, r.source_run_refs
-            """,
-            {"edges": edge_params},
-        )
+        rows = []
+        for start in range(0, len(edge_params), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (a:Node {id: e.s})-[r:EDGE]->(b:Node {id: e.t})
+                    WHERE r.relationship_name = e.rel
+                    RETURN a.id, b.id, r.relationship_name, r.properties,
+                           r.source_ref_keys, r.source_dataset_ids, r.source_run_ids, r.source_run_refs
+                    """,
+                    {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         # Lazy import: prepare_edges_for_storage lives in the modules layer, whose
         # package __init__ imports get_graph_engine -> this adapter. Importing it
         # at module load would create a cycle; at delete-time it is safe.
