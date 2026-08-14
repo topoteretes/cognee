@@ -42,7 +42,8 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 |---|---|
 | [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
 | [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
-| [`global_context_index.py`](guides/global_context_index.py) | `improve(build_global_context_index=True)` and what it changes |
+| [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
+| [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |
 | [`importance_weight.py`](guides/importance_weight.py) | Boosting specific memories in retrieval ranking |
 
 ### Retrieval
@@ -102,7 +103,7 @@ Each script names the simpler guide it builds on and states what it adds.
 | [`remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | `guides/simple_cognee_example.py` + `guides/improve_quickstart.py` | Nine-step tour of the full v1.0 memory API |
 | [`conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py) | `guides/sessions.py` | Recalls across two sessions, then persists both into the graph |
 | [`session_distillation_demo.py`](advanced_guides/session_distillation_demo.py) | `guides/session_distillation.py` | Eight-message session, hybrid recall, post-distillation verification |
-| [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
+| [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` + `guides/global_context_index_recall.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
 | [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
 | [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
 | [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
