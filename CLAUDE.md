@@ -697,6 +697,13 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
 
+### Code Files (cognify CODE route)
+Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension list lives on `code_loader`) are recognized at add time through the loader system: the code loader claims the file, stores it under its real extension, and `ingest_data` tags the record with `system_metadata = {"source": "code"}`. Cognify then routes such items down the CODE route, which runs the deterministic enola code graph pipeline per file — typed `CodeSymbol`/`CodeModule`/… nodes with `calls`/`imports`/`has_method` edges, **no LLM calls**.
+
+- **Search**: `SearchType.CODE` (deterministic graph operations via `code_query`) always works. By default the route also vector-indexes code fact names so `GRAPH_COMPLETION`/triplet search cover code; `CODE_ROUTE_INDEX_VECTORS=false` disables that (embedding-free mode). Chunk-based search (`CHUNKS`, `RAG_COMPLETION`) never covers code — the route produces no chunks.
+- **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
+- **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
+
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset
