@@ -494,6 +494,33 @@ async def test_writes_refresh_whole_session_ttl(adapter):
 
 
 @pytest.mark.asyncio
+async def test_fresh_rows_are_not_rewritten_by_ttl_slide(adapter):
+    """The sliding-TTL UPDATE skips rows whose expiry is within the slack window.
+
+    Guards against the write amplification of issue #4393: an append must not
+    rewrite the session's existing recently-stamped rows.
+    """
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    before = await _fetch_expirations(adapter, cache_qa_entries, qa_id="id1")
+
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+
+    assert await _fetch_expirations(adapter, cache_qa_entries, qa_id="id1") == before
+
+
+@pytest.mark.asyncio
+async def test_ttl_slide_stamps_null_expiry_rows(adapter):
+    """Rows stored without expiry (TTL then disabled) get stamped by the next slide."""
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await _backdate_expirations(adapter, cache_qa_entries, None, qa_id="id1")
+
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+
+    expirations = await _fetch_expirations(adapter, cache_qa_entries, qa_id="id1")
+    assert expirations[0] is not None
+
+
+@pytest.mark.asyncio
 async def test_reads_do_not_refresh_ttl(adapter):
     """Read-only access leaves expires_at untouched."""
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
@@ -568,6 +595,34 @@ async def test_log_usage_and_get_usage_logs(adapter):
     assert [entry["endpoint"] for entry in logs] == ["/search", "/add"]
     assert await adapter.get_usage_logs("u1", limit=1) == [{"endpoint": "/search"}]
     assert await adapter.get_usage_logs("u3") == []
+
+
+@pytest.mark.asyncio
+async def test_log_usage_does_not_rewrite_fresh_rows(adapter):
+    """A logged call must not re-stamp the user's recently-written log rows (#4393)."""
+    await adapter.log_usage("u1", {"endpoint": "/add"})
+    before = await _fetch_expirations(adapter, cache_usage_logs, user_id="u1")
+
+    await adapter.log_usage("u1", {"endpoint": "/search"})
+
+    after = await _fetch_expirations(adapter, cache_usage_logs, user_id="u1")
+    assert before[0] in after and len(after) == 2
+
+
+@pytest.mark.asyncio
+async def test_log_usage_slides_stale_rows_forward(adapter):
+    """Log rows whose expiry lags beyond the slack window are refreshed on write."""
+    await adapter.log_usage("u1", {"endpoint": "/add"})
+    near_future = datetime.now(timezone.utc) + timedelta(seconds=30)
+    await _backdate_expirations(adapter, cache_usage_logs, near_future, user_id="u1")
+
+    await adapter.log_usage("u1", {"endpoint": "/search"})
+
+    expirations = await _fetch_expirations(adapter, cache_usage_logs, user_id="u1")
+    for expiry in expirations:
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        assert expiry > near_future + timedelta(seconds=60)
 
 
 # --------------------------------------------------------------------------- #

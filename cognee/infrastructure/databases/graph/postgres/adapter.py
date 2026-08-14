@@ -1,4 +1,13 @@
-"""Postgres graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + asyncpg."""
+"""Postgres graph adapter using two tables (graph_node, graph_edge) over SQLAlchemy + asyncpg.
+
+DEMO: Using Postgres as a graph store is currently a demo feature and is not
+production-ready. Use it to demo keeping relational metadata, PGVector, and graph
+state in a single Postgres service, but rely on a graph-native backend such as Kuzu or Neo4j
+for production workloads.
+
+Interested in further development or production use of Postgres as a graph database? Write to
+us at social@cognee.ai to explore the options.
+"""
 
 import asyncio
 import json
@@ -100,16 +109,39 @@ def _provenance_conflict_set(table, inputs: ProvenanceAttachInputs) -> Dict[str,
 
 
 class PostgresAdapter(GraphDBInterface):
-    """Graph-as-tables adapter backed by Postgres, accessed via SQLAlchemy async sessions."""
+    """Graph-as-tables adapter backed by Postgres, accessed via SQLAlchemy async sessions.
+
+    DEMO: Using Postgres as a graph store is currently a demo feature and is not
+    production-ready. Use it to demo keeping relational metadata, PGVector, and
+    graph state in a single Postgres service, but rely on a graph-native backend such as Kuzu
+    or Neo4j for production workloads.
+
+    Interested in further development or production use of Postgres as a graph database? Write
+    to us at social@cognee.ai to explore the options.
+    """
+
+    # ``query()`` executes SQL against the graph tables, not Cypher.
+    supports_cypher_queries = False
 
     # ``query()`` executes SQL against the graph tables, not Cypher.
     supports_cypher_queries = False
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
-    def __init__(self, connection_string: str) -> None:
-        """Create engine and sessionmaker from a Postgres connection string."""
+    def __init__(self, connection_string: str, schema: str = "") -> None:
+        """Create engine and sessionmaker from a Postgres connection string.
+
+        When ``schema`` is set (shared-database isolation mode) the connection's
+        ``search_path`` is pinned to that schema so the two fixed tables
+        (``graph_node``/``graph_edge``) and every unqualified query resolve
+        inside the dataset's own schema. This lets many datasets share one
+        database — no per-dataset database and no rewriting of the adapter's
+        SQL. The path is the dataset schema only (``pg_catalog`` is always
+        searched implicitly for built-ins), so neither reads nor
+        ``create_all(checkfirst=True)`` can ever fall through to ``public``.
+        """
         self.db_uri = connection_string
+        self.schema = schema or ""
 
         relational_config = get_relational_config()
         pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}
@@ -137,6 +169,11 @@ class PostgresAdapter(GraphDBInterface):
             if relational_config.database_connect_args
             else {}
         )
+
+        if self.schema:
+            server_settings = dict(connect_args.get("server_settings") or {})
+            server_settings["search_path"] = self.schema
+            connect_args["server_settings"] = server_settings
 
         # Serialize JSONB columns once, at execute time, with the UUID/datetime-aware
         # encoder. This lets add_nodes/add_edges pass raw property dicts straight through

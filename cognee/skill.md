@@ -580,7 +580,7 @@ await cognee.start_ui()
 ```
 
 Caps: `neighborhood_depth=2`, `neighborhood_seed_top_k=10`, `max_nodes=500`.
-See `examples/python/subgraph_visualization_demo.py`.
+See `examples/guides/graph_visualization.py`.
 
 ## Pruning and reset operations
 

@@ -2,8 +2,7 @@ import os
 import asyncio
 from uuid import UUID
 from pydantic import Field
-from typing import List, Optional
-from fastapi.encoders import jsonable_encoder
+from typing import Dict, List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
@@ -122,7 +121,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=dict,
+        response_model=Dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -256,7 +255,12 @@ def get_cognify_router() -> APIRouter:
                 )
                 detail = None
                 if first_err is not None:
-                    detail = getattr(first_err, "error", None) or str(first_err)
+                    # The failing task's error is carried on ``payload`` (set to
+                    # ``repr(error)`` by the pipeline runner); PipelineRunErrored
+                    # has no ``error`` attribute. Surface it so the client gets an
+                    # actionable message instead of the model's repr.
+                    payload = first_err.payload if isinstance(first_err.payload, str) else None
+                    detail = payload or str(first_err)
 
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
