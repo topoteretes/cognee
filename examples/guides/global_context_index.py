@@ -14,7 +14,9 @@ INITIAL_FACTS = [
     "Last year Bob sailed to a small island he had never visited.",
 ]
 
-ADDITIONAL_FACT = "This year, Bob decided to join Alice's hiking trip to the Alps instead of sailing."
+ADDITIONAL_FACT = (
+    "This year, Bob decided to join Alice's hiking trip to the Alps instead of sailing."
+)
 
 
 async def print_index_structure(label):
