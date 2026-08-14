@@ -286,11 +286,14 @@ jobs:
           uses: ./.github/actions/cognee_setup
           with:
             python-version: '3.11.x'
-            extra-dependencies: "aws"
+            extra-dependencies: "aws dlt"
 
         - name: Run S3 Bucket Test
           env:
             ENV: 'dev'
+            # dlt's telemetry thread is non-daemon and can hang interpreter
+            # exit on CI runners; the S3 test ingests through dlt now.
+            RUNTIME__DLTHUB_TELEMETRY: "false"
             LLM_MODEL: ${{ secrets.LLM_MODEL }}
             LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
