@@ -376,6 +376,9 @@ jobs:
     if: ${{ failure() }}
     runs-on: ubuntu-22.04
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
       - name: Send failure email
         env:
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
