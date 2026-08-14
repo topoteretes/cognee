@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.5.0"
+version = "1.5.0.dev1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -221,7 +221,11 @@ Repository = "https://github.com/topoteretes/cognee"
 cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]
-requires = ["hatchling"]
+# Pinned: the build backend decides the wheel's Metadata-Version, and the PyPI
+# publish action validates it with a pinned twine — an unpinned hatchling let
+# the emitted metadata drift to 2.5 and broke the release publish gate. Bump
+# this together with the gh-action-pypi-publish pin in the release workflows.
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
