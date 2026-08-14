@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.ingestion.exceptions import DataContentConflictError
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
@@ -28,6 +29,25 @@ from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tas
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_data_item")
+
+
+async def _pinned_item_content_hash(data_item) -> Optional[str]:
+    """Content hash of a pinned DataItem's incoming payload, or None.
+
+    Pinned items skip content classification on the fast path, but the
+    already-completed short-circuit needs the hash to tell an idempotent
+    re-add apart from a changed one. Uses the same save+classify path as
+    unpinned ingestion so the formula matches the stored Data.content_hash
+    exactly. Returns None for anything that is not a pinned DataItem —
+    unpinned identities derive from content, so they can never conflict.
+    """
+    from cognee.tasks.ingestion.data_item import DataItem as DataItemType
+
+    if not isinstance(data_item, DataItemType) or data_item.data_id is None:
+        return None
+    file_path = await save_data_item_to_storage(data_item)
+    async with open_data_file(file_path) as file:
+        return ingestion.classify(file).get_metadata()["content_hash"]
 
 
 async def run_tasks_data_item_incremental(
@@ -94,6 +114,27 @@ async def run_tasks_data_item_incremental(
                 data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
                 == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
             ):
+                # A pinned id that resurfaces with DIFFERENT content must not
+                # be silently skipped: the stored record (and everything
+                # derived from it) would go stale with no signal. Fail loudly
+                # with the ways out instead. Same content keeps the cheap
+                # idempotent skip.
+                incoming_hash = await _pinned_item_content_hash(data_item)
+                if (
+                    incoming_hash is not None
+                    and data_point.content_hash is not None
+                    and str(data_point.content_hash) != str(incoming_hash)
+                ):
+                    raise DataContentConflictError(
+                        message=(
+                            f"Data id {data_id} already exists in dataset {dataset.id} "
+                            "with different content. To update the existing document, "
+                            "use the update pipeline (update()). To ingest this content "
+                            "as a separate item, use a different data_id (or none, so "
+                            "content derives it). To force re-ingestion in place, "
+                            "re-add with incremental_loading=False and data_cache=False."
+                        )
+                    )
                 yield {
                     "run_info": PipelineRunAlreadyCompleted(
                         pipeline_run_id=pipeline_run_id,

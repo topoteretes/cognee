@@ -4,9 +4,10 @@ The manifest Data id is seeded from (dataset, source name) — no content hash �
 so re-adding a source resolves to the SAME record instead of orphaning it
 between add and cognify. Two invariants keep that safe:
 
-1. add() is idempotent: a completed item keeps the fast skip on re-add,
-   changed content or not. Updating an existing source is update()'s job
-   (explicit UUID), or an explicit re-ingest via
+1. add() is idempotent for UNCHANGED content: a completed item keeps the
+   fast skip on re-add. CHANGED content raises DataContentConflictError
+   instead of silently keeping the stale record — updating an existing
+   source is update()'s job (explicit UUID), or an explicit re-ingest via
    add(..., incremental_loading=False, data_cache=False).
 2. Two sources resolving to one identity in one add() fail loudly instead of
    last-write-wins.
@@ -83,16 +84,35 @@ def _incremental_run(monkeypatch, completed=True):
 
 
 @pytest.mark.asyncio
-async def test_completed_stable_id_item_keeps_the_fast_skip(monkeypatch):
-    """add() is idempotent: a completed item is skipped on re-add, changed
-    content or not — update() (explicit UUID) or turning off both
-    data_cache and incremental_loading are the sanctioned refresh paths."""
+async def test_completed_stable_id_item_with_unchanged_content_keeps_the_fast_skip(monkeypatch):
+    """add() is idempotent for unchanged content: the completed item is
+    skipped on re-add with no error and no reprocessing."""
+    monkeypatch.setattr(
+        item_module, "_pinned_item_content_hash", AsyncMock(return_value="stored-hash")
+    )
     collect = _incremental_run(monkeypatch, completed=True)
     events = await collect()
 
     run_infos = [e["run_info"] for e in events if isinstance(e, dict) and "run_info" in e]
     assert any(isinstance(info, PipelineRunAlreadyCompleted) for info in run_infos)
     assert not any(isinstance(info, PipelineRunCompleted) for info in run_infos)
+
+
+@pytest.mark.asyncio
+async def test_completed_stable_id_item_with_changed_content_raises(monkeypatch):
+    """A completed item resurfacing with different content must fail loudly —
+    silently keeping the stale record left graphs describing old data.
+    update() (explicit UUID) or incremental_loading=False + data_cache=False
+    are the sanctioned refresh paths, named in the error."""
+    from cognee.modules.ingestion.exceptions import DataContentConflictError
+
+    monkeypatch.setattr(
+        item_module, "_pinned_item_content_hash", AsyncMock(return_value="different-hash")
+    )
+    collect = _incremental_run(monkeypatch, completed=True)
+
+    with pytest.raises(DataContentConflictError, match="update"):
+        await collect()
 
 
 @pytest.mark.asyncio
