@@ -185,10 +185,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
 
-                    # Ensure each attempt does not hang indefinitely
+                    # Ensure each attempt does not hang indefinitely. The
+                    # deadline is TOTAL per attempt and starts before any
+                    # network I/O — under high cognify concurrency a request
+                    # can spend most of it queued in the local HTTP connection
+                    # pool, so 30s starved queued-but-healthy requests
+                    # (observed live on a 421-item run: 3,336 timeout retries,
+                    # then failure). 120s absorbs local queueing while still
+                    # catching a genuinely unreachable endpoint; the
+                    # OpenAI-compatible engine uses 300s for the same guard.
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
-                        timeout=30.0,
+                        timeout=300.0,
                     )
 
                 embedding_response = [data["embedding"] for data in response.data]
