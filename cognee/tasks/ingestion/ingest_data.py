@@ -1,5 +1,6 @@
 import json
 import inspect
+import os
 from uuid import UUID, uuid4
 from typing import Union, BinaryIO, Any, List, Optional
 
@@ -14,6 +15,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     resolve_data_id,
@@ -151,10 +153,19 @@ async def ingest_data(
             original_file_path = cached.get("original_file_path")
             actual_file_path = cached.get("actual_file_path")
 
-            # Store all input data as text files in Cognee data storage
+            # Store all input data as text files in Cognee data storage.
+            # Ingestion context rides to the loader: loaders that own routing
+            # (dlt) need the dataset/user to build their staging artifacts.
             cognee_storage_file_path, loader_engine = await data_item_to_text_file(
                 actual_file_path,
                 preferred_loaders,
+                dataset_name=dataset.name,
+                dataset_id=dataset.id,
+                user=user,
+                # actual_file_path is the decoded form (file:// URIs carry
+                # percent-encoding, e.g. spaces as %20) — names derived from
+                # it match the user's real filename.
+                original_file_name=os.path.basename(actual_file_path),
             )
 
             if loader_engine is None:
@@ -162,6 +173,24 @@ async def ingest_data(
 
             # Use data_id computed in pre-loop
             data_id = cached.get("data_id")
+
+            # A loader may return a LoaderResult instead of a plain path: it
+            # then owns the record's identity and route stamp (dlt: the
+            # manifest's stable data_id + the system_metadata routing stamp).
+            # The pinned id replaces the pre-loop mint, and existence is
+            # re-resolved for it so re-adds hit the update branch.
+            if isinstance(cognee_storage_file_path, LoaderResult):
+                loader_result = cognee_storage_file_path
+                cognee_storage_file_path = loader_result.file_path
+                if loader_result.system_metadata is not None and item_system_metadata is None:
+                    item_system_metadata = loader_result.system_metadata
+                if loader_result.data_id is not None:
+                    data_id = loader_result.data_id
+                    if str(data_id) not in existing_data_map:
+                        async with db_engine.get_async_session() as session:
+                            pinned_row = await session.get(Data, data_id)
+                            if pinned_row is not None:
+                                existing_data_map[str(pinned_row.id)] = pinned_row
 
             # Find metadata from original file
             # Standard flow: extract metadata from both original and stored files

@@ -76,8 +76,14 @@ def create_dlt_source_from_connection_string(
     return source
 
 
-def create_dlt_source_from_csv(csv_path: str):
-    """Auto-generate a dlt resource from a CSV file path."""
+def create_dlt_source_from_csv(csv_path: str, source_name: Optional[str] = None):
+    """Auto-generate a dlt resource from a CSV file path.
+
+    ``source_name`` overrides the filename-derived resource name — callers
+    reading from a localized copy (temp download, stored upload) pass the
+    name derived from the ORIGINAL file so the manifest identity is stable
+    across runs regardless of where the bytes were staged.
+    """
     from dlt.sources.filesystem import filesystem, read_csv
 
     parent_dir = os.path.dirname(os.path.abspath(csv_path))
@@ -93,7 +99,7 @@ def create_dlt_source_from_csv(csv_path: str):
     # A piped read_csv resource is otherwise always named "_read_csv", and the
     # manifest identity is seeded from (dataset, source name) — every CSV in a
     # dataset would collapse into one identity. Name per file instead.
-    return source.with_name(csv_source_name(filename))
+    return source.with_name(source_name or csv_source_name(filename))
 
 
 def _parse_sql_query(query: str) -> tuple:
