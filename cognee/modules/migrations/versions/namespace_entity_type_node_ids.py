@@ -134,6 +134,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions._vector_rekey import (
     RekeyedPoint as _RekeyedPoint,
+    index_data_points_batched as _index_data_points_batched,
     lancedb_where as _lancedb_where,
     rekey_lancedb as _rekey_lancedb,
     rekey_native as _rekey_native,
@@ -369,7 +370,7 @@ async def _migrate_vector(vector_engine, id_map: dict, properties_by_id: dict) -
                 migrated_old_ids.append(old_id)
 
             if new_points:
-                await vector_engine.index_data_points(node_type, index_field, new_points)
+                await _index_data_points_batched(vector_engine, node_type, index_field, new_points)
                 await vector_engine.delete_data_points(collection, migrated_old_ids)
 
     return failed
@@ -442,7 +443,8 @@ async def _migrate_triplet_vector(vector_engine, triplet_map: dict) -> None:
         migrated_old_ids.append(old_id)
 
     if new_points:
-        await vector_engine.index_data_points("Triplet", "text", new_points)  # -> Triplet_text
+        # -> Triplet_text
+        await _index_data_points_batched(vector_engine, "Triplet", "text", new_points)
         await vector_engine.delete_data_points("Triplet_text", migrated_old_ids)
 
 
