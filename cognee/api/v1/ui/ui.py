@@ -421,6 +421,50 @@ def prompt_user_for_download() -> bool:
         return False
 
 
+# TODO(subpath-deployment): support serving frontend, backend, and MCP behind one
+# port, reachable at a single domain.
+# Currently, start_ui() always serves the frontend, backend, and MCP server on three
+# separate ports, each assuming it owns the root path ("/") of its own origin.
+# This makes it impossible to expose all three under a single public domain,
+# since none of them can be reached at a distinguishing path prefix.
+#
+# Proposed signature:
+#
+# def start_ui(
+#     pid_callback: Callable[[int], None],
+#     port: int = 3000,
+#     open_browser: bool = True,
+#     auto_download: bool = False,
+#     start_backend: bool = False,
+#     backend_port: int = 8000,
+#     start_mcp: bool = False,
+#     mcp_port: int = 8001,
+#     gateway_port: Optional[int] = None,
+#     frontend_path: str = "/frontend",
+#     backend_path: str = "/backend",
+#     mcp_path: str = "/mcp",
+# ) -> Optional[subprocess.Popen]:
+#
+# Default behavior (gateway_port=None): unchanged from current behavior. The frontend, backend,
+# and MCP server each run independently on their own port (port, backend_port,
+# mcp_port), with no awareness of any path prefix.
+#
+# New behavior (gateway_port=<int>): a single ASGI gateway app is started on
+# gateway_port, exposing all three services under one public port and domain,
+# distinguished by path prefix:
+#   - backend_path  -> the FastAPI backend app, mounted in-process
+#   - mcp_path      -> the MCP ASGI app, mounted in-process
+#   - frontend_path -> proxied through to the Next.js subprocess, which still runs
+#                       on its own internal port (a separate JS runtime cannot be
+#                       mounted in-process)
+# port, backend_port, and mcp_port then become internal bind ports behind the
+# gateway rather than publicly reachable addresses.
+#
+# Intended use case: reaching all of cognee's stack at a single domain, by putting
+# everything behind one port with no external reverse proxy required. The gateway
+# mounts the backend and MCP app in-process, and proxies requests to the frontend
+# internally since Next.js runs as a separate process that can't be mounted the
+# same way.
 def start_ui(
     pid_callback: Callable[[int], None],
     port: int = 3000,
