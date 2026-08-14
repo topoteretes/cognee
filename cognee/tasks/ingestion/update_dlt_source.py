@@ -128,8 +128,12 @@ async def update_dlt_source_rows(
 
     # Re-ingest through add(): staging load (dlt's own merge/replace/append
     # machinery), manifest rebuild, and the in-place Data record update all
-    # reuse the existing machinery. This clears the record's pipeline_status
-    # (content changed) — restored below once the delta is applied.
+    # reuse the existing machinery. add() is idempotent by contract — a
+    # completed item keeps the fast skip — and update() IS the explicit
+    # update path, so the re-ingest takes the explicit hatch (both cache
+    # flags off; the skip runs when either is on). The content change then
+    # clears the record's pipeline_status — restored below once the delta
+    # is applied.
     from cognee.api.v1.add import add  # lazy: avoids api <-> tasks import cycle
 
     # dataset_name must be explicit: resolve_dlt_sources runs before add()'s
@@ -142,6 +146,8 @@ async def update_dlt_source_rows(
         user=user,
         write_disposition=write_disposition,
         primary_key=primary_key,
+        incremental_loading=False,
+        data_cache=False,
     )
 
     fresh_record = await get_data(user.id, data_record.id)
