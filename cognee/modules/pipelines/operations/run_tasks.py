@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Awaitable, Callable, List, Optional
+
+from typing import Any, Awaitable, Callable, List, Optional, Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -13,6 +14,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -32,7 +34,7 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
 async def run_tasks(
-    tasks: List[Task],
+    tasks: Union[List[Task], Callable[[Any], List[Task]]],
     dataset_id: UUID,
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
@@ -45,6 +47,16 @@ async def run_tasks(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
 ):
+    """Run a pipeline over a dataset as ONE logical run.
+
+    ``tasks`` is either the task list every item runs, or a callable mapping
+    one data item to its task list (a task resolver — like
+    ``rollback_handler``, a caller-supplied policy that keeps the engine
+    domain-blind). A constant list is just the degenerate resolver; items
+    resolved to different lists still share this run's lifecycle — one run
+    record, one database context, one rollback, one terminal status.
+    """
+    task_resolver = tasks if callable(tasks) else None
     if not user:
         user = await get_default_user()
 
@@ -79,16 +91,29 @@ async def run_tasks(
             if data_cache or incremental_loading:
                 data = await resolve_data_directories(data)
 
+            # Build (item, item_tasks) work pairs: a resolver picks each
+            # item's task list; a plain list applies uniformly. Validate each
+            # DISTINCT resolved list once (the eager check in run_pipeline
+            # covers only the plain-list case).
+            work_items = []
+            validated_list_ids = set()
+            for item in data:
+                item_tasks = task_resolver(item) if task_resolver else tasks
+                if task_resolver is not None and id(item_tasks) not in validated_list_ids:
+                    validate_pipeline_tasks(item_tasks)
+                    validated_list_ids.add(id(item_tasks))
+                work_items.append((item, item_tasks))
+
             # Semaphore-based concurrency: all items are scheduled at once,
             # but at most data_per_batch run concurrently at any time.
             semaphore = asyncio.Semaphore(data_per_batch)
 
-            async def _run_item(data_item):
+            async def _run_item(data_item, item_tasks):
                 async with semaphore:
                     return await run_tasks_data_item(
                         data_item,
                         dataset,
-                        tasks,
+                        item_tasks,
                         pipeline_name,
                         pipeline_id,
                         pipeline_run_id,
@@ -98,7 +123,9 @@ async def run_tasks(
                             dataset=dataset,
                             pipeline_run_id=pipeline_run_id,
                             pipeline_name=pipeline_name,
-                            extras=extras if isinstance(extras, dict) else {},
+                            # Copy per item: a shared dict would let one item's
+                            # ctx.extras mutations leak into every other item.
+                            extras=dict(extras) if isinstance(extras, dict) else {},
                         ),
                         user,
                         incremental_loading,
@@ -106,7 +133,10 @@ async def run_tasks(
                     )
 
             gathered = await asyncio.gather(
-                *[asyncio.create_task(_run_item(item)) for item in data],
+                *[
+                    asyncio.create_task(_run_item(item, item_tasks))
+                    for item, item_tasks in work_items
+                ],
             )
 
             # Separate successes from unhandled exceptions

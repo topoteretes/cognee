@@ -31,6 +31,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseGraphEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
+    ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -59,6 +60,7 @@ class RecallKwargs(TypedDict, total=False):
     feedback_influence: float
     verbose: bool
     retriever_specific_config: dict
+    response_model: type
     user: object
 
 
@@ -354,9 +356,12 @@ async def recall(
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
+    response_model: type | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
+    tool_connections: list[str] | None = None,
+    tools_trigger: str = "always",
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -385,6 +390,25 @@ async def recall(
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
+        response_model: Pydantic model class for structured completion output.
+            Forwarded to the retriever, which validates the LLM answer against
+            it; each result then carries the validated payload as a dict in its
+            ``structured`` field. Shorthand for
+            ``retriever_specific_config={"response_model": ...}`` — pass it in
+            one place only. Supported by the completion-style search types
+            (GRAPH_COMPLETION and variants, RAG/TRIPLET/HYBRID/TEMPORAL/
+            AGENTIC completion). With a remote Cognee server the model's JSON
+            Schema is sent (``model_json_schema()``); the server validates
+            structure only — Python-side validators do not travel.
+        tool_connections: Names of authorized external database connections
+            for the ``"tools"`` scope. ``None`` uses every connection visible
+            to the user. Only consulted when ``scope`` includes ``"tools"``
+            (which is never implied by ``"auto"`` or ``"all"``) and
+            ``TOOL_CALLS_ENABLED=true``.
+        tools_trigger: When to run the ``"tools"`` scope: ``"always"``
+            (default) or ``"on_empty"`` — go back to the original data source
+            only when every other requested source returned nothing, i.e. when
+            cognee lacks the context to answer.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -392,6 +416,21 @@ async def recall(
     """
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
+
+    # Fold the first-class response_model param into retriever_specific_config,
+    # the channel the retriever registry already reads. Doing this up front means
+    # every downstream path (graph search, scope routing) sees one merged config.
+    if response_model is not None:
+        configured_model = (retriever_specific_config or {}).get("response_model")
+        if configured_model is not None and configured_model is not response_model:
+            raise CogneeValidationError(
+                message="response_model was passed both directly and in "
+                "retriever_specific_config with different values; pass it once."
+            )
+        retriever_specific_config = {
+            **(retriever_specific_config or {}),
+            "response_model": response_model,
+        }
 
     telemetry_user = getattr(user, "id", user) or "sdk"
 
@@ -421,6 +460,16 @@ async def recall(
     else:
         sources = resolved_scope
         auto_fallthrough = False
+
+    if tools_trigger not in ("always", "on_empty"):
+        raise CogneeValidationError(
+            message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
+            name="InvalidToolsTriggerError",
+        )
+    # "on_empty" means: go back to the source database only when cognee lacks
+    # context — so tools must observe every other source's results first.
+    if tools_trigger == "on_empty" and "tools" in sources:
+        sources = [source for source in sources if source != "tools"] + ["tools"]
 
     span_scope = ",".join(sources)
 
@@ -454,6 +503,11 @@ async def recall(
 
         client = get_remote_client()
         if client is not None:
+            # A model class cannot cross the HTTP boundary — send its JSON
+            # Schema instead; the server rebuilds a validation model from it
+            # and results come back with the validated dict in `structured`.
+            # Read from the merged config so the dict form travels too.
+            remote_response_model = (retriever_specific_config or {}).get("response_model")
             results = await client.recall(
                 query_text,
                 query_type,
@@ -468,6 +522,13 @@ async def recall(
                 context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
+                response_schema=(
+                    remote_response_model.model_json_schema()
+                    if remote_response_model is not None
+                    else None
+                ),
+                tool_connections=tool_connections,
+                tools_trigger=tools_trigger,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -517,7 +578,9 @@ async def recall(
             from cognee.modules.recall.methods.normalize_search_payload import (
                 normalize_search_payload,
             )
+
             from cognee.modules.search.methods.search import authorized_search
+            from cognee.modules.search.operations import log_search_history
 
             if user is None:
                 try:
@@ -589,6 +652,12 @@ async def recall(
                 embedding_config=embedding_config,
             )
 
+            # /v1/search records every question it answers; recall never did,
+            # because it calls authorized_search() directly and skips the
+            # logging that search() wraps around it. Agents recall through this
+            # endpoint, so their questions were absent from history entirely.
+            await log_search_history(query_text, local_query_type.value, user.id, graph_results)
+
             tagged = []
             for r in graph_results:
                 items: list[SearchResultItem] = normalize_search_payload(r)
@@ -597,11 +666,73 @@ async def recall(
                 )
             return tagged
 
+        async def _run_tools() -> list[RecallResponse]:
+            from uuid import UUID as _UUID
+
+            from cognee.modules.tools.config import get_tools_config
+            from cognee.modules.tools.connections import list_tool_connections
+            from cognee.modules.tools.text_to_sql import TOOL_NAME, run_text_to_sql
+
+            tools_config = get_tools_config()
+            if not tools_config.tool_calls_enabled:
+                # The scope was requested explicitly ("tools" never comes from
+                # "auto"/"all"), so a silent empty result would read as "no
+                # data" — fail loudly instead.
+                raise CogneeValidationError(
+                    message=(
+                        "Recall scope 'tools' requested but tool calls are disabled. "
+                        "Set TOOL_CALLS_ENABLED=true and register a connection with "
+                        "cognee.tools.register_sql_connection(...) to enable it."
+                    ),
+                    name="ToolCallsDisabledError",
+                )
+
+            caller_user_id = await _resolve_user_id(user)
+            if not caller_user_id:
+                return []
+            user_uuid = _UUID(caller_user_id)
+
+            connection_names = tool_connections or [
+                connection["name"] for connection in await list_tool_connections(user_uuid)
+            ]
+            if not connection_names:
+                return []
+
+            span.set_attribute("cognee.recall.tool_connections", len(connection_names))
+
+            entries: list[RecallResponse] = []
+            for connection_name in connection_names:
+                # Authorization failures (unknown/non-owned name) raise;
+                # generation/execution failures come back as success=False
+                # entries so one dead database never aborts a multi-source
+                # recall.
+                result = await run_text_to_sql(user_uuid, connection_name, query_text)
+                logger.info(
+                    "text_to_sql on '%s': success=%s rows=%d attempts=%d",
+                    connection_name,
+                    result.success,
+                    result.row_count,
+                    result.attempts,
+                )
+                entries.append(
+                    ResponseToolEntry(
+                        source="tools",
+                        tool_name=TOOL_NAME,
+                        question=query_text,
+                        text=result.render_text(),
+                        success=result.success,
+                        error=result.error,
+                        structured=result.structured(),
+                    )
+                )
+            return entries
+
         runners = {
             "session": _run_session,
             "trace": _run_trace,
             "session_context": _run_session_context,
             "graph": _run_graph,
+            "tools": _run_tools,
         }
 
         session_result_count = 0
@@ -612,6 +743,10 @@ async def recall(
             # Auto mode special case: session hit short-circuits graph.
             if auto_fallthrough and src == "graph" and merged:
                 break
+            # on_empty: the other sources gave cognee enough context — don't
+            # go back to the external database.
+            if src == "tools" and tools_trigger == "on_empty" and merged:
+                continue
             part = await runner()
             if src == "session":
                 session_result_count = len(part)

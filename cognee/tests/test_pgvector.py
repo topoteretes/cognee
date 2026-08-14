@@ -23,7 +23,11 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         encoded_text = data_text.encode("utf-8")
         data_hash = hashlib.md5(encoded_text).hexdigest()
         # Get data entry from database based on hash contents
-        data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
+        data = (
+            await session.scalars(
+                select(Data).where(Data.content_hash == data_hash, Data.dataset_id == dataset_2_id)
+            )
+        ).one()
         assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exist: {data.raw_data_location}"
         )
@@ -37,7 +41,10 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         # Get data entry from database based on file path
         data = (
             await session.scalars(
-                select(Data).where(Data.original_data_location == "file://" + file_location)
+                select(Data).where(
+                    Data.original_data_location == "file://" + file_location,
+                    Data.dataset_id == dataset_1_id,
+                )
             )
         ).one()
         assert os.path.isfile(data.original_data_location.replace("file://", "")), (
@@ -312,7 +319,11 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    history = await get_history(user.id)
+    # This test runs with access control disabled (see vector_db_tests.yml), so
+    # search payloads carry no dataset and there is no per-dataset fan-out:
+    # each of the 4 searches records exactly one query and one result row.
+    # limit=0 lifts get_history's default cap of 10.
+    history = await get_history(user.id, limit=0)
     assert len(history) == 8, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()

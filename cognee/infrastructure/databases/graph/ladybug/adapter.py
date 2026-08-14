@@ -50,6 +50,17 @@ from cognee.modules.observability.tracing import (
 
 logger = get_logger()
 
+
+# Rows per bulk MERGE statement (same convention as the Postgres/Turso
+# adapters' _WRITE_CHUNK_SIZE). Bulk node/edge writes are split into chunks of
+# this size so no single statement can exceed the subprocess engine's per-call
+# deadline on large graphs (e.g. code-graph ingests with tens of thousands of
+# facts). Each chunk is its own statement; the writes are idempotent MERGEs
+# and failed runs are swept by the pipeline rollback ledger, so partial
+# progress is safe. Does not change how many data points the pipeline batches.
+_WRITE_CHUNK_SIZE = 2000
+
+
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 
@@ -985,11 +996,11 @@ class LadybugAdapter(GraphDBInterface):
                 relationship_name: $relationship_name
             }]->(to)
             ON CREATE SET
-                r.created_at = timestamp($created_at),
-                r.updated_at = timestamp($updated_at),
+                r.created_at = TIMESTAMP($created_at),
+                r.updated_at = TIMESTAMP($updated_at),
                 r.properties = $properties
             ON MATCH SET
-                r.updated_at = timestamp($updated_at),
+                r.updated_at = TIMESTAMP($updated_at),
                 r.properties = $properties
         """
         params = {
@@ -1070,7 +1081,7 @@ class LadybugAdapter(GraphDBInterface):
 
             # Add timestamp fields
             fields.extend(
-                ["created_at: timestamp($created_at)", "updated_at: timestamp($updated_at)"]
+                ["created_at: TIMESTAMP($created_at)", "updated_at: TIMESTAMP($updated_at)"]
             )
             params.update({"created_at": now, "updated_at": now})
 
@@ -1151,22 +1162,27 @@ class LadybugAdapter(GraphDBInterface):
                     n.name = node.name,
                     n.type = node.type,
                     n.properties = node.properties,
-                    n.created_at = timestamp(node.created_at),
-                    n.updated_at = timestamp(node.updated_at)
+                    n.created_at = TIMESTAMP(node.created_at),
+                    n.updated_at = TIMESTAMP(node.updated_at)
                 ON MATCH SET
                     n.name = node.name,
                     n.type = node.type,
                     n.properties = node.properties,
-                    n.updated_at = timestamp(node.updated_at)
+                    n.updated_at = TIMESTAMP(node.updated_at)
                 """
-                query_params = {"nodes": node_params}
+                extra_params = {}
                 if source_ref_key is not None:
                     merge_query += _provenance_fold_clause("n")
-                    query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+                    extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
-                await self.query(merge_query, query_params)
+                total = len(node_params)
+                for start in range(0, total, _WRITE_CHUNK_SIZE):
+                    chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                    await self.query(merge_query, {"nodes": chunk, **extra_params})
+                    if total > _WRITE_CHUNK_SIZE:
+                        logger.info("Merged nodes %d/%d", start + len(chunk), total)
                 await self.checkpoint()
-                logger.debug(f"Processed {len(node_params)} nodes in batch")
+                logger.debug(f"Processed {total} nodes in batch")
 
         except Exception as e:
             logger.error(f"Failed to add nodes in batch: {e}")
@@ -1835,8 +1851,15 @@ class LadybugAdapter(GraphDBInterface):
             return existing_edges
 
         except Exception as e:
+            # A failed existence check is NOT an empty existence check: callers
+            # (e.g. the cognify dedup in retrieve_existing_edges) read [] as
+            # "none of these edges exist" and proceed to write them. When the
+            # store is unavailable/corrupt those writes also fail, and the run
+            # reports success while persisting nothing (issue #4348). Surface
+            # the failure like the other backends do (neo4j re-raises;
+            # postgres/turso let it propagate) instead of masking it.
             logger.error(f"Failed to check edges in batch: {e}")
-            return []
+            raise
 
     async def add_edge(
         self,
@@ -1913,27 +1936,34 @@ class LadybugAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
+            # Property-map matches (primary-key index seeks) instead of a
+            # cartesian MATCH + WHERE, which planned as a scan on large graphs.
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node), (to:Node)
-            WHERE from.id = edge.from_id AND to.id = edge.to_id
+            MATCH (from:Node {id: edge.from_id})
+            MATCH (to:Node {id: edge.to_id})
             MERGE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name
             }]->(to)
             ON CREATE SET
-                r.created_at = timestamp(edge.created_at),
-                r.updated_at = timestamp(edge.updated_at),
+                r.created_at = TIMESTAMP(edge.created_at),
+                r.updated_at = TIMESTAMP(edge.updated_at),
                 r.properties = edge.properties
             ON MATCH SET
-                r.updated_at = timestamp(edge.updated_at),
+                r.updated_at = TIMESTAMP(edge.updated_at),
                 r.properties = edge.properties
             """
-            query_params = {"edges": edge_params}
+            extra_params = {}
             if source_ref_key is not None:
                 query += _provenance_fold_clause("r")
-                query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+                extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
-            await self.query(query, query_params)
+            total = len(edge_params)
+            for start in range(0, total, _WRITE_CHUNK_SIZE):
+                chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
+                await self.query(query, {"edges": chunk, **extra_params})
+                if total > _WRITE_CHUNK_SIZE:
+                    logger.info("Merged edges %d/%d", start + len(chunk), total)
             await self.checkpoint()
 
         except Exception as e:
@@ -2182,7 +2212,7 @@ class LadybugAdapter(GraphDBInterface):
         MATCH (n:Node)
         WHERE n.id = item.node_id
         SET n.properties = item.properties,
-            n.updated_at = timestamp($updated_at)
+            n.updated_at = TIMESTAMP($updated_at)
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
@@ -2224,7 +2254,7 @@ class LadybugAdapter(GraphDBInterface):
         MATCH (n:Node)
         WHERE n.id = item.node_id
         SET n.properties = item.properties,
-            n.updated_at = timestamp($updated_at)
+            n.updated_at = TIMESTAMP($updated_at)
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
@@ -2275,7 +2305,7 @@ class LadybugAdapter(GraphDBInterface):
           AND to.id = item.to_id
           AND r.relationship_name = item.relationship_name
         SET r.properties = item.properties,
-            r.updated_at = timestamp($updated_at)
+            r.updated_at = TIMESTAMP($updated_at)
         RETURN item.edge_object_id AS edge_object_id
         """
         result = await self.query(query, {"items": edge_updates, "updated_at": now})

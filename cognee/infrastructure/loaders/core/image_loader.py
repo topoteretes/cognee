@@ -206,7 +206,7 @@ class ImageLoader(LoaderInterface):
     def _get_ocr_engine() -> Any:
         """Build the RapidOCR engine once (cached). Requires the rapidocr-onnxruntime dependency."""
         try:
-            from rapidocr_onnxruntime import RapidOCR
+            from rapidocr_onnxruntime import RapidOCR  # ty: ignore[unresolved-import]
         except ImportError as e:
             raise ImportError(
                 "rapidocr-onnxruntime is required for image OCR. "
@@ -254,7 +254,7 @@ class ImageLoader(LoaderInterface):
 
         try:
             with Image.open(file_path) as img:
-                exif_data = img._getexif()
+                exif_data = img._getexif()  # ty:ignore[unresolved-attribute]
         except Exception:
             return None
 
@@ -348,7 +348,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     """
     from PIL import Image  # ty: ignore[unresolved-import]
 
-    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)  # ty:ignore[unresolved-attribute]
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
     bits: list[str] = []

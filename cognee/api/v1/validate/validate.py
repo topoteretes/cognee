@@ -42,6 +42,7 @@ from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.users.methods import get_default_user
@@ -221,8 +222,9 @@ async def validate(
     resolved_dataset = None
     if dataset_names:
         authorized = await get_authorized_existing_datasets(dataset_names, "read", user)
-        if authorized:
-            resolved_dataset = authorized[0]
+        if len(authorized) != len(dataset_names):
+            raise DatasetNotFoundError(message="Dataset not found or not readable.")
+        resolved_dataset = authorized[0]
 
     async with set_database_global_context_variables(
         resolved_dataset.id if resolved_dataset else None,

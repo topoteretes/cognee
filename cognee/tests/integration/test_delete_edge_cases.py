@@ -20,7 +20,7 @@ from sqlalchemy import select, update
 
 import cognee
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data, DatasetData
+from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
@@ -77,15 +77,11 @@ async def test_last_accessed_updates_on_search():
     # Get the data_id
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        result = await session.execute(
-            select(Data, DatasetData)
-            .join(DatasetData, Data.id == DatasetData.data_id)
-            .where(DatasetData.dataset_id == dataset_id)
-        )
-        data_records = result.all()
+        result = await session.execute(select(Data).where(Data.dataset_id == dataset_id))
+        data_records = list(result.scalars().all())
         assert len(data_records) > 0, "Should have at least one data record"
 
-        data_before = data_records[0][0]
+        data_before = data_records[0]
         data_id = data_before.id
 
         # Record timestamp before search

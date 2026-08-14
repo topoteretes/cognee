@@ -23,30 +23,31 @@ async def get_document_ids_for_user(user_id: UUID, dataset_ids: list[UUID] = Non
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        async with session.begin():
-            # Datasets the user has read permission for, regardless of ownership.
-            readable_dataset_ids = (
-                await session.scalars(
-                    select(Dataset.id)
-                    .join(ACL.dataset)
-                    .join(ACL.permission)
-                    .where(
-                        ACL.principal_id == user_id,
-                        Permission.name == "read",
-                    )
+        # Datasets the user has read permission for, regardless of ownership.
+        readable_dataset_ids = (
+            await session.scalars(
+                select(Dataset.id)
+                .join(ACL.dataset)
+                .join(ACL.permission)
+                .where(
+                    ACL.principal_id == user_id,
+                    Permission.name == "read",
                 )
-            ).all()
+            )
+        ).all()
 
-            if dataset_ids is not None:
-                # Keep only the requested datasets the user is allowed to read.
-                requested = set(dataset_ids)
-                readable_dataset_ids = [
-                    dataset_id for dataset_id in readable_dataset_ids if dataset_id in requested
-                ]
+    if dataset_ids is not None:
+        # Keep only the requested datasets the user is allowed to read.
+        requested = set(dataset_ids)
+        readable_dataset_ids = [
+            dataset_id for dataset_id in readable_dataset_ids if dataset_id in requested
+        ]
 
-            document_ids = []
-            for dataset_id in readable_dataset_ids:
-                data_list = await get_dataset_data(dataset_id)
-                document_ids.extend([data.id for data in data_list])
+    # get_dataset_data opens its own session per call; run these AFTER ours is
+    # closed so we never hold two pooled connections at once (#4197 class).
+    document_ids = []
+    for dataset_id in readable_dataset_ids:
+        data_list = await get_dataset_data(dataset_id)
+        document_ids.extend([data.id for data in data_list])
 
-            return document_ids
+    return document_ids

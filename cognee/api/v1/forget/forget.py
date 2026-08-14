@@ -273,7 +273,6 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
-    from cognee.modules.data.models.DatasetData import DatasetData
     from cognee.modules.graph.methods.delete_dataset_nodes_and_edges import (
         delete_dataset_nodes_and_edges,
     )
@@ -292,9 +291,8 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
         # 2. Reset pipeline_status on all data records in this dataset
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
             data_records = (
-                (await session.execute(select(Data).where(Data.id.in_(data_ids_query))))
+                (await session.execute(select(Data).where(Data.dataset_id == dataset_id)))
                 .scalars()
                 .all()
             )
