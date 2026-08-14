@@ -199,3 +199,92 @@ jobs:
     needs: load-tests
     uses: ./.github/workflows/dev_canary_release.yml
     secrets: inherit
+
+  # ══ Large-scale migration compatibility (COG-6112) ═══════════════════════
+  # Codifies the 1.5.0 release validation: seed a production-shaped 2×~100k-node
+  # system on the pinned LEGACY cognee (mock-replay ingestion — zero AI calls),
+  # then run the current branch's full migration chain over it and verify the
+  # dataset-scoping fork split + rekey_fork_document_ids complete with data
+  # intact. Fixtures come from S3 (the perf-test war-and-peace corpus and its
+  # 27×-multiplied mock).
+  large-migration-compat:
+    name: Large-scale migration compatibility (v1.2.0 → current)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    env:
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+      ENV: dev
+      TELEMETRY_DISABLED: "1"
+      RUNTIME__DLTHUB_TELEMETRY: "false"
+      COGNEE_SKIP_CONNECTION_TEST: "true"
+      # All AI calls are mock-replayed; keys are placeholders. The embedding
+      # MODEL still matters: its tokenizer decides chunk boundaries, which must
+      # match the mock capture (cl100k_base).
+      MOCK_EMBEDDING: "true"
+      LLM_PROVIDER: openai
+      LLM_MODEL: openai/gpt-4.1-mini
+      LLM_API_KEY: mock-key
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: openai/text-embedding-3-small
+      EMBEDDING_DIMENSIONS: 1536
+      EMBEDDING_API_KEY: mock-key
+      LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
+      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/mock_war_and_peace_large.json
+
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Download large mock fixtures from S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          PREFIX: nightly_ci_artifacts/performance_test_artifacts
+        run: |
+          mkdir -p /tmp/large_migration_fixtures
+          aws s3 cp "s3://$BUCKET/$PREFIX/war_and_peace.json" "$LARGE_MEMORIES_FILE"
+          aws s3 cp "s3://$BUCKET/$PREFIX/mock_war_and_peace_large.json" "$LARGE_MOCK_FILE"
+
+      # Scripts and the shared mock-ingestion module do not exist on the
+      # legacy tag — save them (the module goes NEXT TO the phase scripts,
+      # phase1 imports it from its own directory).
+      - name: Save release migration test scripts
+        run: |
+          cp -r cognee/tests/release_migration /tmp/release_migration_scripts
+          cp -r cognee/tests/utils/mock_ingestion /tmp/release_migration_scripts/mock_ingestion
+
+      # ── Phase 1: seed 2×~100k-node datasets on the legacy version ────────
+      - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+        run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+
+      - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
+        run: uv sync --extra api --extra docs --extra dev --extra dlt
+
+      - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
+        run: uv run python /tmp/release_migration_scripts/phase1_seed_large.py
+
+      # ── Phase 2: migrate on the current branch and verify ────────────────
+      - name: Switch back to current branch
+        run: git checkout ${{ github.sha }}
+
+      - name: Install current branch dependencies
+        run: uv sync --extra api --extra docs --extra dev --extra dlt
+
+      - name: "Phase 2 — run migrations, verify fork re-key and data integrity (current branch)"
+        run: uv run python cognee/tests/release_migration/phase2_verify_large.py
