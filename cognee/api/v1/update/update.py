@@ -75,8 +75,11 @@ async def update(
         node_set: Optional list of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
         vector_db_config: Optional configuration for vector database (for custom setups).
-                 When provided, the update runs through the full rebuild flow —
-                 chunk-level updates on custom stores are a planned extension.
+                 Chunk-level incremental updates do not support per-call config
+                 forwarding: when provided, the update runs full ingestion
+                 instead (a warning is logged). For incremental updates,
+                 configure stores through environment settings and the
+                 dataset-context database routing system.
         graph_db_config: Optional configuration for graph database (for custom setups).
                  Same routing note as vector_db_config.
         chunk_level_diff: When True (default), diff the new content against the stored
@@ -134,12 +137,17 @@ async def update(
             preserved_legacy_id = old_row.legacy_id
 
     if chunk_level_diff and (vector_db_config is not None or graph_db_config is not None):
-        # Custom store configs are honored by the full flow's pipelines only:
-        # the incremental engine resolves its engines from global/dataset
-        # context and would silently read and write the DEFAULT stores. Route
-        # custom-store updates through the full rebuild until the incremental
-        # engine learns config injection.
-        logger.info("custom store configs provided; running the full update flow")
+        # The chunk-level incremental engine resolves its stores through the
+        # dataset-context routing system, not per-call config dicts — running
+        # it with these params would silently read and write the DEFAULT
+        # stores. The full ingestion flow honors them, so it runs instead.
+        logger.warning(
+            "Chunk-level incremental update is not supported with per-call "
+            "vector_db_config/graph_db_config forwarding; running full "
+            "ingestion instead. To get incremental updates, configure your "
+            "stores through environment settings and the dataset-context "
+            "database routing system instead of per-call config dicts."
+        )
         chunk_level_diff = False
 
     if chunk_level_diff:
