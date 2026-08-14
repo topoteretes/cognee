@@ -28,6 +28,10 @@ except ImportError:
 
 logger = get_logger("ingest_dlt_source")
 
+# Serializes dlt staging runs: one shared pipeline name means one shared dlt
+# working directory, which concurrent runs corrupt (see the lock's use below).
+_staging_lock = asyncio.Lock()
+
 # Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
@@ -88,13 +92,6 @@ async def ingest_dlt_source(
             "Only 'sqlite' and 'postgres' are supported."
         )
 
-    # Execute dlt pipeline with error handling
-    pipeline = dlt.pipeline(
-        pipeline_name="ingest_dlt_source",
-        destination=destination,
-        dataset_name=dataset_name,
-    )
-
     # Build run kwargs based on disposition
     run_kwargs = {
         "write_disposition": write_disposition,
@@ -105,14 +102,25 @@ async def ingest_dlt_source(
     if write_disposition == "merge" and primary_key:
         run_kwargs["primary_key"] = primary_key
 
-    try:
-        # dlt's pipeline.run() is synchronous and potentially long-running;
-        # run it in a thread to avoid blocking the async event loop.
-        load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
-    except Exception as e:
-        raise DLTIngestionError(
-            message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
-        ) from e
+    # Every staging run shares one dlt pipeline name, and dlt's working
+    # directory for a pipeline is NOT safe for concurrent runs: normalize's
+    # package cleanup deletes folders under the other run's feet. The add
+    # pipeline processes items concurrently (two CSVs in one add() reach the
+    # dlt_csv_loader in parallel), so staging must serialize here.
+    async with _staging_lock:
+        pipeline = dlt.pipeline(
+            pipeline_name="ingest_dlt_source",
+            destination=destination,
+            dataset_name=dataset_name,
+        )
+        try:
+            # dlt's pipeline.run() is synchronous and potentially long-running;
+            # run it in a thread to avoid blocking the async event loop.
+            load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
+        except Exception as e:
+            raise DLTIngestionError(
+                message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
+            ) from e
 
     # Scope the read-back to the tables this source actually loaded. The
     # staging DB is shared per dataset, so it can still hold tables from other
