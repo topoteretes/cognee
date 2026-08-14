@@ -215,10 +215,30 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
+
+    Without an LLM API key, the project's document files are excluded (logged)
+    instead of emitted: their routes need an LLM (images transcribe at add
+    time, text is LLM-chunked at cognify), so they would only fail later. The
+    code graph itself never needs one — a key-less repo add still works fully.
     """
+    from cognee.infrastructure.llm.config import get_llm_config
     from cognee.tasks.ingestion.data_item import DataItem
 
     covered, documents, skipped = partition_repo_files(directory)
+
+    if documents and not get_llm_config().llm_api_key:
+        logger.warning(
+            "No LLM API key configured (LLM_API_KEY): excluding %d document file(s) of "
+            "code project %s from processing — their pipelines need an LLM (image "
+            "transcription at add time, text extraction at cognify). The code graph is "
+            "unaffected (enola is LLM-free). Set LLM_API_KEY and re-add the repository "
+            "to ingest its documents.",
+            len(documents),
+            directory,
+        )
+        skipped = skipped + documents
+        documents = []
+
     manifest_text = build_repo_manifest(directory, covered)
 
     data_id = None

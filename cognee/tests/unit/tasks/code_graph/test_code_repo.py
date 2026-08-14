@@ -110,3 +110,42 @@ async def test_directory_without_project_still_flattens(tmp_path):
     resolved = await resolve_data_directories([str(tmp_path)])
 
     assert sorted(item.rsplit("/", 1)[-1] for item in resolved) == ["a.md", "b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_documents_excluded_without_llm_api_key(tmp_path, monkeypatch):
+    """A key-less repo add must not emit document items that would only fail
+    later in LLM pipelines; the code graph itself needs no key."""
+    from types import SimpleNamespace
+
+    import cognee.infrastructure.llm.config as llm_config_module
+    from cognee.tasks.code_graph.code_repo import resolve_code_repository
+
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(
+        llm_config_module, "get_llm_config", lambda: SimpleNamespace(llm_api_key=None)
+    )
+
+    manifest_item, documents, skip_count = await resolve_code_repository(repo)
+
+    assert manifest_item.system_metadata["source"] == "code_repo"
+    assert documents == []
+    assert skip_count == 6  # .env, pyc, bin, mp4 + README.md + notes.txt
+
+
+@pytest.mark.asyncio
+async def test_documents_kept_with_llm_api_key(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import cognee.infrastructure.llm.config as llm_config_module
+    from cognee.tasks.code_graph.code_repo import resolve_code_repository
+
+    repo = _make_repo(tmp_path)
+    monkeypatch.setattr(
+        llm_config_module, "get_llm_config", lambda: SimpleNamespace(llm_api_key="sk-set")
+    )
+
+    _manifest_item, documents, skip_count = await resolve_code_repository(repo)
+
+    assert {path.name for path in documents} == {"README.md", "notes.txt"}
+    assert skip_count == 4
