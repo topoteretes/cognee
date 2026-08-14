@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, patch
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.methods import (
-    create_authorized_dataset,
     get_authorized_dataset_by_name,
 )
 from cognee.modules.data.models import Data
@@ -73,7 +73,9 @@ async def main(mock_create_structured_output: AsyncMock):
     marie = await create_user(email="marie@example.com", password="marie_password")
 
     # Johns's context
-    await set_database_global_context_variables("main_dataset", john.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
+    )
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
@@ -98,7 +100,9 @@ async def main(mock_create_structured_output: AsyncMock):
     johns_dataset_id = list(johns_cognify_result.keys())[0]
 
     # Maries's context
-    await set_database_global_context_variables("main_dataset", marie.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", marie)).id, marie.id
+    )
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
@@ -185,7 +189,9 @@ async def main(mock_create_structured_output: AsyncMock):
     ]
 
     # John's initial assertions
-    await set_database_global_context_variables("main_dataset", john.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
+    )
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(johns_data + johns_legacy_data_points)
     await assert_nodes_vector_index_present(johns_data + johns_legacy_data_points)
@@ -194,7 +200,9 @@ async def main(mock_create_structured_output: AsyncMock):
     await assert_edges_vector_index_present(johns_relationships + johns_legacy_relationships)
 
     # Marie's initial assertions
-    await set_database_global_context_variables("main_dataset", marie.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", marie)).id, marie.id
+    )
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(maries_data + maries_legacy_data_points)
     await assert_nodes_vector_index_present(maries_data + maries_legacy_data_points)
@@ -203,7 +211,9 @@ async def main(mock_create_structured_output: AsyncMock):
     await assert_edges_vector_index_present(maries_relationships + maries_legacy_relationships)
 
     # John's actions
-    await set_database_global_context_variables("main_dataset", john.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", john)).id, john.id
+    )
     # Delete John's data
     await datasets.delete_data(johns_dataset_id, johns_data_id, john)
 
@@ -236,7 +246,9 @@ async def main(mock_create_structured_output: AsyncMock):
     await assert_edges_vector_index_not_present(johns_contains_relationships)
 
     # Marie's actions
-    await set_database_global_context_variables("main_dataset", marie.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", marie)).id, marie.id
+    )
     # Delete Marie's data
     await datasets.delete_data(maries_dataset_id, maries_data_id, marie)  # type: ignore
 
@@ -337,6 +349,9 @@ async def create_mocked_data_points(user):
     async with db_engine.get_async_session() as session:
         old_data = Data(
             id=legacy_document.id,
+            # Post-upgrade legacy rows are dataset-scoped (the backfill stamps
+            # sole-membership rows); membership IS this column now.
+            dataset_id=dataset.id,
             name=legacy_document.name,
             extension="txt",
             raw_data_location=legacy_document.raw_data_location,
@@ -350,9 +365,6 @@ async def create_mocked_data_points(user):
             },
         )
         session.add(old_data)
-
-        dataset.data.append(old_data)
-        session.add(dataset)
 
         await session.commit()
 

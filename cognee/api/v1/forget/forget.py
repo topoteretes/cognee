@@ -9,6 +9,10 @@ from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
     COGNEE_FORGET_TARGET,
     COGNEE_RESULT_COUNT,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    record_operation_duration,
+    increment_items_deleted,
 )
 
 logger = get_logger("forget")
@@ -96,7 +100,13 @@ async def forget(
         },
     )
 
-    with new_span("cognee.api.forget") as span:
+    import time as _time
+
+    _forget_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.delete") as span:
+        span.set_attribute(MEMORY_SYSTEM, "cognee")
+        span.set_attribute(MEMORY_OPERATION, "delete")
         span.set_attribute(COGNEE_FORGET_TARGET, target)
         if dataset_ref:
             span.set_attribute(COGNEE_DATASET_NAME, str(dataset_ref))
@@ -134,7 +144,12 @@ async def forget(
         # would try to create a dataset_database row for a non-existent dataset).
         if everything:
             result = await _forget_everything(user)
-            span.set_attribute(COGNEE_RESULT_COUNT, result.get("datasets_removed", 0))
+            _removed = result.get("datasets_removed", 0)
+            span.set_attribute(COGNEE_RESULT_COUNT, _removed)
+            _duration_ms = (_time.monotonic_ns() - _forget_start_ns) / 1_000_000
+            _attrs = {"memory.system": "cognee", "memory.operation": "delete"}
+            record_operation_duration(_duration_ms, _attrs)
+            increment_items_deleted(_removed, _attrs)
             return result
 
         # All remaining operations are scoped to a single dataset.
@@ -145,7 +160,14 @@ async def forget(
                 raise ValueError("data_id requires dataset or dataset_id.")
             raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
 
-        async with set_database_global_context_variables(dataset_ref, user.id):
+        # Authorize before entering the dataset's database context: context
+        # entry provisions per-dataset database registry rows, a write that
+        # must never happen for a caller without delete permission (an
+        # unauthorized caller used to surface as a UniqueViolation 500 — or,
+        # for an unprovisioned dataset, actually created rows).
+        resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+
+        async with set_database_global_context_variables(resolved_dataset_id, user.id):
             if memory_only:
                 if data_id is not None:
                     return await _forget_data_memory(data_id, dataset_ref, user)
@@ -251,7 +273,6 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
-    from cognee.modules.data.models.DatasetData import DatasetData
     from cognee.modules.graph.methods.delete_dataset_nodes_and_edges import (
         delete_dataset_nodes_and_edges,
     )
@@ -270,9 +291,8 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
         # 2. Reset pipeline_status on all data records in this dataset
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
-            data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset_id)
             data_records = (
-                (await session.execute(select(Data).where(Data.id.in_(data_ids_query))))
+                (await session.execute(select(Data).where(Data.dataset_id == dataset_id)))
                 .scalars()
                 .all()
             )

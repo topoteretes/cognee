@@ -4,7 +4,7 @@ from typing import Optional
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
-    evict_graph_engines_for_database,
+    graph_engine_cache,
 )
 from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
@@ -100,4 +100,4 @@ class PostgresGraphDatasetDatabaseHandler:
         # persist — engines connect lazily, so an entry cached even after this
         # eviction holds no dead connections and either reaches the recreated
         # database or fails fast on a nonexistent one.
-        evict_graph_engines_for_database(db_name)
+        graph_engine_cache.evict_for_database(db_name)

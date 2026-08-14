@@ -9,12 +9,12 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
     CsvDocument,
-    DltRowDocument,
+    DltSourceDocument,
 )
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
 from cognee.tasks.documents.exceptions import WrongDataDocumentInputError
-from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced
+from cognee.tasks.ingestion.dlt_utils import is_dlt_sourced, is_dlt_source_manifest
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -99,6 +99,32 @@ def update_node_set(document):
     document.source_node_set = ", ".join(node_set)
 
 
+def document_class_for(data_item) -> type[Document]:
+    """The document class a data item classifies to. Pure — reads only fields
+    already on the record (system_metadata, extension); no I/O, no config.
+    User-writable external_metadata is deliberately never consulted, so users
+    cannot steer records into (or out of) the DLT route.
+
+    Single source of truth for the dispatch: classify_documents builds
+    instances from it, and cognify routing (modules/cognify/routing.py)
+    derives task routes from it, so classification and routing cannot
+    disagree.
+    """
+    if is_dlt_source_manifest(data_item):
+        return DltSourceDocument
+    if is_dlt_sourced(data_item):
+        # Tombstone: pre-manifest per-row DLT records are unsupported. Routing
+        # them standard would silently send structured rows to the LLM, so
+        # fail loudly instead. Delete such records or re-add the source.
+        raise ValueError(
+            f"Data item {getattr(data_item, 'id', '?')} is a pre-manifest per-row DLT "
+            "record (system_metadata.source == 'dlt'), which is no longer supported. "
+            "Delete it or re-add the DLT source to ingest it as a manifest."
+        )
+    extension = (data_item.extension or "").lower()
+    return EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
+
+
 @task_summary("Classified {n} document(s)")
 async def classify_documents(data_documents: list[Data]) -> list[Document]:
     """
@@ -128,11 +154,7 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
 
     documents = []
     for data_item in data_documents:
-        if is_dlt_sourced(data_item):
-            doc_class = DltRowDocument
-        else:
-            extension = (data_item.extension or "").lower()
-            doc_class = EXTENSION_TO_DOCUMENT_CLASS.get(extension, TextDocument)
+        doc_class = document_class_for(data_item)
 
         document = doc_class(
             id=data_item.id,

@@ -46,12 +46,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
+    uv sync "$@" --extra fastembed --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra aws --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-install-project --no-dev --no-editable
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
-COPY ./distributed /app/distributed
 COPY ./cognee_db_workers /app/cognee_db_workers
 # Compatibility shim that re-exports ladybug under the legacy `kuzu`
 # module name. Listed in [tool.hatch.build.targets.wheel] packages, and
@@ -64,7 +63,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     for extra in ${COGNEE_EXTRAS}; do \
         set -- "$@" --extra "$extra"; \
     done; \
-    uv sync "$@" --extra debug --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
+    uv sync "$@" --extra fastembed --extra debug --extra aws --extra api --extra postgres --extra neo4j --extra llama-index --extra ollama --extra mistral --extra groq --extra anthropic --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 

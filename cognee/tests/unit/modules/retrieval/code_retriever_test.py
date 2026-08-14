@@ -197,7 +197,11 @@ async def test_query_facts_uses_exact_graph_filters_and_raw_fact_properties():
             ],
         }
     ]
-    engine.get_filtered_graph_data.assert_awaited_once_with([{"type": list(CODE_NODE_TYPES)}])
+    engine.get_filtered_graph_data.assert_awaited_once_with(
+        [{"type": [*CODE_NODE_TYPES, "CodeRepository"]}]
+    )
+    # Repository nodes are fetched for the delta operation but stay out of the
+    # fact indexes and every fact-facing operation.
     assert "CodeRepository" not in CODE_NODE_TYPES
 
 
@@ -768,3 +772,62 @@ async def test_invalidation_during_load_discards_stale_snapshot():
 
     assert first_result["total"] == second_result["total"] == 8
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_delta_operation_reports_repository_last_delta():
+    engine, graph_patch = _graph_patch()
+    retriever = CodeRetriever(config={"operation": "delta"})
+
+    with graph_patch:
+        result = await retriever.get_retrieved_objects("")
+
+    assert result["operation"] == "delta"
+    assert [repo["repo"] for repo in result["repositories"]] == ["repo-a"]
+    repository = result["repositories"][0]
+    # The fixture repository node predates delta stamping.
+    assert repository["delta"] is None
+    assert repository["last_snapshot_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_delta_operation_repo_filter_and_stamped_payload():
+    nodes, edges = _code_graph()
+    delta = {"nodes_added": 2, "nodes_removed": 1, "edges_added": 3, "edges_removed": 0}
+    nodes = list(nodes) + [
+        (
+            "repo-b",
+            {
+                "name": "repo-b",
+                "type": "CodeRepository",
+                "path": "/src/repo-b",
+                "last_snapshot_id": "sha256:abc",
+                "last_delta": delta,
+            },
+        )
+    ]
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, edges))
+    graph_patch = patch(
+        "cognee.modules.retrieval.code_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    )
+    retriever = CodeRetriever(config={"operation": "delta", "repo": "repo-b"})
+
+    with graph_patch:
+        result = await retriever.get_retrieved_objects("")
+
+    assert [repo["repo"] for repo in result["repositories"]] == ["repo-b"]
+    assert result["repositories"][0]["last_snapshot_id"] == "sha256:abc"
+    assert result["repositories"][0]["delta"] == delta
+
+
+@pytest.mark.asyncio
+async def test_repository_nodes_stay_out_of_fact_operations():
+    engine, graph_patch = _graph_patch()
+    retriever = CodeRetriever(config={"operation": "query_facts", "limit": 100})
+
+    with graph_patch:
+        result = await retriever.get_retrieved_objects("")
+
+    assert all(fact["type"] != "CodeRepository" for fact in result["facts"])

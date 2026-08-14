@@ -119,28 +119,9 @@ class datasets:
             async with set_database_global_context_variables(dataset.id, dataset.owner_id):
                 await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-                dataset_data = await get_dataset_data(dataset.id)
-
-                # Delete dataset record first while DatasetData junction rows still exist,
-                # so pipeline_status cleanup can find related Data records.
+                # delete_dataset removes the dataset's scoped Data rows
+                # (files refcounted by raw_data_location) with the record.
                 result = await delete_dataset(dataset)
-
-                # Delete individual data records; use return_exceptions so all are attempted
-                # even if some fail.
-                if dataset_data:
-                    results = await asyncio.gather(
-                        *[delete_data(data, dataset_id) for data in dataset_data],
-                        return_exceptions=True,
-                    )
-                    deletion_errors = [r for r in results if isinstance(r, Exception)]
-                    if deletion_errors:
-                        logger.error(
-                            "Failed to delete %d/%d data items from dataset %s: %s",
-                            len(deletion_errors),
-                            len(dataset_data),
-                            dataset_id,
-                            deletion_errors,
-                        )
 
         return result
 
@@ -168,6 +149,14 @@ class datasets:
         # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
         # on this dataset and exclude concurrent deletes.
         async with dataset_lock(dataset.id):
+            # Every id ever issued keeps resolving: exact id first, then the
+            # recorded original of a backfill-split row (legacy_id).
+            from cognee.modules.data.methods import resolve_data_id
+
+            resolved_id = await resolve_data_id(dataset.id, data_id)
+            if resolved_id is not None:
+                data_id = resolved_id
+
             dataset_data = [
                 data for data in await get_dataset_data(dataset.id) if data.id == data_id
             ]
@@ -185,7 +174,7 @@ class datasets:
 
                 return {"status": "success"}
 
-            if not any(ds.id == dataset_id for ds in data.datasets):
+            if str(data.dataset_id) != str(dataset_id):
                 raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
             async with set_database_global_context_variables(dataset_id, dataset.owner_id):
