@@ -55,7 +55,7 @@ async def add(
     # transactions hit WAL snapshot-upgrade conflicts ("database is locked"
     # immediately, bypassing busy_timeout) — observed live at 448 concurrent
     # items. 100 keeps ingestion fast while staying under that pressure.
-    data_per_batch: Optional[int] = 100,
+    data_per_batch: Optional[int] = 20,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
     llm_config: Optional[LLMConfig] = None,
