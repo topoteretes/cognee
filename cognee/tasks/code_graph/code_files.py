@@ -84,9 +84,12 @@ def _staged_repo_name(data_item) -> str:
     all keyed on the repo name (fact_node_id), so it must be stable across
     re-ingestions of the same file AND unique per Data record — two files named
     utils.py must not merge into (and sweep) one repo. The Data id provides
-    both: it is stable for a re-added file and unique per record.
+    both: it is stable for a re-added file and unique per record. The FULL id
+    is used: a truncated prefix would give same-named files a birthday-paradox
+    chance of sharing a repo identity, silently overwriting and sweeping each
+    other's nodes.
     """
-    return f"{_original_file_name(data_item)}_{str(data_item.id)[:8]}"
+    return f"{_original_file_name(data_item)}_{data_item.id}"
 
 
 def _stage_code_file(data_item, staging_root, content: str) -> Path:
