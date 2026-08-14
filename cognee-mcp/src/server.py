@@ -1146,6 +1146,7 @@ async def remember(
     dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
+    background: bool = False,
 ) -> list:
     """Store data in memory.
 
@@ -1180,6 +1181,12 @@ async def remember(
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    background : bool
+        Queue permanent ingestion as a background task and return immediately
+        instead of waiting for the pipeline. Use when the caller has a request
+        deadline shorter than ingestion takes. Ignored with session_id, which
+        is already fast. Errors surface via cognify_status, not the return
+        value.
     """
     if content_base64 and data:
         return [
@@ -1217,6 +1224,46 @@ async def remember(
             ]
 
     dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    # Permanent-memory ingestion runs add + cognify (+ improve), which routinely
+    # outruns an MCP host's per-request deadline — the same constraint the
+    # cognify tool documents as "background process launched due to MCP timeout
+    # limitations". Callers that can't block (the workspace UI) pass
+    # background=True and poll cognify_status instead. Session-cache writes are
+    # fast, so they always run inline.
+    if background and not session_id:
+
+        async def remember_task_wrapper(**kwargs):
+            """Wrapper that captures errors from the background task."""
+            try:
+                await cognee_client.remember(**kwargs)
+            except Exception as e:
+                _record_task_error(dataset_name, str(e))
+                logger.error(f"Background remember task failed for dataset '{dataset_name}': {e}")
+
+        _track_background(
+            remember_task_wrapper(
+                data=data,
+                filename=filename,
+                content_base64=content_base64,
+                dataset_name=dataset_name,
+                session_id=None,
+                custom_prompt=custom_prompt,
+            )
+        )
+        queued = f"'{filename}'" if content_base64 else "text"
+        return [
+            types.TextContent(
+                type="text",
+                text=(
+                    f"Background process launched due to MCP timeout limitations.\n"
+                    f"Queued {queued} for dataset '{dataset_name}'.\n"
+                    f"Check progress with cognify_status, or the log file at: "
+                    f"{get_log_file_location()}"
+                ),
+            )
+        ]
+
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
@@ -1309,11 +1356,14 @@ async def recall(
 async def forget(
     dataset: str = None,
     everything: bool = False,
+    data_id: str = None,
+    dataset_id: str = None,
 ) -> list:
     """Delete data from memory.
 
-    Can target a specific dataset or delete everything the user owns.
-    Removes data from the relational DB, graph DB, and vector DB.
+    Can target a single data item, a specific dataset (by name or id), or
+    everything the user owns. Removes data from the relational DB, graph DB,
+    and vector DB.
 
     Parameters
     ----------
@@ -1321,22 +1371,57 @@ async def forget(
         Dataset name to delete entirely.
     everything : bool
         If true, delete ALL data across all datasets.
+    data_id : str, optional
+        UUID of a single data item to delete. Must be paired with `dataset`
+        or `dataset_id` so the owning dataset is unambiguous.
+    dataset_id : str, optional
+        UUID of the dataset to delete entirely, or to scope `data_id`.
     """
     with redirect_stdout(sys.stderr):
         try:
-            if not dataset and not everything:
+            if not dataset and not everything and not data_id and not dataset_id:
                 return [
                     types.TextContent(
                         type="text",
-                        text="Error: Specify 'dataset' name or set 'everything' to true.",
+                        text=(
+                            "Error: Specify 'dataset' name or set 'everything' to true. "
+                            "To remove a single item, pass 'data_id' with 'dataset' or "
+                            "'dataset_id'."
+                        ),
                     )
                 ]
-            result = await cognee_client.forget(dataset=dataset, everything=everything)
+            if data_id and not dataset and not dataset_id:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text="Error: 'data_id' requires 'dataset' or 'dataset_id'.",
+                    )
+                ]
+
+            # The UI passes ids as strings over JSON; cognee.forget() wants UUIDs.
+            # Parse here so a malformed id is a clear message rather than a
+            # cognee-internal traceback.
+            from uuid import UUID
+
+            try:
+                parsed_data_id = UUID(data_id) if data_id else None
+                parsed_dataset_id = UUID(dataset_id) if dataset_id else None
+            except ValueError as e:
+                return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+
+            result = await cognee_client.forget(
+                dataset=dataset,
+                everything=everything,
+                data_id=parsed_data_id,
+                dataset_id=parsed_dataset_id,
+            )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif parsed_data_id:
+                text = f"Data item '{data_id}' deleted (status={status})."
             else:
-                text = f"Dataset '{dataset}' deleted (status={status})."
+                text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = f"Forget failed: {str(e)}"
@@ -1396,6 +1481,14 @@ async def improve(
 # ---------------------------------------------------------------------------
 
 
+@registry.tool(
+    tags={"workspace", "status"},
+    description=(
+        "Check the progress of background ingestion started by remember(background=True). "
+        "Reports active and completed pipeline jobs for a dataset, including failures that "
+        "a backgrounded call could not return inline."
+    ),
+)
 @log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status(
     dataset_name: str = None,

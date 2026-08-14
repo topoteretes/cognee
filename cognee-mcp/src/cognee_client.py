@@ -732,19 +732,36 @@ class CogneeClient:
         self,
         dataset: Optional[str] = None,
         everything: bool = False,
+        data_id: Optional[UUID] = None,
+        dataset_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
-        """Delete data via forget()."""
+        """Delete data via forget().
+
+        Mirrors cognee.forget()'s targeting options rather than a subset of
+        them: whole-dataset (by name or id), a single data item, or
+        everything. The single-item path is what the workspace UI's per-item
+        delete needs; without it the UI has no way to remove one document.
+        """
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/forget"
             payload = {"everything": everything}
             if dataset:
                 payload["dataset"] = dataset
+            if data_id:
+                payload["data_id"] = str(data_id)
+            if dataset_id:
+                payload["dataset_id"] = str(dataset_id)
             response = await self.client.post(endpoint, json=payload, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
         else:
             with redirect_stdout(sys.stderr):
-                return await self.cognee.forget(dataset=dataset, everything=everything)
+                return await self.cognee.forget(
+                    dataset=dataset,
+                    everything=everything,
+                    data_id=data_id,
+                    dataset_id=dataset_id,
+                )
 
     async def improve(
         self,
