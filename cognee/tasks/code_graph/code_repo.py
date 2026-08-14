@@ -89,6 +89,10 @@ SKIP_DIRS = frozenset(
 # .mp4 has no audio stream, so whisper's ffmpeg extraction crashes and one
 # decorative asset aborts the whole add (observed on cognee's own repo).
 # Images stay documents: architecture diagrams and screenshots carry content.
+# TODO: Make media skipping a code-ingestion option (on/off), default OFF —
+# media in a repo would then be transcribed like any standalone add unless the
+# caller opts into skipping. Requires the loader-level fix first (a silent
+# video must yield empty text, not crash the add), else the default is unsafe.
 REPO_SKIPPED_MEDIA_EXTENSIONS = frozenset(
     {
         "aac",
