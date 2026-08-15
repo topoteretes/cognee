@@ -34,6 +34,6 @@ Any model not listed above is treated as unvalidated/experimental. If you choose
 If you notice that `cognify()` is running but your final queries yield empty search results or no nodes are created, check the following:
 
 1. **Verify your Model**: Ensure you are using one of the recommended models (e.g., `llama3.1:8b`).
-2. **Set Temperature to 0**: Keep `LLM_TEMPERATURE=0.0` (which is Cognee's default) to force deterministic output formatting.
+2. **Set Temperature to 0**: Set `LLM_TEMPERATURE=0.0` in your `.env` to force deterministic output formatting. When unset, the model's own default applies.
 3. **Verify API Connection**: Ensure Ollama is running and accessible (usually at `http://localhost:11434/v1`).
 4. **Inspect Logging**: Check the console log outputs. If Cognee catches validation errors during extraction, they will be reported as warnings.
