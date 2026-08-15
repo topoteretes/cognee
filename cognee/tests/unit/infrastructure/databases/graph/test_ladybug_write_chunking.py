@@ -75,9 +75,27 @@ async def test_add_edges_matches_endpoints_by_primary_key():
     await adapter.add_edges(_fake_edges(1))
 
     query = adapter.query.await_args_list[0].args[0]
-    assert "MATCH (from:Node {id: edge.from_id})" in query
-    assert "MATCH (to:Node {id: edge.to_id})" in query
+    assert "MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})" in query
     assert "MATCH (from:Node), (to:Node)" not in query
+
+
+@pytest.mark.asyncio
+async def test_add_edges_matches_both_endpoints_in_one_clause():
+    """Both endpoints must be bound by a single comma-separated MATCH.
+
+    Two separate MATCH clauses hit the row-driven primary-key lookup added in
+    ladybug 0.19.0 (LadybugDB/ladybug#722) and segfault the engine mid-write
+    (COG-6185). The comma form is equally fast and writes an identical graph,
+    so this is the only shape allowed here.
+    """
+    adapter = _adapter_with_mocked_writes()
+
+    await adapter.add_edges(_fake_edges(1))
+
+    query = adapter.query.await_args_list[0].args[0]
+    match_clauses = [line for line in query.splitlines() if line.strip().startswith("MATCH ")]
+    assert len(match_clauses) == 1, f"endpoints must bind in one MATCH clause, got: {match_clauses}"
+    assert "MATCH (to:Node {id: edge.to_id})" not in query
 
 
 def _fake_edge_identities(count):
