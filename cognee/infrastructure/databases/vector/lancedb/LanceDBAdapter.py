@@ -717,15 +717,31 @@ class LanceDBAdapter(VectorDBInterface):
     def _normalize_arrow_type(arrow_type):
         """
         Convert Arrow type objects into a recursive comparable structure.
-        This allows deep comparison of field names, nullability, and nested types.
+        Compares field names and nested types; nullability is deliberately
+        excluded.
+
+        LanceDB writes every struct field as nullable regardless of what the
+        pydantic model declares, so a model field that is not Optional always
+        reads back ``nullable=True`` while the target type says
+        ``nullable=False``. Comparing that flag makes the check unsatisfiable:
+        a table the migration itself just wrote still reports as incompatible,
+        so the rewrite runs again on the next startup, forever. On a 206k-row
+        collection that is ~7 minutes per collection per start (COG-6185).
         """
-        if hasattr(arrow_type, "num_fields"):
+        import pyarrow as pa
+
+        # Struct first, and by type predicate rather than ``num_fields``:
+        # every pyarrow type answers ``num_fields`` (0 for scalars, 1 for
+        # lists), so the old check funnelled scalars and lists into this
+        # branch and collapsed them all to ``{"fields": []}`` — int64 and
+        # string normalized identically, and a real type change could not be
+        # detected at all.
+        if pa.types.is_struct(arrow_type):
             return {
-                "kind": type(arrow_type).__name__,
+                "kind": "struct",
                 "fields": [
                     {
                         "name": arrow_type.field(i).name,
-                        "nullable": getattr(arrow_type.field(i), "nullable", True),
                         "type": LanceDBAdapter._normalize_arrow_type(arrow_type.field(i).type),
                     }
                     for i in range(arrow_type.num_fields)
@@ -736,7 +752,6 @@ class LanceDBAdapter(VectorDBInterface):
         if value_field is not None:
             return {
                 "kind": type(arrow_type).__name__,
-                "value_nullable": getattr(value_field, "nullable", True),
                 "value_type": LanceDBAdapter._normalize_arrow_type(value_field.type),
             }
 
@@ -749,7 +764,8 @@ class LanceDBAdapter(VectorDBInterface):
                 "item_type": LanceDBAdapter._normalize_arrow_type(item_type),
             }
 
-        return {"kind": type(arrow_type).__name__, "repr": str(arrow_type)}
+        # Scalars: the printed form is what distinguishes int64 from string.
+        return {"kind": "scalar", "repr": str(arrow_type)}
 
     def _get_target_payload_arrow_type(self, payload_schema: type):
         """
@@ -822,14 +838,18 @@ class LanceDBAdapter(VectorDBInterface):
 
             checked_collections.append(collection_name)
             collection = await self.get_collection(collection_name)
-            table = await collection.to_arrow()
-            payload_field_index = table.schema.get_field_index("payload")
+            # Read the schema, not the data: ``to_arrow()`` materializes every
+            # row (206k rows x 3072-dim vectors on a large store) just to reach
+            # ``.schema``, and it does that for collections that turn out to
+            # need nothing. ``schema()`` is a metadata read.
+            schema = await collection.schema()
+            payload_field_index = schema.get_field_index("payload")
 
             if payload_field_index < 0:
                 skipped_collections.append(collection_name)
                 continue
 
-            payload_field_type = table.schema.field(payload_field_index).type
+            payload_field_type = schema.field(payload_field_index).type
             if not hasattr(payload_field_type, "num_fields"):
                 skipped_collections.append(collection_name)
                 continue
