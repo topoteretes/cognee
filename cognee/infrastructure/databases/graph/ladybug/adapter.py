@@ -6,6 +6,11 @@ import asyncio
 import threading
 import tempfile
 from uuid import UUID, uuid5, NAMESPACE_OID
+
+# Importing this package registers the Windows DLL search path ladybug's native
+# extension needs, so it has to precede the ``ladybug`` imports below. See
+# cognee_db_workers/_windows_openssl.py.
+import cognee_db_workers  # noqa: F401
 from ladybug import Connection
 from ladybug.database import Database
 from datetime import datetime, timezone

@@ -71,6 +71,9 @@ dependencies = [
     # Each pinned version's on-disk storage code must also exist in
     # cognee_db_workers.ladybug_migrate.ladybug_version_mapping (0.19.0 -> 43),
     # so bumping this pin is a two-file change.
+    # 0.19.x Windows wheels no longer vendor the OpenSSL DLLs their extension
+    # imports; cognee_db_workers._windows_openssl supplies them. Drop that shim
+    # once a pinned release vendors OpenSSL again.
     "ladybug>=0.17.0,<0.18 ; sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or 'Darwin Kernel Version 23.' in platform_version)",
     "ladybug==0.19.0 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
