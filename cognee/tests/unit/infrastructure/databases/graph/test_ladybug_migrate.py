@@ -62,6 +62,18 @@ def test_read_ladybug_storage_version_0_18_code(tmp_path):
     assert read_ladybug_storage_version(str(tmp_path)) == "0.18.2"
 
 
+def test_ladybug_version_mapping_covers_0_19_storage_code():
+    # 0.19.0 and 0.19.1 both write storage code 43 (read from the header of a
+    # database each wheel actually created), so the mapping holds the latest
+    # patch of the line.
+    assert ladybug_version_mapping[43] == "0.19.1"
+
+
+def test_read_ladybug_storage_version_0_19_code(tmp_path):
+    _write_catalog_kz(str(tmp_path), 43, magic=b"LBUG")
+    assert read_ladybug_storage_version(str(tmp_path)) == "0.19.1"
+
+
 def test_read_ladybug_storage_version_unknown_code_raises(tmp_path):
     # Anything outside the known table — e.g., a code emitted by a newer
     # ladybug release that hasn't been added yet.

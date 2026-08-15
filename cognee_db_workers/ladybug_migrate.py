@@ -20,8 +20,13 @@ import warnings
 # release that can open that format. The code is shared across patch/minor
 # releases that keep the same on-disk format, so there is one entry per format,
 # not per release: 0.16.0 and 0.16.1 both write code 40; 0.17.0 and 0.17.1 both
-# write code 41; 0.18.0 through 0.18.2 all write code 42. Used by
-# needs_migration() to detect legacy (<0.15.0) databases.
+# write code 41; 0.18.0 through 0.18.2 all write code 42; 0.19.0 and 0.19.1
+# both write code 43. Used by needs_migration() to detect legacy (<0.15.0)
+# databases.
+#
+# Codes are read from the header of a store each release actually wrote, not
+# from release notes: create a database with the wheel installed, then unpack
+# bytes 4..12 of catalog.kz as a little-endian uint64.
 ladybug_version_mapping: dict[int, str] = {
     34: "0.7.0",
     35: "0.7.1",
@@ -32,6 +37,7 @@ ladybug_version_mapping: dict[int, str] = {
     40: "0.16.0",
     41: "0.17.1",
     42: "0.18.2",
+    43: "0.19.1",
 }
 
 
