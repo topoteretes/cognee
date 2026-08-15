@@ -134,6 +134,64 @@ def _run_id_for_key(snapshot, source_ref_key: str) -> Optional[str]:
     return None
 
 
+_LADYBUG_PROVIDERS = {"ladybug", "kuzu"}
+
+
+def _is_ladybug_graph() -> bool:
+    """True when the graph store is Ladybug/Kuzu (embedded, string-encoded provenance)."""
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+
+    return get_graph_config().graph_database_provider.lower() in _LADYBUG_PROVIDERS
+
+
+async def _fast_move_provenance_ladybug(graph_engine, old_key: str, new_key: str) -> bool:
+    """Rewrite provenance keys in place with two set-based statements.
+
+    The generic path lists every artifact carrying ``old_key``, reads its
+    provenance, then attaches the new key and removes the old one — 3 reads
+    and 2 writes over the whole subgraph, each a per-row primary-key probe.
+    On a 100k-node fork that is ~400k point updates (~11 min measured).
+
+    Ladybug stores provenance as delimiter-wrapped strings, and a re-key only
+    changes the data-id half of the key, so the entire move is a substring
+    rewrite the engine can do in one scan per artifact kind — no id lists
+    cross the process boundary and no row is probed individually.
+    ``source_run_refs`` embeds the key verbatim, so the same replace fixes it;
+    ``source_dataset_ids`` and ``source_run_ids`` do not contain the data id
+    and stay correct untouched.
+
+    Artifacts holding BOTH keys (an earlier run interrupted mid-move) are
+    deliberately left alone here — a blind replace would duplicate the new
+    key — and fall through to the generic path, which dedupes. Returns False
+    when the engine rejects the statements, so the caller can fall back
+    wholesale.
+    """
+    rewrite = """
+    MATCH (n:Node)
+    WHERE n.source_ref_keys CONTAINS $old_key AND NOT n.source_ref_keys CONTAINS $new_key
+    SET n.source_ref_keys = replace(n.source_ref_keys, $old_key, $new_key),
+        n.source_run_refs = replace(n.source_run_refs, $old_key, $new_key)
+    """
+    rewrite_edges = """
+    MATCH ()-[r:EDGE]->()
+    WHERE r.source_ref_keys CONTAINS $old_key AND NOT r.source_ref_keys CONTAINS $new_key
+    SET r.source_ref_keys = replace(r.source_ref_keys, $old_key, $new_key),
+        r.source_run_refs = replace(r.source_run_refs, $old_key, $new_key)
+    """
+    params = {"old_key": old_key, "new_key": new_key}
+    try:
+        await graph_engine.query(rewrite, params)
+        await graph_engine.query(rewrite_edges, params)
+    except Exception as error:  # unsupported syntax / non-string provenance
+        logger.info(
+            "rekey_fork_document_ids: fast provenance move unavailable (%s), "
+            "using the generic path",
+            error,
+        )
+        return False
+    return True
+
+
 async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
     """Move graph-embedded provenance from pre-fork keys to canonical keys.
 
@@ -149,14 +207,32 @@ async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
     if not await stores_provenance_in_graph(graph_engine):
         return
 
+    fast_path = _is_ladybug_graph()
+
     for old_id, new_id, dataset_id in fork_rows:
         old_key = make_source_ref_key(dataset_id, UUID(old_id))
         new_key = make_source_ref_key(dataset_id, UUID(new_id))
+
+        # Set-based rewrite first; whatever it cannot express (artifacts that
+        # already carry both keys) is left for the generic path below, which
+        # then finds only that residue instead of the whole subgraph.
+        if fast_path:
+            fast_path = await _fast_move_provenance_ladybug(graph_engine, old_key, new_key)
+
         try:
             node_ids = await graph_engine.find_nodes_by_source_ref(old_key)
             edge_identities = await graph_engine.find_edges_by_source_ref(old_key)
         except UnsupportedProvenanceCapability:
             return
+
+        if fast_path and not node_ids and not edge_identities:
+            logger.info(
+                "rekey_fork_document_ids: moved provenance refs from %s to %s "
+                "via set-based rewrite",
+                old_key,
+                new_key,
+            )
+            continue
 
         # Group artifacts by pipeline run id and attach per group: a dataset's
         # subgraph overwhelmingly carries one run id, so this collapses the
