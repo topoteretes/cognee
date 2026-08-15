@@ -21,8 +21,9 @@ import warnings
 # releases that keep the same on-disk format, so there is one entry per format,
 # not per release: 0.16.0 and 0.16.1 both write code 40; 0.17.0 and 0.17.1 both
 # write code 41; 0.18.0 through 0.18.2 all write code 42; 0.19.0 and 0.19.1
-# both write code 43. Used by needs_migration() to detect legacy (<0.15.0)
-# databases.
+# both write code 43 (the entry names 0.19.0 — the version cognee pins, since
+# extension.ladybugdb.com publishes no v0.19.1 JSON extension). Used by
+# needs_migration() to detect legacy (<0.15.0) databases.
 #
 # Codes are read from the header of a store each release actually wrote, not
 # from release notes: create a database with the wheel installed, then unpack
@@ -37,7 +38,7 @@ ladybug_version_mapping: dict[int, str] = {
     40: "0.16.0",
     41: "0.17.1",
     42: "0.18.2",
-    43: "0.19.1",
+    43: "0.19.0",
 }
 
 

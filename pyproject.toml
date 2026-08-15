@@ -64,11 +64,15 @@ dependencies = [
     # machine later moves to a newer line. Those platforms therefore stay
     # exposed to the storage-corruption defects fixed in 0.18.2 and 0.19.1
     # (COG-6185).
+    # Pinned at 0.19.0, not 0.19.1: extension.ladybugdb.com publishes no
+    # v0.19.1 JSON extension (404 on every platform), and 0.19.1 segfaults
+    # cognee's DB worker mid-write in CI. 0.19.0 carries the same storage
+    # fix and its extension build exists.
     # Each pinned version's on-disk storage code must also exist in
-    # cognee_db_workers.ladybug_migrate.ladybug_version_mapping (0.19.1 -> 43),
+    # cognee_db_workers.ladybug_migrate.ladybug_version_mapping (0.19.0 -> 43),
     # so bumping this pin is a two-file change.
     "ladybug>=0.17.0,<0.18 ; sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or 'Darwin Kernel Version 23.' in platform_version)",
-    "ladybug==0.19.1 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
+    "ladybug==0.19.0 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
