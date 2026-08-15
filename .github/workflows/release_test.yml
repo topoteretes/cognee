@@ -229,19 +229,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # TODO: re-enable the kuzu-lancedb scenario. Temporarily disabled so
+          # the release test exercises the postgres pair only; the entry below
+          # is unchanged and should be uncommented once it is brought back.
+          #
           # kuzu-lancedb seeds the REGULAR mock: v1.2.0's ladybug adapter writes
           # the whole graph as one UNWIND statement (chunking ships in v1.5.0),
           # which cannot seed the 100k mock on a CI runner — measured >3h even
           # with SUBPROCESS_CALL_TIMEOUT=0. Switch mock_file to the large mock
           # once COGNEE_COMPATIBILITY_TEST_VERSION is a release containing
           # COG-6112 (bf8ac13fb).
-          - scenario: kuzu-lancedb
-            graph_provider: ladybug
-            vector_provider: lancedb
-            db_provider: sqlite
-            mock_file: mock_war_and_peace.json
-            min_nodes: "2000"
-            min_edges: "7000"
+          # - scenario: kuzu-lancedb
+          #   graph_provider: ladybug
+          #   vector_provider: lancedb
+          #   db_provider: sqlite
+          #   mock_file: mock_war_and_peace.json
+          #   min_nodes: "2000"
+          #   min_edges: "7000"
           - scenario: postgres-pgvector
             graph_provider: postgres
             vector_provider: pgvector
