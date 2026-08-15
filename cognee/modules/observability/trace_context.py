@@ -60,13 +60,21 @@ def disable_tracing() -> None:
 def is_tracing_enabled() -> bool:
     """Return True when tracing is active.
 
-    Checks the module-level flag, then the ``cognee_tracing_enabled`` config
-    field, then falls back to the ``COGNEE_TRACING_ENABLED`` env var directly
-    (to support runtime changes, e.g. in tests).  When enabled but not yet
-    initialized, lazily calls ``enable_tracing()`` if OpenTelemetry is
-    available.
+    An explicit ``COGNEE_TRACING_ENABLED=false`` is authoritative and vetoes
+    everything, including Langfuse-key auto-enablement and an already-latched
+    enabled state. Otherwise checks the module-level flag, then the
+    ``cognee_tracing_enabled`` config field, then falls back to the env var
+    directly (to support runtime changes, e.g. in tests). When enabled but
+    not yet initialized, lazily calls ``enable_tracing()`` if OpenTelemetry
+    is available.
     """
     global _tracing_enabled
+
+    from cognee.base_config import _tracing_explicitly_disabled
+
+    if _tracing_explicitly_disabled():
+        return False
+
     if _tracing_enabled:
         return True
 
