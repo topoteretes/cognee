@@ -12,12 +12,53 @@ Native fast paths (LanceDB, PGVector) move rows carrying their stored vectors
 ``index_data_points`` with the :class:`RekeyedPoint` carrier.
 """
 
+import asyncio
 import logging
 import uuid as uuid_module
 
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 logger = logging.getLogger(__name__)
+
+
+async def index_data_points_batched(
+    vector_engine, index_name: str, index_property_name: str, data_points: list
+) -> None:
+    """Re-embed and upsert ``data_points`` in embedding-engine batches.
+
+    Mirrors cognify's own write path (``cognee/tasks/storage/index_data_points.py``):
+    batches of ``embedding_engine.get_batch_size()`` so no single embedding request
+    exceeds the provider's per-request token cap, with a semaphore bounding in-flight
+    data points to ``embedding_max_concurrent_data_points``. Migrations must call
+    this instead of ``vector_engine.index_data_points`` directly — one unbatched
+    call over a whole collection is exactly what providers reject (OpenAI caps an
+    embeddings request at 300k tokens total).
+    """
+    if not data_points:
+        return
+
+    batch_size = vector_engine.embedding_engine.get_batch_size()
+    max_concurrent_data_points = get_embedding_context_config().embedding_max_concurrent_data_points
+    semaphore = asyncio.Semaphore(max(1, max_concurrent_data_points // batch_size))
+
+    async def _index_batch(batch):
+        async with semaphore:
+            await vector_engine.index_data_points(index_name, index_property_name, batch)
+
+    batches = [data_points[i : i + batch_size] for i in range(0, len(data_points), batch_size)]
+
+    # The FIRST batch runs alone: its write settles collection creation and any
+    # lazy schema migration. Migrations write into tables the per-dataset
+    # storage sync has not rebuilt yet, so on mismatch LanceDB drops and
+    # recreates the table mid-write — a concurrent batch's lock-free
+    # get_collection lands in that window and raises CollectionNotFoundError
+    # (and every concurrent batch would redo the table rewrite). Once settled,
+    # the remaining batches are plain merge-safe upserts and can overlap.
+    await _index_batch(batches[0])
+
+    if len(batches) > 1:
+        await asyncio.gather(*(asyncio.create_task(_index_batch(batch)) for batch in batches[1:]))
 
 
 class RekeyedPoint(DataPoint):
