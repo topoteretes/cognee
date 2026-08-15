@@ -1961,10 +1961,19 @@ class LadybugAdapter(GraphDBInterface):
 
             # Property-map matches (primary-key index seeks) instead of a
             # cartesian MATCH + WHERE, which planned as a scan on large graphs.
+            #
+            # Both endpoints must be matched in ONE comma-separated clause.
+            # Splitting them into two MATCH clauses segfaults ladybug 0.19.x
+            # mid-write (SIGSEGV in the native engine, surfacing through the
+            # subprocess worker as "Subprocess exited unexpectedly (exit code
+            # -11)") — 0.19.0 introduced a row-driven primary-key lookup for
+            # MATCH (LadybugDB/ladybug#722) that this shape lands on. The comma
+            # form keeps the index seeks and is equally fast on 0.17.1, 0.18.2
+            # and 0.19.0 (~80s for 20k edges on all three), and writes an
+            # identical graph. See COG-6185.
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node {id: edge.from_id})
-            MATCH (to:Node {id: edge.to_id})
+            MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})
             MERGE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name
             }]->(to)
