@@ -1,3 +1,17 @@
+# Official Ladybug extension binaries — this image is the origin content
+# behind extension.ladybugdb.com, so copying from it here means the JSON
+# extension ships in the image and is never downloaded at runtime (see
+# cognee_db_workers/ladybug_extensions/README.md). All published versions are
+# collected (~1.7 MB per version pair) so this stage never needs touching when
+# the ladybug constraint changes; at runtime the loader only reads the
+# directory matching the installed ladybug version.
+FROM ghcr.io/ladybugdb/extension-repo:latest AS ladybug-extensions
+RUN mkdir -p /bundle && cd /usr/share/nginx/html && \
+    for f in v*/linux_*/json/libjson.lbug_extension; do \
+        d="/bundle/${f%/json/libjson.lbug_extension}"; \
+        mkdir -p "$d" && cp "$f" "$d/libjson.lbug_extension"; \
+    done
+
 # Use a Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
 
@@ -52,6 +66,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Installing separately from its dependencies allows optimal layer caching
 COPY ./cognee /app/cognee
 COPY ./cognee_db_workers /app/cognee_db_workers
+# Bundle the JSON extension for both image arches; the loader picks the file
+# matching the installed ladybug version and runtime platform.
+COPY --from=ladybug-extensions /bundle/ /app/cognee_db_workers/ladybug_extensions/
 # Compatibility shim that re-exports ladybug under the legacy `kuzu`
 # module name. Listed in [tool.hatch.build.targets.wheel] packages, and
 # imported at module load by alembic/versions/b9274c27a25a_kuzu_11_migration.py.

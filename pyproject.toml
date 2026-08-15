@@ -258,6 +258,10 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["cognee", "cognee_db_workers", "kuzu"]
+# The bundled Ladybug JSON extension binaries are gitignored (built or
+# fetched at release time — see cognee_db_workers/ladybug_extensions/README.md);
+# hatchling excludes gitignored files unless listed here.
+artifacts = ["cognee_db_workers/ladybug_extensions/**/*.lbug_extension"]
 
 [tool.uv]
 # Note: exclude newer packages that are less than 2 days old

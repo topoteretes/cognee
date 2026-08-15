@@ -9,7 +9,7 @@ working without churn.
 
 from __future__ import annotations
 
-from ._kuzu_helpers import install_json_extension_local
+from ._kuzu_helpers import install_json_extension_local, load_json_extension
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -185,6 +185,11 @@ def _install_json(registry: HandleRegistry, req: Request) -> None:
 def _load_extension(registry: HandleRegistry, req: Request) -> None:
     conn = registry.get(req.handle_id)
     extension_name = req.args[0]
+    if extension_name.upper() == "JSON":
+        # JSON gets the full ladder: by-name load, then the binary bundled
+        # with cognee, then INSTALL from the remote repo as last resort.
+        load_json_extension(conn.execute)
+        return None
     try:
         conn.execute(f"LOAD EXTENSION {extension_name};")
     except RuntimeError as error:
