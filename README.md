@@ -23,7 +23,7 @@
 
 
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://github.com/topoteretes/cognee)
   [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
   [![GitHub tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
   [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
@@ -181,11 +181,32 @@ cognee-cli -ui
 > Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
 > required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
 
+### Performance tuning
+
+Cognee's defaults favor memory quality over raw latency. Two knobs matter:
+
+- **`AUTO_FEEDBACK=false`** removes the one LLM call cognee makes after each answered
+  query to self-tune its memory. Reads get faster and cheaper; session memory itself
+  keeps working. Turn it back on when you want memory that improves from conversation
+  signals.
+- **`CACHING=false`** disables session memory entirely — `remember(session_id=...)`
+  stops working and `recall()` loses conversation context. Only set this if you don't
+  use session memory at all. **If you're benchmarking cognee, leave it on** — turning
+  it off benchmarks cognee with its memory layer removed.
+
+A third flag, `DATASET_QUEUE_ENABLED=false`, removes the per-process concurrency guard
+on datasets; it saves a little latency but risks file-lock leaks and resource
+exhaustion when multiple datasets run in parallel — leave it on for servers.
+
 ## Run with Docker
 
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
 [`cognee/cognee`](https://hub.docker.com/r/cognee/cognee) (the API server) and
 [`cognee/cognee-mcp`](https://hub.docker.com/r/cognee/cognee-mcp) (the MCP server).
+
+> **Just want to try it?** Follow the
+> [minimal docker-compose try-out](docs/minimal-docker-compose.md) — a single
+> copy-pasteable compose file that runs the prebuilt image, no clone or build needed.
 
 ### Option A — Docker Compose (build from source)
 
@@ -376,6 +397,25 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
+### Multi-tenant deployments
+
+With `ENABLE_BACKEND_ACCESS_CONTROL=true` (the default), each user+dataset combination
+gets its own isolated graph and vector databases. Not every backend supports this:
+
+| Layer | Isolation supported | Not supported |
+|---|---|---|
+| Graph | Ladybug/Kuzu (default), Neo4j*, Postgres (demo), Turso | Neptune, remote Ladybug |
+| Vector | LanceDB (default), PGVector, Turso | Neptune Analytics, community adapters |
+| Relational | — | SQLite/Postgres is always one shared database (users, permissions, registry) |
+
+\* Neo4j isolation creates one database per dataset inside your DBMS, which requires an
+edition with multi-database support (Enterprise or Aura).
+
+Both your graph **and** vector backends must support isolation — if either doesn't,
+cognee raises an error naming the unsupported backend rather than silently falling
+back to shared databases. To run an unsupported backend, deploy
+single-tenant with `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
 ## Use Cognee in Other Languages
 

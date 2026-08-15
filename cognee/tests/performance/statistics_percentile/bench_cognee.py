@@ -27,6 +27,17 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+# Mock loading/replay lives in the shared mock-ingestion module
+# (cognee/tests/utils/mock_ingestion) so other suites — e.g. the large-scale
+# migration release test — build systems the exact same way. The private
+# aliases keep this file's call sites and capture_mock.py's imports stable.
+from cognee.tests.utils.mock_ingestion import (
+    install_mocks as _install_mocks,
+    load_memories,
+    load_mock_data as _load_mock_data,
+    memory_to_text,
+)
+
 # ── Defaults ─────────────────────────────────────────────────────────────────
 
 DEFAULT_MEMORIES_FILE = Path(__file__).with_name("memories.json")
@@ -102,89 +113,63 @@ def _resolve_cloud_config(args: argparse.Namespace) -> dict:
 # ── Mock LLM / Embedding ────────────────────────────────────────────────────
 
 
-def _load_mock_data(path: Path) -> dict:
-    with open(path) as f:
-        raw = json.load(f)
-    by_title: dict[str, dict] = {}
-    for entry in raw["memories"]:
-        by_title[entry["title"]] = entry
-    return by_title
+# Stats for --mock-document-embeddings, surfaced in the results JSON:
+# how many embed inputs were served from the store vs embedded live.
+_DOC_EMBED_STATS = {"served": 0, "embedded_live": 0}
 
 
-def _install_mocks(mock_data: dict[str, dict]) -> None:
-    """Mock the LLM (structured-output replay) and embeddings (cognee MOCK_EMBEDDING)."""
+def _install_document_embedding_mock(embeddings_file: Path) -> None:
+    """Replay captured document embeddings; embed anything unseen for REAL.
+
+    The `mock_document_embeddings` system: every text captured during the
+    real cognify run (chunks, entities, edge texts, summaries) gets its
+    stored REAL vector back with no API call, while unseen texts — search
+    queries — go through the live embedding API. Vector search therefore
+    behaves exactly like production, without re-embedding the corpus.
+
+    Requires a working embedding API key at replay time for the live path.
+    """
     import importlib
 
-    from cognee.infrastructure.llm.LLMGateway import LLMGateway
-    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+    with open(embeddings_file) as f:
+        payload = json.load(f)
+    stored_vectors: dict[str, list[float]] = payload["vectors"]
+    print(
+        f"Document-embedding mock enabled: {len(stored_vectors)} stored vectors "
+        f"(model: {payload.get('model')}); unseen texts embed live"
+    )
 
+    from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
+        get_embedding_engine,
+    )
+
+    engine_cls = type(get_embedding_engine())
+    original = engine_cls.embed_text
+
+    async def replay_embed(self, text):
+        missing = [item for item in text if item not in stored_vectors]
+        if missing:
+            fetched = await original(self, missing)
+            for item, vector in zip(missing, fetched):
+                stored_vectors[item] = vector  # in-memory only; repeat queries hit once
+            _DOC_EMBED_STATS["embedded_live"] += len(missing)
+        _DOC_EMBED_STATS["served"] += len(text) - len(missing)
+        return [stored_vectors[item] for item in text]
+
+    engine_cls.embed_text = replay_embed
+
+    # Clear cached engines so any instance constructed before this install is
+    # replaced by one using the patched class (class-level patch covers both,
+    # but the caches may also hold pre-mock env-derived config).
     emb_mod = importlib.import_module(
         "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine"
     )
     vec_mod = importlib.import_module("cognee.infrastructure.databases.vector.create_vector_engine")
-
-    def _match_memory(text_input: str) -> dict | None:
-        for title, entry in mock_data.items():
-            if title in text_input:
-                return entry
-        return None
-
-    @staticmethod
-    async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
-        entry = _match_memory(text_input)
-
-        if response_model is KnowledgeGraph or (
-            isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph)
-        ):
-            if entry:
-                return KnowledgeGraph(**entry["knowledge_graph"])
-            return KnowledgeGraph(nodes=[], edges=[])
-
-        if response_model is SummarizedContent or (
-            isinstance(response_model, type) and issubclass(response_model, SummarizedContent)
-        ):
-            if entry:
-                return SummarizedContent(**entry["summary"])
-            return SummarizedContent(summary="Mock summary.", description="")
-
-        return response_model()
-
-    LLMGateway.acreate_structured_output = _mock_acreate
-
-    # Mock embeddings via cognee's built-in MOCK_EMBEDDING switch instead of
-    # monkey-patching the engine. The real embedding engine is still constructed,
-    # so it keeps its real tokenizer — chunk boundaries are decided by
-    # embedding_engine.tokenizer.count_tokens() in chunk_by_sentence, and a stub
-    # without a tokenizer would silently re-chunk the text (one-token-per-word),
-    # shifting boundaries and breaking title-substring matching for multi-chunk
-    # documents. With the flag set, embed_text skips the API and returns zero
-    # vectors. Clear cached engines so the flag takes effect.
-    os.environ["MOCK_EMBEDDING"] = "true"
     emb_mod.create_embedding_engine.cache_clear()
     vec_mod._create_vector_engine.cache_clear()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def load_memories(path: Path) -> list[dict]:
-    with open(path) as f:
-        memories = json.load(f)
-    if not isinstance(memories, list) or not memories:
-        sys.exit(f"Error: {path} must contain a non-empty JSON array")
-    for i, m in enumerate(memories):
-        if "content" not in m:
-            sys.exit(f"Error: memory {i} is missing a 'content' key")
-    return memories
-
-
-def memory_to_text(mem: dict) -> str:
-    title = mem.get("title", "Untitled")
-    content = mem["content"]
-    refs = mem.get("references", "none")
-    if isinstance(refs, list):
-        refs = ", ".join(refs) if refs else "none"
-    return f"Title: {title}\n\n{content}\n\nReferences: {refs}"
 
 
 # ── Benchmark ────────────────────────────────────────────────────────────────
@@ -222,10 +207,19 @@ async def run_benchmark(
     cognee.config.set_embedding_dimensions(embedding_dims)
     cognee.config.set_embedding_api_key(config["embedding_api_key"])
 
+    document_embeddings_file = config.get("mock_document_embeddings_file")
     if config.get("mock_llm"):
         mock_data = _load_mock_data(config["mock_memories_file"])
-        _install_mocks(mock_data)
-        print("Mock LLM/embedding mode enabled")
+        # With document-embedding replay active, embeddings are handled there;
+        # only the LLM gets the built-in mock treatment.
+        _install_mocks(mock_data, mock_embeddings=not document_embeddings_file)
+        print(
+            "Mock LLM mode enabled"
+            if document_embeddings_file
+            else "Mock LLM/embedding mode enabled"
+        )
+    if document_embeddings_file:
+        _install_document_embedding_mock(Path(document_embeddings_file))
 
     n = len(memories)
     status = {
@@ -347,8 +341,11 @@ async def run_benchmark(
             "embedding_dimensions": embedding_dims,
             "dataset_name": DATASET_NAME,
             "mock_llm": config.get("mock_llm", False),
+            "mock_document_embeddings": bool(document_embeddings_file),
         },
     }
+    if document_embeddings_file:
+        results["document_embedding_stats"] = dict(_DOC_EMBED_STATS)
 
     print("\n" + "=" * 60)
     print("RESULTS")
@@ -365,6 +362,11 @@ async def run_benchmark(
     print(f"  Embedding model   : {embedding_model} ({embedding_dims}d)")
     if config.get("mock_llm"):
         print("  Mock mode         : ON")
+    if document_embeddings_file:
+        print(
+            f"  Doc-embedding mock: served {_DOC_EMBED_STATS['served']} from store, "
+            f"embedded {_DOC_EMBED_STATS['embedded_live']} live"
+        )
     print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
     print("=" * 60)
 
@@ -764,6 +766,16 @@ def main():
         help=f"Mock responses JSON file (default: {DEFAULT_MOCK_MEMORIES_FILE.name})",
     )
     parser.add_argument(
+        "--mock-document-embeddings",
+        type=Path,
+        default=None,
+        help=(
+            "Embeddings file from capture_mock.py --capture-embeddings: replay "
+            "the stored REAL document vectors; unseen texts (search queries) "
+            "embed live, so a real embedding API key is still required."
+        ),
+    )
+    parser.add_argument(
         "--tenant-url",
         default=None,
         help="Cognee Cloud tenant URL; runs all operations remotely via cognee.serve()",
@@ -807,11 +819,18 @@ def main():
 
     cloud_mode = bool(args.tenant_url or args.create_tenant)
     if cloud_mode:
+        if args.mock_document_embeddings:
+            sys.exit(
+                "Error: --mock-document-embeddings is not supported in cloud mode "
+                "(embeddings run server-side)"
+            )
         config = _resolve_cloud_config(args)
     else:
         config = _resolve_config(args)
         if config["mock_llm"]:
             config["mock_memories_file"] = args.mock_memories
+        if args.mock_document_embeddings:
+            config["mock_document_embeddings_file"] = args.mock_document_embeddings
 
     memories = load_memories(args.memories)
     if args.num_memories is not None:

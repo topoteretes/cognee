@@ -108,10 +108,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
+        # Skip the retry chain for terminal error classes. Authentication /
+        # authorization / not-found errors will never succeed on a retry, so
+        # the previous behaviour of running the full backoff ladder wasted
+        # ~2 minutes of user wall clock on a mis-typed API key. Superset of
+        # the LLM adapter exclusion set (adds PermissionDeniedError); see
+        # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
         retry=retry_if_not_exception_type(
             (
                 EmbeddingContextWindowTooSmallError,
                 litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                litellm.exceptions.PermissionDeniedError,
                 asyncio.CancelledError,
             )
         ),
@@ -177,10 +185,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
 
-                    # Ensure each attempt does not hang indefinitely
+                    # Ensure each attempt does not hang indefinitely. The
+                    # deadline is TOTAL per attempt and starts before any
+                    # network I/O, so under large loads a request can spend
+                    # most of it queued client-side; 300s absorbs that while
+                    # still catching a genuinely hung request (matches the
+                    # OpenAI-compatible engine's deadline).
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
-                        timeout=30.0,
+                        timeout=300.0,
                     )
 
                 embedding_response = [data["embedding"] for data in response.data]
@@ -251,6 +264,19 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(
                 "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
             ) from e
+
+        except (
+            litellm.exceptions.AuthenticationError,
+            litellm.exceptions.PermissionDeniedError,
+        ):
+            # Terminal auth failures must reach tenacity unwrapped so
+            # ``retry_if_not_exception_type`` can short-circuit the backoff
+            # ladder. Deliberately diverges from the EmbeddingException
+            # contract of the other branches: keeping the litellm class (and
+            # its message) intact lets the CLI's first-run remediation match
+            # it. (CancelledError needs no branch here — as a BaseException it
+            # already bypasses the handlers below and propagates unwrapped.)
+            raise
 
         except (
             litellm.exceptions.BadRequestError,

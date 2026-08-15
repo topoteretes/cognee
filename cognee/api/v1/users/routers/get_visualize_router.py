@@ -141,9 +141,11 @@ def get_visualize_router() -> APIRouter:
             )
             return HTMLResponse(html_visualization)
 
-        except Exception as error:
+        except Exception:
             logger.exception("Visualization failed for dataset %s", dataset_id)
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            return JSONResponse(
+                status_code=409, content={"error": "Unable to render visualization."}
+            )
 
     @router.get("/json", response_model=None)
     async def visualize_json(
@@ -535,6 +537,9 @@ def get_visualize_router() -> APIRouter:
             return HTMLResponse(html_visualization)
 
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Multi-user visualization request failed: %s", error)
+            return JSONResponse(
+                status_code=409, content={"error": "Unable to render visualization."}
+            )
 
     return router

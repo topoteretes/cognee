@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, MagicMock
 from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
 
 
-def make_ops():
+def make_ops(**kwargs):
     factory = MagicMock()
     factory.cache_await_closed = AsyncMock()
     key_args = MagicMock(return_value=("k1", "k2"))
-    ops = EngineCacheOps(factory, key_args, "db_name_field")
+    ops = EngineCacheOps(factory, key_args, "db_name_field", **kwargs)
     return ops, factory, key_args
 
 
@@ -63,3 +63,30 @@ async def test_aevict_for_database_awaits_in_flight_closes():
     assert await ops.aevict_for_database("dataset-uuid") == 3
     factory.cache_evict_matching.assert_called_once_with(db_name_field="dataset-uuid")
     factory.cache_await_closed.assert_awaited_once_with(db_name_field="dataset-uuid")
+
+
+def test_evict_for_url_matches_on_configured_field():
+    ops, factory, _ = make_ops(database_url_field="db_url_field")
+
+    ops.evict_for_url("bolt://localhost:7799")
+    factory.cache_evict_matching.assert_called_once_with(db_url_field="bolt://localhost:7799")
+
+
+def test_evict_for_url_rejects_empty_url_and_missing_field():
+    ops, _, _ = make_ops(database_url_field="db_url_field")
+    with pytest.raises(ValueError, match="db_url_field"):
+        ops.evict_for_url("")
+
+    ops_without_url, _, _ = make_ops()
+    with pytest.raises(RuntimeError, match="database_url_field"):
+        ops_without_url.evict_for_url("bolt://localhost:7799")
+
+
+@pytest.mark.asyncio
+async def test_aevict_for_url_awaits_in_flight_closes():
+    ops, factory, _ = make_ops(database_url_field="db_url_field")
+    factory.cache_evict_matching.return_value = 2
+
+    assert await ops.aevict_for_url("bolt://localhost:7799") == 2
+    factory.cache_evict_matching.assert_called_once_with(db_url_field="bolt://localhost:7799")
+    factory.cache_await_closed.assert_awaited_once_with(db_url_field="bolt://localhost:7799")

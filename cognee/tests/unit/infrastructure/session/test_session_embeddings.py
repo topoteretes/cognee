@@ -329,8 +329,12 @@ class TestRankerRelevance:
 
     def test_stored_embeddings_do_not_affect_ranking(self):
         ranker = DeterministicRanker()
-        aligned = _entry("rules", "same words", embedding=[1.0, 0.0])
-        misaligned = _entry("rules", "same words", embedding=[0.0, 1.0])
+        # Pin one timestamp for both entries: score() has a recency term, so
+        # per-entry utcnow() stamps make the scores differ by an ulp whenever
+        # the two _entry() calls land a few milliseconds apart.
+        created_at = datetime.utcnow().isoformat()
+        aligned = _entry("rules", "same words", embedding=[1.0, 0.0], created_at=created_at)
+        misaligned = _entry("rules", "same words", embedding=[0.0, 1.0], created_at=created_at)
 
         assert ranker.score(aligned, "same words") == ranker.score(misaligned, "same words")
 

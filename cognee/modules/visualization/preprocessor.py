@@ -65,6 +65,8 @@ _STAGE_BY_TYPE: Dict[str, str] = {
     "TableType": "schema",
     "TableRow": "schema",
     "ColumnValue": "schema",
+    "DltColumn": "schema",
+    "DltRow": "chunk",
 }
 
 
@@ -112,6 +114,8 @@ _TYPE_COLOR_MAP: Dict[str, str] = {
     "TableRow": "#A550FF",
     "TableType": "#6510F4",
     "ColumnValue": "#747470",
+    "DltColumn": "#747470",
+    "DltRow": "#0DFF00",
     "SchemaTable": "#A550FF",
     "DatabaseSchema": "#6510F4",
     "SchemaRelationship": "#323332",
@@ -248,6 +252,8 @@ def node_type_rank(node_type):
         "TableType": 1,
         "TableRow": 2,
         "ColumnValue": 3,
+        "DltColumn": 3,
+        "DltRow": 1,
     }
     return type_ranks.get(node_type, 4)
 

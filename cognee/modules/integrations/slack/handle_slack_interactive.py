@@ -26,6 +26,7 @@ from cognee.modules.integrations.slack.handle_cognee_ask import (
     handle_cognee_ask_discard,
     handle_cognee_ask_share,
 )
+from cognee.modules.integrations.slack.handle_slack_link import NOT_LINKED_MESSAGE
 from cognee.modules.integrations.slack.persistence import (
     get_by_team,
     is_active,
@@ -106,13 +107,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
     # installer" as a stopgap).
     owner_user_id = await resolve_owner_user_id(credential, team_id, invoking_slack_user_id)
     if owner_user_id is None:
-        await post_to_response_url(
-            response_url,
-            _ephemeral(
-                "Link your own Cognee account first: `/cognee-link <api_key>` "
-                "(create a key from your Cognee account's API Keys settings)."
-            ),
-        )
+        await post_to_response_url(response_url, _ephemeral(NOT_LINKED_MESSAGE))
         return
 
     message = payload.get("message") or {}

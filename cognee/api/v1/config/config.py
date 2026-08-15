@@ -59,6 +59,55 @@ def _coerce_int(value, name: str, *, min_value: int | None = None) -> int:
     return result
 
 
+def _resolve_env_var_name(config_obj, key: str) -> str:
+    """Resolve the env var name pydantic-settings will read ``key`` back from.
+
+    Most fields have no alias, so the env var name is just ``key.upper()``.
+    A few (e.g. ``TranslationConfig.batch_size`` -> ``TRANSLATION_BATCH_SIZE``)
+    declare an explicit ``validation_alias``/``Field(..., env=...)`` that
+    diverges from that default — check for one before falling back.
+    """
+    fields = getattr(type(config_obj), "model_fields", None)
+    info = fields.get(key) if fields else None
+    alias = getattr(info, "validation_alias", None) if info else None
+    if isinstance(alias, str):
+        return alias
+    choices = getattr(alias, "choices", None)
+    if choices:
+        first = choices[0]
+        if isinstance(first, str):
+            return first
+    return key.upper()
+
+
+def _mask_secret(value: str) -> str:
+    """Mask a secret value for display, keeping a few edge characters as a hint."""
+    if not value:
+        return value
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:3]}...{value[-4:]}"
+
+
+def _persist_env_var(env_var_name: str, value) -> tuple[str, bool]:
+    """Write ``env_var_name=value`` into the ``.env`` file in the current
+    working directory, creating it if it doesn't exist yet.
+
+    This is the same file every config class resolves via
+    ``SettingsConfigDict(env_file=".env")``, so a value persisted here is
+    picked up by the next process (CLI invocation or script) started from
+    the same directory. Returns ``(path, created)``.
+    """
+    import dotenv
+
+    path = os.path.join(os.getcwd(), ".env")
+    created = not os.path.exists(path)
+    if created:
+        open(path, "a").close()
+    dotenv.set_key(path, env_var_name, "" if value is None else str(value))
+    return path, created
+
+
 def _coerce_for_field(config_obj, key: str, value):
     """Coerce ``value`` to the declared type of ``config_obj.<key>`` for the
     common ``bool`` and ``int`` cases. Used by ``_update_config`` so bulk
@@ -656,8 +705,123 @@ class config:
         """
         config._update_config(get_translation_config(), config_dict)
 
+    # Map configuration keys to their setter methods. Used by ``set()``.
+    _setter_mapping = {
+        "llm_provider": "set_llm_provider",
+        "llm_model": "set_llm_model",
+        "llm_api_key": "set_llm_api_key",
+        "llm_endpoint": "set_llm_endpoint",
+        "embedding_provider": "set_embedding_provider",
+        "embedding_model": "set_embedding_model",
+        "embedding_dimensions": "set_embedding_dimensions",
+        "embedding_endpoint": "set_embedding_endpoint",
+        "embedding_api_key": "set_embedding_api_key",
+        "graph_database_provider": "set_graph_database_provider",
+        "graph_database_subprocess_enabled": "set_graph_database_subprocess_enabled",
+        "kuzu_num_threads": "set_kuzu_num_threads",
+        "kuzu_buffer_pool_size": "set_kuzu_buffer_pool_size",
+        "kuzu_max_db_size": "set_kuzu_max_db_size",
+        "vector_db_provider": "set_vector_db_provider",
+        "vector_db_subprocess_enabled": "set_vector_db_subprocess_enabled",
+        "vector_db_url": "set_vector_db_url",
+        "vector_db_key": "set_vector_db_key",
+        "chunk_size": "set_chunk_size",
+        "chunk_overlap": "set_chunk_overlap",
+        "chunk_strategy": "set_chunk_strategy",
+        "chunk_engine": "set_chunk_engine",
+        "classification_model": "set_classification_model",
+        "summarization_model": "set_summarization_model",
+        "graph_model": "set_graph_model",
+        "system_root_directory": "system_root_directory",
+        "data_root_directory": "data_root_directory",
+    }
+
+    # Mirrors ``_setter_mapping`` for reads: key -> (config getter, attribute name).
+    # Used by ``get()``/``get_all()``.
+    _getter_mapping = {
+        "llm_provider": (get_llm_config, "llm_provider"),
+        "llm_model": (get_llm_config, "llm_model"),
+        "llm_api_key": (get_llm_config, "llm_api_key"),
+        "llm_endpoint": (get_llm_config, "llm_endpoint"),
+        "embedding_provider": (get_embedding_config, "embedding_provider"),
+        "embedding_model": (get_embedding_config, "embedding_model"),
+        "embedding_dimensions": (get_embedding_config, "embedding_dimensions"),
+        "embedding_endpoint": (get_embedding_config, "embedding_endpoint"),
+        "embedding_api_key": (get_embedding_config, "embedding_api_key"),
+        "graph_database_provider": (get_graph_config, "graph_database_provider"),
+        "graph_database_subprocess_enabled": (
+            get_graph_config,
+            "graph_database_subprocess_enabled",
+        ),
+        "kuzu_num_threads": (get_graph_config, "kuzu_num_threads"),
+        "kuzu_buffer_pool_size": (get_graph_config, "kuzu_buffer_pool_size"),
+        "kuzu_max_db_size": (get_graph_config, "kuzu_max_db_size"),
+        "vector_db_provider": (get_vectordb_config, "vector_db_provider"),
+        "vector_db_subprocess_enabled": (get_vectordb_config, "vector_db_subprocess_enabled"),
+        "vector_db_url": (get_vectordb_config, "vector_db_url"),
+        "vector_db_key": (get_vectordb_config, "vector_db_key"),
+        "chunk_size": (get_chunk_config, "chunk_size"),
+        "chunk_overlap": (get_chunk_config, "chunk_overlap"),
+        "chunk_strategy": (get_chunk_config, "chunk_strategy"),
+        "chunk_engine": (get_chunk_config, "chunk_engine"),
+        "classification_model": (get_cognify_config, "classification_model"),
+        "summarization_model": (get_cognify_config, "summarization_model"),
+        "graph_model": (get_graph_config, "graph_model"),
+        "system_root_directory": (get_base_config, "system_root_directory"),
+        "data_root_directory": (get_base_config, "data_root_directory"),
+    }
+
+    # Keys whose value is a secret and should be masked by ``get``/``get_all``
+    # unless the caller explicitly asks to reveal it.
+    _secret_keys = {"llm_api_key", "embedding_api_key", "vector_db_key"}
+
     @staticmethod
-    def set(key: str, value):
+    def get(key: str, reveal_secrets: bool = False):
+        """Get a configuration value by key name.
+
+        Parameters
+        ----------
+        key : str
+            The configuration key name (same names accepted by ``set()``).
+        reveal_secrets : bool
+            If False (default), secret values (API keys) are masked.
+
+        Raises
+        ------
+        InvalidConfigAttributeError
+            If the key is not a recognized configuration attribute.
+        """
+        if key in config._getter_mapping:
+            getter, attribute = config._getter_mapping[key]
+            value = getattr(getter(), attribute)
+        else:
+            embedding_config = get_embedding_config()
+            if not hasattr(embedding_config, key):
+                raise InvalidConfigAttributeError(attribute=key)
+            value = getattr(embedding_config, key)
+
+        if key in config._secret_keys and value and not reveal_secrets:
+            return _mask_secret(str(value))
+        return value
+
+    @staticmethod
+    def get_all(reveal_secrets: bool = False) -> dict:
+        """Get all known configuration values.
+
+        Parameters
+        ----------
+        reveal_secrets : bool
+            If False (default), secret values (API keys) are masked.
+        """
+        keys = list(config._getter_mapping.keys())
+        for field_name in type(get_embedding_config()).model_fields:
+            if field_name not in config._getter_mapping:
+                keys.append(field_name)
+
+        return {key: config.get(key, reveal_secrets=reveal_secrets) for key in keys}
+
+    @staticmethod
+    def set(key: str, value, persist: bool = False):
         """Set a configuration value by key name.
 
         Generic setter that maps configuration keys to their specific setter methods.
@@ -673,52 +837,44 @@ class config:
             The configuration key name.
         value : any
             The value to set.
+        persist : bool
+            If True, also write the resulting value to the ``.env`` file in the
+            current working directory, so it survives past the current process
+            (used by the CLI; SDK callers default to the previous in-memory-only
+            behavior).
+
+        Returns
+        -------
+        dict or None
+            When ``persist`` is True, ``{"path": ..., "created": ..., "env_var": ...}``
+            describing where the value was written. ``None`` otherwise.
 
         Raises
         ------
         InvalidConfigAttributeError
             If the key is not a recognized configuration attribute.
         """
-        # Map configuration keys to their setter methods
-        setter_mapping = {
-            "llm_provider": "set_llm_provider",
-            "llm_model": "set_llm_model",
-            "llm_api_key": "set_llm_api_key",
-            "llm_endpoint": "set_llm_endpoint",
-            "embedding_provider": "set_embedding_provider",
-            "embedding_model": "set_embedding_model",
-            "embedding_dimensions": "set_embedding_dimensions",
-            "embedding_endpoint": "set_embedding_endpoint",
-            "embedding_api_key": "set_embedding_api_key",
-            "graph_database_provider": "set_graph_database_provider",
-            "graph_database_subprocess_enabled": "set_graph_database_subprocess_enabled",
-            "kuzu_num_threads": "set_kuzu_num_threads",
-            "kuzu_buffer_pool_size": "set_kuzu_buffer_pool_size",
-            "kuzu_max_db_size": "set_kuzu_max_db_size",
-            "vector_db_provider": "set_vector_db_provider",
-            "vector_db_subprocess_enabled": "set_vector_db_subprocess_enabled",
-            "vector_db_url": "set_vector_db_url",
-            "vector_db_key": "set_vector_db_key",
-            "chunk_size": "set_chunk_size",
-            "chunk_overlap": "set_chunk_overlap",
-            "chunk_strategy": "set_chunk_strategy",
-            "chunk_engine": "set_chunk_engine",
-            "classification_model": "set_classification_model",
-            "summarization_model": "set_summarization_model",
-            "graph_model": "set_graph_model",
-            "system_root_directory": "system_root_directory",
-            "data_root_directory": "data_root_directory",
-        }
-
-        if key in setter_mapping:
-            method_name = setter_mapping[key]
+        if key in config._setter_mapping:
+            method_name = config._setter_mapping[key]
             method = getattr(config, method_name)
             method(value)
-            return
-
-        embedding_config = get_embedding_config()
-        if hasattr(embedding_config, key):
+        else:
+            embedding_config = get_embedding_config()
+            if not hasattr(embedding_config, key):
+                raise InvalidConfigAttributeError(attribute=key)
             config.set_embedding_config({key: value})
-            return
 
-        raise InvalidConfigAttributeError(attribute=key)
+        if not persist:
+            return None
+
+        if key in config._getter_mapping:
+            getter, attribute = config._getter_mapping[key]
+            config_obj = getter()
+        else:
+            config_obj = get_embedding_config()
+            attribute = key
+        final_value = getattr(config_obj, attribute)
+
+        env_var_name = _resolve_env_var_name(config_obj, attribute)
+        path, created = _persist_env_var(env_var_name, final_value)
+        return {"path": path, "created": created, "env_var": env_var_name}

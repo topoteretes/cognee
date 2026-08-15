@@ -197,5 +197,204 @@ jobs:
     name: Dev Canary Release
     if: ${{ github.event_name == 'workflow_dispatch' }}
     needs: load-tests
+    # The nested release-pypi job requests id-token/attestations write for
+    # provenance publishing (#3298); a caller must grant at least that or
+    # GitHub rejects the WHOLE workflow at run creation (startup_failure on
+    # every dispatch since that change).
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/dev_canary_release.yml
     secrets: inherit
+
+  # ══ Large-scale migration compatibility (COG-6112) ═══════════════════════
+  # Codifies the 1.5.0 release validation: seed a production-shaped 2-dataset
+  # system on the pinned LEGACY cognee (mock-replay ingestion — zero AI calls),
+  # then run the current branch's full migration chain over it and verify the
+  # dataset-scoping fork split + rekey_fork_document_ids complete with data
+  # intact. Fixtures come from S3 (the perf-test war-and-peace corpus and its
+  # mock; swap in mock_war_and_peace_large.json + 80000/200000 floors for the
+  # 27x large-scale variant once it is uploaded).
+  #
+  # Matrix covers the core adapter pairs (Neo4j deliberately excluded for now).
+  large-migration-compat:
+    name: "Large migration compat (${{ matrix.scenario }}, v1.2.0 → current)"
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # TODO: re-enable the kuzu-lancedb scenario. Temporarily disabled so
+          # the release test exercises the postgres pair only; the entry below
+          # is unchanged and should be uncommented once it is brought back.
+          #
+          # kuzu-lancedb seeds the REGULAR mock: v1.2.0's ladybug adapter writes
+          # the whole graph as one UNWIND statement (chunking ships in v1.5.0),
+          # which cannot seed the 100k mock on a CI runner — measured >3h even
+          # with SUBPROCESS_CALL_TIMEOUT=0. Switch mock_file to the large mock
+          # once COGNEE_COMPATIBILITY_TEST_VERSION is a release containing
+          # COG-6112 (bf8ac13fb).
+          # - scenario: kuzu-lancedb
+          #   graph_provider: ladybug
+          #   vector_provider: lancedb
+          #   db_provider: sqlite
+          #   mock_file: mock_war_and_peace.json
+          #   min_nodes: "2000"
+          #   min_edges: "7000"
+          - scenario: postgres-pgvector
+            graph_provider: postgres
+            vector_provider: pgvector
+            db_provider: postgres
+            mock_file: mock_war_and_peace_large.json
+            min_nodes: "50000"
+            min_edges: "180000"
+
+    # One postgres service for the whole matrix; the kuzu-lancedb scenario
+    # simply never connects to it.
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      COGNEE_COMPATIBILITY_TEST_VERSION: v1.2.0
+      ENV: dev
+      TELEMETRY_DISABLED: "1"
+      RUNTIME__DLTHUB_TELEMETRY: "false"
+      COGNEE_SKIP_CONNECTION_TEST: "true"
+
+      # Backend selection per matrix scenario. The DB_*/VECTOR_DB_* connection
+      # values are ignored by the sqlite/lancedb providers, and ladybug ignores
+      # GRAPH_DATABASE_URL — setting them unconditionally keeps the env static.
+      GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_provider }}
+      GRAPH_DATABASE_URL: postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+      # v1.2.0's postgres graph handler reads the discrete fields, not the URL
+      # (and its graph_database_port DEFAULTS to a literal placeholder 123).
+      GRAPH_DATABASE_HOST: localhost
+      GRAPH_DATABASE_PORT: 5432
+      GRAPH_DATABASE_USERNAME: cognee
+      GRAPH_DATABASE_PASSWORD: cognee
+      VECTOR_DB_PROVIDER: ${{ matrix.vector_provider }}
+      VECTOR_DB_HOST: localhost
+      VECTOR_DB_PORT: 5432
+      VECTOR_DB_USERNAME: cognee
+      VECTOR_DB_PASSWORD: cognee
+      DB_PROVIDER: ${{ matrix.db_provider }}
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: cognee
+      DB_PASSWORD: cognee
+      DB_NAME: cognee_db
+
+      # LLM calls are mock-replayed in both phases; the LLM key is a
+      # placeholder. Embeddings are mocked ONLY in phase 1 (MOCK_EMBEDDING on
+      # that step) — phase 2 embeds for real, so its step overrides the key
+      # with the real secret. The embedding MODEL/DIMENSIONS stay pinned
+      # job-wide: the tokenizer decides chunk boundaries (must match the mock
+      # capture, cl100k_base), and phase 1 creates 1536-dim vector tables that
+      # phase 2's real embeddings must fit.
+      LLM_PROVIDER: openai
+      LLM_MODEL: openai/gpt-4.1-mini
+      LLM_API_KEY: mock-key
+      EMBEDDING_PROVIDER: openai
+      EMBEDDING_MODEL: openai/text-embedding-3-small
+      EMBEDDING_DIMENSIONS: 1536
+      EMBEDDING_API_KEY: mock-key
+
+      LARGE_MEMORIES_FILE: /tmp/large_migration_fixtures/war_and_peace.json
+      LARGE_MOCK_FILE: /tmp/large_migration_fixtures/${{ matrix.mock_file }}
+      # Scale floors phase 2 asserts per dataset, sized to the scenario's mock.
+      # Counts are pipeline-era dependent: the v1.2.0 pipeline builds 2,338
+      # nodes / 9,148 edges per dataset from the regular mock (measured in CI),
+      # and ~102k / ~207k from the 27x large mock. Cross-dataset equality is
+      # the real integrity check; these floors just catch gross data loss.
+      MIN_NODES: ${{ matrix.min_nodes }}
+      MIN_EDGES: ${{ matrix.min_edges }}
+
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Download mock fixtures from S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+          BUCKET: github-runner-cognee-tests
+          PREFIX: nightly_ci_artifacts/performance_test_artifacts
+        run: |
+          mkdir -p /tmp/large_migration_fixtures
+          aws s3 cp "s3://$BUCKET/$PREFIX/war_and_peace.json" "$LARGE_MEMORIES_FILE"
+          aws s3 cp "s3://$BUCKET/$PREFIX/${{ matrix.mock_file }}" "$LARGE_MOCK_FILE"
+
+      # Scripts and the shared mock-ingestion module do not exist on the
+      # legacy tag — save them (the module goes NEXT TO the phase scripts,
+      # phase1 imports it from its own directory).
+      - name: Save release migration test scripts
+        run: |
+          cp -r cognee/tests/release_migration /tmp/release_migration_scripts
+          cp -r cognee/tests/utils/mock_ingestion /tmp/release_migration_scripts/mock_ingestion
+
+      # ── Phase 1: seed 2 datasets on the legacy version ────────────────────
+      - name: Switch to cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+        run: git checkout ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }}
+
+      - name: Install cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }} dependencies
+        run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
+
+      - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
+        env:
+          # Phase 1 seeding is fully mocked (LLM replay + zero-vector
+          # embeddings); only this phase sets the MOCK_EMBEDDING switch.
+          MOCK_EMBEDDING: "true"
+          # The LEGACY version's ladybug bulk writes pre-date the COG-6112
+          # chunking fix: at 100k scale its single-statement kuzu writes cannot
+          # fit the 300s worker deadline, so seeding disables it. Phase 2 keeps
+          # the default deadline — fitting it IS the acceptance criterion.
+          SUBPROCESS_CALL_TIMEOUT: "0"
+        run: uv run python /tmp/release_migration_scripts/phase1_seed_large.py
+
+      # ── Phase 2: migrate on the current branch and verify ────────────────
+      - name: Switch back to current branch
+        run: git checkout ${{ github.sha }}
+
+      - name: Install current branch dependencies
+        run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
+
+      - name: "Phase 2 — run migrations, verify fork re-key and data integrity (current branch)"
+        env:
+          # Real embeddings in this phase: migrations re-embed on the generic
+          # re-key path and verification searches/ingest embed for real (the
+          # phase-2 script also drops any inherited MOCK_EMBEDDING switch).
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python cognee/tests/release_migration/phase2_verify_large.py
