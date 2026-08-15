@@ -41,11 +41,14 @@ un-migrated stores: a fork delete there fails fast (DocumentSubgraphNotFoundErro
 instead of mutating stores the migration has not touched.
 
 Deliberate boundary: chunk POINT ids are untouched — nothing recomputes them
-from the document id on this code line. The payload sync goes through
-``index_data_points`` (cognify's own write path), batched the same way
-(``index_data_points_batched``), so the stored row shape matches production
-writes on every vector backend; text is unchanged, so the re-embedded vector
-is equivalent.
+from the document id on this code line. Only the ``document_id`` reference
+scalar in the chunk's payload moves. Because the point id and chunk text are
+unchanged, the stored vector is already correct, so a backend that can update
+the payload in place does exactly that (``resync_document_id_native``: PGVector
+via a SQL payload update, no re-embed). Backends without a native path fall back
+to re-embedding through ``index_data_points`` (``index_data_points_batched``);
+re-embedding purely to change a scalar is wasted spend and, on a large fork, is
+what trips a provider's per-request embedding token cap.
 
 Fork rows are rare (same user, identical content, several datasets, before
 the upgrade), so this is cheap: one indexed relational query in the common
@@ -70,7 +73,7 @@ from cognee.modules.data.models import Data
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.shared.logging_utils import get_logger
 
-from ._vector_rekey import index_data_points_batched
+from ._vector_rekey import index_data_points_batched, resync_document_id_native
 from .namespace_entity_type_node_ids import _make_node, _migrate_graph
 
 logger = get_logger(__name__)
@@ -259,7 +262,12 @@ async def _sync_chunk_vector_payloads(
 
     if not await vector_engine.has_collection("DocumentChunk_text"):
         return
-    await index_data_points_batched(vector_engine, "DocumentChunk", "text", carriers)
+    # Only the document_id reference scalar moves — the chunk text and point id
+    # are unchanged, so the stored vector is already correct. Repoint it in place
+    # on backends that can (no re-embedding); re-embed only where they cannot.
+    chunk_targets = {str(carrier.id): str(carrier.document_id) for carrier in carriers}
+    if not await resync_document_id_native(vector_engine, "DocumentChunk_text", chunk_targets):
+        await index_data_points_batched(vector_engine, "DocumentChunk", "text", carriers)
     logger.info(
         "rekey_fork_document_ids: synced document_id payload on %d chunk vector row(s)",
         len(carriers),

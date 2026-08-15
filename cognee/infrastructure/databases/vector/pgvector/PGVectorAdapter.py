@@ -450,6 +450,59 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     await session.execute(insert_statement)
                 await session.commit()
 
+    async def upsert_raw_vectors(
+        self,
+        collection_name: str,
+        points: list[dict],
+        payload_schema: Optional[Any] = None,
+    ) -> None:
+        """Upsert caller-supplied vectors + payloads without invoking the embedding engine.
+
+        For small, system-owned vector state (truth-subspace centroids, migration
+        re-keys) where re-embedding from text would be wrong or wasteful. Unlike
+        ``create_data_points``, the vector comes from the caller and BOTH the vector
+        and payload are refreshed on id conflict. The payload dict is stored as-is,
+        so no fields are dropped; ``payload_schema`` is accepted for interface
+        symmetry with LanceDB but is not needed here (Postgres stores JSON directly).
+        """
+        if not points:
+            return
+
+        if not await self.has_collection(collection_name):
+            await self.create_collection(collection_name)
+        table = await self.get_table(collection_name)
+
+        rows = []
+        for point in points:
+            point_id = point.get("id")
+            vector = point.get("vector")
+            if point_id is None:
+                raise ValueError("Raw vector point is missing id")
+            if not isinstance(vector, list):
+                raise ValueError("Raw vector point vector must be a list")
+            rows.append(
+                {
+                    "id": str(point_id),
+                    "payload": sanitize_relational_payload(serialize_data(point.get("payload"))),
+                    "vector": vector,
+                }
+            )
+
+        async with self._get_write_lock(collection_name):
+            async with self.get_async_session() as session:
+                for start_index in range(0, len(rows), QUERY_BATCH_SIZE):
+                    batch = rows[start_index : start_index + QUERY_BATCH_SIZE]
+                    statement = insert(table).values(batch)
+                    statement = statement.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={
+                            "vector": statement.excluded.vector,
+                            "payload": statement.excluded.payload,
+                        },
+                    )
+                    await session.execute(statement)
+                await session.commit()
+
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""
         await self.create_collection(f"{index_name}_{index_property_name}")

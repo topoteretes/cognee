@@ -216,3 +216,55 @@ async def rekey_native(vector_engine, collection: str, id_map: dict) -> bool:
         await rekey_pgvector(vector_engine, collection, id_map)
         return True
     return False
+
+
+async def resync_document_id_native(vector_engine, collection: str, chunk_targets: dict) -> bool:
+    """Repoint the ``document_id`` payload scalar on existing chunk vector rows
+    WITHOUT re-embedding — the point id and chunk text are unchanged, so the
+    stored vector is already correct; only the reference scalar moves.
+
+    ``chunk_targets`` maps ``chunk point id -> new document id``. Returns ``True``
+    when a native path handled it (nothing re-embedded); ``False`` means the
+    caller must fall back to the generic re-embed path (``index_data_points``).
+
+    Re-embedding purely to change a payload scalar is wasted embedding spend and,
+    on a large fork, is exactly what trips a provider's per-request token cap.
+    PGVector stores the payload as a plain JSON column, so it is updated in place.
+    Backends whose vector rows cannot be updated without re-embedding (e.g.
+    LanceDB's columnar store, whose payload arrow schema is not a plain map)
+    return ``False`` and take the re-embed fallback.
+    """
+    if not chunk_targets:
+        return True
+
+    adapter = vector_engine.__class__.__name__
+    if adapter == "PGVectorAdapter":
+        await _resync_pgvector_document_id(vector_engine, collection, chunk_targets)
+        return True
+    return False
+
+
+async def _resync_pgvector_document_id(vector_engine, collection: str, chunk_targets: dict) -> None:
+    """PGVector: update the ``document_id`` payload key in place (vector untouched)."""
+    from sqlalchemy import select, update
+
+    from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
+    try:
+        table = await vector_engine.get_table(collection)
+    except CollectionNotFoundError:
+        return
+
+    ids = [str(chunk_id) for chunk_id in chunk_targets]
+    async with vector_engine.get_async_session() as session:
+        rows = (
+            await session.execute(select(table.c.id, table.c.payload).where(table.c.id.in_(ids)))
+        ).all()
+        for row in rows:
+            new_document_id = str(chunk_targets[str(row.id)])
+            payload = dict(row.payload or {})
+            if payload.get("document_id") == new_document_id:
+                continue  # idempotent: already re-keyed
+            payload["document_id"] = new_document_id
+            await session.execute(update(table).where(table.c.id == row.id).values(payload=payload))
+        await session.commit()
