@@ -300,10 +300,13 @@ jobs:
       DB_PASSWORD: cognee
       DB_NAME: cognee_db
 
-      # All AI calls are mock-replayed; keys are placeholders. The embedding
-      # MODEL still matters: its tokenizer decides chunk boundaries, which must
-      # match the mock capture (cl100k_base).
-      MOCK_EMBEDDING: "true"
+      # LLM calls are mock-replayed in both phases; the LLM key is a
+      # placeholder. Embeddings are mocked ONLY in phase 1 (MOCK_EMBEDDING on
+      # that step) — phase 2 embeds for real, so its step overrides the key
+      # with the real secret. The embedding MODEL/DIMENSIONS stay pinned
+      # job-wide: the tokenizer decides chunk boundaries (must match the mock
+      # capture, cl100k_base), and phase 1 creates 1536-dim vector tables that
+      # phase 2's real embeddings must fit.
       LLM_PROVIDER: openai
       LLM_MODEL: openai/gpt-4.1-mini
       LLM_API_KEY: mock-key
@@ -367,6 +370,9 @@ jobs:
 
       - name: "Phase 1 — mock-replay ingest 2 datasets (cognee ${{ env.COGNEE_COMPATIBILITY_TEST_VERSION }})"
         env:
+          # Phase 1 seeding is fully mocked (LLM replay + zero-vector
+          # embeddings); only this phase sets the MOCK_EMBEDDING switch.
+          MOCK_EMBEDDING: "true"
           # The LEGACY version's ladybug bulk writes pre-date the COG-6112
           # chunking fix: at 100k scale its single-statement kuzu writes cannot
           # fit the 300s worker deadline, so seeding disables it. Phase 2 keeps
@@ -382,4 +388,9 @@ jobs:
         run: uv sync --extra api --extra docs --extra dev --extra dlt --extra postgres
 
       - name: "Phase 2 — run migrations, verify fork re-key and data integrity (current branch)"
+        env:
+          # Real embeddings in this phase: migrations re-embed on the generic
+          # re-key path and verification searches/ingest embed for real (the
+          # phase-2 script also drops any inherited MOCK_EMBEDDING switch).
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python cognee/tests/release_migration/phase2_verify_large.py

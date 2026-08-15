@@ -13,10 +13,14 @@ release migrates it correctly, mirroring the manual 1.5.0 release validation:
    each dataset owns exactly one Data row, and the two rows carry DIFFERENT
    ids (the fork actually split).
 3. Functional verification: search executes on the migrated data, and a
-   post-migration mock-replay ingest into one dataset completes — the write
-   path works on the migrated stores.
+   post-migration ingest into one dataset completes — the write path works on
+   the migrated stores.
 
-Runs with the same replay mocks as phase 1 (zero AI calls, deterministic).
+LLM calls are replayed like in phase 1, but embeddings are REAL in this
+phase: the migrations under test (generic vector re-key re-embeds; searches
+embed queries; the post-migration ingest embeds chunks) must exercise the
+real embedding path — that is part of what the release test validates. Only
+phase 1's legacy seeding mocks embeddings.
 """
 
 import asyncio
@@ -56,10 +60,13 @@ async def dataset_graph_counts(dataset_name: str):
 async def main():
     from cognee.tests.utils.mock_ingestion import install_mocks, load_mock_data
 
-    # Install replay mocks BEFORE migrations: generic (non-native) vector
-    # backends re-embed during re-key, and post-migration verification
-    # searches embed queries. MOCK_EMBEDDING must match phase 1's vectors.
-    install_mocks(load_mock_data(MOCK_FILE))
+    # Replay the LLM only. Embeddings stay REAL in this phase: the migrations
+    # under test re-embed on the generic vector re-key path, and verification
+    # searches / the post-migration ingest embed for real too. Drop any
+    # inherited phase-1 switch so a shared environment cannot silently re-mock
+    # them (the engines read MOCK_EMBEDDING with a "false" default).
+    os.environ.pop("MOCK_EMBEDDING", None)
+    install_mocks(load_mock_data(MOCK_FILE), mock_embeddings=False)
 
     import cognee
 
