@@ -201,6 +201,60 @@ def test_instructor_mode_table_and_adapter_wiring():
     assert OpenAIAdapter.default_instructor_mode == get_instructor_mode("openai")
 
 
+def _clear_sampling_env(monkeypatch):
+    for var in ("LLM_TEMPERATURE", "LLM_SEED", "LLM_ARGS", "LLM_PROVIDER", "LLM_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_unset_temperature_is_not_folded_into_llm_args(monkeypatch):
+    """
+    An unset llm_temperature must not be sent to the provider: the default
+    model family (gpt-5) rejects any temperature other than its own default.
+    """
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(_env_file=None)
+    assert config.llm_args is None
+
+
+def test_explicit_temperature_kwarg_folds_into_llm_args(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(llm_temperature=0.0, _env_file=None)
+    assert config.llm_args == {"temperature": 0.0}
+
+
+def test_env_temperature_folds_into_llm_args(monkeypatch):
+    """
+    LLM_TEMPERATURE set via env reaches llm_args (env-set fields land in
+    model_fields_set). This is the fix for the field being dead config: it was
+    documented as the determinism knob but never plumbed to any adapter.
+    """
+    _clear_sampling_env(monkeypatch)
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.0")
+
+    config = LLMConfig(_env_file=None)
+    assert config.llm_args == {"temperature": 0.0}
+
+
+def test_llm_args_temperature_wins_over_dedicated_field(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(
+        llm_temperature=0.0,
+        llm_args={"temperature": 0.7, "max_tokens": 1024},
+        _env_file=None,
+    )
+    assert config.llm_args == {"temperature": 0.7, "max_tokens": 1024}
+
+
+def test_seed_folds_into_llm_args_and_preserves_existing_keys(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(llm_seed=42, llm_args={"max_tokens": 1024}, _env_file=None)
+    assert config.llm_args == {"seed": 42, "max_tokens": 1024}
+
+
 def test_known_providers_match_enum():
     """
     KNOWN_LLM_PROVIDERS must stay aligned with the LLMProvider dispatch enum so

@@ -20,12 +20,20 @@ class IngestionConfig(BaseSettings):
     # Env: DLT_COLUMN_VALUE_COLUMNS as JSON, or add(..., column_value_columns=...).
     dlt_column_value_columns: dict[str, list[str]] = {}
 
+    # Length bound on cell values selected for ColumnValue nodes; 0 (default)
+    # means unlimited — every selected value becomes a node regardless of
+    # length. Set a positive value (env: DLT_MAX_COLUMN_VALUE_LENGTH) to skip
+    # long free-text cells, which make poor shared categorical nodes and cost
+    # one embedding per unique value.
+    dlt_max_column_value_length: int = 0
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
         return {
             "dlt_max_rows_per_table": self.dlt_max_rows_per_table,
             "dlt_column_value_columns": self.dlt_column_value_columns,
+            "dlt_max_column_value_length": self.dlt_max_column_value_length,
         }
 
 

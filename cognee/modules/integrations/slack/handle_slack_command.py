@@ -1,9 +1,11 @@
 """Slash command handling for the Slack app.
 
-``/cognee-ask`` and ``/cognee-link`` (per-member account linking — see
-handle_slack_link.py) are implemented today. ``/cognee-remember`` and
-``/cognee-forget`` (async ``response_url`` pattern) are natural follow-ons
-once this integration has an owner to prioritize them.
+``/cognee-ask``, ``/cognee-remember`` and ``/cognee-link`` (per-member
+account linking — see handle_slack_link.py) are implemented today, matching
+the commands the cloud integration exposes. ``/cognee-forget`` is not: cognee
+can delete a dataset, one data item, or everything, but not by description,
+so a command taking a description of a fact could not honour it — and a
+person believing otherwise is the worst outcome available.
 
 Slash command bodies are ``application/x-www-form-urlencoded`` — parsed here
 from the verified raw bytes, never via FastAPI form parameters (see
@@ -19,6 +21,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.modules.integrations.slack.handle_cognee_ask import handle_cognee_ask
+from cognee.modules.integrations.slack.handle_cognee_remember import handle_cognee_remember
 from cognee.modules.integrations.slack.handle_slack_link import handle_cognee_link
 from cognee.modules.integrations.slack.persistence import get_by_team, is_active
 
@@ -52,6 +55,9 @@ async def handle_slack_command(raw_body: bytes) -> dict[str, Any]:
 
     if command == "/cognee-ask":
         return await handle_cognee_ask(raw_body)
+
+    if command == "/cognee-remember":
+        return await handle_cognee_remember(raw_body)
 
     if command == "/cognee-link":
         return await handle_cognee_link(raw_body)

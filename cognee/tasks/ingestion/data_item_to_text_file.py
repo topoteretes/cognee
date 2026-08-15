@@ -36,7 +36,14 @@ async def pull_from_s3(file_path, destination_file) -> None:
 async def data_item_to_text_file(
     data_item_path: str,
     preferred_loaders: dict[str, dict[str, Any]] = None,
+    **loader_kwargs: Any,
 ) -> Tuple[str, LoaderInterface]:
+    """Run the loader engine on a data item's file.
+
+    ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,
+    original_file_name) is forwarded to the selected loader's ``load()``;
+    loaders that don't need it ignore it via ``**kwargs``.
+    """
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)
 
@@ -59,9 +66,9 @@ async def data_item_to_text_file(
                 temp_file.flush()  # Data needs to be saved to local storage
                 temp_file.close()  # release the handle so the loader can reopen by name
                 loader = get_loader_engine()
-                return await loader.load_file(temp_file.name, preferred_loaders), loader.get_loader(
-                    temp_file.name, preferred_loaders
-                )
+                return await loader.load_file(
+                    temp_file.name, preferred_loaders, **loader_kwargs
+                ), loader.get_loader(temp_file.name, preferred_loaders)
             finally:
                 temp_file.close()  # idempotent; covers the early-exception path
                 try:
@@ -73,9 +80,9 @@ async def data_item_to_text_file(
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
-                    data_item_path, preferred_loaders
-                )
+                return await loader.load_file(
+                    data_item_path, preferred_loaders, **loader_kwargs
+                ), loader.get_loader(data_item_path, preferred_loaders)
             else:
                 raise IngestionError(message="Local files are not accepted.")
 
@@ -86,9 +93,9 @@ async def data_item_to_text_file(
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
-                    data_item_path, preferred_loaders
-                )
+                return await loader.load_file(
+                    data_item_path, preferred_loaders, **loader_kwargs
+                ), loader.get_loader(data_item_path, preferred_loaders)
             else:
                 raise IngestionError(message="Local files are not accepted.")
     # data is not a supported type

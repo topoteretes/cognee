@@ -17,10 +17,7 @@ import cognee.tasks.ingestion.dlt_schema_graph as schema_graph_module
 from cognee.modules.engine.models import ColumnValue
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.dlt_schema_graph import emit_dlt_schema_graph
-from cognee.tasks.ingestion.resolve_dlt_sources import (
-    MAX_COLUMN_VALUE_LENGTH,
-    _selected_column_values,
-)
+from cognee.tasks.ingestion.resolve_dlt_sources import _selected_column_values
 
 graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
@@ -81,16 +78,29 @@ class TestSelectedColumnValues:
         row = _row(row_data=self.ROW_DATA, foreign_keys=self.FOREIGN_KEYS)
         assert _selected_column_values(row, {"orders": ["id", "customer_id"]}) == {}
 
-    def test_null_empty_and_overlong_values_skipped(self):
+    def test_null_and_empty_values_skipped_long_values_kept(self):
+        """No length bound by default: a selected value of any length becomes
+        a node — only null/empty cells are skipped."""
+        long_value = "x" * 10_000
         row = _row(
             row_data={
                 "id": 1,
                 "status": None,
                 "note": "  ",
-                "blob": "x" * (MAX_COLUMN_VALUE_LENGTH + 1),
+                "blob": long_value,
                 "country": "RS",
             }
         )
+        assert _selected_column_values(row, {"orders": ["*"]}) == {
+            "blob": long_value,
+            "country": "RS",
+        }
+
+    def test_opt_in_length_bound_skips_long_values(self, monkeypatch):
+        from cognee.tasks.ingestion.config import get_ingestion_config
+
+        monkeypatch.setattr(get_ingestion_config(), "dlt_max_column_value_length", 8)
+        row = _row(row_data={"id": 1, "blob": "x" * 9, "country": "RS"})
         assert _selected_column_values(row, {"orders": ["*"]}) == {"country": "RS"}
 
     def test_values_coerced_to_stripped_strings(self):

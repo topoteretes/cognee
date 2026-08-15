@@ -2047,19 +2047,23 @@ async def main():
     # Skip migrations when in API or Cloud mode (remote handles its own database)
     is_remote = bool(args.api_url) or bool(serve_url)
     if not args.no_migration and not is_remote:
-        from cognee.modules.engine.operations.setup import setup
         from cognee.run_migrations import run_migrations
 
         logger.info("Running database migrations...")
 
-        # Database setup and migrations print progress and "table already
-        # exists" notices to stdout. In stdio transport stdout is the JSON-RPC
-        # channel, so route that output to stderr — the same guard every tool
-        # applies around its cognee calls.
+        # Migrations print progress and "table already exists" notices to
+        # stdout. In stdio transport stdout is the JSON-RPC channel, so route
+        # that output to stderr — the same guard every tool applies around its
+        # cognee calls.
         with redirect_stdout(sys.stderr):
-            await setup()
-            # Full startup migrations (relational schema + graph/vector revision
-            # chains) — MCP writes new-scheme data, so it must migrate like the API.
+            # run_migrations() alone — it tells a fresh database from an
+            # existing one (fresh: schema from the models + `alembic stamp
+            # head`; existing: Alembic deltas + the graph/vector data chain).
+            # Running setup() before it used to spoil that check: create_all
+            # built the schema unstamped, so a brand-new database was
+            # classified as existing and replayed the full migration history.
+            # Vector-store tables are created on first write (add() runs
+            # setup()), the same as every SDK flow.
             await run_migrations()
 
         logger.info("Database migrations done.")

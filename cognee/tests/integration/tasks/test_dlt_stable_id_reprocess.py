@@ -138,24 +138,39 @@ async def test_changed_row_reprocesses_without_vanishing(clean_env):
     texts = await _row_texts()
     assert "pending" in texts
 
-    # Re-sync with one changed row. The Data row must survive in place:
-    # same id, new hash, never absent.
+    # Re-sync with one changed row through plain add(): add() is IDEMPOTENT.
+    # The completed record keeps the fast skip — same id, same stored hash,
+    # graph untouched. Updating an existing source is update()'s job
+    # (explicit UUID) or an explicit re-ingest (below).
+    changed_rows = [
+        {"id": "1", "status": "active"},
+        {"id": "2", "status": "shipped"},
+    ]
+    await cognee.add(_dlt_source(changed_rows), dataset_name=DATASET, **kwargs)
+    _, records = await _manifest_record(user)
+    assert len(records) == 1, "manifest must never be absent after a re-add"
+    assert records[0].id == manifest_id, "stable identity: same Data id across re-adds"
+    assert str(records[0].content_hash) == str(first_hash), (
+        "plain re-add must not mutate the completed record"
+    )
+    texts = await _row_texts()
+    assert "pending" in texts, "plain re-add must leave the graph untouched"
+
+    # Explicit re-ingest: the completed-skip runs whenever data_cache OR
+    # incremental_loading is on, so bypassing it takes both flags off; the
+    # record then updates in place and re-cognify purges + re-emits.
     await cognee.add(
-        _dlt_source(
-            [
-                {"id": "1", "status": "active"},
-                {"id": "2", "status": "shipped"},
-            ]
-        ),
+        _dlt_source(changed_rows),
         dataset_name=DATASET,
+        incremental_loading=False,
+        data_cache=False,
         **kwargs,
     )
     _, records = await _manifest_record(user)
-    assert len(records) == 1, "manifest must never be absent after a changed re-add"
-    assert records[0].id == manifest_id, "stable identity: same Data id across the change"
-    assert str(records[0].content_hash) != str(first_hash), "content hash tracked the change"
+    assert len(records) == 1
+    assert records[0].id == manifest_id, "stable identity survives the explicit re-ingest"
+    assert str(records[0].content_hash) != str(first_hash), "record tracked the change"
 
-    # Re-cognify: purge + re-emit. New value searchable, old value gone.
     await cognee.cognify(datasets=[DATASET])
     texts = await _row_texts()
     assert "shipped" in texts, "updated row value must be in the graph"
