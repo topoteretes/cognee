@@ -146,3 +146,55 @@ class TestRejections:
             model_from_json_schema(
                 {"type": "object", "properties": {"bad-name": {"type": "string"}}}
             )
+
+    def test_empty_any_of(self):
+        with pytest.raises(CogneeValidationError, match="anyOf"):
+            model_from_json_schema(
+                {
+                    "type": "object",
+                    "properties": {"value": {"anyOf": []}},
+                    "required": ["value"],
+                }
+            )
+
+    def test_non_list_any_of(self):
+        with pytest.raises(CogneeValidationError, match="anyOf"):
+            model_from_json_schema(
+                {"type": "object", "properties": {"value": {"anyOf": {"type": "string"}}}}
+            )
+
+    def test_empty_type_list(self):
+        with pytest.raises(CogneeValidationError, match="type"):
+            model_from_json_schema({"type": "object", "properties": {"value": {"type": []}}})
+
+    def test_nested_empty_any_of(self):
+        with pytest.raises(CogneeValidationError, match="anyOf"):
+            model_from_json_schema(
+                {
+                    "type": "object",
+                    "properties": {"xs": {"type": "array", "items": {"anyOf": []}}},
+                }
+            )
+
+
+class TestUnions:
+    def test_single_member_any_of_collapses_to_that_type(self):
+        rebuilt = model_from_json_schema(
+            {
+                "type": "object",
+                "properties": {"value": {"anyOf": [{"type": "string"}]}},
+                "required": ["value"],
+            }
+        )
+        assert rebuilt.model_validate({"value": "ok"}).value == "ok"
+
+    def test_type_list_builds_a_union(self):
+        rebuilt = model_from_json_schema(
+            {
+                "type": "object",
+                "properties": {"value": {"type": ["string", "null"]}},
+                "required": ["value"],
+            }
+        )
+        assert rebuilt.model_validate({"value": "ok"}).value == "ok"
+        assert rebuilt.model_validate({"value": None}).value is None
