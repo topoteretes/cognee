@@ -158,30 +158,48 @@ async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
         except UnsupportedProvenanceCapability:
             return
 
-        # Group artifacts by pipeline run id and attach per group: a dataset's
-        # subgraph overwhelmingly carries one run id, so this collapses the
-        # 100k-node / 295k-edge per-item loops — each a write+checkpoint
-        # subprocess round-trip whose page churn alone could exhaust kuzu's
-        # max_db_size — into a handful of batched calls.
+        # Backends with single-sweep moves (Ladybug) rewrite each artifact
+        # ONCE: run refs embedding the old key are rewritten in place, so the
+        # run-id grouping (and its full-graph snapshot read) is unnecessary.
+        # Versus attach-then-remove this is 1 read + 1 write sweep instead of
+        # 3 reads + 2 writes — on a 100k-node fork the write volume, which is
+        # both the dominant cost and the engine-corruption exposure surface
+        # (COG-6112), is halved. Convergence is preserved: an artifact the
+        # sweep already moved no longer matches the old key and is a no-op.
+        single_sweep = hasattr(graph_engine, "move_node_source_refs") and hasattr(
+            graph_engine, "move_edge_source_refs"
+        )
+
         if node_ids:
-            snapshots = await graph_engine.get_node_delete_data(node_ids)
-            nodes_by_run: dict = {}
-            for node_id in node_ids:
-                run_id = _run_id_for_key(snapshots.get(node_id), old_key)
-                nodes_by_run.setdefault(run_id, []).append(node_id)
-            for run_id, grouped_ids in nodes_by_run.items():
-                await graph_engine.attach_node_source_refs(grouped_ids, [new_key], run_id)
-            await graph_engine.remove_node_source_refs(node_ids, [old_key])
+            if single_sweep:
+                await graph_engine.move_node_source_refs(node_ids, old_key, new_key)
+            else:
+                # Group artifacts by pipeline run id and attach per group: a
+                # dataset's subgraph overwhelmingly carries one run id, so this
+                # collapses the 100k-node per-item loops — each a
+                # write+checkpoint subprocess round-trip whose page churn alone
+                # could exhaust kuzu's max_db_size — into a few batched calls.
+                snapshots = await graph_engine.get_node_delete_data(node_ids)
+                nodes_by_run: dict = {}
+                for node_id in node_ids:
+                    run_id = _run_id_for_key(snapshots.get(node_id), old_key)
+                    nodes_by_run.setdefault(run_id, []).append(node_id)
+                for run_id, grouped_ids in nodes_by_run.items():
+                    await graph_engine.attach_node_source_refs(grouped_ids, [new_key], run_id)
+                await graph_engine.remove_node_source_refs(node_ids, [old_key])
 
         if edge_identities:
-            edge_snapshots = await graph_engine.get_edge_delete_data(edge_identities)
-            edges_by_run: dict = {}
-            for edge in edge_identities:
-                run_id = _run_id_for_key(edge_snapshots.get(edge), old_key)
-                edges_by_run.setdefault(run_id, []).append(edge)
-            for run_id, grouped_edges in edges_by_run.items():
-                await graph_engine.attach_edge_source_refs(grouped_edges, [new_key], run_id)
-            await graph_engine.remove_edge_source_refs(edge_identities, [old_key])
+            if single_sweep:
+                await graph_engine.move_edge_source_refs(edge_identities, old_key, new_key)
+            else:
+                edge_snapshots = await graph_engine.get_edge_delete_data(edge_identities)
+                edges_by_run: dict = {}
+                for edge in edge_identities:
+                    run_id = _run_id_for_key(edge_snapshots.get(edge), old_key)
+                    edges_by_run.setdefault(run_id, []).append(edge)
+                for run_id, grouped_edges in edges_by_run.items():
+                    await graph_engine.attach_edge_source_refs(grouped_edges, [new_key], run_id)
+                await graph_engine.remove_edge_source_refs(edge_identities, [old_key])
 
         logger.info(
             "rekey_fork_document_ids: moved provenance refs on %d node(s), %d edge(s) "

@@ -32,6 +32,7 @@ from cognee.infrastructure.databases.provenance.source_refs import (
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
+    provenance_after_move,
     provenance_after_remove,
     provenance_attach_inputs,
 )
@@ -1430,6 +1431,48 @@ class LadybugAdapter(GraphDBInterface):
             self._write_edge_provenance,
             self._edge_row,
             lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
+        )
+
+    async def move_node_source_refs(
+        self,
+        node_ids: list[str],
+        old_source_ref_key: str,
+        new_source_ref_key: str,
+    ) -> None:
+        """Replace one source ref with another in a single read+write sweep.
+
+        Equivalent end state to attach(new) followed by remove(old), but each
+        artifact is rewritten once instead of twice — on large graphs this
+        halves the write volume of a re-key, the dominant cost (and the
+        engine-corruption exposure, see COG-6112) of the fork document re-key.
+        Run refs embedding the old key are rewritten in place, so per-artifact
+        run ids are preserved exactly.
+        """
+        await self._apply_source_ref_change(
+            node_ids,
+            self._read_node_provenance,
+            self._write_node_provenance,
+            self._node_row,
+            lambda keys, run_refs: provenance_after_move(
+                keys, run_refs, old_source_ref_key, new_source_ref_key
+            ),
+        )
+
+    async def move_edge_source_refs(
+        self,
+        edges: list[EdgeIdentity],
+        old_source_ref_key: str,
+        new_source_ref_key: str,
+    ) -> None:
+        """Edge counterpart of ``move_node_source_refs`` — one sweep, not two."""
+        await self._apply_source_ref_change(
+            edges,
+            self._read_edge_provenance,
+            self._write_edge_provenance,
+            self._edge_row,
+            lambda keys, run_refs: provenance_after_move(
+                keys, run_refs, old_source_ref_key, new_source_ref_key
+            ),
         )
 
     async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:

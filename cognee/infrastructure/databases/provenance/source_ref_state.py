@@ -127,6 +127,48 @@ def provenance_after_attach(
     return ProvenanceColumns(keys, derive_dataset_ids(keys), derive_run_ids(run_refs), run_refs)
 
 
+def provenance_after_move(
+    current_keys: List[str],
+    current_run_refs: List[str],
+    old_key: str,
+    new_key: str,
+) -> ProvenanceColumns:
+    """Return the four provenance columns after moving ``old_key`` to ``new_key``.
+
+    Single-transition equivalent of attach(new) + remove(old), so a re-key can
+    rewrite an artifact in ONE read+write sweep instead of two. Every
+    source_run_ref embedding the old key is rewritten in place to embed the new
+    key — each artifact keeps its own run ids, which attach+remove could only
+    approximate by re-stamping a group-level run id. An artifact that no longer
+    carries the old key (interrupted run resumed) is returned unchanged, so the
+    sweep stays convergent.
+    """
+    had_old_key = old_key in current_keys
+    old_run_refs = [
+        ref for ref in current_run_refs if get_source_ref_key_from_source_run_ref(ref) == old_key
+    ]
+    if not had_old_key and not old_run_refs:
+        return ProvenanceColumns(
+            list(current_keys),
+            derive_dataset_ids(current_keys),
+            derive_run_ids(current_run_refs),
+            list(current_run_refs),
+        )
+
+    keys = [key for key in current_keys if key != old_key]
+    if new_key not in keys:
+        keys.append(new_key)
+
+    run_refs: List[str] = []
+    for ref in current_run_refs:
+        if get_source_ref_key_from_source_run_ref(ref) == old_key:
+            ref = make_source_run_ref(get_pipeline_run_id_from_source_run_ref(ref), new_key)
+        if ref not in run_refs:
+            run_refs.append(ref)
+
+    return ProvenanceColumns(keys, derive_dataset_ids(keys), derive_run_ids(run_refs), run_refs)
+
+
 def provenance_after_remove(
     current_keys: List[str],
     current_run_refs: List[str],
