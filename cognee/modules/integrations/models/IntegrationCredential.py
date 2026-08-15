@@ -3,8 +3,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from cognee.infrastructure.databases.relational.ModelBase import Base
-from sqlalchemy import JSON, DateTime, Index, LargeBinary, SmallInteger, String
-from sqlalchemy import UUID as SAUUID
+from sqlalchemy import JSON, DateTime, Index, LargeBinary, SmallInteger, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -45,13 +44,13 @@ class IntegrationCredential(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(SAUUID, primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
-    user_id: Mapped[UUID] = mapped_column(SAUUID, nullable=False, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
 
     # Optional second owner dimension — see the class docstring. No FK: a
     # plain opaque id, same as user_id.
-    workspace_id: Mapped[Optional[UUID]] = mapped_column(SAUUID, nullable=True, index=True)
+    workspace_id: Mapped[Optional[UUID]] = mapped_column(Uuid, nullable=True, index=True)
 
     provider: Mapped[str] = mapped_column(String, nullable=False)
     provider_account_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)

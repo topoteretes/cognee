@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID as uuid_UUID
 from fastapi_users import schemas
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
-from sqlalchemy import ForeignKey, Column, UUID
+from sqlalchemy import ForeignKey, Column, Uuid
 from sqlalchemy.orm import relationship, Mapped
 
 from .Principal import Principal
@@ -15,14 +15,14 @@ from .Tenant import Tenant
 class User(SQLAlchemyBaseUserTableUUID, Principal):
     __tablename__ = "users"
 
-    id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
+    id = Column(Uuid, ForeignKey("principals.id", ondelete="CASCADE"), primary_key=True)
 
     # Foreign key to current Tenant (Many-to-One relationship)
-    tenant_id = Column(UUID, ForeignKey("tenants.id"))
+    tenant_id = Column(Uuid, ForeignKey("tenants.id"))
 
     # Parent user — when an agent/service user creates datasets, the parent
     # inherits full permissions automatically. Null for regular human users.
-    parent_user_id = Column(UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    parent_user_id = Column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Many-to-Many Relationship with Roles
     roles: Mapped[list["Role"]] = relationship(

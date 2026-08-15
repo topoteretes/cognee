@@ -1,6 +1,6 @@
 from sqlalchemy import ForeignKey
 from datetime import datetime, timezone
-from sqlalchemy import UUID, Column, DateTime, String, JSON
+from sqlalchemy import Uuid, Column, DateTime, String, JSON
 from sqlalchemy.ext.mutable import MutableDict
 from uuid import uuid4
 
@@ -10,9 +10,9 @@ from cognee.infrastructure.databases.relational import Base
 class PrincipalConfiguration(Base):
     __tablename__ = "principal_configuration"
 
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id = Column(Uuid, primary_key=True, default=uuid4)
 
-    owner_id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), index=True)
+    owner_id = Column(Uuid, ForeignKey("principals.id", ondelete="CASCADE"), index=True)
 
     name = Column(String, unique=False, nullable=False)
 

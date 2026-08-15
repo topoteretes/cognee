@@ -6,7 +6,7 @@ from sqlalchemy import (
     Column,
     Text,
     DateTime,
-    UUID as SQLAlchemy_UUID,
+    Uuid,
     Integer,
     Enum as SQLEnum,
     JSON,
@@ -36,7 +36,7 @@ class SyncOperation(Base):
     __tablename__ = "sync_operations"
 
     # Primary identifiers
-    id = Column(SQLAlchemy_UUID, primary_key=True, default=uuid4, doc="Database primary key")
+    id = Column(Uuid, primary_key=True, default=uuid4, doc="Database primary key")
     run_id = Column(Text, unique=True, index=True, doc="Public run ID returned to users")
 
     # Status and progress tracking
@@ -48,7 +48,7 @@ class SyncOperation(Base):
     # Operation metadata
     dataset_ids = Column(JSON, doc="Array of dataset IDs being synced")
     dataset_names = Column(JSON, doc="Array of dataset names being synced")
-    user_id = Column(SQLAlchemy_UUID, index=True, doc="ID of the user who initiated the sync")
+    user_id = Column(Uuid, index=True, doc="ID of the user who initiated the sync")
 
     # Timing information
     created_at = Column(

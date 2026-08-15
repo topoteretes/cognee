@@ -1,6 +1,6 @@
 from uuid import uuid5, NAMESPACE_OID
 from datetime import datetime, timezone
-from sqlalchemy import UUID, Column, DateTime, String, Index
+from sqlalchemy import Uuid, Column, DateTime, String, Index
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -9,12 +9,12 @@ class GraphRelationshipLedger(Base):
     __tablename__ = "graph_relationship_ledger"
 
     id = Column(
-        UUID,
+        Uuid,
         primary_key=True,
         default=lambda: uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
     )
-    source_node_id = Column(UUID, nullable=False)
-    destination_node_id = Column(UUID, nullable=False)
+    source_node_id = Column(Uuid, nullable=False)
+    destination_node_id = Column(Uuid, nullable=False)
     creator_function = Column(String, nullable=False)
     # TODO(security): node_label stores readable entity names (e.g. "Apple", "John").
     #   Evaluate whether this needs hashing/minimization for SOC2 compliance.
@@ -22,7 +22,7 @@ class GraphRelationshipLedger(Base):
     node_label = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime(timezone=True), nullable=True)
-    user_id = Column(UUID, nullable=True)
+    user_id = Column(Uuid, nullable=True)
 
     # Create indexes
     __table_args__ = (

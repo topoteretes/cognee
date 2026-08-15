@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, ForeignKey, UUID
+from sqlalchemy import Column, DateTime, ForeignKey, Uuid
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -8,5 +8,5 @@ class PipelineTask(Base):
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    pipeline_id = Column("pipeline", UUID, ForeignKey("pipeline.id"), primary_key=True)
-    task_id = Column("task", UUID, ForeignKey("task.id"), primary_key=True)
+    pipeline_id = Column("pipeline", Uuid, ForeignKey("pipeline.id"), primary_key=True)
+    task_id = Column("task", Uuid, ForeignKey("task.id"), primary_key=True)
