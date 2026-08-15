@@ -84,3 +84,28 @@ async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
     )
 
     assert peak == 1
+
+@pytest.mark.asyncio
+async def test_index_data_points_isolates_metadata_for_multiple_index_fields():
+    """Each indexed copy must retain only its own field without mutating the source."""
+    class MultiFieldDataPoint(DataPoint):
+        name: str
+        description: str
+        metadata: dict = {"index_fields": ["name", "description"]}
+
+    data_point = MultiFieldDataPoint(name="name text", description="description text")
+    indexed_batches = []
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
+
+    async def capture_indexed_points(_type_name, field_name, batch):
+        indexed_batches.append((field_name, batch))
+
+    mock_vector_engine.index_data_points.side_effect = capture_indexed_points
+    await index_data_points([data_point], vector_engine=mock_vector_engine)
+
+    assert data_point.metadata["index_fields"] == ["name", "description"]
+    assert [(field, points[0].metadata["index_fields"]) for field, points in indexed_batches] == [
+        ("name", ["name"]),
+        ("description", ["description"]),
+    ]
