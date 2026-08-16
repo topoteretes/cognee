@@ -14,19 +14,18 @@ from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.models import GlobalContextSummary
 
-from .bucketing.graph.inputs import load_graph_bucketing_inputs
+from .bucketing.graph.inputs import GraphBucketingInputs, load_graph_bucketing_inputs
 from .bucketing.graph.placement import (
     validate_graph_buckets_can_be_extended,
     validate_vector_buckets_can_be_extended,
 )
-from .build import build_context_index, group_buckets_by_level
+from .build import GraphSimilarityMode, build_context_index, group_buckets_by_level
 from .bucketing_strategy import BucketingStrategyName
 from .load import dataset_id_from_context, load_context_index_input_from_graph
 from .models import GlobalContextIndexUpdateData, SummaryNode
 from .persist import delete_context_index_nodes, persist_context_index_edges
 
 logger = get_logger("global_context_index")
-GraphBucketingInputs = tuple[dict[str, set[str]], dict[str, float]]
 
 
 @dataclass
@@ -219,9 +218,16 @@ async def ensure_graph_bucketing_inputs(
 
 def unpack_graph_bucketing_inputs(
     graph_bucketing_inputs: GraphBucketingInputs | None,
-) -> tuple[dict[str, set[str]], dict[str, float]]:
+) -> GraphBucketingInputs:
     if graph_bucketing_inputs is None:
-        return {}, {}
+        return GraphBucketingInputs(
+            entities_by_summary_id={},
+            idf_weights={},
+            entity_type_by_entity_id={},
+            type_idf_weights={},
+            entity_relations=[],
+            edge_type_embeddings={},
+        )
     return graph_bucketing_inputs
 
 
@@ -235,8 +241,9 @@ async def build_and_persist_context_index(
     min_overlap: float,
     graph_bucketing_inputs: GraphBucketingInputs | None,
     ctx: PipelineContext | None,
+    graph_similarity_mode: GraphSimilarityMode = "entity",
 ) -> list[GlobalContextSummary]:
-    entities_by_summary_id, idf_weights = unpack_graph_bucketing_inputs(graph_bucketing_inputs)
+    inputs = unpack_graph_bucketing_inputs(graph_bucketing_inputs)
     context_datapoints, assignments = await build_context_index(
         new_text_summaries=new_summaries,
         text_summaries_all=scope.text_summaries,
@@ -248,8 +255,13 @@ async def build_and_persist_context_index(
         placement_distance_threshold=placement_distance_threshold,
         bucketing_strategy=bucketing_strategy,
         min_overlap=min_overlap,
-        entities_by_summary_id=entities_by_summary_id,
-        idf_weights=idf_weights,
+        entities_by_summary_id=inputs.entities_by_summary_id,
+        idf_weights=inputs.idf_weights,
+        entity_type_by_entity_id=inputs.entity_type_by_entity_id,
+        type_idf_weights=inputs.type_idf_weights,
+        graph_similarity_mode=graph_similarity_mode,
+        entity_relations=inputs.entity_relations,
+        edge_type_embeddings=inputs.edge_type_embeddings,
         ctx=ctx,
     )
 
@@ -266,6 +278,7 @@ async def update_global_context_index(
     bucketing_strategy: BucketingStrategyName = "vector",
     min_overlap: float = 0.05,
     ctx: PipelineContext | None = None,
+    graph_similarity_mode: GraphSimilarityMode = "entity",
 ) -> list[GlobalContextSummary]:
     """
     Build or incrementally extend the global context index above a dataset's
@@ -278,6 +291,11 @@ async def update_global_context_index(
     vector-built buckets cannot be extended by graph incremental mode, and
     existing graph-built buckets cannot be extended by vector incremental mode;
     use ``rebuild=True`` to switch strategies.
+
+    ``graph_similarity_mode`` only matters when ``bucketing_strategy="graph"``:
+    ``"entity"`` (default) scores level-0 placement by entity overlap alone,
+    exactly as before; ``"combined"`` blends in entity-type and
+    relationship-pattern signals too.
     """
     validate_global_context_index_config(
         max_bucket_size,
@@ -318,4 +336,5 @@ async def update_global_context_index(
         min_overlap,
         graph_bucketing_inputs,
         ctx,
+        graph_similarity_mode=graph_similarity_mode,
     )
