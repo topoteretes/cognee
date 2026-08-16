@@ -29,6 +29,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.user_preferences import load_active_preferences
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.context_global_variables import session_user
@@ -180,6 +181,10 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         collections = self._get_vector_index_collections()
         unified_engine = getattr(self, "_unified_engine", None)
+        # Personal prefers weights ride into the triplet scorer. The lookup is
+        # memoized and fails open: flag off, no node, or any error yields {},
+        # so the search stays byte-identical to an un-personalized run.
+        _preference_text, personal_weights = await load_active_preferences()
         return await brute_force_triplet_search(
             query,
             query_batch,
@@ -194,6 +199,7 @@ class GraphCompletionRetriever(BaseRetriever):
             unified_engine=unified_engine,
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
+            personal_weights=personal_weights or None,
         )
 
     async def get_triplets_batch(
@@ -315,9 +321,19 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> List[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
+        # Sessionless guidance site: preference text rides the guidance channel
+        # (conversation_history), never context. The lookup is memoized, so this
+        # shares the get_triplets read; empty text is falsy and leaves the
+        # system prompt untouched. The session path never reaches this method,
+        # so it cannot collide with compose_session_prompt's layer.
+        preference_text, _weights = await load_active_preferences()
         if query_batch:
-            return await generate_completion_batch(query_batch=query_batch, **kwargs)
-        completion = await generate_completion(query=query, **kwargs)
+            return await generate_completion_batch(
+                query_batch=query_batch, conversation_history=preference_text, **kwargs
+            )
+        completion = await generate_completion(
+            query=query, conversation_history=preference_text, **kwargs
+        )
         return [completion]
 
     async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:

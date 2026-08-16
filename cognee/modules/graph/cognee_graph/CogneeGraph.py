@@ -31,6 +31,7 @@ class CogneeGraph(CogneeAbstractGraph):
     directed: bool
     triplet_distance_penalty: float
     feedback_influence: float
+    personal_influence: float
 
     def __init__(self, directed: bool = True):
         self.nodes = {}
@@ -39,6 +40,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.directed = directed
         self.triplet_distance_penalty = 6.5
         self.feedback_influence = get_base_config().default_feedback_influence
+        self.personal_influence = get_base_config().personalization_influence
 
     def add_node(self, node: Node) -> None:
         if node.id in self.nodes:
@@ -397,6 +399,20 @@ class CogneeGraph(CogneeAbstractGraph):
                         default_penalty=self.triplet_distance_penalty,
                     )
 
+    def apply_personal_weights(self, weights: Dict[str, float]) -> None:
+        """Set ``personal_weight`` on nodes matched by id; unknown ids are ignored.
+
+        Called after projection and distance mapping. The weight lands in its
+        own attribute rather than ``feedback_weight`` so the personal and
+        global signals stay separable when debugging a ranking change.
+        """
+        if not weights:
+            return
+        for node_id, weight in weights.items():
+            node = self.nodes.get(str(node_id))
+            if node is not None:
+                node.add_attribute("personal_weight", weight)
+
     def _calculate_query_top_triplet_importances(
         self,
         k: int,
@@ -404,9 +420,14 @@ class CogneeGraph(CogneeAbstractGraph):
         feedback_influence: Optional[float] = None,
     ) -> List[Edge]:
         """Calculate top k triplet importances for a specific query index."""
+        # Imported lazily: the user_preferences package pulls in tasks/memify,
+        # which imports this module back — a top-level import would be circular.
+        from cognee.modules.user_preferences.weights import personal_factor
+
         active_feedback_influence = (
             self.feedback_influence if feedback_influence is None else feedback_influence
         )
+        active_personal_influence = self.personal_influence
 
         def _effective_distance(distance: float, feedback_weight: Any) -> float:
             if active_feedback_influence <= 0.0:
@@ -431,6 +452,22 @@ class CogneeGraph(CogneeAbstractGraph):
                 active_feedback_influence * (1.0 - normalized_feedback_weight)
             )
             return blended_normalized * 2.0
+
+        def _personal_distance(raw: float, blended: float, element) -> float:
+            if active_personal_influence <= 0.0:
+                return blended
+            # Same eligibility test _effective_distance applies, on the same
+            # input it saw. RAW decides whether, BLENDED decides what: the
+            # blend always returns a value in [0, 2], so testing the returned
+            # value instead would scale fallback penalties like real matches —
+            # and at feedback influence 0 the blend short-circuits without
+            # ever consulting its range guard.
+            if raw >= self.triplet_distance_penalty or raw < 0.0 or raw > 2.0:
+                return blended
+            weight = element.attributes.get("personal_weight")
+            if weight is None:
+                return blended
+            return blended * personal_factor(weight, active_personal_influence, distance_space=True)
 
         def score(edge: Edge) -> float:
             elements = (
@@ -463,7 +500,8 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                 distance = (2 - importance_weight) * distance
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
-                importances.append(_effective_distance(distance, feedback_weight))
+                blended = _effective_distance(distance, feedback_weight)
+                importances.append(_personal_distance(distance, blended, element))
 
             return sum(importances)
 
