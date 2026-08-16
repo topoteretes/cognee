@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
+from uuid import UUID
+
 from sqlalchemy import (
     DateTime,
     Index,
     # event,
     Text,
     JSON,
-    UUID,
+    Uuid,
 )
 
 # from sqlalchemy.schema import DDL
@@ -17,17 +19,17 @@ from cognee.infrastructure.databases.relational import Base
 class Node(Base):
     __tablename__ = "nodes"
 
-    id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
 
-    slug: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    slug: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
 
-    user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
 
-    data_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    data_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
 
-    dataset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
+    dataset_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True, nullable=False)
     pipeline_run_id: Mapped[UUID | None] = mapped_column(
-        UUID(as_uuid=True), index=True, nullable=True
+        Uuid(as_uuid=True), index=True, nullable=True
     )
 
     label: Mapped[str | None] = mapped_column(Text)

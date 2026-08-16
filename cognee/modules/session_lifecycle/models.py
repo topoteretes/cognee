@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UUID
+from sqlalchemy import Column, DateTime, Float, Integer, String, Text, Uuid
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -29,9 +29,9 @@ class SessionRecord(Base):
     # from the Claude Code plugin). Scoped per user — same string from
     # two users is two different sessions.
     session_id = Column(String, primary_key=True)
-    user_id = Column(UUID, primary_key=True, index=True)
+    user_id = Column(Uuid, primary_key=True, index=True)
 
-    dataset_id = Column(UUID, nullable=True, index=True)
+    dataset_id = Column(Uuid, nullable=True, index=True)
 
     # Stored status. "abandoned" is the only value inferred at read
     # time instead of being stored — everything else (running,
@@ -99,7 +99,7 @@ class SessionModelUsage(Base):
     __tablename__ = "session_model_usage"
 
     session_id = Column(String, primary_key=True)
-    user_id = Column(UUID, primary_key=True, index=True)
+    user_id = Column(Uuid, primary_key=True, index=True)
     model = Column(Text, primary_key=True)
 
     tokens_in = Column(Integer, nullable=False, default=0)

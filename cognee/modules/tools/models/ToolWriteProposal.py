@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
-from sqlalchemy import UUID as SAUUID
+from sqlalchemy import JSON, DateTime, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from cognee.infrastructure.databases.relational.ModelBase import Base
@@ -25,9 +24,9 @@ class ToolWriteProposal(Base):
 
     __tablename__ = "tool_write_proposals"
 
-    id: Mapped[UUID] = mapped_column(SAUUID, primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
 
-    user_id: Mapped[UUID] = mapped_column(SAUUID, nullable=False, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
     connection_name: Mapped[str] = mapped_column(String, nullable=False)
 
     status: Mapped[str] = mapped_column(String, nullable=False, default="proposed", index=True)
