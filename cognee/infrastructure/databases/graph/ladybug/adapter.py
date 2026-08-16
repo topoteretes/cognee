@@ -66,6 +66,93 @@ logger = get_logger()
 _WRITE_CHUNK_SIZE = 2000
 
 
+# ── Bulk upsert statements (COG-6216) ────────────────────────────────────────
+#
+# Kuzu never plans ``MERGE`` through the ``Node.id`` primary-key index. EXPLAIN
+# on ``UNWIND $rows AS row MERGE (n:Node {id: row.id})`` returns
+# SCAN_NODE_TABLE + HASH_JOIN, so ONE statement costs a full scan of the node
+# table and a batch split into C chunks costs C scans:
+#
+#     total  ~  (rows / _WRITE_CHUNK_SIZE) * node_table_size    ->    O(N^2)
+#
+# ``MATCH`` does use the index — it plans as QUERY_PRIMARY_KEY_LOOKUP, a
+# per-row seek — so the upsert is spelled out as probe-existing /
+# CREATE-missing / SET-existing. Three index-driven statements per chunk beat
+# one scanning statement by ~20x at 40k nodes and, unlike MERGE, stay linear.
+#
+# The edge statements match their two endpoints in SEPARATE ``MATCH`` clauses.
+# A single comma-separated ``MATCH (a {id: ...}), (b {id: ...})`` plans as a
+# cartesian product of two scans; split clauses plan as two seeks.
+#
+# COG-6185 recorded that splitting the endpoints into two ``MATCH`` clauses
+# segfaults ladybug 0.19.x mid-write. That was observed with ``MERGE``, which
+# is gone from these statements: split ``MATCH`` + ``CREATE`` and split
+# ``MATCH`` + ``SET`` were exercised on 0.19.0 up to 40k edges, in-process and
+# through the subprocess worker, without a SIGSEGV. Keep ``MERGE`` out of the
+# split-MATCH shape.
+#
+# ``test_ladybug_write_query_plans.py`` asserts these plans against a real
+# database, so a Kuzu upgrade that changes the planner fails there rather than
+# silently reintroducing the quadratic.
+_NODE_PROBE_QUERY = """
+UNWIND $ids AS node_id
+MATCH (n:Node {id: node_id})
+RETURN n.id
+"""
+
+_NODE_CREATE_QUERY = """
+UNWIND $nodes AS node
+CREATE (n:Node {
+    id: node.id,
+    name: node.name,
+    type: node.type,
+    properties: node.properties,
+    created_at: TIMESTAMP(node.created_at),
+    updated_at: TIMESTAMP(node.updated_at)
+})
+"""
+
+_NODE_UPDATE_QUERY = """
+UNWIND $nodes AS node
+MATCH (n:Node {id: node.id})
+SET n.name = node.name,
+    n.type = node.type,
+    n.properties = node.properties,
+    n.updated_at = TIMESTAMP(node.updated_at)
+"""
+
+# Existing edges are found by expanding the source nodes' outgoing edges rather
+# than by matching both endpoints and the relationship in one pattern: the
+# latter plans as a scan even with both endpoints bound.
+_EDGE_PROBE_QUERY = """
+UNWIND $ids AS node_id
+MATCH (from:Node {id: node_id})-[r:EDGE]->(to:Node)
+RETURN from.id, to.id, r.relationship_name
+"""
+
+_EDGE_CREATE_QUERY = """
+UNWIND $edges AS edge
+MATCH (from:Node {id: edge.from_id})
+MATCH (to:Node {id: edge.to_id})
+CREATE (from)-[r:EDGE {
+    relationship_name: edge.relationship_name,
+    created_at: TIMESTAMP(edge.created_at),
+    updated_at: TIMESTAMP(edge.updated_at),
+    properties: edge.properties
+}]->(to)
+"""
+
+_EDGE_UPDATE_QUERY = """
+UNWIND $edges AS edge
+MATCH (from:Node {id: edge.from_id})
+MATCH (to:Node {id: edge.to_id})
+MATCH (from)-[r:EDGE]->(to)
+WHERE r.relationship_name = edge.relationship_name
+SET r.updated_at = TIMESTAMP(edge.updated_at),
+    r.properties = edge.properties
+"""
+
+
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 
@@ -330,6 +417,11 @@ class LadybugAdapter(GraphDBInterface):
                 self._initialize_connection()
         self.LADYBUG_ASYNC_LOCK = asyncio.Lock()
         self._source_ref_change_lock = asyncio.Lock()
+        # Serializes the probe -> create -> update sequence in add_nodes /
+        # add_edges (see the bulk upsert statements above): those reads decide
+        # what the following writes do, so two concurrent callers must not
+        # interleave them.
+        self._bulk_write_lock = asyncio.Lock()
         self._connection_lock = asyncio.Lock()
         # Set when ``open_connections == 0``; used by transient teardown
         # paths (e.g. ``delete_graph``) to wait for in-flight queries to
@@ -1158,34 +1250,43 @@ class LadybugAdapter(GraphDBInterface):
                     }
                 )
 
+            # Deduplicate by id (last wins). MERGE absorbed repeats within one
+            # UNWIND batch; CREATE would raise a primary-key violation on them.
+            # Mirrors PostgresAdapter.add_nodes, which dedupes for ON CONFLICT.
+            node_params = list({node["id"]: node for node in node_params}.values())
+
             if node_params:
-                # Batch merge nodes
-                merge_query = """
-                UNWIND $nodes AS node
-                MERGE (n:Node {id: node.id})
-                ON CREATE SET
-                    n.name = node.name,
-                    n.type = node.type,
-                    n.properties = node.properties,
-                    n.created_at = TIMESTAMP(node.created_at),
-                    n.updated_at = TIMESTAMP(node.updated_at)
-                ON MATCH SET
-                    n.name = node.name,
-                    n.type = node.type,
-                    n.properties = node.properties,
-                    n.updated_at = TIMESTAMP(node.updated_at)
-                """
+                create_query = _NODE_CREATE_QUERY
+                update_query = _NODE_UPDATE_QUERY
                 extra_params = {}
                 if source_ref_key is not None:
-                    merge_query += _provenance_fold_clause("n")
+                    create_query += _provenance_fold_clause("n")
+                    update_query += _provenance_fold_clause("n")
                     extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
                 total = len(node_params)
-                for start in range(0, total, _WRITE_CHUNK_SIZE):
-                    chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
-                    await self.query(merge_query, {"nodes": chunk, **extra_params})
-                    if total > _WRITE_CHUNK_SIZE:
-                        logger.info("Merged nodes %d/%d", start + len(chunk), total)
+                # The probe -> create -> update sequence is a read-modify-write:
+                # serialize it per adapter instance so two concurrent writers
+                # cannot both see an id as missing and both CREATE it (which
+                # would raise a primary-key violation). Same rationale as
+                # ``_source_ref_change_lock``.
+                async with self._bulk_write_lock:
+                    for start in range(0, total, _WRITE_CHUNK_SIZE):
+                        chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                        existing = {
+                            row[0]
+                            for row in await self.query(
+                                _NODE_PROBE_QUERY, {"ids": [node["id"] for node in chunk]}
+                            )
+                        }
+                        new_nodes = [node for node in chunk if node["id"] not in existing]
+                        old_nodes = [node for node in chunk if node["id"] in existing]
+                        if new_nodes:
+                            await self.query(create_query, {"nodes": new_nodes, **extra_params})
+                        if old_nodes:
+                            await self.query(update_query, {"nodes": old_nodes, **extra_params})
+                        if total > _WRITE_CHUNK_SIZE:
+                            logger.info("Merged nodes %d/%d", start + len(chunk), total)
                 await self.checkpoint()
                 logger.debug(f"Processed {total} nodes in batch")
 
@@ -1952,11 +2053,15 @@ class LadybugAdapter(GraphDBInterface):
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
 
+            # Endpoint ids are stringified here, not just handed to Kuzu as
+            # whatever the caller passed (usually UUID): the existing-edge probe
+            # compares them against ids read back from the STRING `Node.id`
+            # column, and UUID != str would make every edge look new.
             edge_params = [
                 {
-                    "from_id": from_node,
-                    "to_id": to_node,
-                    "relationship_name": relationship_name,
+                    "from_id": str(from_node),
+                    "to_id": str(to_node),
+                    "relationship_name": str(relationship_name),
                     "properties": json.dumps(properties, cls=JSONEncoder),
                     "created_at": now,
                     "updated_at": now,
@@ -1964,43 +2069,51 @@ class LadybugAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
-            # Property-map matches (primary-key index seeks) instead of a
-            # cartesian MATCH + WHERE, which planned as a scan on large graphs.
-            #
-            # Both endpoints must be matched in ONE comma-separated clause.
-            # Splitting them into two MATCH clauses segfaults ladybug 0.19.x
-            # mid-write (SIGSEGV in the native engine, surfacing through the
-            # subprocess worker as "Subprocess exited unexpectedly (exit code
-            # -11)") — 0.19.0 introduced a row-driven primary-key lookup for
-            # MATCH (LadybugDB/ladybug#722) that this shape lands on. The comma
-            # form keeps the index seeks and is equally fast on 0.17.1, 0.18.2
-            # and 0.19.0 (~80s for 20k edges on all three), and writes an
-            # identical graph. See COG-6185.
-            query = """
-            UNWIND $edges AS edge
-            MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})
-            MERGE (from)-[r:EDGE {
-                relationship_name: edge.relationship_name
-            }]->(to)
-            ON CREATE SET
-                r.created_at = TIMESTAMP(edge.created_at),
-                r.updated_at = TIMESTAMP(edge.updated_at),
-                r.properties = edge.properties
-            ON MATCH SET
-                r.updated_at = TIMESTAMP(edge.updated_at),
-                r.properties = edge.properties
-            """
+            # Deduplicate by (from, to, relationship_name), last wins. MERGE
+            # absorbed repeats within one UNWIND batch; CREATE would write them
+            # twice. Mirrors PostgresAdapter.add_edges, which dedupes by the
+            # same composite key for ON CONFLICT.
+            edge_params = list(
+                {
+                    (edge["from_id"], edge["to_id"], edge["relationship_name"]): edge
+                    for edge in edge_params
+                }.values()
+            )
+
+            create_query = _EDGE_CREATE_QUERY
+            update_query = _EDGE_UPDATE_QUERY
             extra_params = {}
             if source_ref_key is not None:
-                query += _provenance_fold_clause("r")
+                create_query += _provenance_fold_clause("r")
+                update_query += _provenance_fold_clause("r")
                 extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
             total = len(edge_params)
-            for start in range(0, total, _WRITE_CHUNK_SIZE):
-                chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
-                await self.query(query, {"edges": chunk, **extra_params})
-                if total > _WRITE_CHUNK_SIZE:
-                    logger.info("Merged edges %d/%d", start + len(chunk), total)
+            async with self._bulk_write_lock:
+                for start in range(0, total, _WRITE_CHUNK_SIZE):
+                    chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
+                    # Expand only the OUTGOING edges of this chunk's source
+                    # nodes. Cost is the sum of their out-degrees, not the node
+                    # table — and cognee's hub nodes (EntityType) are hubs by
+                    # in-degree, which this never touches.
+                    existing = {
+                        tuple(row)
+                        for row in await self.query(
+                            _EDGE_PROBE_QUERY,
+                            {"ids": sorted({edge["from_id"] for edge in chunk})},
+                        )
+                    }
+                    new_edges = []
+                    old_edges = []
+                    for edge in chunk:
+                        key = (edge["from_id"], edge["to_id"], edge["relationship_name"])
+                        (old_edges if key in existing else new_edges).append(edge)
+                    if new_edges:
+                        await self.query(create_query, {"edges": new_edges, **extra_params})
+                    if old_edges:
+                        await self.query(update_query, {"edges": old_edges, **extra_params})
+                    if total > _WRITE_CHUNK_SIZE:
+                        logger.info("Merged edges %d/%d", start + len(chunk), total)
             await self.checkpoint()
 
         except Exception as e:
