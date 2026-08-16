@@ -988,6 +988,116 @@ async def test_feedback_blend_preserves_distance_order_when_feedback_weights_mat
 
 
 @pytest.mark.asyncio
+async def test_importance_weight_out_of_range_does_not_corrupt_ranking(setup_graph):
+    """importance_weight >= 2.0 must not flip the ranking so the worst-match triplet wins.
+
+    Regression guard: the scoring formula uses (2 - importance_weight) as a distance
+    multiplier. Without clamping, a weight >= 2.0 makes the multiplier <= 0, so the
+    least-relevant triplet ends up with the lowest (best) score. See the linked issue.
+    """
+    graph = setup_graph
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    node4 = Node("4")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+    graph.add_node(node4)
+
+    # edge_best is a genuine close match (distance 0.1); edge_worst is far (1.5) but
+    # carries an importance_weight (3.0) that would, unclamped, push its score negative.
+    edge_best = Edge(node1, node2, attributes={"importance_weight": 3.0})
+    edge_worst = Edge(node3, node4, attributes={"importance_weight": 0.5})
+    graph.add_edge(edge_best)
+    graph.add_edge(edge_worst)
+
+    node1.add_attribute("vector_distance", [0.1])
+    node2.add_attribute("vector_distance", [0.1])
+    node3.add_attribute("vector_distance", [1.5])
+    node4.add_attribute("vector_distance", [1.5])
+    edge_best.add_attribute("vector_distance", [0.1])
+    edge_worst.add_attribute("vector_distance", [1.5])
+
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    # The genuinely-close triplet must still rank first despite its out-of-range weight.
+    assert ranked[0] == edge_best
+    assert ranked[1] == edge_worst
+
+
+@pytest.mark.asyncio
+async def test_importance_weight_nan_falls_back_to_neutral(setup_graph):
+    """NaN importance_weight must be treated as neutral (1.0), not corrupt heapq ordering.
+
+    heapq.nsmallest has undefined behavior when keys contain NaN, so a NaN weight must
+    never reach the score computation.
+    """
+    graph = setup_graph
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    node4 = Node("4")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+    graph.add_node(node4)
+
+    edge_nan = Edge(node1, node2, attributes={"importance_weight": float("nan")})
+    edge_normal = Edge(node3, node4, attributes={"importance_weight": 0.5})
+    graph.add_edge(edge_nan)
+    graph.add_edge(edge_normal)
+
+    node1.add_attribute("vector_distance", [0.1])
+    node2.add_attribute("vector_distance", [0.1])
+    node3.add_attribute("vector_distance", [1.0])
+    node4.add_attribute("vector_distance", [1.0])
+    edge_nan.add_attribute("vector_distance", [0.1])
+    edge_normal.add_attribute("vector_distance", [1.0])
+
+    # Must not raise and must produce a deterministic, correct order.
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    assert ranked[0] == edge_nan
+    assert ranked[1] == edge_normal
+
+
+@pytest.mark.asyncio
+async def test_importance_weight_within_range_preserves_ordering(setup_graph):
+    """importance_weight in [0.0, 2.0] must keep existing ranking behavior unchanged."""
+    graph = setup_graph
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    node4 = Node("4")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+    graph.add_node(node4)
+
+    edge_low_weight = Edge(node1, node2, attributes={"importance_weight": 0.0})
+    edge_high_weight = Edge(node3, node4, attributes={"importance_weight": 2.0})
+    graph.add_edge(edge_low_weight)
+    graph.add_edge(edge_high_weight)
+
+    # Equal distances; higher importance_weight -> (2 - iw) smaller -> lower (better) score.
+    node1.add_attribute("vector_distance", [0.5])
+    node2.add_attribute("vector_distance", [0.5])
+    node3.add_attribute("vector_distance", [0.5])
+    node4.add_attribute("vector_distance", [0.5])
+    edge_low_weight.add_attribute("vector_distance", [0.5])
+    edge_high_weight.add_attribute("vector_distance", [0.5])
+
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    assert ranked[0] == edge_high_weight
+    assert ranked[1] == edge_low_weight
+
+
+@pytest.mark.asyncio
 async def test_missing_distance_penalty_ranks_below_max_real_triplet(setup_graph):
     """Fallback penalty 6.5 must rank behind any fully-matched max-cosine triplet (<= 6.0)."""
     graph = setup_graph
