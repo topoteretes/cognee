@@ -1,0 +1,114 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "cognee.postgresName" . }}
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ include "cognee.postgresName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cognee.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      {{- with .Values.postgres.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "cognee.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      {{- with .Values.postgres.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: postgres-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          imagePullPolicy: {{ .Values.postgres.imagePullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: {{ .Values.postgres.port }}
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cognee.databaseSecretName" . }}
+                  key: {{ .Values.postgres.auth.usernameKey }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cognee.databaseSecretName" . }}
+                  key: {{ .Values.postgres.auth.passwordKey }}
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cognee.databaseSecretName" . }}
+                  key: {{ .Values.postgres.auth.databaseKey }}
+            - name: PGDATA
+              value: {{ .Values.postgres.env.PGDATA | quote }}
+          {{- with .Values.postgres.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.postgres.probes.readiness.enabled }}
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: {{ .Values.postgres.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.postgres.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.postgres.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.postgres.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.postgres.probes.liveness.enabled }}
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: {{ .Values.postgres.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.postgres.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.postgres.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.postgres.probes.liveness.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "cognee.labels" . | nindent 10 }}
+          app.kubernetes.io/component: postgres
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+{{- end }}

@@ -1,0 +1,15 @@
+{{- if .Values.cognee.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cognee.backendName" . }}
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  minAvailable: {{ .Values.cognee.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "cognee.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+{{- end }}

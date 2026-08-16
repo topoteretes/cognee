@@ -1,53 +1,116 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .Release.Name }}-cognee
+  name: {{ include "cognee.backendName" . }}
   labels:
-    app: {{ .Release.Name }}-cognee
+    {{- include "cognee.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
 spec:
-  replicas: 1
+  {{- if not .Values.cognee.autoscaling.enabled }}
+  replicas: {{ .Values.cognee.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
-      app: {{ .Release.Name }}-cognee
+      {{- include "cognee.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
   template:
     metadata:
+      {{- with .Values.cognee.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
-        app: {{ .Release.Name }}-cognee
+        {{- include "cognee.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
     spec:
+      serviceAccountName: {{ include "cognee.serviceAccountName" . }}
+      {{- with .Values.cognee.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: cognee
-          image: {{ .Values.cognee.image }}
+          image: {{ .Values.cognee.image | quote }}
+          imagePullPolicy: {{ .Values.cognee.imagePullPolicy }}
           ports:
-            - containerPort: {{ .Values.cognee.port }}
+            - name: http
+              containerPort: {{ .Values.cognee.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "cognee.configMapName" . }}
           env:
-            - name: ENABLE_BACKEND_ACCESS_CONTROL
-              value: "false"
-            - name: ENV
-              value: {{ .Values.cognee.env.ENV }}
-            - name: PYTHONPATH
-              value: {{ .Values.cognee.env.PYTHONPATH }}
-            - name: VECTOR_DB_PROVIDER
-              value: pgvector
             - name: DB_HOST
-              value: {{ .Release.Name }}-postgres
+              value: {{ include "cognee.databaseHost" . | quote }}
             - name: DB_PORT
-              value: "{{ .Values.postgres.port }}"
+              value: {{ include "cognee.databasePort" . | quote }}
             - name: DB_NAME
-              value: {{ .Values.postgres.env.POSTGRES_DB }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cognee.databaseSecretName" . }}
+                  key: {{ include "cognee.databaseNameKey" . }}
             - name: DB_USERNAME
-              value: {{ .Values.postgres.env.POSTGRES_USER }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cognee.databaseSecretName" . }}
+                  key: {{ include "cognee.databaseUsernameKey" . }}
             - name: DB_PASSWORD
-              value: {{ .Values.postgres.env.POSTGRES_PASSWORD }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cognee.databaseSecretName" . }}
+                  key: {{ include "cognee.databasePasswordKey" . }}
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-llm-api-key
-                  key: LLM_API_KEY
-            - name: LLM_MODEL
-              value: {{ .Values.cognee.env.LLM_MODEL }}
-            - name: LLM_PROVIDER
-              value: {{ .Values.cognee.env.LLM_PROVIDER }}
+                  name: {{ include "cognee.llmSecretName" . }}
+                  key: {{ .Values.cognee.secrets.llmApiKeyKey }}
+          {{- with .Values.cognee.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.cognee.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.cognee.probes.liveness.path | quote }}
+              port: http
+            initialDelaySeconds: {{ .Values.cognee.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.cognee.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.cognee.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.cognee.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.cognee.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.cognee.probes.readiness.path | quote }}
+              port: http
+            initialDelaySeconds: {{ .Values.cognee.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.cognee.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.cognee.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.cognee.probes.readiness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.cognee.probes.startup.enabled }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.cognee.probes.startup.path | quote }}
+              port: http
+            periodSeconds: {{ .Values.cognee.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.cognee.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.cognee.probes.startup.failureThreshold }}
+          {{- end }}
           resources:
-            limits:
-              cpu: {{ .Values.cognee.resources.cpu }}
-              memory: {{ .Values.cognee.resources.memory }}
+            {{- toYaml .Values.cognee.resources | nindent 12 }}
+          volumeMounts:
+            - name: cognee-data
+              mountPath: /var/lib/cognee
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: cognee-data
+          {{- if .Values.cognee.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cognee.persistenceClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
