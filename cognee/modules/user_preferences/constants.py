@@ -27,6 +27,11 @@ PREFERENCE_WEIGHTS_APPLIED_KEY = "preference_weights_applied"
 # Cap on the preference node's text; truncation drops the oldest lines.
 MAX_PREFERENCE_TEXT_CHARS = 2000
 
+# When prefers weights exist, retrievers fetch top_k * this many candidates
+# before re-ranking and trimming back to top_k. Without the over-fetch,
+# personalization could only reorder the same set, never change membership.
+PREFERENCE_OVERFETCH = 3
+
 # Prepended at render time, never stored on the node — the node stores data,
 # one place owns presentation.
 PREFERENCE_RENDER_HEADER = (

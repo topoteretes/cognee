@@ -12,8 +12,43 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
+from cognee.base_config import get_base_config
+from cognee.modules.user_preferences import (
+    PREFERENCE_OVERFETCH,
+    load_active_preferences,
+    personal_factor,
+)
 
 logger = get_logger("CompletionRetriever")
+
+
+def _stable_sort_by_personal_distance(
+    found_chunks: List[Any], weights: Dict[str, float], influence: float
+) -> List[Any]:
+    """Stable re-sort of ScoredResult chunks by personalized distance.
+
+    ``score`` is a distance here (lower is better), so a preferred chunk's
+    distance shrinks by ``personal_factor(..., distance_space=True)``. Chunk
+    id comes from ``payload["id"]`` falling back to ``.id`` — the same rule
+    ``extract_from_scored_results`` uses, so the ids match the ones the
+    preference update wrote ``prefers`` edges for. Chunks with no matching
+    weight keep their raw distance, and the sort is stable, so ties keep the
+    vector engine's order.
+    """
+
+    def personalized_distance(chunk: Any) -> float:
+        chunk_id = None
+        payload = getattr(chunk, "payload", None)
+        if isinstance(payload, dict):
+            chunk_id = payload.get("id")
+        if chunk_id is None:
+            chunk_id = getattr(chunk, "id", None)
+        weight = weights.get(str(chunk_id)) if chunk_id is not None else None
+        if weight is None:
+            return chunk.score
+        return chunk.score * personal_factor(weight, influence, distance_space=True)
+
+    return sorted(found_chunks, key=personalized_distance)
 
 
 class CompletionRetriever(BaseRetriever):
@@ -47,20 +82,37 @@ class CompletionRetriever(BaseRetriever):
     async def get_retrieved_objects(self, query: str) -> Any:
         vector_engine = await get_vector_engine_async()
 
+        # Loaded before the search because it decides the limit: with prefers
+        # weights present we over-fetch so personalization can change which
+        # chunks make the cut, not just their order. Flag off or no node
+        # returns ("", {}), keeping limit=top_k and no re-sort — byte-identical
+        # to the un-personalized path.
+        _preference_text, weights = await load_active_preferences()
+        limit = self.top_k * PREFERENCE_OVERFETCH if weights else self.top_k
+
         try:
             found_chunks = await vector_engine.search(
                 "DocumentChunk_text",
                 query,
-                limit=self.top_k,
+                limit=limit,
                 include_payload=True,
                 node_name=self.node_name,
                 node_name_filter_operator=self.node_name_filter_operator,
             )
-
-            return found_chunks
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+        if weights:
+            # Re-sort before merge_retrieved_objects: the session path merges
+            # two retrieval lanes with merge_ranked(..., limit=top_k), so
+            # ordering must already be personalized when the merge trims.
+            influence = get_base_config().personalization_influence
+            found_chunks = _stable_sort_by_personal_distance(found_chunks, weights, influence)[
+                : self.top_k
+            ]
+
+        return found_chunks
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
         return merge_ranked(
@@ -115,7 +167,15 @@ class CompletionRetriever(BaseRetriever):
     async def _generate_completion_without_session(self, query: str, context: str) -> List[Any]:
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
-        completion = await generate_completion(query=query, **kwargs)
+        # Sessionless guidance site: preference text rides the guidance channel
+        # (conversation_history), never context. The lookup is memoized, so this
+        # shares the get_retrieved_objects read. Empty text is falsy and leaves
+        # the system prompt untouched. The session path never reaches this
+        # method, so it cannot collide with compose_session_prompt's layer.
+        preference_text, _weights = await load_active_preferences()
+        completion = await generate_completion(
+            query=query, conversation_history=preference_text, **kwargs
+        )
         return [completion]
 
     async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
