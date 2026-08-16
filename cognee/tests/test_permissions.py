@@ -11,6 +11,7 @@ import cognee
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
+from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -89,13 +90,23 @@ async def permissions_example_env(tmp_path_factory):
     await _reset_engines_and_prune()
 
 
+async def _mock_structured_output(text_input, system_prompt, response_model, **kwargs):
+    """Session search now makes two structured-output calls per turn (answer + turn
+    analysis, run concurrently), not one - the mock has to answer each with the type it
+    asked for, or the analysis call gets the answer's plain string and crashes downstream.
+    """
+    if response_model is SessionTurnAnalysis:
+        return SessionTurnAnalysis()
+    return "MOCK_ANSWER"
+
+
 async def test_permissions_example_flow(permissions_example_env):
     """Pytest version of `examples/python/permissions_example.py` (same scenarios, asserts instead of prints)."""
     # Patch LLM calls so GRAPH_COMPLETION can run without external API keys.
     llm_patch = patch(
         "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
         new_callable=AsyncMock,
-        return_value="MOCK_ANSWER",
+        side_effect=_mock_structured_output,
     )
 
     # Resolve example data file path (repo-shipped PDF).
@@ -280,6 +291,44 @@ async def test_remove_user_from_tenant_user_not_in_tenant_404(permissions_exampl
         await remove_user_from_tenant(user_id=other_user.id, tenant_id=tenant_id, owner_id=owner.id)
 
     assert "User not found in this tenant" in exc_info.value.message
+
+
+async def test_pipeline_permission_basics(permissions_example_env):
+    """Basic has-access / no-access pairs for forget, export, and visualize.
+
+    Each pipeline resolves its dataset through the ACL layer with the
+    permission its operation actually needs (forget: delete; export and
+    visualize: read), so an unauthorized user gets a 403 and the owner
+    succeeds. push is not covered here: it resolves its cloud client before
+    any permission check, so the ACL path is unreachable without a remote.
+    """
+    from cognee.modules.data.methods import get_datasets_by_name
+
+    owner = await create_user("pipeline_owner@example.com", "example")
+    stranger = await create_user("pipeline_stranger@example.com", "example")
+
+    await cognee.add(["pipeline permission fixture text"], dataset_name="PIPE_PERMS", user=owner)
+    dataset_id = (await get_datasets_by_name(["PIPE_PERMS"], owner.id))[0].id
+
+    # export: read permission required.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.export(dataset_id, user=stranger)
+    snapshot = await cognee.export(dataset_id, user=owner)
+    assert snapshot is not None
+
+    # visualize: read permission required.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.visualize_graph(dataset=dataset_id, user=stranger)
+    html = await cognee.visualize_graph(dataset=dataset_id, user=owner)
+    assert html is not None
+
+    # forget: delete permission required. Denial first, then the owner's
+    # forget actually removes the dataset.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.forget(dataset=dataset_id, user=stranger)
+    result = await cognee.forget(dataset=dataset_id, user=owner)
+    assert result["status"] == "success"
+    assert await get_datasets_by_name(["PIPE_PERMS"], owner.id) == []
 
 
 async def test_improve_permission_matrix(permissions_example_env):

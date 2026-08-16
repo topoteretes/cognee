@@ -9,6 +9,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
 
 
+def _tracing_explicitly_disabled() -> bool:
+    """True when the operator set COGNEE_TRACING_ENABLED to an explicit off
+    value. An unset variable is not a veto — it leaves auto-enabling (e.g.
+    from Langfuse keys) free to happen."""
+    return os.getenv("COGNEE_TRACING_ENABLED", "").lower() in ("false", "0", "no")
+
+
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
@@ -36,6 +43,7 @@ class BaseConfig(BaseSettings):
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
+        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
         # Langfuse rides the existing OTLP pipeline as just another destination.
@@ -62,7 +70,10 @@ class BaseConfig(BaseSettings):
             if not self.otel_exporter_otlp_headers:
                 self.otel_exporter_otlp_headers = f"Authorization=Basic {auth_b64}"
 
-            self.cognee_tracing_enabled = True
+            # Keys imply tracing on ONLY when the operator did not explicitly
+            # turn it off — COGNEE_TRACING_ENABLED=false is authoritative.
+            if not _tracing_explicitly_disabled():
+                self.cognee_tracing_enabled = True
 
         return self
 

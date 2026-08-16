@@ -1,7 +1,7 @@
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis
 import redis.asyncio as aioredis
@@ -119,7 +119,7 @@ class RedisAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
@@ -327,11 +327,15 @@ class RedisAdapter(CacheDBInterface):
     ) -> list[SessionQAEntry]:
         """
         Retrieve the most recent Q/A/context triplet(s) for the given session.
+
+        Returns [] when the session has no entries, for every last_n (matches the
+        SQL/FS adapters and the declared return type; the last_n=1 fast path must
+        not leak None).
         """
         session_key = self._session_key(user_id, session_id)
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
-            return [SessionQAEntry.model_validate_json(data)] if data else None
+            return [SessionQAEntry.model_validate_json(data)] if data else []
         data = await self.async_redis.lrange(session_key, -last_n, -1)
         return [SessionQAEntry.model_validate_json(d) for d in data] if data else []
 

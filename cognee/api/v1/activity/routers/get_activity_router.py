@@ -7,12 +7,16 @@ can render an activity timeline and trace viewer.
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Query, Depends
+from fastapi.responses import JSONResponse
 from cognee.modules.users.models import User
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
     get_specific_user_permission_datasets,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_activity_router() -> APIRouter:
@@ -115,8 +119,12 @@ def get_activity_router() -> APIRouter:
                 )
 
             return result
-        except Exception as e:
-            return {"error": str(e)}
+        except Exception:
+            logger.exception("Failed to retrieve activity traces")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Unable to retrieve activity traces."},
+            )
 
     @router.get("/users")
     async def get_tenant_users(user: User = Depends(get_authenticated_user)):
@@ -271,7 +279,6 @@ def get_activity_router() -> APIRouter:
         """Export a dataset's knowledge graph as a Markdown memory report."""
         from fastapi.responses import Response
         from cognee.modules.data.models.Dataset import Dataset
-        from cognee.modules.data.models.DatasetData import DatasetData
         from cognee.modules.data.models.Data import Data
         from cognee.modules.graph.methods import get_formatted_graph_data
         from cognee.infrastructure.databases.relational import get_relational_engine
@@ -290,12 +297,8 @@ def get_activity_router() -> APIRouter:
             if not dataset:
                 return Response(content="Dataset not found", status_code=404)
 
-            # Get documents (join DatasetData → Data)
-            docs_result = await session.execute(
-                select(Data)
-                .join(DatasetData, Data.id == DatasetData.data_id)
-                .filter(DatasetData.dataset_id == dataset_id)
-            )
+            # Get documents (dataset-scoped rows)
+            docs_result = await session.execute(select(Data).filter(Data.dataset_id == dataset_id))
             docs = docs_result.scalars().all()
 
         # Get graph data

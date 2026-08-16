@@ -308,7 +308,7 @@ async def test_get_neighborhood_depth_and_edge_types(adapter):
 async def test_factory_returns_turso_adapter_and_rejects_remote(tmp_path):
     from cognee.infrastructure.databases.graph.get_graph_engine import (
         create_graph_engine,
-        evict_graph_engine,
+        graph_engine_cache,
     )
 
     db_path = str(tmp_path / "graph.db")
@@ -323,7 +323,7 @@ async def test_factory_returns_turso_adapter_and_rejects_remote(tmp_path):
         assert isinstance(engine, TursoAdapter)
         assert engine.db_uri == f"sqlite+aiosqlite:///{db_path}"
     finally:
-        evict_graph_engine(**kwargs)
+        graph_engine_cache.evict(**kwargs)
 
     # A set auth token (remote) is rejected: remote sync is not supported yet.
     with pytest.raises(EnvironmentError):

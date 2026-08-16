@@ -535,26 +535,81 @@ class TestSkillContract(unittest.TestCase):
     def test_materialize_inline_skill_writes_slug_dir(self):
         from cognee.api.v1.remember.remember import _materialize_inline_skill
 
-        tmp_dir, source = _materialize_inline_skill(_SKILL, "code-review")
+        root = Path(tempfile.mkdtemp())
         try:
+            source = _materialize_inline_skill(_SKILL, "code-review", root)
             md = source / "code-review" / "SKILL.md"
             assert md.is_file()
             assert "Review code changes" in md.read_text()
         finally:
-            tmp_dir.cleanup()
+            import shutil
+
+            shutil.rmtree(root)
 
     def test_materialize_inline_skill_defaults_and_sanitizes_slug(self):
         from cognee.api.v1.remember.remember import _materialize_inline_skill
 
-        tmp_dir, source = _materialize_inline_skill("# x", None)
+        root = Path(tempfile.mkdtemp())
         try:
+            source = _materialize_inline_skill("# x", None, root)
             assert (source / "skill" / "SKILL.md").is_file()
-        finally:
-            tmp_dir.cleanup()
 
-        # A traversal-y name collapses to a single safe path segment.
-        tmp_dir2, source2 = _materialize_inline_skill("# x", "../../etc/evil")
-        try:
+            # A traversal-y name collapses to a single safe path segment.
+            source2 = _materialize_inline_skill("# x", "../../etc/evil", root)
             assert (source2 / "evil" / "SKILL.md").is_file()
         finally:
-            tmp_dir2.cleanup()
+            import shutil
+
+            shutil.rmtree(root)
+
+    def test_reingest_inline_skill_keeps_same_node_id(self):
+        """Re-ingesting the same skill_name into the same dataset reuses the id.
+
+        Regression for the duplicate-skill bug: inline materialization used a
+        fresh random tempdir per call, so skill.source_dir (which feeds
+        _scoped_skill_id) changed every POST /api/v1/skills and minted a new
+        Skill node. The deterministic materialize root keeps the id stable, so
+        the storage layer's upsert replaces the existing node instead.
+        """
+        from cognee.api.v1.remember.remember import (
+            _materialize_inline_skill,
+            _skill_materialize_root,
+        )
+        from cognee.modules.tools.ingest_skills import add_skills
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+        root = _skill_materialize_root(dataset.id)
+        edited = _SKILL.replace(
+            "Read the diff, identify concrete bugs, and cite file paths.",
+            "Read the diff, identify concrete bugs, cite file paths, and add tests.",
+        )
+
+        try:
+            with patch(
+                "cognee.modules.tools.ingest_skills.add_data_points",
+                new_callable=AsyncMock,
+            ):
+                first_source = _materialize_inline_skill(_SKILL, "code-review", root)
+                first = _run(add_skills(first_source, user=user, dataset=dataset))[0]
+
+                second_source = _materialize_inline_skill(edited, "code-review", root)
+                second = _run(add_skills(second_source, user=user, dataset=dataset))[0]
+
+            assert first.id == second.id
+            assert second.procedure != first.procedure  # edited body picked up
+
+            # Same name in a different dataset gets a distinct id.
+            other_dataset = SimpleNamespace(id=uuid4(), name="other")
+            with patch(
+                "cognee.modules.tools.ingest_skills.add_data_points",
+                new_callable=AsyncMock,
+            ):
+                other_source = _materialize_inline_skill(_SKILL, "code-review", root)
+                other = _run(add_skills(other_source, user=user, dataset=other_dataset))[0]
+
+            assert other.id != first.id
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)

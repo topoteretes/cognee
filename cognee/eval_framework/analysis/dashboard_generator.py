@@ -1,3 +1,4 @@
+import html
 import json
 import plotly.graph_objects as go
 from typing import Dict, List, Tuple
@@ -70,7 +71,7 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
             )
 
     for metric, details in metric_details.items():
-        details_html.append(f"<h3>{metric} Details</h3>")
+        details_html.append(f"<h3>{html.escape(str(metric))} Details</h3>")
         details_html.append("""
             <table class="metric-table">
                 <tr>
@@ -84,11 +85,11 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
         for item in details:
             details_html.append(
                 f"<tr>"
-                f"<td>{item['question']}</td>"
-                f"<td>{item['answer']}</td>"
-                f"<td>{item['golden_answer']}</td>"
-                f"<td>{item['reason']}</td>"
-                f"<td>{item['score']}</td>"
+                f"<td>{html.escape(str(item['question']))}</td>"
+                f"<td>{html.escape(str(item['answer']))}</td>"
+                f"<td>{html.escape(str(item['golden_answer']))}</td>"
+                f"<td>{html.escape(str(item['reason']))}</td>"
+                f"<td>{html.escape(str(item['score']))}</td>"
                 f"</tr>"
             )
         details_html.append("</table>")
@@ -99,6 +100,7 @@ def get_dashboard_html_template(
     figures: List[str], details_html: List[str], benchmark: str = ""
 ) -> str:
     """Generate the complete HTML dashboard template."""
+    benchmark = html.escape(str(benchmark))
     return f"""
     <!DOCTYPE html>
     <html>
