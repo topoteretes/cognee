@@ -64,6 +64,7 @@ def test_litellm_delegates_and_strips_vllm_prefix():
         provider="openai",
         model="hosted_vllm/BAAI/bge-m3",
         max_completion_tokens=100,
+        huggingface_tokenizer="custom/litellm-tokenizer",
     )
     with patch(
         f"{_BASE}.LiteLLMEmbeddingEngine.resolve_embedding_tokenizer",
@@ -74,6 +75,7 @@ def test_litellm_delegates_and_strips_vllm_prefix():
         provider="openai",
         model="BAAI/bge-m3",  # the hosted_vllm/ routing prefix is stripped first
         max_completion_tokens=100,
+        huggingface_tokenizer="custom/litellm-tokenizer",
     )
 
 
@@ -102,6 +104,7 @@ def test_openai_compatible_delegates_to_resolver():
         OpenAICompatibleEmbeddingEngine,
         model="BAAI/bge-m3",
         max_completion_tokens=128,
+        huggingface_tokenizer="custom/openai-tokenizer",
     )
     with patch(
         f"{_BASE}.OpenAICompatibleEmbeddingEngine.resolve_embedding_tokenizer",
@@ -112,4 +115,5 @@ def test_openai_compatible_delegates_to_resolver():
         provider="openai_compatible",
         model="BAAI/bge-m3",
         max_completion_tokens=128,
+        huggingface_tokenizer="custom/openai-tokenizer",
     )

@@ -111,6 +111,7 @@ def create_embedding_engine(
             endpoint=embedding_endpoint,
             api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,
+            huggingface_tokenizer=huggingface_tokenizer,
         )
 
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
@@ -125,4 +126,5 @@ def create_embedding_engine(
         dimensions=embedding_dimensions,
         max_completion_tokens=embedding_max_completion_tokens,
         batch_size=embedding_batch_size,
+        huggingface_tokenizer=huggingface_tokenizer,
     )
