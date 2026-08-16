@@ -35,7 +35,13 @@ async def add_user_to_role(user_id: UUID, role_id: UUID, owner_id: UUID):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         user = (await session.execute(select(User).where(User.id == user_id))).scalars().first()
+        if not user:
+            raise UserNotFoundError
+
         role = (await session.execute(select(Role).where(Role.id == role_id))).scalars().first()
+        if not role:
+            raise RoleNotFoundError
+
         tenant = (
             (await session.execute(select(Tenant).where(Tenant.id == role.tenant_id)))
             .scalars()
@@ -44,11 +50,7 @@ async def add_user_to_role(user_id: UUID, role_id: UUID, owner_id: UUID):
 
         user_tenants = await user.awaitable_attrs.tenants
 
-        if not user:
-            raise UserNotFoundError
-        elif not role:
-            raise RoleNotFoundError
-        elif role.tenant_id not in [tenant.id for tenant in user_tenants]:
+        if role.tenant_id not in [tenant.id for tenant in user_tenants]:
             raise TenantNotFoundError(
                 message="User tenant does not match role tenant. User cannot be added to role."
             )
