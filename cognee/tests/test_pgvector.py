@@ -95,6 +95,74 @@ async def test_vector_engine_search_none_limit():
     assert len(result) > 15
 
 
+async def test_hnsw_index_created_and_backfilled():
+    from sqlalchemy import text
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.infrastructure.engine import DataPoint
+
+    class HnswProbePoint(DataPoint):
+        text: str
+        metadata: dict = {"index_fields": ["text"]}
+
+    vector_engine = await get_vector_engine_async()
+    collection_name = "HnswIndexProbe_text"
+    index_name = f"{collection_name}_vector_hnsw_idx"
+    # More rows than pgvector's default hnsw.ef_search (40), so a search that
+    # silently truncates to ef_search would visibly return fewer than this.
+    point_count = 60
+
+    async def hnsw_index_exists() -> bool:
+        async with vector_engine.engine.begin() as connection:
+            result = await connection.execute(
+                text(
+                    "SELECT 1 FROM pg_indexes WHERE indexname = :name AND indexdef ILIKE '%hnsw%'"
+                ),
+                {"name": index_name},
+            )
+            return result.scalar() is not None
+
+    try:
+        await vector_engine.create_collection(collection_name)
+        await vector_engine.create_data_points(
+            collection_name,
+            [HnswProbePoint(text=f"hnsw probe point {i}") for i in range(point_count)],
+        )
+
+        assert await hnsw_index_exists(), (
+            "create_collection should have built an HNSW index for a new collection"
+        )
+
+        query_vector = (await vector_engine.embedding_engine.embed_text(["hnsw probe point 0"]))[0]
+        result = await vector_engine.search(
+            collection_name=collection_name, query_vector=query_vector, limit=None
+        )
+        assert len(result) == point_count, (
+            f"limit=None must return every row even with an HNSW index present, "
+            f"got {len(result)} of {point_count}"
+        )
+
+        async with vector_engine.engine.begin() as connection:
+            await connection.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+        assert not await hnsw_index_exists(), "Test setup failed to drop the index"
+
+        migration_result = await vector_engine.run_migrations()
+        assert await hnsw_index_exists(), (
+            "run_migrations should backfill the HNSW index onto a collection that "
+            f"already has data, got migration result: {migration_result}"
+        )
+
+        result = await vector_engine.search(
+            collection_name=collection_name, query_vector=query_vector, limit=None
+        )
+        assert len(result) == point_count, (
+            "limit=None must still return every row after the index is backfilled"
+        )
+    finally:
+        async with vector_engine.engine.begin() as connection:
+            await connection.execute(text(f'DROP TABLE IF EXISTS "{collection_name}"'))
+        vector_engine.reset_metadata_cache()
+
+
 async def test_vector_engine_search_with_nodeset_filtering():
     node_set_a = ["NLP"]
     node_set_b = ["Quantum", "Computers"]
@@ -327,6 +395,8 @@ async def main():
     assert len(history) == 8, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()
+
+    await test_hnsw_index_created_and_backfilled()
 
     await test_vector_engine_search_with_nodeset_filtering()
     # Note: make sure to call test_vector_engine_search_with_nodeset_filtering()
