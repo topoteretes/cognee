@@ -40,9 +40,11 @@ class GraphConfig(BaseSettings):
     - model_config
     """
 
-    # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
-    # and determine default graph db file and path based on this parameter if no values are provided
-    graph_database_provider: str = Field("ladybug", env="GRAPH_DATABASE_PROVIDER")
+    # pydantic-settings binds each field from its upper-cased name (e.g.
+    # GRAPH_DATABASE_PROVIDER) automatically, so no explicit env= is needed. The
+    # value is read here and the derived graph file/path are filled in the model
+    # validator below when no explicit values are provided.
+    graph_database_provider: str = Field("ladybug")
 
     graph_database_url: str = ""
     graph_database_name: str = ""
@@ -59,10 +61,11 @@ class GraphConfig(BaseSettings):
     graph_dataset_database_handler: str = "ladybug"
     graph_database_subprocess_enabled: bool = True
 
-    # Kuzu tuning. 0 means "use Kuzu's default" (one thread per CPU).
-    kuzu_num_threads: int = Field(0, env="KUZU_NUM_THREADS")
-    kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE, env="KUZU_BUFFER_POOL_SIZE")
-    kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE, env="KUZU_MAX_DB_SIZE")
+    # Kuzu tuning. 0 means "use Kuzu's default" (one thread per CPU). These bind
+    # from KUZU_NUM_THREADS / KUZU_BUFFER_POOL_SIZE / KUZU_MAX_DB_SIZE by field name.
+    kuzu_num_threads: int = Field(0)
+    kuzu_buffer_pool_size: int = Field(DEFAULT_KUZU_BUFFER_POOL_SIZE)
+    kuzu_max_db_size: int = Field(DEFAULT_KUZU_MAX_DB_SIZE)
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
