@@ -80,14 +80,38 @@ def test_config_honors_explicit_dimensions(monkeypatch):
     assert cfg.embedding_dimensions == 384
 
 
-def test_config_falls_back_when_unresolvable(monkeypatch):
-    # Unknown model + unset dimensions falls back to 3072 with a warning,
-    # so existing setups don't crash at import time.
+def test_config_fails_loud_when_unresolvable(monkeypatch):
+    # Unknown model + unset dimensions should fail loud with ValueError.
+    import pytest
+
     _clear_embedding_env(monkeypatch)
-    cfg = EmbeddingConfig(
-        _env_file=None,
-        embedding_provider="openai",
-        embedding_model="totally-fake-embedder-zzz",
-        embedding_dimensions=None,
-    )
-    assert cfg.embedding_dimensions == 3072
+    with pytest.raises(ValueError, match="Could not auto-derive embedding_dimensions"):
+        EmbeddingConfig(
+            _env_file=None,
+            embedding_provider="openai",
+            embedding_model="totally-fake-embedder-zzz",
+            embedding_dimensions=None,
+        )
+
+
+def test_config_raises_when_llm_is_non_openai_and_embedding_unset(monkeypatch):
+    import pytest
+    from cognee.infrastructure.llm.config import LLMConfig
+
+    _clear_embedding_env(monkeypatch)
+
+    with patch("cognee.infrastructure.llm.config.get_llm_context_config") as mock_get_llm:
+        mock_llm_cfg = LLMConfig(_env_file=None)
+        mock_llm_cfg.llm_provider = "anthropic"
+        mock_llm_cfg.llm_model = "anthropic/claude-3-opus"
+        mock_get_llm.return_value = mock_llm_cfg
+
+        with pytest.raises(ValueError, match="Embedding provider is not set.*anthropic"):
+            EmbeddingConfig(_env_file=None)
+
+
+def test_config_alias_for_max_tokens(monkeypatch):
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("EMBEDDING_MAX_TOKENS", "999")
+    cfg = EmbeddingConfig(_env_file=None)
+    assert cfg.embedding_max_completion_tokens == 999
