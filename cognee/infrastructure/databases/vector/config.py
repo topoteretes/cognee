@@ -45,6 +45,10 @@ class VectorConfig(BaseSettings):
         # dataset handler instead of the default lancedb one. This mirrors the same
         # pattern used in GraphConfig for postgres → postgres_graph.
         provider = self.vector_db_provider.lower()
+        # Accept "postgres" as a user-facing alias for "pgvector" so that a
+        # fully-Postgres deployment can use a single provider name everywhere.
+        if provider == "postgres":
+            provider = "pgvector"
         self.vector_db_provider = provider
         vector_dataset_database_handler = self.vector_dataset_database_handler.lower()
         self.vector_dataset_database_handler = vector_dataset_database_handler
