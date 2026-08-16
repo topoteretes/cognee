@@ -24,6 +24,8 @@ from cognee.modules.retrieval.utils.global_context import (
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.truth_subspace import align
+from cognee.base_config import get_base_config
+from cognee.modules.user_preferences import load_active_preferences
 from cognee.modules.truth_subspace.centroids import load_centroids, pad_coords
 from cognee.modules.truth_subspace.constants import DEFAULT_K
 from cognee.shared.logging_utils import get_logger
@@ -89,6 +91,13 @@ class HybridRetriever(BaseRetriever):
             query_vector
         )
 
+        # Personal prefers weights ride into the chunk-lane ranking only —
+        # the entity lane selects by vector top-k with no re-rankable score
+        # list. The lookup is memoized and fails open: flag off, no node, or
+        # any error yields {}, keeping ranking byte-identical to an
+        # un-personalized run.
+        _preference_text, personal_weights = await load_active_preferences()
+
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
@@ -103,6 +112,8 @@ class HybridRetriever(BaseRetriever):
                 q_coords=q_coords,
                 truth_state_by_id=truth_state_by_id,
                 current_truth_epoch=current_truth_epoch,
+                personal_weights=personal_weights,
+                personal_influence=get_base_config().personalization_influence,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
@@ -270,9 +281,16 @@ class HybridRetriever(BaseRetriever):
             )
             return [completion]
 
+        # Sessionless guidance site: preference text rides the guidance channel
+        # (conversation_history), never context. The lookup is memoized, so this
+        # shares the get_retrieved_objects read; empty text is falsy and leaves
+        # the system prompt untouched. The session branch above never reaches
+        # here, so it cannot collide with compose_session_prompt's layer.
+        preference_text, _weights = await load_active_preferences()
         completion = await generate_completion(
             query=query,
             context=context,
+            conversation_history=preference_text,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
             system_prompt=self.system_prompt,

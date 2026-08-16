@@ -2,6 +2,7 @@ from typing import Optional
 
 from cognee.modules.retrieval.hybrid.results import payload, result_id
 from cognee.modules.truth_subspace.align import truth_factor
+from cognee.modules.user_preferences import personal_factor
 
 
 def rank_chunk_summary_pairs(
@@ -12,6 +13,8 @@ def rank_chunk_summary_pairs(
     q_coords: Optional[list[float]] = None,
     truth_state_by_id: Optional[dict] = None,
     current_truth_epoch: Optional[int] = None,
+    personal_weights: Optional[dict] = None,
+    personal_influence: float = 0.0,
 ) -> list[dict]:
     if limit <= 0:
         return []
@@ -41,6 +44,17 @@ def rank_chunk_summary_pairs(
             truth_state = (truth_state_by_id or {}).get(chunk_id, {})
             if truth_state.get("truth_epoch") == current_truth_epoch:
                 final_score *= truth_factor(truth_state.get("truth_alignment", []), q_coords)
+
+        if personal_weights:
+            # Personal prefers weight, multiplied beside the importance and
+            # truth factors. Hybrid sorts by descending score, hence score
+            # space. Chunks with no matching weight keep their score, so an
+            # empty map is byte-identical to an un-personalized run.
+            personal_weight = personal_weights.get(chunk_id)
+            if personal_weight is not None:
+                final_score *= personal_factor(
+                    personal_weight, personal_influence, distance_space=False
+                )
 
         ranked.append((final_score, rrf_score, min(ranks), chunk_id, pair))
 
