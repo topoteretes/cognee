@@ -5,20 +5,39 @@ logger = setup_logging()
 
 
 def is_embeddable(s: str) -> bool:
+
     """
-    Check if input string is embeddable, if not it will be replaced with a dummy value to prevent API errors.
-    Empty strings and a string with only a space character are not embeddable.
-    If input string contains at least one alphanumeric character, it is considered embeddable.
+
+    Check whether an input string should be treated as embeddable.
+
+    A string is considered embeddable if it is a string and contains at least
+
+    one non-whitespace character after stripping. Empty or whitespace-only
+
+    strings are not embeddable and will be replaced with a dummy value to
+
+    prevent API errors.
+
     """
+
     if not isinstance(s, str):
+
         return False
+
     # Strip whitespace to check if the string is empty or only contains spaces
+
     s = s.strip()
+
     if len(s) >= 1:
+
         return True
+
     logger.debug(
+
         "Input string was not embeddable. Skipping embedding and using dummy value instead."
+
     )
+
     return False
 
 
