@@ -23,7 +23,7 @@ async def run_tasks_with_telemetry(
     logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
 
     try:
-        logger.info("Pipeline run started: `%s`", pipeline_name)
+        logger.info("Processing data item for pipeline: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Started",
             user.id,
@@ -38,7 +38,7 @@ async def run_tasks_with_telemetry(
         async for result in run_tasks_base(tasks, data, user, ctx):
             yield result
 
-        logger.info("Pipeline run completed: `%s`", pipeline_name)
+        logger.info("Finished processing data item for pipeline: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Completed",
             user.id,
@@ -51,7 +51,7 @@ async def run_tasks_with_telemetry(
         )
     except Exception as error:
         logger.error(
-            "Pipeline run errored: `%s`\n%s\n",
+            "Error processing data item for pipeline: `%s`\n%s\n",
             pipeline_name,
             str(error),
             exc_info=True,
