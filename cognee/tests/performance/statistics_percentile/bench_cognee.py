@@ -48,6 +48,17 @@ DEFAULT_EMBEDDING_PROVIDER = "openai"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMS = 1536
 DATASET_NAME = "bench_memories"
+SEARCH_QUERY = "What is in the document"
+
+# Search types timed in Phase 3, in run order: `(metric suffix, SearchType name)`.
+# Each gets its own metric so the nightly report can compare retrieval
+# strategies side by side — GRAPH_COMPLETION is the default graph traversal,
+# HYBRID_COMPLETION the chunk+entity blend. Both the local and the cloud
+# benchmark iterate this list, so the two modes always report the same types.
+BENCHMARKED_SEARCH_TYPES = (
+    ("graph_completion", "GRAPH_COMPLETION"),
+    ("hybrid_completion", "HYBRID_COMPLETION"),
+)
 
 ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
@@ -227,14 +238,14 @@ async def run_benchmark(
         "db_setup": "success",
         "add": "success",
         "cognify": "success",
-        "search": "success",
         "dataset_delete": "success",
+        **{f"search_{key}": "success" for key, _ in BENCHMARKED_SEARCH_TYPES},
     }
     t_prune = 0.0
     t_db_setup = 0.0
     t_add = 0.0
     t_cognify = 0.0
-    t_search = 0.0
+    t_search = {key: 0.0 for key, _ in BENCHMARKED_SEARCH_TYPES}
     t_dataset_delete = 0.0
 
     # ── Prune (clean slate) ──────────────────────────────────────────────
@@ -289,15 +300,23 @@ async def run_benchmark(
     t_total = t_add + t_cognify
 
     # ── Phase 3: cognee.search() ─────────────────────────────────────────
+    # One timing per benchmarked search type. `only_context=True` keeps every
+    # number a measure of retrieval rather than answer generation, so the types
+    # stay comparable to each other and to the previous single-search metric.
     print("\nPhase 3: Running search queries...")
-    try:
+    for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
         t_q_start = time.time()
-        await cognee.search(query_text="What is in the document", only_context=True)
-        t_search = time.time() - t_q_start
-    except Exception as e:
-        t_search = time.time() - t_q_start
-        status["search"] = f"failed: {e}"
-        print(f"  Search FAILED: {e}")
+        try:
+            await cognee.search(
+                query_text=SEARCH_QUERY,
+                query_type=cognee.SearchType[search_type],
+                only_context=True,
+            )
+            t_search[metric_key] = time.time() - t_q_start
+        except Exception as e:
+            t_search[metric_key] = time.time() - t_q_start
+            status[f"search_{metric_key}"] = f"failed: {_err(e)}"
+            print(f"  Search {search_type} FAILED: {_err(e)}")
 
     # ── Phase 4: dataset delete (populated) ──────────────────────────────
     # Deleting the dataset AFTER the graph is built measures the meaningful
@@ -331,7 +350,7 @@ async def run_benchmark(
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": round(t_db_setup, 3),
-        "search_time": t_search,
+        **{f"search_time_{key}": t_search[key] for key, _ in BENCHMARKED_SEARCH_TYPES},
         "dataset_delete_time_s": round(t_dataset_delete, 3),
         "status": status,
         "success": all_ok,
@@ -354,7 +373,11 @@ async def run_benchmark(
     print(f"  cognee.add() time : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
     print(f"  cognify() time    : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
-    print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
+    for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+        print(
+            f"  Search {search_type:<18}: {t_search[metric_key]:.2f}s  "
+            f"[{status[f'search_{metric_key}']}]"
+        )
     print(f"  DB setup time     : {t_db_setup:.2f}s  [{status['db_setup']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  Dataset delete    : {t_dataset_delete:.2f}s  [{status['dataset_delete']}]")
@@ -514,12 +537,12 @@ async def run_benchmark_cloud(
         "db_setup": "success",  # server-side, nothing to set up from the client
         "add": "success",
         "cognify": "success",
-        "search": "success",
+        **{f"search_{key}": "success" for key, _ in BENCHMARKED_SEARCH_TYPES},
     }
     t_prune = 0.0
     t_add = 0.0
     t_cognify = 0.0
-    t_search = 0.0
+    t_search = {key: 0.0 for key, _ in BENCHMARKED_SEARCH_TYPES}
     t_tenant_create = 0.0
     t_tenant_delete = 0.0
     t_dataset_delete = 0.0
@@ -550,7 +573,10 @@ async def run_benchmark_cloud(
             # skew failed-run percentiles low).
             t_tenant_create = time.time() - t_tenant_create_start
             status["tenant_create"] = f"failed: {_err(e)}"
-            for phase in ("prune", "add", "cognify", "search"):
+            skipped_phases = ("prune", "add", "cognify") + tuple(
+                f"search_{key}" for key, _ in BENCHMARKED_SEARCH_TYPES
+            )
+            for phase in skipped_phases:
                 status[phase] = "skipped"
             tenant_ready = False
             print(f"  Tenant creation FAILED: {_err(e)}")
@@ -606,19 +632,24 @@ async def run_benchmark_cloud(
             print(f"  Cognify FAILED: {_err(e)}")
 
         # ── Phase 3: search ──────────────────────────────────────────────
+        # One timing per benchmarked search type, matching the local mode.
         # Scoped to this suite's dataset so a concurrently-running suite on
         # the same tenant cannot contaminate the search timing or results.
-        print("\nPhase 3: Running remote search query...")
-        t_q_start = time.time()
-        try:
-            await client.search(
-                "What is in the document", datasets=[dataset_name], only_context=True
-            )
-            t_search = time.time() - t_q_start
-        except Exception as e:
-            t_search = time.time() - t_q_start
-            status["search"] = f"failed: {_err(e)}"
-            print(f"  Search FAILED: {_err(e)}")
+        print("\nPhase 3: Running remote search queries...")
+        for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+            t_q_start = time.time()
+            try:
+                await client.search(
+                    SEARCH_QUERY,
+                    search_type=search_type,
+                    datasets=[dataset_name],
+                    only_context=True,
+                )
+                t_search[metric_key] = time.time() - t_q_start
+            except Exception as e:
+                t_search[metric_key] = time.time() - t_q_start
+                status[f"search_{metric_key}"] = f"failed: {_err(e)}"
+                print(f"  Search {search_type} FAILED: {_err(e)}")
 
         # ── Phase 4 (cloud-only metric): delete the POPULATED dataset ────
         # Only meaningful with a graph in it, hence after cognify/search and
@@ -664,7 +695,7 @@ async def run_benchmark_cloud(
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": 0.0,
-        "search_time": t_search,
+        **{f"search_time_{key}": t_search[key] for key, _ in BENCHMARKED_SEARCH_TYPES},
         "status": status,
         "success": all_ok,
         "config": {
@@ -700,7 +731,11 @@ async def run_benchmark_cloud(
     print(f"  add time          : {t_add:.2f}s  ({t_add / n:.2f}s per memory)  [{status['add']}]")
     print(f"  cognify time      : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
-    print(f"  Search total      : {t_search:.2f}s  [{status['search']}]")
+    for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+        print(
+            f"  Search {search_type:<18}: {t_search[metric_key]:.2f}s  "
+            f"[{status[f'search_{metric_key}']}]"
+        )
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
     print("=" * 60)
