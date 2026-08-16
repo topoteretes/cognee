@@ -17,6 +17,7 @@ from .constants import (
     PREFERENCE_WEIGHTS_APPLIED_KEY,
     PREFERS_RELATIONSHIP,
 )
+from .lookup import load_active_preferences
 from .models import UserPreference
 from .store import (
     delete_prefers_edges,
@@ -26,7 +27,7 @@ from .store import (
     write_prefers_edges,
 )
 from .update import PreferenceUpdateResult, update_user_preferences
-from .weights import effective_weight
+from .weights import effective_weight, personal_factor
 
 __all__ = [
     "MAX_PREFERENCE_TEXT_CHARS",
@@ -41,7 +42,9 @@ __all__ = [
     "UserPreference",
     "delete_prefers_edges",
     "effective_weight",
+    "load_active_preferences",
     "load_preference_state",
+    "personal_factor",
     "preference_node_id",
     "update_user_preferences",
     "upsert_preference_node",

@@ -34,6 +34,16 @@ class BaseConfig(BaseSettings):
     # against the per-turn clock, which ticks on every turn rather than every
     # rated one; at 0.02 a reinforced edge decays out in a few hundred turns.
     preference_beta: float = float(os.getenv("PREFERENCE_BETA", "0.02"))
+    # Master switch for per-user preference personalization at retrieval time.
+    # Off by default so a default deployment stays byte-identical to today.
+    personalization_enabled: bool = os.getenv("PERSONALIZATION_ENABLED", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    # The most personalization may move a ranking score: 0.3 means at most 30%.
+    # Blends via personal_factor, which is exactly 1.0 at a neutral weight.
+    personalization_influence: float = float(os.getenv("PERSONALIZATION_INFLUENCE", "0.3"))
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):

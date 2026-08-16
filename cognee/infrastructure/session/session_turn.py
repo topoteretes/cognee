@@ -47,16 +47,41 @@ class SessionTurnPreparation:
 def compose_session_prompt(
     active_context_block: str,
     conversation_history: str,
+    preference_text: str = "",
 ) -> str:
-    """Assemble the session prompt from active guidance and conversation history.
+    """Assemble the session prompt from preferences, active guidance, and history.
 
-    Empty layers are skipped. The active session-context block is placed before
-    the conversation history so durable user/session guidance remains prominent.
+    Empty layers are skipped. Preference text (durable, cross-session) is
+    layered ahead of the active session-context block (this session's current
+    guidance), which sits ahead of the conversation history. Some lines may
+    appear in both blocks — accepted, not a bug: the two carry different
+    meanings, and their headers say so, which is what the model reads.
     """
     prompt = conversation_history
     if active_context_block:
         prompt = active_context_block + "\n\n" + prompt
+    if preference_text:
+        prompt = preference_text + "\n\n" + prompt
     return prompt
+
+
+async def load_preference_text_safe() -> str:
+    """Preference text for the guidance channel. Fail-open -> "".
+
+    The import is deferred because ``cognee.modules.user_preferences`` pulls in
+    ``update.py``, which imports this package back through
+    ``cognee.infrastructure.session`` — a top-level import here would be
+    circular. The layering inversion itself is precedented: session code
+    already imports ``modules.retrieval.utils.completion``.
+    """
+    try:
+        from cognee.modules.user_preferences import load_active_preferences
+
+        preference_text, _weights = await load_active_preferences()
+        return preference_text
+    except Exception as error:
+        logger.debug("Session turn: preference lookup failed open: %s", error)
+        return ""
 
 
 def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
@@ -157,7 +182,10 @@ async def generate_session_answer(
             query=answer_query,
         )
 
-    conversation_history = compose_session_prompt(active_context_block, conversation_history)
+    preference_text = await load_preference_text_safe()
+    conversation_history = compose_session_prompt(
+        active_context_block, conversation_history, preference_text
+    )
 
     (
         answer,

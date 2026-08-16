@@ -20,6 +20,7 @@ from cognee.infrastructure.session.session_turn import (
     build_active_context_block_safe,
     coerce_qa_entry,
     compose_session_prompt,
+    load_preference_text_safe,
     load_served_context_payload,
     select_session_history,
 )
@@ -190,6 +191,7 @@ async def complete_turn(
     prompts: TurnPrompts,
 ) -> Any:
     """Generate the turn's answer from retrieval context and session prompt history."""
+    preference_text = await load_preference_text_safe()
     completion_call = generate_completion(
         query=snapshot.raw_message,
         context=context,
@@ -199,6 +201,7 @@ async def complete_turn(
         conversation_history=compose_session_prompt(
             snapshot.active_context,
             snapshot.completion_history,
+            preference_text,
         ),
         response_model=prompts.response_model,
     )
