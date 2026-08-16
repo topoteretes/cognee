@@ -39,6 +39,31 @@ The script creates a Modal secret group and deploys the FastAPI server. Your end
 
 **Persistent data**: Uses a Modal Volume mounted at `/data` for file-based databases. For production, configure Postgres + PgVector instead.
 
+### End-to-end test
+
+`tests/test_modal_serve_e2e.py` verifies the serving path against real Modal
+infrastructure: it deploys an ephemeral, uniquely named app, polls `/health`
+(tolerating the scale-to-zero cold start), runs a minimal add → cognify →
+search round-trip over HTTP, and always tears the app and volume down —
+even on failure. Because the Modal image installs the published `cognee`
+package, this tests the released serving path, not local branch code.
+
+In CI it runs via `.github/workflows/modal_serve_e2e.yml` — nightly and on
+manual `workflow_dispatch` only, never on PRs — and skips cleanly when the
+`MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` secrets are absent (e.g. on forks).
+
+To run it locally with a Modal account and the `cognee-secrets` group set up:
+
+```bash
+python distributed/deploy/tests/test_modal_serve_e2e.py
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODAL_APP_NAME` | `cognee-api-e2e-<run id>` | Ephemeral app name (production name is refused) |
+| `MODAL_VOLUME_NAME` | `cognee-data-e2e-<run id>` | Ephemeral volume name, deleted on teardown |
+| `DEFAULT_USER_EMAIL` / `DEFAULT_USER_PASSWORD` | cognee defaults | Default-user login; must match the values in `cognee-secrets`, if set there |
+
 ---
 
 ## Railway
