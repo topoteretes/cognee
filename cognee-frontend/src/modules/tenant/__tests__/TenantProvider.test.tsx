@@ -46,7 +46,6 @@ const BASE_WORKSPACE_STATE = {
   submitWorkspaceName: () => {},
   closeNameModal: () => {},
   isCreatingWorkspace: false,
-  creatingWorkspaceName: "",
 };
 
 beforeEach(() => {
@@ -101,5 +100,27 @@ describe("TenantProvider — /me error handling", () => {
     render(<TenantProvider>content</TenantProvider>);
 
     expect(screen.getByText("content")).toBeInTheDocument();
+  });
+});
+
+describe("TenantProvider — workspace creation wait (CLO-244)", () => {
+  it("shows the same provisioning skeleton as the dashboard while polling for the new tenant, not a different loading treatment", () => {
+    // Regression: this screen used to be a standalone dark spinner with its
+    // own copy ("Creating your new workspace... This takes just a moment"),
+    // visually unrelated to the DashboardSkeleton the destination page shows
+    // once switchTenant's hard navigation lands — reading as two different
+    // loading screens back to back. It must now render the exact same
+    // skeleton/copy as the dashboard.
+    mockUseUser.mockReturnValue({
+      userMe: { isSeenWelcome: true, onboardingCompletedAt: "2026-01-01", activeWorkspaceId: "t1", userId: "auth0|user-A" },
+      isUserMeError: false,
+    });
+    mockUseWorkspaceCreation.mockReturnValue({ ...BASE_WORKSPACE_STATE, isCreatingWorkspace: true });
+
+    render(<TenantProvider>content</TenantProvider>);
+
+    expect(screen.getByText("Your workspace is being set up — usually takes under a minute.")).toBeInTheDocument();
+    expect(screen.getByText("Get started")).toBeInTheDocument();
+    expect(screen.queryByText("content")).not.toBeInTheDocument();
   });
 });

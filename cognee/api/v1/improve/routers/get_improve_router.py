@@ -4,16 +4,18 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi import Depends
 from pydantic import Field
-from typing import List, Optional, Union, Literal
+from typing import Dict, List, Optional, Union, Literal
 
 from cognee.api.DTO import InDTO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.exceptions import CogneeApiError
 
 logger = get_logger()
 
@@ -37,7 +39,7 @@ class ImprovePayloadDTO(InDTO):
 def get_improve_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=dict)
+    @router.post("", response_model=Dict[UUID, PipelineRunInfo])
     @log_usage(function_name="POST /v1/improve", log_type="api_endpoint")
     async def improve(payload: ImprovePayloadDTO, user: User = Depends(get_authenticated_user)):
         """
@@ -95,6 +97,10 @@ def get_improve_router() -> APIRouter:
             if isinstance(improve_run, PipelineRunErrored):
                 return JSONResponse(status_code=420, content=improve_run)
             return improve_run
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable message;
+            # the global handler in cognee/api/client.py returns them.
+            raise
         except Exception as error:
             logger.error("Improve endpoint error: %s", error, exc_info=True)
             return JSONResponse(

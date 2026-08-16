@@ -50,6 +50,9 @@ def _id_subquery(prefix: str, ids: List[str]) -> Tuple[str, Dict[str, str]]:
 class TursoAdapter(GraphDBInterface):
     """Graph-as-tables adapter backed by Turso/libSQL, accessed via SQLAlchemy async sessions."""
 
+    # ``query()`` executes SQL against the graph tables, not Cypher.
+    supports_cypher_queries = False
+
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
     def __init__(self, connection_string: str) -> None:

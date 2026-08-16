@@ -13,6 +13,12 @@ class Query(Base):
     query_type = Column(String)
     user_id = Column(UUID, index=True)
 
+    # Dataset the search was scoped to, recorded only when it resolved to
+    # exactly one. A search can fan out over several datasets (or every
+    # dataset the user can read), and those have no single dataset to
+    # attribute the query to, so they stay NULL.
+    dataset_id = Column(UUID, index=True, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )

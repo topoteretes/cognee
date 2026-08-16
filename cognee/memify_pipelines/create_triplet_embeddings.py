@@ -11,13 +11,14 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
 from cognee.tasks.storage import index_data_points
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("create_triplet_embeddings")
 
 
 async def create_triplet_embeddings(
     user: User,
-    dataset: str = "main_dataset",
+    dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
     triplets_batch_size: int = 100,
 ) -> dict[str, Any]:

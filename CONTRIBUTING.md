@@ -23,6 +23,7 @@ You can contribute to **cognee** in many ways:
 - 🔍 Reviewing pull requests
 - 🛠️ Contributing code or tests
 - 🌐 Helping other users
+- 📇 Adding an entry to the [Integrations Hub or Use-Case Gallery](docs/contributing/add-catalog-entry.md)
 
 ## 📫 Get in Touch
 
@@ -105,6 +106,27 @@ Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 uv run python cognee/tests/test_library.py
 ```
 
+### Minimal Docker Compose Try-out
+
+If you want a quick local smoke test before changing code, bring up the default API server with Docker Compose:
+
+```shell
+cp .env.template .env
+# edit .env and set LLM_API_KEY
+docker compose up
+```
+
+Useful optional profiles:
+
+```shell
+docker compose --profile ui up        # frontend on http://localhost:3000
+docker compose --profile mcp up       # MCP server on http://localhost:8001
+docker compose --profile postgres up  # Postgres/PGVector
+docker compose --profile neo4j up     # Neo4j
+```
+
+See the [Run with Docker](README.md#run-with-docker) section in the README for more details.
+
 ### Running Simple Example
 
 Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
@@ -112,7 +134,7 @@ Copy `.env.template` to `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
 ```shell
-uv run python examples/demos/simple_cognee_example.py
+uv run python examples/guides/simple_cognee_example.py
 ```
 
 ## 4. 📤 Submitting Changes

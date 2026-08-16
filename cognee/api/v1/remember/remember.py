@@ -1,5 +1,6 @@
 import asyncio
 import time
+from pathlib import Path
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any, Literal, TYPE_CHECKING
 
@@ -39,13 +40,20 @@ from cognee.modules.observability import (
 
 logger = get_logger("remember")
 
+# Strong refs for fire-and-forget background remember tasks. The event loop only
+# keeps a weak reference to a task, and the API router drops the RememberResult
+# (the sole other holder of the task) after serializing it — without anchoring
+# here the gc can collect an in-flight task before it completes, silently
+# aborting the background add+cognify run or session bridge (#4312). Tasks
+# remove themselves on done.
+_BACKGROUND_REMEMBER_TASKS: set[asyncio.Task] = set()
+
 
 class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
     node_set: List[str]
-    dataset_id: UUID
     preferred_loaders: list
     incremental_loading: bool
     data_cache: bool
@@ -71,7 +79,6 @@ class RememberKwargs(TypedDict, total=False):
 # Kept in sync with RememberKwargs above and the add()/cognify() signatures.
 _ADD_ONLY = frozenset(
     {
-        "dataset_id",
         "node_set",
         "preferred_loaders",
         "importance_weight",
@@ -571,6 +578,11 @@ class RememberResult:
         # remember() always processes a single dataset, so take the first.
         ds_id, run_info = next(iter(cognify_result.items()))
         self.dataset_id = str(ds_id)
+        # A dataset_id-only call leaves dataset_name at its default; the
+        # pipeline result knows the real name, so prefer it.
+        run_dataset_name = getattr(run_info, "dataset_name", None)
+        if run_dataset_name:
+            self.dataset_name = run_dataset_name
 
         if hasattr(run_info, "status"):
             self.status = "errored" if "Errored" in run_info.status else "completed"
@@ -639,6 +651,7 @@ async def remember(
     ],
     dataset_name: str = "main_dataset",
     *,
+    dataset_id: Optional[UUID] = None,
     session_id: Optional[str] = None,
     chunk_size: Optional[int] = None,
     chunker: Optional[Any] = None,
@@ -656,6 +669,12 @@ async def remember(
     **Without session_id (permanent memory):** Runs ``add()`` +
     ``cognify()`` to ingest data and build the knowledge graph.
 
+    Because the graph is built through ``cognify()``, the cognify feature
+    flags apply here too. Notably, setting ``CONTRADICTION_DETECTION=true``
+    makes every ``remember()`` call check the facts it just stored against
+    the ones already in the graph and record each conflict as a
+    ``contradicts`` edge (see ``CognifyConfig``). Off by default.
+
     **With session_id (session memory):** Stores the data in the
     session cache for fast retrieval. When ``self_improvement`` is
     True (default), also bridges the session data into the permanent
@@ -665,6 +684,10 @@ async def remember(
     Args:
         data: The data to store (text, file paths, binary streams, etc.).
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
+        dataset_id: UUID of an existing dataset to target directly. Takes
+            precedence over ``dataset_name``. Not supported for
+            ``MemorySource`` imports or typed ``MemoryEntry`` payloads,
+            which are dataset-name based.
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
@@ -725,6 +748,10 @@ async def remember(
     if isinstance(data, MemorySource):
         if dry_run:
             raise ValueError("dry_run is not supported for MemorySource imports.")
+        if dataset_id is not None:
+            raise ValueError(
+                "dataset_id is not supported for MemorySource imports; use dataset_name."
+            )
 
         from cognee.api.v1.serve.state import get_remote_client
         from cognee.modules.migration.import_source import import_memory_source
@@ -774,6 +801,10 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
+        if dataset_id is not None:
+            raise ValueError(
+                "dataset_id is not supported for typed memory entries; use dataset_name."
+            )
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
@@ -827,6 +858,7 @@ async def remember(
             additional_properties={
                 "mode": mode,
                 "dataset_name": dataset_name,
+                "dataset_id": str(dataset_id) if dataset_id else "",
                 "data_size_bytes": data_size,
                 "item_count": item_count,
                 "session_id": session_id or "",
@@ -839,6 +871,7 @@ async def remember(
         return await _remember_inner(
             data,
             dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             chunk_size=chunk_size,
             chunker=chunker,
@@ -851,32 +884,49 @@ async def remember(
         )
 
 
-def _materialize_inline_skill(skills_text, skill_name):
-    """Write inline SKILL.md markdown into a temporary ``<slug>/SKILL.md`` folder.
+def _skill_materialize_root(dataset_id: UUID) -> Path:
+    """Stable on-disk base for materialized skills, per dataset.
+
+    Inline text and uploaded SKILL.md files are staged here so that
+    ``skill.source_dir`` (which feeds ``_scoped_skill_id``) is deterministic
+    across re-ingests. A fresh random tempdir would mint a new skill id on every
+    call and duplicate the Skill node in the graph. The system temp dir is always
+    an allowed skill source root (see ``_configured_skill_source_roots``).
+    """
+    import hashlib
+    import tempfile
+    from pathlib import Path as _Path
+
+    key = hashlib.sha256(str(dataset_id).encode("utf-8")).hexdigest()[:16]
+    return _Path(tempfile.gettempdir()) / f"cognee-skills-{key}"
+
+
+def _materialize_inline_skill(skills_text, skill_name, materialize_root):
+    """Write inline SKILL.md markdown into a deterministic ``<slug>/SKILL.md`` folder.
 
     The no-code companion to the file-upload skills path: callers can pass the
     SKILL.md body as a string (e.g. from an n8n field) instead of uploading a
     file. The parser derives the skill name from the parent directory, so the
-    file is nested under ``<slug>/``. Returns ``(cleanup_handle, source_root)``.
+    file is nested under ``<slug>/`` under the given materialization root.
+    Returns the materialization root.
     """
-    import tempfile
     from pathlib import Path as _Path
 
     slug = _Path((skill_name or "skill").strip() or "skill").name
-    tmp = tempfile.TemporaryDirectory(prefix="cognee-skills-")
-    skill_dir = _Path(tmp.name) / slug
+    skill_dir = _Path(materialize_root) / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(
         skills_text if isinstance(skills_text, str) else str(skills_text),
         encoding="utf-8",
     )
-    return tmp, _Path(tmp.name)
+    return _Path(materialize_root)
 
 
 async def _remember_inner(
     data,
     dataset_name,
     *,
+    dataset_id=None,
     session_id,
     chunk_size,
     chunker,
@@ -895,6 +945,7 @@ async def _remember_inner(
         return await client.remember(
             data,
             dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             chunk_size=chunk_size,
             custom_prompt=custom_prompt,
@@ -908,7 +959,7 @@ async def _remember_inner(
     # dataset this call targets (dataset_id override, else dataset_name).
     from cognee.modules.migrations.startup import run_migrations_and_block
 
-    await run_migrations_and_block(kwargs.get("dataset_id") or dataset_name, kwargs.get("user"))
+    await run_migrations_and_block(dataset_id or dataset_name, kwargs.get("user"))
 
     # Normalize "" to None — HTML forms and Swagger UI submit untouched
     # optional fields as empty strings.
@@ -974,7 +1025,7 @@ async def _remember_inner(
         result = RememberResult(
             status="completed",
             dataset_name=dataset_name,
-            dataset_id=str(kwargs.get("dataset_id")) if kwargs.get("dataset_id") else None,
+            dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=None,
         )
         result.items = []
@@ -983,7 +1034,7 @@ async def _remember_inner(
             await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
-                dataset=kwargs.get("dataset_id") or dataset_name,
+                dataset=dataset_id or dataset_name,
                 user=kwargs.get("user"),
                 pipeline_name="code_graph_pipeline",
                 # The default (graph-only) pipeline performs no LLM or embedding
@@ -1000,7 +1051,6 @@ async def _remember_inner(
 
     if content_type == "skills":
         import shutil
-        import tempfile
         from pathlib import Path as _Path
 
         from cognee.context_global_variables import set_database_global_context_variables
@@ -1010,7 +1060,6 @@ async def _remember_inner(
         await setup()
 
         user = kwargs.get("user")
-        dataset_id = kwargs.get("dataset_id")
         dataset_ref = dataset_id or dataset_name
         user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
         dataset = authorized_datasets[0]
@@ -1022,11 +1071,10 @@ async def _remember_inner(
 
         # HTTP callers (CloudClient + Swagger) deliver SKILL.md content as
         # UploadFile/file-like objects, not paths. add_skills reads paths from
-        # the local filesystem, so materialize the uploads into a tempdir
-        # under cwd (which is always allowed by _configured_skill_source_roots)
-        # before handing off. Local SDK callers continue to pass a path.
+        # the local filesystem, so materialize the uploads into a stable
+        # per-dataset temp dir before handing off. Local SDK callers continue to
+        # pass a path.
         skill_source: Any = data
-        tmp_dir: Optional[tempfile.TemporaryDirectory] = None
         normalized_uploads: list = []
         if isinstance(data, list):
             for item in data:
@@ -1035,44 +1083,56 @@ async def _remember_inner(
         elif data is not None and not isinstance(data, (str, _Path)) and hasattr(data, "read"):
             normalized_uploads.append(data)
 
-        if normalized_uploads:
-            tmp_dir = tempfile.TemporaryDirectory(prefix="cognee-skills-", dir=_Path.cwd())
-            tmp_root = _Path(tmp_dir.name)
-            for upload in normalized_uploads:
-                rel_name = (
-                    getattr(upload, "filename", None) or getattr(upload, "name", None) or "SKILL.md"
-                )
-                # Defensive: reject absolute paths / traversal in client-sent names.
-                safe_rel = _Path(rel_name).as_posix().lstrip("/")
-                if ".." in _Path(safe_rel).parts:
-                    raise ValueError(f"Invalid skill filename: {rel_name}")
-                dest = tmp_root / safe_rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                # UploadFile.read() is async; plain file-like .read() is sync.
-                read_result = upload.read()
-                payload = await read_result if hasattr(read_result, "__await__") else read_result
-                if isinstance(payload, str):
-                    payload = payload.encode("utf-8")
-                dest.write_bytes(payload or b"")
-            skill_files = list(tmp_root.rglob("SKILL.md"))
-            if skill_files:
-                skill_source = tmp_root
-            else:
-                raw_files = [path for path in tmp_root.rglob("*") if path.is_file()]
-                if raw_files:
-                    canonical_root = tmp_root / "__canonical_skills__"
-                    for index, raw_file in enumerate(raw_files):
-                        target_dir = canonical_root / f"skill-{index:04d}"
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(raw_file, target_dir / "SKILL.md")
-                    skill_source = canonical_root
-                else:
-                    skill_source = tmp_root
+        # A deterministic root keeps skill.source_dir (and therefore the
+        # _scoped_skill_id uuid5) stable across re-ingests, so re-ingesting an
+        # edited SKILL.md upserts the existing Skill node instead of creating a
+        # duplicate.
+        materialize_root: Optional[_Path] = None
+        if normalized_uploads or skills_text:
+            root = _skill_materialize_root(dataset.id)
+            root.mkdir(parents=True, exist_ok=True)
+            materialize_root = root
 
-        # No-code path: inline SKILL.md markdown supplied as a string instead of
-        # an uploaded file. Reuses the same add_skills pipeline as the upload path.
-        if not normalized_uploads and skills_text:
-            tmp_dir, skill_source = _materialize_inline_skill(skills_text, skill_name)
+            if normalized_uploads:
+                for upload in normalized_uploads:
+                    rel_name = (
+                        getattr(upload, "filename", None)
+                        or getattr(upload, "name", None)
+                        or "SKILL.md"
+                    )
+                    # Defensive: reject absolute paths / traversal in client-sent names.
+                    safe_rel = _Path(rel_name).as_posix().lstrip("/")
+                    if ".." in _Path(safe_rel).parts:
+                        raise ValueError(f"Invalid skill filename: {rel_name}")
+                    dest = root / safe_rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    # UploadFile.read() is async; plain file-like .read() is sync.
+                    read_result = upload.read()
+                    payload = (
+                        await read_result if hasattr(read_result, "__await__") else read_result
+                    )
+                    if isinstance(payload, str):
+                        payload = payload.encode("utf-8")
+                    dest.write_bytes(payload or b"")
+                skill_files = list(root.rglob("SKILL.md"))
+                if skill_files:
+                    skill_source = root
+                else:
+                    raw_files = [path for path in root.rglob("*") if path.is_file()]
+                    if raw_files:
+                        canonical_root = root / "__canonical_skills__"
+                        for index, raw_file in enumerate(raw_files):
+                            target_dir = canonical_root / f"skill-{index:04d}"
+                            target_dir.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(raw_file, target_dir / "SKILL.md")
+                        skill_source = canonical_root
+                    else:
+                        skill_source = root
+            else:
+                # No-code path: inline SKILL.md markdown supplied as a string
+                # instead of an uploaded file. Reuses the same add_skills
+                # pipeline as the upload path.
+                skill_source = _materialize_inline_skill(skills_text, skill_name, root)
 
         try:
             async with set_database_global_context_variables(dataset.id, owner_id):
@@ -1083,8 +1143,8 @@ async def _remember_inner(
                     dataset=dataset,
                 )
         finally:
-            if tmp_dir is not None:
-                tmp_dir.cleanup()
+            if materialize_root is not None:
+                shutil.rmtree(materialize_root, ignore_errors=True)
         result = RememberResult(
             status="completed",
             dataset_name=dataset.name,
@@ -1138,8 +1198,6 @@ async def _remember_inner(
     if remaining:
         raise TypeError(f"Unexpected keyword arguments: {', '.join(remaining)}")
 
-    dataset_id = add_kwargs.pop("dataset_id", None) or shared_kwargs.get("dataset_id")
-
     # Ensure database is initialized (same as add() does internally).
     # Must run before get_default_user() which queries the DB.
     from cognee.modules.engine.operations.setup import setup
@@ -1154,12 +1212,19 @@ async def _remember_inner(
         user = await get_default_user()
         shared_kwargs["user"] = user
 
+    # Build the result object — starts as "running"
+    if not dataset_id and dataset_name:
+        # Create dataset if it doesn't exist
+        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+        dataset_id = dataset_id[0].id if dataset_id else None
+
     # Session memory: store in session cache, then optionally bridge to graph
     if session_id:
         await _add_to_session(session_id, data, user)
         result = RememberResult(
             status="session_stored",
             dataset_name=dataset_name,
+            dataset_id=str(dataset_id) if dataset_id else None,
             session_ids=[session_id],
         )
         result.elapsed_seconds = time.monotonic() - result._started_at
@@ -1168,16 +1233,10 @@ async def _remember_inner(
         if self_improvement:
             from cognee.api.v1.improve import improve
 
-            # Create/authorize the target dataset before launching the
-            # background improve. Otherwise it bridges into a dataset that was
-            # never created, and every bridge stage fails on write/read
-            # authorization. Mirrors the permanent path below.
-            user, _ = await resolve_authorized_user_datasets(dataset_name, user)
-
             async def _session_improve():
                 try:
                     await improve(
-                        dataset=dataset_name,
+                        dataset=dataset_id,
                         session_ids=[session_id],
                         user=user,
                     )
@@ -1186,14 +1245,11 @@ async def _remember_inner(
                     logger.warning("remember: session improve failed (non-fatal): %s", exc)
 
             result._task = asyncio.create_task(_session_improve())
+            _BACKGROUND_REMEMBER_TASKS.add(result._task)
+            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
 
         return result
 
-    # Build the result object — starts as "running"
-    if not dataset_id and dataset_name:
-        # Create dataset if it doesn't exist
-        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset_id = dataset_id[0].id if dataset_id else None
     result = RememberResult(
         status="running",
         dataset_name=dataset_name,
@@ -1229,7 +1285,7 @@ async def _remember_inner(
             from cognee.api.v1.improve import improve
 
             logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
-            improve_kwargs = {"dataset": dataset_name, "user": user}
+            improve_kwargs = {"dataset": dataset_id or dataset_name, "user": user}
             if session_ids:
                 improve_kwargs["session_ids"] = session_ids
             await improve(**improve_kwargs)
@@ -1249,6 +1305,8 @@ async def _remember_inner(
                 logger.exception("Background remember failed")
 
         result._task = asyncio.create_task(_remember_background())
+        _BACKGROUND_REMEMBER_TASKS.add(result._task)
+        result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
         return result
 
     # Blocking mode

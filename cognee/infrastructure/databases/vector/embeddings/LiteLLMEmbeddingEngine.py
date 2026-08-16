@@ -108,10 +108,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
+        # Skip the retry chain for terminal error classes. Authentication /
+        # authorization / not-found errors will never succeed on a retry, so
+        # the previous behaviour of running the full backoff ladder wasted
+        # ~2 minutes of user wall clock on a mis-typed API key. Superset of
+        # the LLM adapter exclusion set (adds PermissionDeniedError); see
+        # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
         retry=retry_if_not_exception_type(
             (
                 EmbeddingContextWindowTooSmallError,
                 litellm.exceptions.NotFoundError,
+                litellm.exceptions.AuthenticationError,
+                litellm.exceptions.PermissionDeniedError,
                 asyncio.CancelledError,
             )
         ),
@@ -155,14 +163,37 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
                     }
+                    # Older LiteLLM releases serialize an omitted encoding format as null,
+                    # which OpenRouter rejects (it only accepts "float"/"base64"). Cognee
+                    # always consumes float vectors, so make the valid format explicit for
+                    # every OpenRouter route: the "openrouter/" model prefix, an explicit
+                    # provider, or a custom endpoint aimed at openrouter.ai. The last case
+                    # (an unprefixed model + endpoint) is driven through litellm's OpenAI
+                    # handler -- the branch that historically injected the null -- so it is
+                    # the one that still needs the guard on current litellm. We keep this
+                    # scoped to OpenRouter because providers such as gemini/bedrock/vertex_ai
+                    # reject encoding_format and cognee does not enable litellm.drop_params.
+                    routed_to_openrouter = (
+                        (self.provider or "").lower() == "openrouter"
+                        or (self.model or "").lower().startswith("openrouter/")
+                        or "openrouter.ai" in (self.endpoint or "").lower()
+                    )
+                    if routed_to_openrouter:
+                        embedding_kwargs["encoding_format"] = "float"
+
                     # Pass through target embedding dimensions when supported
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
 
-                    # Ensure each attempt does not hang indefinitely
+                    # Ensure each attempt does not hang indefinitely. The
+                    # deadline is TOTAL per attempt and starts before any
+                    # network I/O, so under large loads a request can spend
+                    # most of it queued client-side; 300s absorbs that while
+                    # still catching a genuinely hung request (matches the
+                    # OpenAI-compatible engine's deadline).
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
-                        timeout=30.0,
+                        timeout=300.0,
                     )
 
                 embedding_response = [data["embedding"] for data in response.data]
@@ -233,6 +264,19 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(
                 "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
             ) from e
+
+        except (
+            litellm.exceptions.AuthenticationError,
+            litellm.exceptions.PermissionDeniedError,
+        ):
+            # Terminal auth failures must reach tenacity unwrapped so
+            # ``retry_if_not_exception_type`` can short-circuit the backoff
+            # ladder. Deliberately diverges from the EmbeddingException
+            # contract of the other branches: keeping the litellm class (and
+            # its message) intact lets the CLI's first-run remediation match
+            # it. (CancelledError needs no branch here — as a BaseException it
+            # already bypasses the handlers below and propagates unwrapped.)
+            raise
 
         except (
             litellm.exceptions.BadRequestError,

@@ -22,6 +22,9 @@ from cognee.infrastructure.llm.retry_config import (
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
@@ -45,7 +48,7 @@ class MistralAdapter(GenericAPIAdapter):
     - show_prompt
     """
 
-    default_instructor_mode = "mistral_tools"
+    default_instructor_mode = get_instructor_mode("mistral")
 
     def __init__(
         self,
@@ -180,7 +183,10 @@ class MistralAdapter(GenericAPIAdapter):
         transcription_model = self.transcription_model
         if self.transcription_model.startswith("mistral"):
             transcription_model = self.transcription_model.split("/")[-1]
-        file_name = input.split("/")[-1]
+        # Normalize Windows ("\") and POSIX ("/") separators before taking the
+        # basename; on Windows `input` is a backslash path, so splitting on "/"
+        # alone would send the full path as the file name to the API.
+        file_name = str(input).replace("\\", "/").split("/")[-1]
         async with open_data_file(input, mode="rb") as f:
             transcription_response = self.mistral_client.audio.transcriptions.complete(
                 model=transcription_model,
