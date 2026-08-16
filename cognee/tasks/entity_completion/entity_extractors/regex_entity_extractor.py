@@ -66,7 +66,25 @@ class RegexEntityExtractor(BaseEntityExtractor):
 
         try:
             logger.info(f"Extracting entities from text: {text[:100]}...")
-            return self._text_to_entities(text)
+
+            import asyncio
+
+            # Run each regex pattern extraction in separate threads concurrently.
+            # Since the re module releases the GIL during search/match operations,
+            # this achieves parallel execution on multi-core systems.
+            tasks = [
+                asyncio.to_thread(self._extract_entities_by_type, entity_type, text)
+                for entity_type in self.config.get_entity_names()
+            ]
+
+            results = await asyncio.gather(*tasks)
+
+            all_entities = []
+            for extracted_entities in results:
+                all_entities.extend(extracted_entities)
+
+            logger.info(f"Extracted {len(all_entities)} entities")
+            return all_entities
         except Exception as e:
             logger.error(f"Entity extraction failed: {str(e)}")
             return []
