@@ -29,6 +29,7 @@ class CsvChunker(Chunker):
                         contains=[],
                         document_id=document_id,
                         document_name=document_name,
+                        importance_weight=self.document.importance_weight,
                         metadata={
                             "index_fields": ["text"],
                         },
