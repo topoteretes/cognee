@@ -192,6 +192,16 @@ _OPERATIONS: List[Dict[str, Any]] = [
             {"effect": "removes", "target_type": "TextSummary"},
         ],
     },
+    {
+        "name": "reconcile_memory",
+        "label": "reconcile / supersede",
+        "kind": "self_improve",
+        "scope": "whole",
+        "summary": "Detects contradictory claims about the same subject, adds a 'supersedes' edge from the current claim to the stale one, and demotes the stale node's feedback_weight.",
+        "effects": [
+            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
+        ],
+    },
 ]
 
 
