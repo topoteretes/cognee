@@ -6,6 +6,7 @@ from cognee.modules.users.methods.get_default_user import get_default_user
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.shared.logging_utils import get_logger
 
 AsyncGenLike = Union[
     AsyncIterable[Any],
@@ -19,6 +20,87 @@ AsyncGenLike = Union[
 # an in-flight task before it completes, silently aborting the background run. Tasks
 # remove themselves on done, so this set's size tracks currently-running pipelines.
 _BACKGROUND_PIPELINE_TASKS: set[asyncio.Task] = set()
+logger = get_logger("pipeline_execution_mode")
+
+
+def _handle_background_task_done(task: asyncio.Task) -> None:
+    """Release a completed supervisor task and retrieve unexpected exceptions."""
+    _BACKGROUND_PIPELINE_TASKS.discard(task)
+    if task.cancelled():
+        return
+
+    error = task.exception()
+    if error is not None:
+        logger.error(
+            "Background pipeline supervisor failed: %s",
+            error,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+async def _close_pipeline(pipeline: AsyncIterable[Any]) -> None:
+    close = getattr(pipeline, "aclose", None)
+    if not callable(close):
+        return
+
+    try:
+        await close()
+    except Exception:
+        logger.exception("Failed to close a background pipeline generator")
+
+
+async def _record_unhandled_pipeline_error(started_info, error: Exception) -> None:
+    """Persist an error when a custom pipeline fails without doing so itself."""
+    try:
+        from cognee.modules.pipelines.methods import get_pipeline_run
+        from cognee.modules.pipelines.operations import log_pipeline_run_error
+
+        pipeline_run = await get_pipeline_run(started_info.pipeline_run_id)
+        if pipeline_run is None:
+            return
+
+        run_info = pipeline_run.run_info if isinstance(pipeline_run.run_info, dict) else {}
+        await log_pipeline_run_error(
+            started_info.pipeline_run_id,
+            pipeline_run.pipeline_id,
+            pipeline_run.pipeline_name,
+            started_info.dataset_id,
+            run_info.get("data"),
+            error,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to persist background pipeline error for dataset %s",
+            started_info.dataset_id,
+        )
+
+
+async def _drain_background_pipeline(pipeline, started_info) -> None:
+    """Drain one pipeline without allowing its failure to abort later datasets."""
+    terminal_emitted = False
+    try:
+        async for pipeline_run_info in pipeline:
+            push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+            if isinstance(pipeline_run_info, (PipelineRunCompleted, PipelineRunErrored)):
+                terminal_emitted = True
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.exception(
+            "Background pipeline failed for dataset %s",
+            started_info.dataset_id,
+        )
+        if not terminal_emitted:
+            await _record_unhandled_pipeline_error(started_info, error)
+            pipeline_run_info = PipelineRunErrored(
+                pipeline_run_id=started_info.pipeline_run_id,
+                dataset_id=started_info.dataset_id,
+                dataset_name=started_info.dataset_name,
+                payload=repr(error),
+            )
+            push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
+    finally:
+        await _close_pipeline(pipeline)
 
 
 async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, Any]:
@@ -91,38 +173,46 @@ async def run_pipeline_as_background_process(
     async def handle_rest_of_the_run(pipeline_list):
         # Execute all provided pipelines one by one to avoid database write conflicts
         # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
-        for pipeline in pipeline_list:
-            while True:
-                try:
-                    pipeline_run_info = await anext(pipeline)
-                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-                except StopAsyncIteration:
-                    break
+        try:
+            for pipeline_run, started_info in pipeline_list:
+                await _drain_background_pipeline(pipeline_run, started_info)
+        finally:
+            # Cancellation or an unexpected supervisor failure must also close
+            # generators that have emitted STARTED but have not been drained yet.
+            for pipeline_run, _ in pipeline_list:
+                await _close_pipeline(pipeline_run)
 
     # Start all pipelines to get started status
     pipeline_list = []
-    for dataset in datasets:
-        call_params = dict(params)
-        if "datasets" in call_params:
-            call_params["datasets"] = dataset
+    created_pipelines = []
+    try:
+        for dataset in datasets:
+            call_params = dict(params)
+            if "datasets" in call_params:
+                call_params["datasets"] = dataset
 
-        pipeline_run = pipeline(**call_params) if callable(pipeline) else pipeline
+            pipeline_run = pipeline(**call_params) if callable(pipeline) else pipeline
+            created_pipelines.append(pipeline_run)
 
-        # Save dataset Pipeline run started info
-        run_info = await anext(pipeline_run)
-        pipeline_run_started_info[run_info.dataset_id] = run_info
+            # Save dataset Pipeline run started info
+            run_info = await anext(pipeline_run)
+            pipeline_run_started_info[run_info.dataset_id] = run_info
 
-        if pipeline_run_started_info[run_info.dataset_id].payload:
-            # Remove payload info to avoid serialization
-            # TODO: Handle payload serialization
-            pipeline_run_started_info[run_info.dataset_id].payload = []
+            if pipeline_run_started_info[run_info.dataset_id].payload:
+                # Remove payload info to avoid serialization
+                # TODO: Handle payload serialization
+                pipeline_run_started_info[run_info.dataset_id].payload = []
 
-        pipeline_list.append(pipeline_run)
+            pipeline_list.append((pipeline_run, run_info))
+    except BaseException:
+        for created_pipeline in created_pipelines:
+            await _close_pipeline(created_pipeline)
+        raise
 
     # Send all started pipelines to execute one by one in background
     task = asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
     _BACKGROUND_PIPELINE_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_PIPELINE_TASKS.discard)
+    task.add_done_callback(_handle_background_task_done)
 
     return pipeline_run_started_info
 
