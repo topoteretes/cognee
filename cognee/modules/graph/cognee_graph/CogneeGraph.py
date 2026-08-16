@@ -8,6 +8,7 @@ from cognee.modules.graph.exceptions import (
     InvalidDimensionsError,
 )
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.engine import is_internal_node
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 from cognee.base_config import get_base_config
@@ -177,6 +178,8 @@ class CogneeGraph(CogneeAbstractGraph):
         start_time = time.time()
         # Process nodes
         for node_id, properties in nodes_data:
+            if is_internal_node(properties):
+                continue
             node_attributes = {key: properties.get(key) for key in node_properties_to_project}
             self.add_node(
                 Node(
