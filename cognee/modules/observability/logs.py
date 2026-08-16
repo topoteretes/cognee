@@ -15,7 +15,10 @@ from typing import Optional
 try:
     from opentelemetry._logs import set_logger_provider
     from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-    from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
+    from opentelemetry.sdk._logs.export import (
+        BatchLogRecordProcessor,
+        SimpleLogRecordProcessor,
+    )
     from opentelemetry.sdk.resources import Resource
 
     _OTEL_LOGS_AVAILABLE = True
@@ -103,8 +106,12 @@ def _try_add_otlp_log_exporter(provider, endpoint: str, headers) -> None:
     try:
         from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 
+        # BatchLogRecordProcessor exports on a background thread. A Simple
+        # processor here means one synchronous network round trip PER LOG
+        # RECORD on the emitting thread — cognify emits log lines by the
+        # hundred thousand, so that silently collapses pipeline throughput.
         provider.add_log_record_processor(
-            SimpleLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
+            BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
         )
         _log.info("OTel: OTLP gRPC log exporter registered → %s", logs_endpoint)
     except ImportError:
@@ -117,8 +124,9 @@ def _add_http_log_exporter(provider, endpoint: str, headers) -> None:
             OTLPLogExporter as OTLPHttpLogExporter,
         )
 
+        # Batch, not Simple — see the gRPC path above for why.
         provider.add_log_record_processor(
-            SimpleLogRecordProcessor(OTLPHttpLogExporter(endpoint=endpoint, headers=headers))
+            BatchLogRecordProcessor(OTLPHttpLogExporter(endpoint=endpoint, headers=headers))
         )
     except ImportError:
         import warnings
