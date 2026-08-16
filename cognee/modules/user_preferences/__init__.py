@@ -10,8 +10,11 @@ one home.
 from .constants import (
     MAX_PREFERENCE_TEXT_CHARS,
     NEUTRAL_WEIGHT,
+    PREFERENCE_DELETE_THRESHOLD,
     PREFERENCE_NODE_SET,
     PREFERENCE_RENDER_HEADER,
+    PREFERENCE_TURN_COUNTED_KEY,
+    PREFERENCE_WEIGHTS_APPLIED_KEY,
     PREFERS_RELATIONSHIP,
 )
 from .models import UserPreference
@@ -22,17 +25,25 @@ from .store import (
     upsert_preference_node,
     write_prefers_edges,
 )
+from .update import PreferenceUpdateResult, update_user_preferences
+from .weights import effective_weight
 
 __all__ = [
     "MAX_PREFERENCE_TEXT_CHARS",
     "NEUTRAL_WEIGHT",
+    "PREFERENCE_DELETE_THRESHOLD",
     "PREFERENCE_NODE_SET",
     "PREFERENCE_RENDER_HEADER",
+    "PREFERENCE_TURN_COUNTED_KEY",
+    "PREFERENCE_WEIGHTS_APPLIED_KEY",
     "PREFERS_RELATIONSHIP",
+    "PreferenceUpdateResult",
     "UserPreference",
     "delete_prefers_edges",
+    "effective_weight",
     "load_preference_state",
     "preference_node_id",
+    "update_user_preferences",
     "upsert_preference_node",
     "write_prefers_edges",
 ]

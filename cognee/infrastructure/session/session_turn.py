@@ -287,7 +287,13 @@ async def apply_session_turn_analysis(
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-    if not analysis.candidate_context_updates and not analysis.served_context_ratings:
+    # A rating is only evidence when there is a previous turn it can refer to.
+    previous_answer_rating = analysis.previous_answer_rating if previous_qa_id else None
+    if (
+        not analysis.candidate_context_updates
+        and not analysis.served_context_ratings
+        and previous_answer_rating is None
+    ):
         return []
     try:
         ratings = list(analysis.served_context_ratings or [])
@@ -298,6 +304,7 @@ async def apply_session_turn_analysis(
             created_at=datetime.now(timezone.utc).isoformat(),
             raw_text=query,
             referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
+            referenced_qa_rating=previous_answer_rating,
             influencing_context_ids=list(served_ids or []),
             candidate_context_entries=[
                 c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in candidates

@@ -25,6 +25,15 @@ class BaseConfig(BaseSettings):
     # Default blend weight for the learned feedback signal during graph search.
     # Opt-in by default to preserve existing retrieval behavior.
     default_feedback_influence: float = float(os.getenv("DEFAULT_FEEDBACK_INFLUENCE", "0.0"))
+    # How far one rating pulls a personal prefers-edge weight toward its target.
+    # Deliberately higher than the 0.1 used for global feedback_weight: a global
+    # weight aggregates every user's evidence and should move slowly, a personal
+    # weight has a single source and should be reactive.
+    preference_alpha: float = float(os.getenv("PREFERENCE_ALPHA", "0.3"))
+    # How much an untouched prefers-edge weight fades per turn. Calibrated
+    # against the per-turn clock, which ticks on every turn rather than every
+    # rated one; at 0.02 a reinforced edge decays out in a few hundred turns.
+    preference_beta: float = float(os.getenv("PREFERENCE_BETA", "0.02"))
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):

@@ -468,9 +468,25 @@ class SessionFeedbackEntry(BaseModel):
     created_at: str
     raw_text: str
     referenced_qa_ids: List[str] = Field(default_factory=list)
+    referenced_qa_rating: Optional[int] = None
     influencing_context_ids: List[str] = Field(default_factory=list)
     candidate_context_entries: List[dict] = Field(default_factory=list)
     kind: Literal["feedback"] = "feedback"
+
+    @field_validator("referenced_qa_rating", mode="before")
+    @classmethod
+    def referenced_qa_rating_in_range_or_none(cls, value):
+        """1-5 verdict on the turn named by referenced_qa_ids; anything else
+        coerces to None so a malformed value degrades to "no signal"."""
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, float) and not value.is_integer():
+            return None
+        try:
+            rating = int(value)
+        except (TypeError, ValueError):
+            return None
+        return rating if 1 <= rating <= 5 else None
 
     @field_validator("id")
     @classmethod
