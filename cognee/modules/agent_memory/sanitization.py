@@ -8,9 +8,17 @@ MAX_TRACE_CONTAINER_ITEMS = 20
 
 
 def truncate_text(value: str, limit: int) -> str:
-    """Bound stored trace strings so unusually large params/returns do not create oversized trace payloads."""
+    """Bound stored trace strings so unusually large params/returns do not create oversized trace payloads.
+
+    The returned string never exceeds ``limit`` characters.
+    """
     if len(value) <= limit:
         return value
+    if limit < 3:
+        # Fewer than 3 characters leaves no room for the "..." marker, and
+        # value[: limit - 3] would be a negative slice that returns a string
+        # LONGER than limit. Hard-truncate instead.
+        return value[: max(limit, 0)]
     return value[: limit - 3] + "..."
 
 
