@@ -1,0 +1,97 @@
+name: test | helm kind e2e
+
+on:
+  workflow_call:
+
+jobs:
+  helm-kind-e2e:
+    name: Helm chart deploy + golden flow on kind
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Build the images the cluster will run ─────────────────────────────
+      - name: Build cognee image (from this PR's code)
+        run: docker build -t cognee/cognee:ci-test .
+
+      - name: Build mock LLM image
+        run: docker build -t mock-llm:ci-test cognee/tests/deployment/mock_llm
+
+      # ── Create the kind cluster and load the local images into it ─────────
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: cognee-test
+          node_image: kindest/node:v1.31.2
+
+      - name: Load images into kind
+        run: |
+          kind load docker-image cognee/cognee:ci-test --name cognee-test
+          kind load docker-image mock-llm:ci-test --name cognee-test
+
+      # ── Deploy the mock, then the chart pointed at it ─────────────────────
+      - name: Deploy in-cluster mock LLM
+        run: kubectl apply -f cognee/tests/deployment/mock_llm/k8s.yml
+
+      - name: Helm install cognee (mock LLM, dummy key)
+        run: |
+          helm install cognee deployment/helm \
+            --set cognee.image.repository=cognee/cognee \
+            --set cognee.image.tag=ci-test \
+            --set cognee.image.pullPolicy=IfNotPresent \
+            --set cognee.env.LLM_ENDPOINT=http://mock-llm:11434 \
+            --set cognee.env.LLM_API_KEY=mock \
+            --set cognee.env.EMBEDDING_PROVIDER=openai \
+            --set cognee.env.EMBEDDING_MODEL=text-embedding-3-small \
+            --set cognee.env.EMBEDDING_DIMENSIONS=1536 \
+            --set cognee.env.EMBEDDING_ENDPOINT=http://mock-llm:11434
+
+      # ── Wait for readiness (Postgres up, cognee rolled out) ───────────────
+      - name: Wait for mock LLM
+        run: kubectl rollout status deployment/mock-llm --timeout=120s
+
+      - name: Wait for Postgres ready
+        run: kubectl wait --for=condition=ready pod -l app=cognee-postgres --timeout=180s
+
+      - name: Wait for cognee deployment
+        run: kubectl wait --for=condition=available deployment/cognee-cognee --timeout=300s
+
+      # ── Port-forward and run the golden flow ──────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test deps
+        run: python -m pip install httpx pytest pytest-asyncio
+
+      - name: Port-forward cognee service
+        run: |
+          kubectl port-forward svc/cognee-cognee 8000:8000 &
+          echo "PF_PID=$!" >> "$GITHUB_ENV"
+          # give the forward a moment; the test also polls /health itself
+          sleep 5
+
+      - name: Run deployment golden flow
+        env:
+          COGNEE_BASE_URL: http://localhost:8000
+        run: python -m pytest -m deployment_graph cognee/tests/deployment/test_helm_kind.py -v
+
+      # ── Diagnostics on failure + teardown ──────────────────────
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== pods ===";        kubectl get pods -o wide || true
+          echo "=== pvc ===";         kubectl get pvc || true
+          echo "=== cognee logs ==="; kubectl logs -l app=cognee-cognee --tail=200 || true
+          echo "=== postgres logs ==="; kubectl logs -l app=cognee-postgres --tail=100 || true
+          echo "=== mock logs ===";   kubectl logs -l app=mock-llm --tail=100 || true
+
+      - name: Stop port-forward
+        if: always()
+        run: kill "${PF_PID}" 2>/dev/null || true

@@ -1,13 +1,21 @@
 # Configuration for the 'cognee' application service
 cognee:
-  # Image name (using the local image we’ll build in Minikube)
-  image: "cognee/cognee:main"
+  image:
+    repository: "cognee/cognee"
+    tag: "main"
+    pullPolicy: "IfNotPresent"      # so kind-loaded images aren't re-pulled
   port: 8000
   env:
     ENV: "local"
     PYTHONPATH: "."
-    LLM_MODEL: "openai/gpt-4o-mini"
     LLM_PROVIDER: "openai"
+    LLM_MODEL: "openai/gpt-4o-mini"
+    LLM_ENDPOINT: ""                 # empty default = real behavior unchanged
+    LLM_API_KEY: ""                  # default so `helm install` doesn't fail at render
+    EMBEDDING_PROVIDER: ""
+    EMBEDDING_MODEL: ""
+    EMBEDDING_DIMENSIONS: ""
+    EMBEDDING_ENDPOINT: ""
   resources:
     cpu: "4.0"
     memory: "2Gi"
