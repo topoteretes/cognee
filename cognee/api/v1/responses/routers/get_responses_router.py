@@ -53,8 +53,13 @@ def get_responses_router() -> APIRouter:
         Call appropriate model API based on model name
         """
 
-        # TODO: Support other models (e.g. cognee-v1-openai-gpt-3.5-turbo, etc.)
-        model = "gpt-4o"
+        # Support Cognee model aliases and fall back to gpt-4o if model is empty or default
+        if not model or model == "cognee-v1":
+            model = "gpt-4o"
+        elif model.startswith("cognee-v1-openai-"):
+            model = model[len("cognee-v1-openai-"):]
+        elif model.startswith("cognee-v1-"):
+            model = model[len("cognee-v1-"):]
 
         client = _get_model_client()
 
