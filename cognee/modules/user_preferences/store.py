@@ -2,9 +2,12 @@
 
 Everything goes straight through the graph engine — never ``add_data_points``
 or ``index_data_points`` — so preference data is never embedded and can never
-come back as a search result. Only portable ``GraphDBInterface`` methods are
-used (``get_neighborhood``, ``add_nodes``, ``update_node``, ``add_edges``,
-``delete_edge_triples``), so the store works on any in-tree backend.
+come back as a search result. The primary paths use ``get_neighborhood``,
+``add_nodes``, ``update_node``, ``add_edges`` and ``delete_edge_triples``;
+``update_node`` and ``delete_edge_triples`` are optional adapter extensions
+(the base interface raises), so both writers carry a portable fallback built
+from ``add_nodes`` / ``add_edges`` — which every in-tree adapter implements as
+a true upsert — and the store still works on any in-tree backend.
 
 ``load_preference_state`` returns the *stored* weights; applying decay is the
 caller's job, so exactly one place knows the formula.
@@ -13,6 +16,7 @@ caller's job, so exactly one place knows the formula.
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 from uuid import UUID
 
+from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
@@ -77,20 +81,32 @@ async def upsert_preference_node(
 ) -> str:
     """Create or update the preference node for (user, dataset); returns its id.
 
-    Updates go through ``update_node`` — ``add_node`` is ``MERGE ... ON CREATE
-    SET`` and would silently leave an existing row untouched. On create, the
-    node is also merged into the ``user_preferences`` NodeSet so all preference
-    nodes can be listed and deleted together.
+    Updates go through ``update_node`` where the adapter has it (it patches in
+    place and reports whether the node existed). ``update_node`` is an optional
+    extension implemented only by Ladybug, so on ``NotImplementedError`` the
+    write falls through to the full-node path below — safe as an update there
+    because every other in-tree adapter's ``add_nodes`` is a true upsert
+    (Neo4j ``ON MATCH SET n +=``, Neptune ``ON MATCH SET n +=``,
+    Postgres/Turso ``ON CONFLICT DO UPDATE``), and the full model is written
+    each time so a blob replacement loses nothing. On create, the node is also
+    merged into the ``user_preferences`` NodeSet so all preference nodes can be
+    listed and deleted together.
     """
     graph_engine = await get_graph_engine()
     pref_id = str(preference_node_id(user_id, dataset_id))
 
-    updated = await graph_engine.update_node(
-        pref_id,
-        {"text": text, "turn_counter": turn_counter, "text_watermark": text_watermark},
-    )
-    if updated:
-        return pref_id
+    try:
+        updated = await graph_engine.update_node(
+            pref_id,
+            {"text": text, "turn_counter": turn_counter, "text_watermark": text_watermark},
+        )
+        if updated:
+            return pref_id
+    except NotImplementedError:
+        logger.debug(
+            "update_node not implemented by this graph adapter; "
+            "falling back to full-node upsert via add_nodes."
+        )
 
     preference = UserPreference(
         id=preference_node_id(user_id, dataset_id),
@@ -163,7 +179,14 @@ async def delete_prefers_edges(user_id: str, dataset_id: str, target_ids: Iterab
     """Delete ``prefers`` edges to the given targets.
 
     ``delete_edge_triples`` issues ``DELETE r``, not ``DETACH DELETE``, so the
-    preferred content nodes survive.
+    preferred content nodes survive. It is an optional extension (ladybug,
+    neo4j and postgres implement it; the base interface raises), so on
+    backends without it the edges are neutralized instead of deleted: rewritten
+    via ``add_edges`` with ``weight == NEUTRAL_WEIGHT`` and
+    ``updated_at_turn == 0``. A neutral edge carries no ranking signal (its
+    personal factor is 1.0) and decay keeps it at neutral forever, so the
+    fallback preserves every observable behavior except the bounded-edge-count
+    guarantee — the row itself lingers.
     """
     targets = [str(target_id) for target_id in target_ids]
     if not targets:
@@ -172,13 +195,37 @@ async def delete_prefers_edges(user_id: str, dataset_id: str, target_ids: Iterab
     graph_engine = await get_graph_engine()
     source_id = str(preference_node_id(user_id, dataset_id))
 
-    await graph_engine.delete_edge_triples(
-        [
-            EdgeIdentity(
-                source_id=source_id,
-                target_id=target_id,
-                relationship_name=PREFERS_RELATIONSHIP,
-            )
-            for target_id in targets
-        ]
-    )
+    try:
+        await graph_engine.delete_edge_triples(
+            [
+                EdgeIdentity(
+                    source_id=source_id,
+                    target_id=target_id,
+                    relationship_name=PREFERS_RELATIONSHIP,
+                )
+                for target_id in targets
+            ]
+        )
+    except (NotImplementedError, UnsupportedProvenanceCapability):
+        logger.debug(
+            "delete_edge_triples not implemented by this graph adapter; "
+            "neutralizing %d prefers edge(s) instead of deleting them.",
+            len(targets),
+        )
+        await graph_engine.add_edges(
+            [
+                (
+                    source_id,
+                    target_id,
+                    PREFERS_RELATIONSHIP,
+                    {
+                        "relationship_name": PREFERS_RELATIONSHIP,
+                        "source_node_id": source_id,
+                        "target_node_id": target_id,
+                        "weight": NEUTRAL_WEIGHT,
+                        "updated_at_turn": 0,
+                    },
+                )
+                for target_id in targets
+            ]
+        )
