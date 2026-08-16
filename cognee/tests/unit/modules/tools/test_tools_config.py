@@ -14,6 +14,8 @@ def test_default_limits():
     assert config.text_to_sql_max_attempts == 3
     assert config.text_to_sql_statement_timeout_ms == 5000
     assert config.text_to_sql_max_schema_tables == 50
+    assert config.tool_sqlite_allowed_root == ""
+    assert config.sql_allowed_hosts() == set()
 
 
 def test_sql_connections_empty_by_default():
@@ -53,3 +55,10 @@ def test_sql_connections_rejects_entry_without_connection_string():
 def test_env_gate_parses(monkeypatch):
     monkeypatch.setenv("TOOL_CALLS_ENABLED", "true")
     assert ToolsConfig(_env_file=None).tool_calls_enabled is True
+
+
+def test_sql_target_policy_parses(monkeypatch):
+    monkeypatch.setenv("TOOL_SQL_ALLOWED_HOSTS", "db.internal, analytics.example.")
+    config = ToolsConfig(_env_file=None, tool_sqlite_allowed_root="/srv/sqlite")
+    assert config.tool_sqlite_allowed_root == "/srv/sqlite"
+    assert config.sql_allowed_hosts() == {"db.internal", "analytics.example"}

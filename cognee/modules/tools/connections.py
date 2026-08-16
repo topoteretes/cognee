@@ -21,6 +21,7 @@ from cognee.modules.integrations.crypto import decrypt_credentials, encrypt_cred
 from cognee.modules.tools.config import get_tools_config
 from cognee.modules.tools.errors import ToolConnectionNotFoundError, ToolError
 from cognee.modules.tools.models.ToolConnection import ToolConnection
+from cognee.modules.tools.target_policy import validate_user_connection_target
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("tool_connections")
@@ -125,6 +126,14 @@ async def register_tool_connection(
             f"Supported providers: {', '.join(_SUPPORTED_PROVIDERS)}."
         )
 
+    config = get_tools_config()
+    validate_user_connection_target(
+        connection_string,
+        resolved_provider,
+        sqlite_allowed_root=config.tool_sqlite_allowed_root,
+        allowed_hosts=config.sql_allowed_hosts(),
+    )
+
     ciphertext, nonce, encryption_version, key_id = encrypt_credentials(
         {"connection_string": connection_string}
     )
@@ -216,6 +225,13 @@ async def get_tool_connection(user_id: UUID, name: str) -> dict[str, Any]:
 
     if row is not None:
         payload = decrypt_credentials(row.ciphertext, row.nonce, row.encryption_version, row.key_id)
+        config = get_tools_config()
+        validate_user_connection_target(
+            payload["connection_string"],
+            row.provider,
+            sqlite_allowed_root=config.tool_sqlite_allowed_root,
+            allowed_hosts=config.sql_allowed_hosts(),
+        )
         options = row.options or {}
         return {
             "name": row.name,

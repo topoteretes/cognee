@@ -6,7 +6,6 @@ import pytest
 
 import cognee.modules.tools.connections as connections_mod
 from cognee.modules.tools.config import ToolsConfig
-from cognee.modules.tools.errors import ToolConnectionNotFoundError, ToolError
 from cognee.modules.tools.connections import (
     delete_tool_connection,
     get_tool_connection,
@@ -14,6 +13,8 @@ from cognee.modules.tools.connections import (
     list_tool_connections,
     register_tool_connection,
 )
+from cognee.modules.tools.errors import ToolConnectionNotFoundError, ToolError
+from cognee.modules.tools.target_policy import validate_user_connection_target
 
 
 @pytest.fixture
@@ -35,8 +36,12 @@ def relational_engine(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def no_env_connections(monkeypatch):
-    monkeypatch.setattr(connections_mod, "get_tools_config", lambda: ToolsConfig(_env_file=None))
+def no_env_connections(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        connections_mod,
+        "get_tools_config",
+        lambda: ToolsConfig(_env_file=None, tool_sqlite_allowed_root=str(tmp_path)),
+    )
 
 
 def test_infer_provider():
@@ -47,6 +52,48 @@ def test_infer_provider():
         infer_provider("mysql://u:p@h/db")
     with pytest.raises(ToolError):
         infer_provider("not-a-dsn")
+
+
+def test_user_sqlite_target_must_stay_under_allowlisted_root(tmp_path):
+    validate_user_connection_target(
+        "sqlite:///warehouse.db",
+        "sqlite",
+        sqlite_allowed_root=str(tmp_path),
+        allowed_hosts=set(),
+    )
+
+    with pytest.raises(ToolError, match="inside"):
+        validate_user_connection_target(
+            "sqlite:////tmp/private.db",
+            "sqlite",
+            sqlite_allowed_root=str(tmp_path),
+            allowed_hosts=set(),
+        )
+
+    with pytest.raises(ToolError, match="disabled"):
+        validate_user_connection_target(
+            "sqlite:///warehouse.db",
+            "sqlite",
+            sqlite_allowed_root="",
+            allowed_hosts=set(),
+        )
+
+
+def test_user_postgres_target_must_match_allowlisted_host():
+    validate_user_connection_target(
+        "postgresql://user:password@analytics.internal/db",
+        "postgres",
+        sqlite_allowed_root="",
+        allowed_hosts={"analytics.internal"},
+    )
+
+    with pytest.raises(ToolError, match="TOOL_SQL_ALLOWED_HOSTS"):
+        validate_user_connection_target(
+            "postgresql://user:password@127.0.0.1/db",
+            "postgres",
+            sqlite_allowed_root="",
+            allowed_hosts=set(),
+        )
 
 
 @pytest.mark.asyncio
@@ -145,8 +192,14 @@ async def test_env_connections_visible_to_everyone(crypto_key, relational_engine
 
 
 @pytest.mark.asyncio
-async def test_user_connection_shadows_env_connection(crypto_key, relational_engine, monkeypatch):
-    config = ToolsConfig(_env_file=None, tool_sql_connections='{"analytics": "sqlite:///env.db"}')
+async def test_user_connection_shadows_env_connection(
+    crypto_key, relational_engine, monkeypatch, tmp_path
+):
+    config = ToolsConfig(
+        _env_file=None,
+        tool_sql_connections='{"analytics": "sqlite:///env.db"}',
+        tool_sqlite_allowed_root=str(tmp_path),
+    )
     monkeypatch.setattr(connections_mod, "get_tools_config", lambda: config)
 
     user_id = uuid4()
