@@ -255,54 +255,17 @@ class CogneeGraph(CogneeAbstractGraph):
                     adapter, memory_fragment_filter
                 )
 
-            self.triplet_distance_penalty = triplet_distance_penalty
             self.feedback_influence = feedback_influence
 
-            start_time = time.time()
-            # Process nodes
-            for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(
-                    Node(
-                        str(node_id),
-                        node_attributes,
-                        dimension=node_dimension,
-                        node_penalty=triplet_distance_penalty,
-                    )
-                )
-
-            # Process edges
-            for source_id, target_id, relationship_type, properties in edges_data:
-                source_node = self.get_node(str(source_id))
-                target_node = self.get_node(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = {
-                        key: properties.get(key) for key in edge_properties_to_project
-                    }
-                    edge_attributes["relationship_type"] = relationship_type
-
-                    edge = Edge(
-                        source_node,
-                        target_node,
-                        attributes=edge_attributes,
-                        directed=directed,
-                        dimension=edge_dimension,
-                        edge_penalty=triplet_distance_penalty,
-                    )
-                    self.add_edge(edge)
-                else:
-                    # See note at first call-site above and issue #2897.
-                    logger.debug(
-                        "Skipping edge with unprojectable endpoints: %s -> %s",
-                        source_id,
-                        target_id,
-                    )
-                    continue
-
-            # Final statistics
-            projection_time = time.time() - start_time
-            logger.info(
-                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
+            self._process_nodes_and_edges(
+                nodes_data,
+                edges_data,
+                node_properties_to_project,
+                edge_properties_to_project,
+                directed,
+                node_dimension,
+                edge_dimension,
+                triplet_distance_penalty,
             )
 
         except EntityNotFoundError:
@@ -349,53 +312,17 @@ class CogneeGraph(CogneeAbstractGraph):
                 raise EntityNotFoundError(message="Empty neighborhood projected from the database.")
             edges_data = edges_data or []
 
-            self.triplet_distance_penalty = triplet_distance_penalty
             self.feedback_influence = feedback_influence
 
-            start_time = time.time()
-            # Process nodes
-            for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(
-                    Node(
-                        str(node_id),
-                        node_attributes,
-                        dimension=node_dimension,
-                        node_penalty=triplet_distance_penalty,
-                    )
-                )
-
-            # Process edges
-            for source_id, target_id, relationship_type, properties in edges_data:
-                source_node = self.get_node(str(source_id))
-                target_node = self.get_node(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = {
-                        key: properties.get(key) for key in edge_properties_to_project
-                    }
-                    edge_attributes["relationship_type"] = relationship_type
-
-                    edge = Edge(
-                        source_node,
-                        target_node,
-                        attributes=edge_attributes,
-                        directed=directed,
-                        dimension=edge_dimension,
-                        edge_penalty=triplet_distance_penalty,
-                    )
-                    self.add_edge(edge)
-                else:
-                    # See note at first call-site above and issue #2897.
-                    logger.debug(
-                        "Skipping edge with unprojectable endpoints: %s -> %s",
-                        source_id,
-                        target_id,
-                    )
-                    continue
-
-            projection_time = time.time() - start_time
-            logger.info(
-                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
+            self._process_nodes_and_edges(
+                nodes_data,
+                edges_data,
+                node_properties_to_project,
+                edge_properties_to_project,
+                directed,
+                node_dimension,
+                edge_dimension,
+                triplet_distance_penalty,
             )
 
         except Exception:
