@@ -71,6 +71,7 @@ async def log_pipeline_run_progress(
                             ]
                         )
                     )
+                    .order_by(PipelineRun.created_at.desc())
                     .limit(1)
                 )
             ).scalar_one_or_none()
@@ -82,10 +83,17 @@ async def log_pipeline_run_progress(
                 # Progress is metadata-only, so dropping this tick is harmless.
                 return terminal_run
 
-            # Truly no row for this pipeline_run_id yet (e.g. racing
-            # log_pipeline_run_start's own commit) — insert rather than drop
-            # the tick, matching the pre-existing log_pipeline_run_start/
-            # complete/error insert pattern.
+            # Truly no row for this pipeline_run_id yet — e.g. racing
+            # log_pipeline_run_start's own commit, which today's only caller
+            # (run_tasks.py) can't trigger: it awaits that commit before
+            # scheduling any item, so this insert is dead code in practice,
+            # kept only for a hypothetical future caller that doesn't. If it
+            # ever does fire and log_pipeline_run_start's commit lands right
+            # after, the result is two STARTED rows for one pipeline_run_id —
+            # this one missing the "data" field log_pipeline_run_start sets —
+            # not a duplicate update target, since both /status queries pick
+            # the latest by created_at regardless. Accepted as a harmless
+            # edge case rather than adding upsert-style locking for it.
             pipeline_run = PipelineRun(
                 pipeline_run_id=pipeline_run_id,
                 pipeline_name=pipeline_name,

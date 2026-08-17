@@ -39,9 +39,16 @@ def upgrade() -> None:
             # now grows throughout a run (see module docstring), so a large
             # production table deserves the non-blocking path. CONCURRENTLY
             # cannot run inside a transaction, hence autocommit_block().
+            #
+            # IF NOT EXISTS matters here specifically: if a prior CONCURRENTLY
+            # build died mid-way (deadlock/timeout/crash), Postgres leaves an
+            # INVALID index under this name. The `existing_indexes` guard
+            # above only reflects valid indexes, so a retry would otherwise
+            # hit "relation already exists" instead of cleanly no-op'ing or
+            # replacing the invalid one.
             with op.get_context().autocommit_block():
                 op.execute(
-                    f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON pipeline_runs "
+                    f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {INDEX_NAME} ON pipeline_runs "
                     f"(dataset_id, pipeline_name, created_at)"
                 )
         else:
@@ -60,6 +67,6 @@ def downgrade() -> None:
     if INDEX_NAME in existing_indexes:
         if conn.dialect.name == "postgresql":
             with op.get_context().autocommit_block():
-                op.execute(f"DROP INDEX CONCURRENTLY {INDEX_NAME}")
+                op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {INDEX_NAME}")
         else:
             op.drop_index(INDEX_NAME, "pipeline_runs")
