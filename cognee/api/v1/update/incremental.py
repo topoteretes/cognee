@@ -2,32 +2,39 @@
 
 Flow (only runs from the update endpoint):
 
-1. Enforce dataset-level "write" permission and data membership/ownership
-   (same checks as the raw-document read endpoint).
+1. Enforce dataset-level "write" AND "delete" permission plus data
+   membership/ownership. Delete too, because this path destroys graph state —
+   the full fallback reaches the same destruction through delete_data, which
+   requires it, so the two branches must not disagree.
 2. Read the OLD processed text from ``Data.raw_data_location`` and the stored
    chunk nodes from the graph, ordered by their position in that text.
 3. STAGE the new content: the input runs through the same loader machinery as
    ingestion (content-addressed storage write) — but the ``Data`` row is NOT
    touched. Readers keep resolving the coherent old version.
-4. Diff old vs new text into DISJOINT changed regions (line-anchored hunks,
-   trimmed to char precision, expanded to old chunk boundaries); chunks between
-   regions are kept untouched. Each region is re-chunked with the standard
-   TextChunker (same boundary semantics and token budget as pipeline chunks),
-   then ``validate_no_loss`` proves the final chunk set reassembles the new
-   text byte-for-byte. Only now — staging and validation done — is a pipeline
-   run record created; refused updates leave no run-record noise.
-5. Write: extract ONLY the new chunks through the standard graph-extraction
-   and storage tasks (attributed to the same ``data_id``), delete the replaced
-   chunks (+ summaries + chunk-orphaned entities), renumber shifted survivors.
+4. PLAN, through a swappable ``ChunkPolicy`` (default: diff into disjoint
+   changed regions, re-chunk each at the budget its replaced chunks recorded,
+   keep everything between them untouched). The policy returns a COMPLETE
+   decision — fresh chunks, surviving ids and their new positions, dead ids —
+   so this module executes rather than finishes planning. Its result is then
+   re-derived here and compared to the new text byte-for-byte: the policy
+   checked its own arithmetic, and the orchestrator trusts none of it. Only
+   now — staging and validation done — is a pipeline run record created;
+   refused updates leave no run-record noise.
+5. Write: extract ONLY the fresh chunks, in bounded batches, through the
+   standard graph-extraction and storage tasks (attributed to the same
+   ``data_id``), delete the replaced chunks (+ summaries + chunk-orphaned
+   entities), renumber moved survivors.
 6. PUBLISH in one relational transaction: content location, hashes, size,
    token count, and the processed stamp flip together. A crash anywhere
    before the publish leaves the row on the old content; the stored chunks
    then no longer tile the stored text, so the next touch fails closed into a
    full rebuild (self-heal).
 
-Raises IncrementalUpdateNotPossible when preconditions fail (first ingestion,
-non-text data, stored chunks not tiling the stored text) — the caller decides
-to run the full update instead.
+Raises IncrementalUpdateNotPossible when preconditions fail, carrying a typed
+``RefusalReason`` (unsupported backend, unsupported chunker, no baseline,
+chunks not tiling, unreadable text) — the caller decides to run the full
+update instead, and can tell a permanent misconfiguration from a first
+ingestion in the logs. Permission errors are NOT refusals: they propagate.
 """
 
 import json
@@ -56,10 +63,8 @@ from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipel
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents.classify_documents import update_node_set
-from cognee.tasks.documents.extract_chunks_from_documents import update_document_token_count
 from cognee.tasks.graph.detect_contradictions import detect_contradictions
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
 from cognee.modules.chunking.chunk_id import chunk_content_hash
@@ -271,28 +276,22 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
     )
 
 
-def _build_shifted_chunks(
-    document: Document,
-    stored_chunks: List[dict],
-    affected: set,
-    kept_final_index: dict,
-) -> List[DocumentChunk]:
-    """Kept chunks whose chunk_index no longer matches their final position.
+def _misindexed_chunks(document: Document, stored_chunks: List[dict]) -> List[DocumentChunk]:
+    """Stored chunks whose recorded index disagrees with their actual position.
 
-    Rehydrated from their stored node with their EXISTING id and corrected
-    index; re-storing them through add_data_points upserts the graph node and
-    refreshes the vector payload, so citations and layout stay consistent
-    after region lengths changed.
+    Drift the planner never intended: a crash between a delete and its
+    renumbering leaves survivors carrying stale indexes. Rehydrated with their
+    EXISTING id and the corrected index, so re-storing them upserts the graph
+    node and refreshes the vector payload rather than creating anything.
+
+    Planned moves are a different thing and come from ``plan.kept_moves``; this
+    only repairs a document whose stored order is already inconsistent.
     """
-    shifted = []
-    for position, node in enumerate(stored_chunks):
-        if position in affected:
-            continue
-        expected = kept_final_index[position]
-        if int(node.get("chunk_index", -1)) == expected:
-            continue
-        shifted.append(_rehydrate_chunk(document, node, expected))
-    return shifted
+    return [
+        _rehydrate_chunk(document, node, position)
+        for position, node in enumerate(stored_chunks)
+        if int(node.get("chunk_index", -1)) != position
+    ]
 
 
 async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> None:
@@ -617,9 +616,7 @@ async def _stage_and_plan(
         # the whole document). A missing stamp counts as a repair so the
         # self-heal keeps its reach — it is a write either way, and every write
         # belongs under a run.
-        shifted = _build_shifted_chunks(
-            document, stored_chunks, set(), {i: i for i in range(len(stored_chunks))}
-        )
+        shifted = _misindexed_chunks(document, stored_chunks)
         needs_stamp = not await is_data_processed(data_id, dataset_id)
         repairs = ["indexes"] if shifted else []
         if needs_stamp:
@@ -678,27 +675,31 @@ def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: List[dict], new_t
     positions, which would silently reorder or drop a chunk.
     """
     stored_text_by_id = {str(node["id"]): node["text"] for node in stored_chunks}
-    placed: dict = {}
-    for chunk in plan.fresh:
-        placed[chunk.chunk_index] = chunk.text
-    for chunk_id, index in list(plan.reused.items()) + list(plan.kept_moves.items()):
-        placed[index] = stored_text_by_id[chunk_id]
-    # Kept chunks the policy did not move keep their stored position.
     moved = set(plan.reused) | set(plan.kept_moves)
     deleted = set(plan.deleted_ids)
-    for node in stored_chunks:
-        chunk_id = str(node["id"])
-        if chunk_id in moved or chunk_id in deleted:
-            continue
-        placed.setdefault(int(node.get("chunk_index", -1)), node["text"])
 
-    expected_positions = set(range(len(placed)))
-    if set(placed) != expected_positions:
+    # (final position, text) for every chunk the document will have. Collected
+    # as a LIST, not a dict: two chunks claiming one position must be visible
+    # as a duplicate rather than one silently overwriting the other.
+    placed = [(chunk.chunk_index, chunk.text) for chunk in plan.fresh]
+    placed += [
+        (index, stored_text_by_id[chunk_id])
+        for chunk_id, index in list(plan.reused.items()) + list(plan.kept_moves.items())
+    ]
+    # Kept chunks the policy did not move stay at their stored position.
+    placed += [
+        (int(node.get("chunk_index", -1)), node["text"])
+        for node in stored_chunks
+        if str(node["id"]) not in moved and str(node["id"]) not in deleted
+    ]
+
+    positions = [index for index, _ in placed]
+    if sorted(positions) != list(range(len(placed))):
         raise IncrementalUpdateNotPossible(
             "plan leaves chunk positions with gaps or duplicates",
             RefusalReason.CHUNKS_NOT_TILING,
         )
-    if "".join(placed[index] for index in sorted(placed)) != new_text:
+    if "".join(text for _, text in sorted(placed)) != new_text:
         raise IncrementalUpdateNotPossible(
             "incremental plan would lose or corrupt content",
             RefusalReason.CHUNKS_NOT_TILING,

@@ -8,7 +8,7 @@ truth fields to model defaults).
 
 from uuid import uuid4
 
-from cognee.api.v1.update.incremental import _build_shifted_chunks, _rehydrate_chunk
+from cognee.api.v1.update.incremental import _misindexed_chunks, _rehydrate_chunk
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 
 
@@ -81,22 +81,48 @@ def test_rehydrate_tolerates_missing_and_malformed_fields():
     assert chunk.max_chunk_tokens is None  # legacy nodes have no recorded budget
 
 
-def test_shifted_chunks_rehydrate_and_renumber_only_moved_survivors():
+def test_misindexed_chunks_repairs_only_the_drifted_ones():
+    """Self-heal for stored order left inconsistent by an interrupted run.
+
+    A crash between a delete and its renumbering leaves survivors carrying
+    stale indexes. Only those are rebuilt — a chunk already sitting at its
+    actual position must not be rewritten for nothing.
+    """
     document = _document()
     stored = [
-        _stored_node("a ", 0),
-        _stored_node("b ", 1),  # affected — replaced by 3 new chunks
-        _stored_node("c ", 2),  # suffix: index 2 -> 4
-        _stored_node("d ", 3),  # suffix: index 3 -> 5
+        _stored_node("a ", 0),  # correct
+        _stored_node("b ", 5),  # drifted: actually at position 1
+        _stored_node("c ", 2),  # correct
+        _stored_node("d ", 9),  # drifted: actually at position 3
     ]
-    # Chunk 1 was replaced by 3 new chunks: kept chunk 0 stays at 0, kept
-    # chunks 2 and 3 land at final positions 4 and 5.
-    shifted = _build_shifted_chunks(
-        document, stored, affected={1}, kept_final_index={0: 0, 2: 4, 3: 5}
-    )
 
-    assert [str(chunk.id) for chunk in shifted] == [stored[2]["id"], stored[3]["id"]]
-    assert [chunk.chunk_index for chunk in shifted] == [4, 5]
-    assert all(chunk.importance_weight == 0.91 for chunk in shifted)  # preserved
-    # The prefix chunk already sits at its expected index — untouched.
-    assert stored[0]["id"] not in {str(chunk.id) for chunk in shifted}
+    repaired = _misindexed_chunks(document, stored)
+
+    assert [str(chunk.id) for chunk in repaired] == [stored[1]["id"], stored[3]["id"]]
+    assert [chunk.chunk_index for chunk in repaired] == [1, 3]
+    assert all(chunk.importance_weight == 0.91 for chunk in repaired)  # preserved
+
+
+def test_a_consistent_document_needs_no_repair():
+    document = _document()
+    stored = [_stored_node("a ", 0), _stored_node("b ", 1), _stored_node("c ", 2)]
+
+    assert _misindexed_chunks(document, stored) == []
+
+
+def test_planned_moves_rehydrate_at_their_target_position():
+    """The writer rebuilds a survivor at the position the plan assigned it.
+
+    Rehydration is the writer's job, not the policy's: it carries every stored
+    field across, and adapters replace a node's whole property set on MERGE,
+    so a field left out would be erased rather than reset.
+    """
+    document = _document()
+    node = _stored_node("c ", 2)
+
+    moved = _rehydrate_chunk(document, node, 4)
+
+    assert str(moved.id) == node["id"]  # identity survives the move
+    assert moved.chunk_index == 4
+    assert moved.text == node["text"]
+    assert moved.importance_weight == 0.91
