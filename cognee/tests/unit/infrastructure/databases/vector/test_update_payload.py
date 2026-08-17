@@ -100,7 +100,10 @@ async def test_lancedb_update_payload():
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _port_open("localhost", 5432), reason="no local Postgres on 5432")
 async def test_pgvector_update_payload():
-    import asyncpg
+    # An open port is not enough: a machine can be running Postgres while
+    # cognee is installed without the postgres extra, and a bare import here
+    # fails the test instead of skipping it.
+    asyncpg = pytest.importorskip("asyncpg")
 
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 
