@@ -13,13 +13,15 @@ was not covered by one index — and CLO-557's in-flight progress ticks
 just at start/complete/error, making that gap matter sooner than it used to.
 """
 
+from typing import Sequence, Union
+
 from alembic import op
 from sqlalchemy.engine.reflection import Inspector
 
-revision = "d1e2f3a4b5c6"
-down_revision = "b8c1d3e5f7a9"
-branch_labels = None
-depends_on = None
+revision: str = "d1e2f3a4b5c6"
+down_revision: Union[str, None] = "b8c1d3e5f7a9"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 INDEX_NAME = "ix_pipeline_runs_dataset_pipeline_created_at"
 
