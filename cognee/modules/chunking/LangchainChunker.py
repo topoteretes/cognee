@@ -12,6 +12,7 @@ logger = get_logger()
 
 class LangchainChunker(Chunker):
     """
+    chunker_id = "langchain_chunker_v1"
     A Chunker that splits text into chunks using Langchain's RecursiveCharacterTextSplitter.
 
     The chunker will split the text into chunks of approximately the given size, but will not split
@@ -45,6 +46,7 @@ class LangchainChunker(Chunker):
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
                 if token_count <= self.max_chunk_size:
                     yield DocumentChunk(
+                        chunker_id=self.chunker_id,
                         id=uuid5(NAMESPACE_OID, chunk),
                         text=chunk,
                         chunk_size=token_count,

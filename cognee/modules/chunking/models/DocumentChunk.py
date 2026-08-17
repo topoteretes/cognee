@@ -40,6 +40,12 @@ class DocumentChunk(DataPoint):
     # region with the budget recorded on the chunks it replaces, so a document
     # stays self-consistent even when the global configuration changes.
     max_chunk_tokens: Optional[int] = None
+    # Which chunker produced this chunk (Chunker.chunker_id). Chunkers disagree
+    # on boundaries — an overlapping chunker's output cannot tile its input —
+    # so a document may only be updated by the chunker that built it. None on
+    # chunks written before the field existed, which reads as "unknown" and
+    # falls through to the tiling check.
+    chunker_id: Optional[str] = None
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
     importance_weight: Optional[float] = 0.5

@@ -64,12 +64,14 @@ from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_sum
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
-from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
-from cognee.modules.chunking.incremental_chunking import (
-    IncrementalPlan,
+from cognee.modules.chunking.chunk_id import chunk_content_hash
+from cognee.modules.chunking.chunk_policy import (
+    DEFAULT_CHUNK_POLICY,
+    ChunkPlan,
+    ChunkPlanRequest,
+    ChunkPolicy,
     IncrementalPlanError,
-    compute_incremental_plan,
-    validate_no_loss,
+    stored_chunker_id,
 )
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -257,106 +259,6 @@ async def _prune_ledger_rows(data_id: UUID, dataset_id: UUID, doomed_ids: List[s
             )
         )
         await session.commit()
-
-
-async def _chunk_region(
-    document: Document, region_text: str, max_chunk_size: int
-) -> List[DocumentChunk]:
-    """Run the standard TextChunker over the replacement region.
-
-    Replacement chunks get the same sentence/paragraph boundary semantics as
-    pipeline chunks; only the region's last chunk may come out under-filled,
-    like the tail of any normally-cognified document. The chunker's ids and
-    indexes are region-local and discarded — _build_new_chunks reassigns both.
-    """
-    if not region_text:
-        return []
-
-    async def get_text():
-        yield region_text
-
-    chunker = TextChunker(document, get_text, max_chunk_size)
-    return [chunk async for chunk in chunker.read()]
-
-
-def _assemble_final_chunks(
-    document: Document,
-    stored_chunks: List[dict],
-    plan: IncrementalPlan,
-    region_chunk_lists: List[List[DocumentChunk]],
-) -> tuple:
-    """Walk the final document order once: kept chunks and region chunks interleaved.
-
-    Returns (new_chunks, kept_final_index) where new_chunks carry document-
-    scoped content-hash ids (occurrence counting over the FINAL order, so two
-    identical texts stay distinct; surviving legacy ids are dodged by bumping
-    the occurrence) and kept_final_index maps each kept chunk's old position
-    to its final chunk_index.
-    """
-    affected = set(plan.affected_indices)
-    surviving_ids = {
-        str(node["id"]) for position, node in enumerate(stored_chunks) if position not in affected
-    }
-    region_by_start = {
-        region.affected_indices[0]: index for index, region in enumerate(plan.regions)
-    }
-
-    occurrences: dict = {}
-    new_chunks: List[DocumentChunk] = []
-    kept_final_index: dict = {}
-    final_index = 0
-    position = 0
-    while position < len(stored_chunks):
-        if position in region_by_start:
-            region_index = region_by_start[position]
-            for region_chunk in region_chunk_lists[region_index]:
-                text = region_chunk.text
-                content_hash = chunk_content_hash(text)
-                occurrence = occurrences.get(content_hash, 0)
-                chunk_id = content_chunk_id(document.id, content_hash, occurrence)
-                while str(chunk_id) in surviving_ids:
-                    occurrence += 1
-                    chunk_id = content_chunk_id(document.id, content_hash, occurrence)
-                occurrences[content_hash] = occurrence + 1
-                new_chunks.append(
-                    DocumentChunk(
-                        id=chunk_id,
-                        text=text,
-                        chunk_size=region_chunk.chunk_size,
-                        content_hash=content_hash,
-                        max_chunk_tokens=region_chunk.max_chunk_tokens,
-                        chunk_index=final_index,
-                        cut_type=region_chunk.cut_type,
-                        is_part_of=document,
-                        contains=[],
-                        document_id=str(document.id),
-                        document_name=document.name,
-                    )
-                )
-                final_index += 1
-            position = plan.regions[region_index].affected_indices[-1] + 1
-        else:
-            text_hash = chunk_content_hash(stored_chunks[position]["text"])
-            occurrences[text_hash] = occurrences.get(text_hash, 0) + 1
-            kept_final_index[position] = final_index
-            final_index += 1
-            position += 1
-    return new_chunks, kept_final_index
-
-
-def _region_chunk_budget(stored_chunks: List[dict], region, fallback: int) -> int:
-    """Token budget for re-chunking one region.
-
-    The budget recorded on the chunks the region replaces wins, so an edit
-    keeps the granularity of the text around it even when the global
-    configuration changed after ingestion. Legacy chunks predate the recorded
-    budget and fall back to the current configuration.
-    """
-    for position in region.affected_indices:
-        recorded = stored_chunks[position].get("max_chunk_tokens")
-        if recorded:
-            return int(recorded)
-    return fallback
 
 
 def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
@@ -641,8 +543,16 @@ async def incremental_update(
     preferred_loaders=None,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: Optional[str] = None,
+    chunker: type = TextChunker,
+    policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
 ) -> dict:
-    """Perform a chunk-level incremental update of one document."""
+    """Perform a chunk-level incremental update of one document.
+
+    ``policy`` decides which chunks exist afterwards and what happens to the
+    old ones; it is replaceable without touching storage or this orchestration.
+    ``chunker`` must match the one that built the document's stored chunks —
+    a mismatch is refused rather than discovered as a tiling failure.
+    """
     graph_engine = await get_graph_engine()
     if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
         raise IncrementalUpdateNotPossible(
@@ -697,6 +607,8 @@ async def incremental_update(
                 preferred_loaders,
                 graph_model,
                 custom_prompt,
+                chunker,
+                policy,
             )
 
 
@@ -710,6 +622,8 @@ async def _run_incremental_update(
     preferred_loaders,
     graph_model: type[BaseModel],
     custom_prompt: Optional[str],
+    chunker: type,
+    policy: ChunkPolicy,
 ) -> dict:
     """Stage → validate → (record) → write → publish.
 
@@ -718,7 +632,9 @@ async def _run_incremental_update(
     Errors after the record is created are logged against it. Every write,
     including the unchanged branch's self-heal, happens under a run.
     """
-    bundle = await _stage_and_plan(data_id, data, dataset, user, node_set, preferred_loaders)
+    bundle = await _stage_and_plan(
+        data_id, data, dataset, user, node_set, preferred_loaders, chunker, policy
+    )
 
     # A no-op with nothing to repair is the only path that writes nothing, and
     # so the only one that records no run.
@@ -778,6 +694,8 @@ async def _stage_and_plan(
     user: User,
     node_set: Optional[List[str]],
     preferred_loaders,
+    chunker: type,
+    policy: ChunkPolicy,
 ) -> dict:
     """Everything that can be decided WITHOUT touching live state.
 
@@ -833,33 +751,36 @@ async def _stage_and_plan(
             "shifted_chunks": shifted,
         }
 
-    stored_texts = [node["text"] for node in stored_chunks]
+    # Compatibility is a planning question, so answer it before planning. Every
+    # chunker cuts differently — an overlapping one's output cannot tile its
+    # input — and without this the mismatch would surface as a tiling failure,
+    # indistinguishable from a document that was never cognified.
+    stored_chunker = stored_chunker_id(stored_chunks)
+    if stored_chunker and stored_chunker != getattr(chunker, "chunker_id", ""):
+        raise IncrementalUpdateNotPossible(
+            f"document was chunked by {stored_chunker}, not {getattr(chunker, 'chunker_id', '')}",
+            RefusalReason.UNSUPPORTED_CHUNKER,
+        )
+
     try:
-        plan = compute_incremental_plan(old_text, stored_texts, new_text)
+        plan = await policy(
+            ChunkPlanRequest(
+                old_text=old_text,
+                new_text=new_text,
+                stored_chunks=stored_chunks,
+                document=document,
+                chunker_cls=chunker,
+                fallback_budget=await get_max_chunk_tokens(),
+            )
+        )
     except IncrementalPlanError as error:
         raise IncrementalUpdateNotPossible(str(error), RefusalReason.CHUNKS_NOT_TILING) from error
 
-    fallback_budget = await get_max_chunk_tokens()
-    region_chunk_lists = [
-        await _chunk_region(
-            document,
-            region.replacement_text,
-            _region_chunk_budget(stored_chunks, region, fallback_budget),
-        )
-        for region in plan.regions
-    ]
-    new_chunks, kept_final_index = _assemble_final_chunks(
-        document, stored_chunks, plan, region_chunk_lists
-    )
-    try:
-        validate_no_loss(
-            stored_texts,
-            plan,
-            [[chunk.text for chunk in chunks] for chunks in region_chunk_lists],
-            new_text,
-        )
-    except IncrementalPlanError as error:
-        raise IncrementalUpdateNotPossible(str(error), RefusalReason.CHUNKS_NOT_TILING) from error
+    # Re-derive the document the plan describes and compare it to the text that
+    # was asked for. The policy checked its own arithmetic; this trusts none of
+    # it, and it is policy-agnostic — a policy with no notion of regions is
+    # validated by exactly the same check.
+    _validate_plan_reassembles(plan, stored_chunks, new_text)
 
     return {
         "staged": staged,
@@ -867,9 +788,41 @@ async def _stage_and_plan(
         "data_item": old_data,
         "stored_chunks": stored_chunks,
         "plan": plan,
-        "new_chunks": new_chunks,
-        "kept_final_index": kept_final_index,
     }
+
+
+def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: List[dict], new_text: str) -> None:
+    """Refuse a plan whose chunks do not reassemble into exactly the new text.
+
+    Also catches what a region-level check cannot: duplicate or missing final
+    positions, which would silently reorder or drop a chunk.
+    """
+    stored_text_by_id = {str(node["id"]): node["text"] for node in stored_chunks}
+    placed: dict = {}
+    for chunk in plan.fresh:
+        placed[chunk.chunk_index] = chunk.text
+    for chunk_id, index in list(plan.reused.items()) + list(plan.kept_moves.items()):
+        placed[index] = stored_text_by_id[chunk_id]
+    # Kept chunks the policy did not move keep their stored position.
+    moved = set(plan.reused) | set(plan.kept_moves)
+    deleted = set(plan.deleted_ids)
+    for node in stored_chunks:
+        chunk_id = str(node["id"])
+        if chunk_id in moved or chunk_id in deleted:
+            continue
+        placed.setdefault(int(node.get("chunk_index", -1)), node["text"])
+
+    expected_positions = set(range(len(placed)))
+    if set(placed) != expected_positions:
+        raise IncrementalUpdateNotPossible(
+            "plan leaves chunk positions with gaps or duplicates",
+            RefusalReason.CHUNKS_NOT_TILING,
+        )
+    if "".join(placed[index] for index in sorted(placed)) != new_text:
+        raise IncrementalUpdateNotPossible(
+            "incremental plan would lose or corrupt content",
+            RefusalReason.CHUNKS_NOT_TILING,
+        )
 
 
 async def _write_and_publish(
@@ -896,9 +849,8 @@ async def _write_and_publish(
     staged: StagedContent = bundle["staged"]
     document = bundle["document"]
     stored_chunks = bundle["stored_chunks"]
-    plan = bundle["plan"]
-    new_chunks = bundle["new_chunks"]
-    kept_final_index = bundle["kept_final_index"]
+    plan: ChunkPlan = bundle["plan"]
+    stored_by_id = {str(node["id"]): node for node in stored_chunks}
 
     # The run that is recording this write, not a fresh id: the provenance
     # stamped on every node and edge below embeds it, and that stamp is what
@@ -911,26 +863,21 @@ async def _write_and_publish(
         pipeline_name=PIPELINE_NAME,
     )
 
-    # A replacement chunk that is byte-identical to one being replaced hashes
-    # to the SAME node id. Keep its subgraph: rehydrate the stored node at its
-    # new position (preserving all properties), skip re-extraction, and
-    # exclude it from deletion.
-    affected_ids = {str(stored_chunks[i]["id"]) for i in plan.affected_indices}
-    new_ids = {str(chunk.id) for chunk in new_chunks}
-    stored_by_id = {str(node["id"]): node for node in stored_chunks}
+    # Surviving chunks are rebuilt HERE, not in the policy: the rehydration
+    # carries every stored field across, and a field it drops is erased rather
+    # than reset (adapters replace a node's whole property set on MERGE). The
+    # plan names them; the writer knows how to rebuild them.
     reused_chunks = [
-        _rehydrate_chunk(document, stored_by_id[str(chunk.id)], chunk.chunk_index)
-        for chunk in new_chunks
-        if str(chunk.id) in affected_ids
+        _rehydrate_chunk(document, stored_by_id[chunk_id], index)
+        for chunk_id, index in plan.reused.items()
     ]
-    fresh_chunks = [chunk for chunk in new_chunks if str(chunk.id) not in affected_ids]
 
     cognify_config = get_cognify_config()
-    if fresh_chunks:
+    if plan.fresh:
         # Same extraction + summarization the cognify pipeline runs, with the
         # same ontology resolution, model, and prompt plumbing.
         summaries = await extract_graph_and_summarize(
-            fresh_chunks,
+            plan.fresh,
             graph_model=graph_model,
             config=_resolve_extraction_config(),
             custom_prompt=custom_prompt,
@@ -945,43 +892,44 @@ async def _write_and_publish(
         await _restore_repositioned_chunks(reused_chunks, context)
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
-    ids_to_delete = sorted(affected_ids - new_ids)
-    if ids_to_delete:
-        doomed = await delete_chunks_incremental(ids_to_delete, dataset_id, data_id)
+    if plan.deleted_ids:
+        doomed = await delete_chunks_incremental(plan.deleted_ids, dataset_id, data_id)
         await _prune_ledger_rows(data_id, dataset_id, doomed)
 
     # -- Renumber kept chunks whose position shifted --------------------------- #
-    shifted_chunks = _build_shifted_chunks(
-        document, stored_chunks, set(plan.affected_indices), kept_final_index
-    )
+    shifted_chunks = [
+        _rehydrate_chunk(document, stored_by_id[chunk_id], index)
+        for chunk_id, index in plan.kept_moves.items()
+    ]
     if shifted_chunks:
         await _restore_repositioned_chunks(shifted_chunks, context)
 
     # -- PUBLISH: content + metadata + token count + stamp, atomically --------- #
+    replaced = set(plan.deleted_ids) | set(plan.reused)
     surviving_tokens = sum(
-        int(node.get("chunk_size", 0))
-        for position, node in enumerate(stored_chunks)
-        if position not in set(plan.affected_indices)
+        int(node.get("chunk_size", 0)) for node in stored_chunks if str(node["id"]) not in replaced
     )
-    new_tokens = sum(chunk.chunk_size for chunk in new_chunks)
+    new_tokens = sum(chunk.chunk_size for chunk in plan.fresh)
+    new_tokens += sum(int(stored_by_id[chunk_id].get("chunk_size", 0)) for chunk_id in plan.reused)
     await _publish_staged(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
 
-    kept_count = len(stored_chunks) - len(plan.affected_indices)
+    added_chunks = len(plan.fresh) + len(plan.reused)
+    kept_count = len(stored_chunks) - len(replaced)
     logger.info(
         "incremental update: %d regions, kept %d chunks, deleted %d, added %d "
         "(%d reused), reindexed %d",
-        len(plan.regions),
+        plan.regions,
         kept_count,
-        len(ids_to_delete),
-        len(new_chunks),
+        len(plan.deleted_ids),
+        added_chunks,
         len(reused_chunks),
         len(shifted_chunks),
     )
     return {
         "status": "incremental",
-        "regions": len(plan.regions),
-        "deleted_chunks": len(ids_to_delete),
-        "added_chunks": len(new_chunks),
+        "regions": plan.regions,
+        "deleted_chunks": len(plan.deleted_ids),
+        "added_chunks": added_chunks,
         "reused_chunks": len(reused_chunks),
         "kept_chunks": kept_count,
         "reindexed_chunks": len(shifted_chunks),

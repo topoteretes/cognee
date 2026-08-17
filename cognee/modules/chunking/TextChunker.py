@@ -10,6 +10,8 @@ logger = get_logger()
 
 
 class TextChunker(Chunker):
+    chunker_id = "text_chunker_v1"
+
     async def read(self):
         document_id = str(self.document.id)
         document_name = self.document.name or basename(self.document.raw_data_location)
@@ -37,6 +39,7 @@ class TextChunker(Chunker):
                     if len(paragraph_chunks) == 0:
                         chunk_id, content_hash = chunk_identity(chunk_data["text"])
                         yield DocumentChunk(
+                            chunker_id=self.chunker_id,
                             id=chunk_id,
                             text=chunk_data["text"],
                             chunk_size=chunk_data["chunk_size"],
@@ -60,6 +63,7 @@ class TextChunker(Chunker):
                         try:
                             chunk_id, content_hash = chunk_identity(chunk_text)
                             yield DocumentChunk(
+                                chunker_id=self.chunker_id,
                                 id=chunk_id,
                                 text=chunk_text,
                                 chunk_size=self.chunk_size,
@@ -89,6 +93,7 @@ class TextChunker(Chunker):
                 chunk_text = " ".join(chunk["text"] for chunk in paragraph_chunks)
                 chunk_id, content_hash = chunk_identity(chunk_text)
                 yield DocumentChunk(
+                    chunker_id=self.chunker_id,
                     id=chunk_id,
                     text=chunk_text,
                     chunk_size=self.chunk_size,

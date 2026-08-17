@@ -11,6 +11,8 @@ from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
 from cognee.api.v1.update.incremental import IncrementalUpdateNotPossible, incremental_update
+from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("update")
@@ -30,6 +32,8 @@ async def update(
     chunk_level_diff: bool = True,
     graph_model: type[BaseModel] = KnowledgeGraph,
     custom_prompt: Optional[str] = None,
+    chunker: type = TextChunker,
+    policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
 ) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo], dict]:
     """
     Update existing data in Cognee.
@@ -88,6 +92,12 @@ async def update(
                  delete + pinned re-add + cognify flow when chunk-level preconditions are
                  not met (first ingestion, non-text content, unverified graph adapter).
                  Permission errors always propagate and never trigger the fallback.
+        chunker: Chunking strategy. Must match the one that built the document's stored
+                 chunks — a mismatch is refused (and falls back) rather than surfacing
+                 as a tiling failure. Chunk-level path only.
+        policy: Decides which chunks exist after the edit and what happens to the old
+                 ones. Replaceable without touching storage or update orchestration.
+                 Chunk-level path only; not exposed on the HTTP route.
 
     Returns:
         With chunk_level_diff, a summary dict with the same keys for either status:
@@ -167,6 +177,8 @@ async def update(
                 preferred_loaders=preferred_loaders,
                 graph_model=graph_model,
                 custom_prompt=custom_prompt,
+                chunker=chunker,
+                policy=policy,
             )
         except IncrementalUpdateNotPossible as refusal:
             # The reason is a structured field, not just prose: an unsupported

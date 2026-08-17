@@ -8,7 +8,7 @@ Legacy chunks carry no recorded budget and fall back to the current config.
 
 import asyncio
 
-from cognee.api.v1.update.incremental import _region_chunk_budget
+from cognee.modules.chunking.chunk_policy import _region_chunk_budget
 from cognee.modules.chunking.incremental_chunking import ReplacementRegion
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.Document import Document
