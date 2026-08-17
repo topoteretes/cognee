@@ -79,6 +79,50 @@ async def test_custom_configs_skip_the_incremental_path():
         assert result == full_result, "custom-config updates must return the full-flow result"
 
 
+async def test_multi_item_input_is_rejected_not_multiplied():
+    """update() is the ONLY place that rejects a multi-item list.
+
+    The incremental engine used to re-check this and raise
+    IncrementalUpdateNotPossible — which means "fall back", so a two-item
+    update would have been routed into a full flow that had already unwrapped
+    it. That copy is gone, which makes this check the only thing standing
+    between a caller and a silently multiplied update.
+    """
+    from cognee.modules.ingestion.exceptions import IngestionError
+
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock()
+
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
+    with p1, p2, p3, p4, p5, p6:
+        with pytest.raises(IngestionError):
+            await update_module.update(
+                data_id=data_id,
+                data=["first document", "second document"],
+                dataset_id=dataset_id,
+                user=SimpleNamespace(id=uuid4()),
+            )
+
+    incremental.assert_not_called()
+
+
+async def test_single_item_list_is_unwrapped():
+    """The permissive shape the HTTP router sends is accepted, not refused."""
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock(return_value={"status": "incremental"})
+
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, {"run": "full"})
+    with p1, p2, p3, p4, p5, p6:
+        await update_module.update(
+            data_id=data_id,
+            data=["only document"],
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
+
+    assert incremental.await_args.kwargs["data"] == "only document"
+
+
 async def test_no_configs_take_the_incremental_path():
     data_id, dataset_id = uuid4(), uuid4()
     incremental = AsyncMock(return_value={"status": "incremental"})

@@ -10,6 +10,8 @@ a graph adapter registered at runtime through ``use_graph_adapter()`` can take
 the incremental path by satisfying the contract.
 """
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -19,6 +21,8 @@ from cognee.api.v1.update.incremental import (
     RefusalReason,
     incremental_update,
 )
+from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY
+from cognee.modules.chunking.TextChunker import TextChunker
 
 
 def test_every_reason_is_distinguishable():
@@ -121,6 +125,139 @@ def test_the_provider_name_gate_is_gone():
     import cognee.api.v1.update.incremental as incremental
 
     assert not hasattr(incremental, "SUPPORTED_GRAPH_PROVIDERS")
+
+
+@pytest.mark.asyncio
+async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatch):
+    """The point of chunker_id: say WHY, instead of failing the tiling check.
+
+    Chunkers disagree on boundaries, so a document can only be updated by the
+    one that built it. Without recorded identity the mismatch surfaced as
+    "stored chunk 0 does not tile the stored document text" — the same error a
+    never-cognified document produces.
+    """
+    import cognee.api.v1.update.incremental as incremental
+
+    stored = [{"id": str(uuid4()), "text": "para\n", "chunk_index": 0, "chunker_id": "other_v1"}]
+
+    async def _get_data(*_args, **_kwargs):
+        return SimpleNamespace(
+            id=uuid4(), raw_data_location="/tmp/old.txt", content_hash="OLD", external_metadata={}
+        )
+
+    async def _read(location):
+        return "old\n" if location == "/tmp/old.txt" else "new\n"
+
+    async def _stored_chunks(*_args, **_kwargs):
+        return stored
+
+    async def _stage(*_args, **_kwargs):
+        return SimpleNamespace(raw_data_location="/tmp/new.txt", content_hash="NEW")
+
+    monkeypatch.setattr(incremental, "get_data", _get_data)
+    monkeypatch.setattr(incremental, "_read_processed_text", _read)
+    monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
+    monkeypatch.setattr(incremental, "_stage_new_content", _stage)
+    monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._stage_and_plan(
+            uuid4(),
+            "new",
+            SimpleNamespace(id=uuid4()),
+            SimpleNamespace(id=uuid4()),
+            None,
+            None,
+            chunker=TextChunker,  # declares text_chunker_v1, stored says other_v1
+            policy=DEFAULT_CHUNK_POLICY,
+        )
+
+    assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER
+    assert "other_v1" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_write_without_delete_permission_is_denied(monkeypatch):
+    """This path destroys graph state, so it needs the same permission the
+    full fallback needs — and must deny with the same exception type.
+
+    Without the delete check, the permission update() demanded depended on
+    which branch it happened to take, and the faster branch was the weaker one.
+    """
+    import cognee.api.v1.update.incremental as incremental
+    from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    class _Adapter:
+        supports_incremental_chunk_updates = True
+
+    async def _get_graph_engine():
+        return _Adapter()
+
+    granted = []
+
+    async def _authorize(_user, dataset_id, permission):
+        granted.append(permission)
+        if permission == "delete":
+            raise PermissionDeniedError("no delete permission")
+        return SimpleNamespace(id=dataset_id)
+
+    monkeypatch.setattr(incremental, "get_graph_engine", _get_graph_engine)
+    monkeypatch.setattr(incremental, "get_authorized_dataset", _authorize)
+
+    with pytest.raises(UnauthorizedDataAccessError):
+        await incremental_update(uuid4(), "text", uuid4(), user=SimpleNamespace(id=uuid4()))
+
+    assert "delete" in granted, "the delete permission was never checked"
+
+
+@pytest.mark.asyncio
+async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
+    """A big edit must not become one oversized, all-or-nothing extraction.
+
+    The cognify pipeline bounds this through the task machinery
+    (task_config={"batch_size": ...}); this path does not run through it, so
+    the slicing is explicit and needs its own guard. Unbounded, a rewrite of
+    most of a large document sends every replacement chunk into a single call
+    with no intermediate progress.
+    """
+    import cognee.api.v1.update.incremental as incremental
+    from cognee.modules.chunking.chunk_policy import ChunkPlan
+
+    batches = []
+
+    async def _extract(chunks, **_kwargs):
+        batches.append(len(chunks))
+        return []
+
+    monkeypatch.setattr(incremental, "extract_graph_and_summarize", _extract)
+    monkeypatch.setattr(incremental, "add_data_points", AsyncMock())
+    monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
+    monkeypatch.setattr(incremental, "publish_updated_data", AsyncMock())
+    monkeypatch.setattr(incremental, "delete_chunks_incremental", AsyncMock(return_value=[]))
+    monkeypatch.setattr(incremental, "prune_ledger_rows", AsyncMock())
+    monkeypatch.setattr(
+        incremental,
+        "get_cognify_config",
+        lambda: SimpleNamespace(
+            chunks_per_batch=3, triplet_embedding=False, contradiction_detection=False
+        ),
+    )
+
+    fresh = [SimpleNamespace(id=uuid4(), chunk_size=1) for _ in range(7)]
+    bundle = {
+        "staged": SimpleNamespace(),
+        "document": SimpleNamespace(id=uuid4()),
+        "stored_chunks": [],
+        "plan": ChunkPlan(fresh=fresh, regions=1),
+        "data_item": SimpleNamespace(id=uuid4()),
+    }
+
+    await incremental._write_and_publish(
+        bundle, uuid4(), SimpleNamespace(id=uuid4()), None, None, None, None, uuid4()
+    )
+
+    assert batches == [3, 3, 1], f"expected bounded batches of 3, got {batches}"
 
 
 @pytest.mark.asyncio
