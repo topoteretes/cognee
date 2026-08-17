@@ -1,7 +1,7 @@
 import enum
 from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, JSON, Enum, UUID, String
+from sqlalchemy import Column, DateTime, JSON, Enum, UUID, String, Index
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -14,6 +14,19 @@ class PipelineRunStatus(enum.Enum):
 
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
+    __table_args__ = (
+        # Covers get_pipeline_status.py / get_pipeline_progress.py's
+        # ROW_NUMBER() lookup of each dataset's latest run for a pipeline
+        # (filter on dataset_id + pipeline_name, order by created_at DESC).
+        # See alembic/versions/d1e2f3a4b5c6_add_pipeline_runs_status_index.py
+        # for the migration that adds this to existing databases.
+        Index(
+            "ix_pipeline_runs_dataset_pipeline_created_at",
+            "dataset_id",
+            "pipeline_name",
+            "created_at",
+        ),
+    )
 
     id = Column(UUID, primary_key=True, default=uuid4)
 

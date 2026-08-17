@@ -7,6 +7,9 @@ Covered here:
 - An item that hard-raises is still counted (finally-based, not a plain
   post-return increment).
 - Large batches throttle the DB write itself, not just the in-memory count.
+- log_pipeline_run_progress updates the run's one STARTED row in place
+  instead of inserting a new pipeline_runs row per tick, so a long batch
+  doesn't grow the table unboundedly.
 - pipeline_run_info_queues correctly round-trips a PipelineRunProgress event,
   the same way it already does for the other PipelineRunInfo subclasses.
 """
@@ -16,10 +19,20 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
+from cognee.modules.pipelines.models import PipelineRun
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunProgress
+from cognee.modules.pipelines.operations.log_pipeline_run_progress import (
+    log_pipeline_run_progress,
+)
+from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
 from cognee.modules.pipelines.queues import pipeline_run_info_queues as queues_module
+from cognee.infrastructure.databases.relational import (
+    create_db_and_tables,
+    get_relational_engine,
+)
 
 
 @pytest.mark.asyncio
@@ -157,6 +170,52 @@ async def test_run_tasks_throttles_progress_db_writes_on_large_batches(
     assert 15 <= len(progress_calls) <= 25
     assert any(call["completed_items"] == 100 for call in progress_calls)
     assert any(call["completed_items"] == 1 for call in progress_calls)
+
+
+@pytest.mark.asyncio
+async def test_log_pipeline_run_progress_updates_in_place():
+    """Multiple progress ticks for the same run must update one row, not
+    insert one per tick — otherwise pipeline_runs grows without bound as
+    batches accumulate (the table's whole lifetime, not just one run)."""
+    await create_db_and_tables()
+
+    dataset_id = uuid4()
+    pipeline_id = uuid4()
+
+    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id, None)
+    pipeline_run_id = pipeline_run.pipeline_run_id
+
+    for tick in range(1, 6):
+        await log_pipeline_run_progress(
+            pipeline_run_id=pipeline_run_id,
+            pipeline_id=pipeline_id,
+            pipeline_name="cognify_pipeline",
+            dataset_id=dataset_id,
+            completed_items=tick,
+            total_items=5,
+            current_stage=f"stage-{tick}",
+        )
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PipelineRun).filter(PipelineRun.pipeline_run_id == pipeline_run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    # log_pipeline_run_start's row + zero extra rows from the five ticks
+    # that followed — not six rows.
+    assert len(rows) == 1
+    assert rows[0].run_info["progress"] == {
+        "completed_items": 5,
+        "total_items": 5,
+        "current_stage": "stage-5",
+    }
 
 
 def test_queue_round_trips_pipeline_run_progress():
