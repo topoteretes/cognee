@@ -5,6 +5,7 @@ from cognee.modules.retrieval.hybrid.results import (
     display_value,
     first_display_value,
     payload,
+    payload_matches_node_filter,
     result_id,
 )
 from cognee.shared.logging_utils import get_logger
@@ -17,11 +18,13 @@ async def build_entities(
     entity_hits: list[Any],
     max_edges_per_entity: int,
     edge_ranks: Optional[dict[str, int]] = None,
+    node_name: Optional[list[str]] = None,
+    node_name_filter_operator: str = "OR",
 ):
     if not entity_hits:
         return []
 
-    entities = [_entity_from_result(result) for result in entity_hits]
+    entities = [_entity_from_result(result, node_name) for result in entity_hits]
     entity_ids = [entity["id"] for entity in entities if entity["id"]]
     if not entity_ids:
         return entities
@@ -36,12 +39,40 @@ async def build_entities(
 
     connections_by_entity_id = _partition_neighborhood(entity_ids, nodes, edges)
     for entity in entities:
+        connections = connections_by_entity_id.get(entity["id"], [])
+        if node_name:
+            connections = _scoped_connections(
+                entity["id"], connections, node_name, node_name_filter_operator
+            )
         entity["edges"] = _edge_bullets_from_connections(
-            connections_by_entity_id.get(entity["id"], []),
+            connections,
             max_edges_per_entity,
             edge_ranks or {},
         )
     return entities
+
+
+def _scoped_connections(
+    entity_id: str,
+    connections: list[tuple[dict, dict, dict]],
+    node_name: list[str],
+    node_name_filter_operator: str,
+) -> list[tuple[dict, dict, dict]]:
+    """Drop triples whose neighbor endpoint falls outside the requested node sets.
+
+    The matched entity already passed the scoped vector search, but its one-hop
+    neighborhood comes from an unfiltered graph round trip, so foreign-dataset
+    neighbors (and their edge_text derived from foreign chunks) must be checked
+    here. Fail-closed: a neighbor without a belongs_to_set list is dropped."""
+    scoped = []
+    for connection in connections:
+        source, _, target = connection
+        neighbor = target if str(source.get("id")) == str(entity_id) else source
+        if str(neighbor.get("id")) == str(entity_id) or payload_matches_node_filter(
+            neighbor, node_name, node_name_filter_operator
+        ):
+            scoped.append(connection)
+    return scoped
 
 
 def _partition_neighborhood(
@@ -83,19 +114,33 @@ def format_entities(entities: list[dict]) -> str:
     return "## Relevant entities\n" + "\n\n".join(blocks)
 
 
-def _entity_from_result(result: Any) -> dict:
+def _entity_from_result(result: Any, node_name: Optional[list[str]] = None) -> dict:
     result_payload = payload(result)
     entity_id = result_id(result) or ""
+    description = display_value(result_payload.get("description"))
+    if node_name and not _has_single_owner_set(result_payload):
+        # Shared entities carry a single global description overwritten by every
+        # dataset's re-extraction (last writer wins), so on scoped searches it may
+        # have been authored by a dataset outside the filter. Suppress it unless
+        # the entity provably belongs to exactly one node set.
+        description = None
     return {
         "id": entity_id,
         "name": first_display_value(
             result_payload.get("name"), result_payload.get("text"), entity_id
         )
         or "",
-        "description": display_value(result_payload.get("description")),
+        "description": description,
         "type": _entity_type(result_payload),
         "edges": [],
     }
+
+
+def _has_single_owner_set(result_payload: dict) -> bool:
+    belongs_to_set = result_payload.get("belongs_to_set")
+    if not isinstance(belongs_to_set, list) or not belongs_to_set:
+        return False
+    return len({str(item) for item in belongs_to_set}) == 1
 
 
 def _format_entity(entity: dict) -> str:
