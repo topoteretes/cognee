@@ -256,6 +256,9 @@ export default function SearchPage() {
   const [input, setInput] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [scope, setScope] = useState<SearchScope>("documents");
+  // When on, ask the graph for the explicit connecting path between two entities
+  // (SearchType.CONNECTION_PATH) instead of a normal completion.
+  const [connectionPath, setConnectionPath] = useState(false);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -403,15 +406,19 @@ export default function SearchPage() {
       const mostRecentAgentSessionId = sessions.find(
         (s) => !s.session_id.startsWith(SESSION_PREFIX),
       )?.session_id;
-      const sendScope = scope === "agent" ? ["session", "trace"] : "graph";
+      // Connection-path search is graph-only; it ignores the agent/session scope.
+      const sendScope =
+        !connectionPath && scope === "agent" ? ["session", "trace"] : "graph";
       // Graph searches carry the conversation's session id so the backend
       // records the Q&A — that's what persists the chat across refreshes.
-      const sendSessionId = scope === "agent" ? mostRecentAgentSessionId : finalConvoId;
+      const sendSessionId =
+        !connectionPath && scope === "agent" ? mostRecentAgentSessionId : finalConvoId;
       const data = await recallKnowledge(cogniInstance, {
         query,
         scope: sendScope as never,
         sessionId: sendSessionId,
         datasetIds: searchDatasetIds,
+        searchType: connectionPath ? "CONNECTION_PATH" : undefined,
       });
       const resultData = (Array.isArray(data) ? data : []) as SearchResultItem[];
       const content = normalizeResults(resultData);
@@ -642,6 +649,22 @@ export default function SearchPage() {
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  onClick={() => setConnectionPath((v) => !v)}
+                  className="cursor-pointer"
+                  title="Explain the path connecting two entities"
+                  style={{
+                    background: connectionPath ? "#6510F4" : "#FFFFFF",
+                    color: connectionPath ? "#FFFFFF" : "#3F3F46",
+                    border: connectionPath ? "none" : "1px solid #E4E4E7",
+                    borderRadius: 100, paddingBlock: 4, paddingInline: 10,
+                    fontSize: 11, lineHeight: "16px", fontFamily: "inherit",
+                    cursor: "pointer",
+                  }}
+                >
+                  Connection Path
+                </button>
               </div>
               <BrainSelector allowAll={false} align="right" direction="up" />
             </div>
