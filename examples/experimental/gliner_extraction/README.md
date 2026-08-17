@@ -58,12 +58,41 @@ sentences + an entity digest), not abstractive. Answer generation at query
 time (`GRAPH_COMPLETION`) still needs an LLM; `CHUNKS`/`SUMMARIES`/`CHUNKS_LEXICAL`
 search stays fully LLM-free.
 
+## Where the schema comes from (OWL + LLM discovery)
+
+GLiNER is schema-driven: it only extracts the types you name. Instead of the
+hardcoded defaults, derive the schema from an OWL ontology, and optionally
+let ONE per-dataset LLM call propose types the ontology doesn't cover:
+
+```python
+from ontology_schema import gliner_schema_from_ontology, discover_additional_types
+
+# OWL classes -> entity types, OWL object properties -> relation types
+# (rdfs:label as name, rdfs:comment as the description GLiNER matches on)
+entity_types, relation_types = gliner_schema_from_ontology("military.owl")
+
+# Optional: one LLM call over a sample proposes labels NOT in the ontology
+extra_e, extra_r = await discover_additional_types(sample_texts, entity_types, relation_types)
+entity_types |= extra_e
+relation_types |= extra_r
+
+await gliner_cognify(datasets=["my_dataset"], extractor=extractor,
+                     entity_types=entity_types, relation_types=relation_types)
+```
+
+This keeps open-endedness at per-dataset cost while extraction itself stays
+LLM-free per chunk. Additionally, when `ONTOLOGY_FILE_PATH` is set, cognee's
+existing ontology resolver canonicalizes and enriches the extracted graph
+against the same OWL — that mechanism applies to GLiNER output unchanged.
+
 ## Files
 
 - `gliner_graph_extractor.py` — the `calculate_chunk_graphs` hook; maps GLiNER
   output (batched, span-aware) onto cognee's `KnowledgeGraph` model.
 - `gliner_cognify.py` — the full pipeline swap (`gliner_extract_and_summarize`
   task + `gliner_cognify()` runner).
+- `ontology_schema.py` — OWL → GLiNER schema derivation + per-dataset LLM
+  discovery of types the ontology doesn't cover.
 - `demo_gliner_cognify.py` — end-to-end demo that runs with a deliberately
   broken LLM key as proof of zero LLM calls.
 - `benchmark_book.py` — whole-book benchmark (`python benchmark_book.py book.pdf`).
