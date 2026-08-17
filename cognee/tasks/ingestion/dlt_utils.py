@@ -18,13 +18,16 @@ def document_source_tag(item) -> Optional[str]:
     return tag if isinstance(tag, str) and tag else None
 
 
-def _metadata_source(metadata) -> Optional[str]:
+def metadata_source(metadata) -> Optional[str]:
     """Extract the ``source`` field from system metadata.
 
     Accepts a dict, a JSON string, or an object with a ``system_metadata``
     attribute (a Data record / DataItem). Returns None when the source cannot
     be determined. Deliberately never reads external_metadata: that field is
     user-writable, and routing/deletion decisions must not key on user bytes.
+
+    Shared reader for every system_metadata["source"] check (DLT here, code
+    files in cognee.tasks.code_graph.code_files) so the tag is parsed one way.
     """
     meta = getattr(metadata, "system_metadata", metadata)
     if isinstance(meta, str):
@@ -39,12 +42,12 @@ def _metadata_source(metadata) -> Optional[str]:
 
 def is_dlt_sourced(metadata) -> bool:
     """Check whether system_metadata indicates a legacy per-row DLT item (source == "dlt")."""
-    return _metadata_source(metadata) == "dlt"
+    return metadata_source(metadata) == "dlt"
 
 
 def is_dlt_source_manifest(metadata) -> bool:
     """Check whether system_metadata indicates a DLT source manifest (source == "dlt_source")."""
-    return _metadata_source(metadata) == "dlt_source"
+    return metadata_source(metadata) == "dlt_source"
 
 
 async def load_dlt_manifest(raw_data_location: str) -> dict:

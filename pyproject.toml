@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "1.4.2"
+version = "1.5.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -57,16 +57,25 @@ dependencies = [
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "pylance>=0.22.0,<=0.36.0",
-    # ladybug 0.18.x publishes only macosx_15_0 wheels and its sdist needs C++20
-    # std::atomic_ref, which Apple Clang's libc++ on macOS <= 14 lacks — so the
-    # source-build fallback hard-fails there. Darwin 24 == macOS 15: older Macs
-    # stay on 0.17.x (storage code 41; the ladybug_migrate worker upgrades the
-    # on-disk format when they later move to 0.18). The '24.' (trailing dot) is
-    # deliberate: it is not a valid PEP 440 version, which forces PEP 508's
-    # string-comparison fallback — packaging evaluates BOTH sides of and/or, and
-    # version-comparing platform_release crashes pip on Linux kernels like
-    # "6.8.0-45-generic" (packaging.version.InvalidVersion).
-    "ladybug>=0.16.0,<=0.18.2 ; sys_platform != 'darwin' or platform_release >= '24.'",
+    # ladybug 0.18.x+ publishes only macosx_15_0 wheels (its sdist needs C++20
+    # std::atomic_ref, which Apple Clang's libc++ on macOS <= 14 lacks), so
+    # macOS 13/14 (Darwin 22/23) get 0.17.x — the last line with macosx_13_0
+    # wheels; storage code 41, which ladybug_migrate upgrades forward when the
+    # machine later moves to a newer line. Those platforms therefore stay
+    # exposed to the storage-corruption defects fixed in 0.18.2 and 0.19.1
+    # (COG-6185).
+    # Pinned at 0.19.0, not 0.19.1: extension.ladybugdb.com publishes no
+    # v0.19.1 JSON extension (404 on every platform), and 0.19.1 segfaults
+    # cognee's DB worker mid-write in CI. 0.19.0 carries the same storage
+    # fix and its extension build exists.
+    # Each pinned version's on-disk storage code must also exist in
+    # cognee_db_workers.ladybug_migrate.ladybug_version_mapping (0.19.0 -> 43),
+    # so bumping this pin is a two-file change.
+    # 0.19.x Windows wheels no longer vendor the OpenSSL DLLs their extension
+    # imports; cognee_db_workers._windows_openssl supplies them. Drop that shim
+    # once a pinned release vendors OpenSSL again.
+    "ladybug>=0.17.0,<0.18 ; sys_platform == 'darwin' and ('Darwin Kernel Version 22.' in platform_version or 'Darwin Kernel Version 23.' in platform_version)",
+    "ladybug==0.19.0 ; sys_platform != 'darwin' or ('Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
@@ -221,7 +230,11 @@ Repository = "https://github.com/topoteretes/cognee"
 cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]
-requires = ["hatchling"]
+# Pinned: the build backend decides the wheel's Metadata-Version, and the PyPI
+# publish action validates it with a pinned twine — an unpinned hatchling let
+# the emitted metadata drift to 2.5 and broke the release publish gate. Bump
+# this together with the gh-action-pypi-publish pin in the release workflows.
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]

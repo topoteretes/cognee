@@ -185,10 +185,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     if self.dimensions is not None:
                         embedding_kwargs["dimensions"] = self.dimensions
 
-                    # Ensure each attempt does not hang indefinitely
+                    # Ensure each attempt does not hang indefinitely. The
+                    # deadline is TOTAL per attempt and starts before any
+                    # network I/O, so under large loads a request can spend
+                    # most of it queued client-side; 300s absorbs that while
+                    # still catching a genuinely hung request (matches the
+                    # OpenAI-compatible engine's deadline).
                     response = await asyncio.wait_for(
                         litellm.aembedding(**embedding_kwargs),
-                        timeout=30.0,
+                        timeout=300.0,
                     )
 
                 embedding_response = [data["embedding"] for data in response.data]

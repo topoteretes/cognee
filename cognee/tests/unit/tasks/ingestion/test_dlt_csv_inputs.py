@@ -1,174 +1,134 @@
-"""CSV inputs to the DLT auto-detection: paths, uploads, and s3 locations.
+"""CSV ingestion routes through the loader engine's dlt_csv_loader.
 
-resolve_dlt_sources auto-routes CSVs to the DLT manifest path. Three input
-shapes must all land there with a filename-derived source name (the manifest
-identity is seeded from it):
-
-1. local path strings (and file:// URIs) — read in place, nothing spooled
-2. file-like uploads (API UploadFile / SDK binary handles) — spooled to a
-   temp dir dlt's filesystem source can read
-3. s3:// paths — downloaded through cognee's storage layer, then spooled
-
-Naming per file (instead of dlt's fixed "_read_csv" pipe name) is what keeps
-two CSVs in one dataset from collapsing into a single manifest identity.
+With the dlt extra installed, the engine's priority order puts
+``dlt_csv_loader`` above the plain ``csv_loader``, so every CSV takes the
+structured DLT route: staging ingestion, one manifest per file with a stable
+``data_id``, and the ``system_metadata`` route stamp — returned to
+``ingest_data`` as a ``LoaderResult``. The text-flattening ``csv_loader``
+remains reachable as an explicit per-call choice via ``preferred_loaders``,
+and is the automatic fallback when dlt is not installed (this loader never
+registers then).
 """
 
-import io
-import logging
-import os
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
-# The unit CI matrices install the base extras only — dlt is optional there,
-# and the resolve_dlt_sources import chain below pulls dlt at module level.
+# The unit CI matrices install the base extras only — without dlt the loader
+# under test is deliberately not registered.
 pytest.importorskip("dlt")
 
-import cognee.infrastructure.files.utils.open_data_file as open_data_file_module
-from cognee.tasks.ingestion.create_dlt_source import (
-    create_dlt_source_from_csv,
-    csv_source_name,
-    is_csv_upload,
-)
-from cognee.tasks.ingestion.resolve_dlt_sources import (
-    _log_structured_inputs_without_dlt,
-    _normalize_structured_inputs,
-)
+import importlib  # noqa: E402
+
+# The ingestion package re-exports these names, shadowing the submodules on
+# plain ``import a.b.c as m`` — import_module returns the real modules.
+ingest_dlt_source_module = importlib.import_module("cognee.tasks.ingestion.ingest_dlt_source")
+resolve_module = importlib.import_module("cognee.tasks.ingestion.resolve_dlt_sources")
+from cognee.infrastructure.loaders.create_loader_engine import create_loader_engine  # noqa: E402
+from cognee.infrastructure.loaders.external.dlt_csv_loader import DltCsvLoader  # noqa: E402
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult  # noqa: E402
+from cognee.modules.ingestion.exceptions import IngestionError  # noqa: E402
+from cognee.tasks.ingestion.data_item import DataItem  # noqa: E402
 
 CSV_BYTES = b"id,name\n1,Ada\n2,Alan\n"
 
 
-def _upload(filename="people.csv", content=CSV_BYTES):
-    """Duck-typed API upload: .file + .filename, like starlette's UploadFile."""
-    return SimpleNamespace(file=io.BytesIO(content), filename=filename)
-
-
-def _csv_file(tmp_path, name="people.csv", content=CSV_BYTES):
-    path = tmp_path / name
-    path.write_bytes(content)
+@pytest.fixture
+def csv_file(tmp_path):
+    path = tmp_path / "people.csv"
+    path.write_bytes(CSV_BYTES)
     return str(path)
 
 
-class TestCsvSourceName:
-    def test_stem_is_sanitized_and_lowercased(self):
-        assert csv_source_name("My Data-2024.csv") == "my_data_2024"
+class TestDispatch:
+    def test_dlt_loader_wins_csv_dispatch(self, csv_file):
+        engine = create_loader_engine()
+        loader = engine.get_loader(csv_file, None)
+        assert loader is not None
+        assert loader.loader_name == "dlt_csv_loader"
 
-    def test_path_is_reduced_to_basename(self):
-        assert csv_source_name("/some/dir/people.csv") == "people"
-
-    def test_unusable_stem_falls_back(self):
-        assert csv_source_name("---.csv") == "csv_source"
-
-
-class TestIsCsvUpload:
-    def test_api_upload_shape(self):
-        assert is_csv_upload(_upload())
-
-    def test_binary_handle_shape(self, tmp_path):
-        with open(_csv_file(tmp_path), "rb") as handle:
-            assert is_csv_upload(handle)
-
-    def test_strings_are_not_uploads(self):
-        assert not is_csv_upload("people.csv")
-
-    def test_non_csv_filename_rejected(self):
-        assert not is_csv_upload(SimpleNamespace(file=io.BytesIO(), filename="notes.txt"))
-
-    def test_filename_less_object_rejected(self):
-        assert not is_csv_upload(io.BytesIO(CSV_BYTES))
+    def test_preferred_loader_forces_plain_csv(self, csv_file):
+        engine = create_loader_engine()
+        loader = engine.get_loader(csv_file, {"csv_loader": {}})
+        assert loader is not None
+        assert loader.loader_name == "csv_loader"
 
 
-class TestCreateDltSourceFromCsv:
-    def test_resource_named_after_file(self, tmp_path):
-        source = create_dlt_source_from_csv(_csv_file(tmp_path, "Employee Roster.csv"))
-        assert source.name == "employee_roster"
+class TestLoad:
+    @pytest.mark.asyncio
+    async def test_load_returns_manifest_loader_result(self, csv_file, tmp_path, monkeypatch):
+        """load() must run staging ingestion + manifest build and hand back
+        the manifest's stable id and route stamp as a LoaderResult."""
+        manifest_id = uuid4()
+        stamp = {"source": "dlt_source", "source_name": "people", "row_count": 2}
+        manifest_item = DataItem(data='{"rows": []}', data_id=manifest_id, system_metadata=stamp)
 
+        captured = {}
 
-@pytest.mark.asyncio
-class TestNormalizeStructuredInputs:
-    async def test_local_path_passes_through_without_spooling(self, tmp_path):
-        items, spool_dir = await _normalize_structured_inputs([_csv_file(tmp_path)], None)
-        assert spool_dir is None
-        assert items[0].name == "people"
+        def fake_create(path, source_name=None):
+            captured["source_name"] = source_name
+            captured["path"] = path
+            return SimpleNamespace(name=source_name)
 
-    async def test_file_uri_is_unwrapped(self, tmp_path):
-        items, spool_dir = await _normalize_structured_inputs(
-            [f"file://{_csv_file(tmp_path)}"], None
+        import cognee.tasks.ingestion.create_dlt_source as create_module
+        import cognee.infrastructure.loaders.external.dlt_csv_loader as loader_module
+
+        monkeypatch.setattr(create_module, "create_dlt_source_from_csv", fake_create)
+        monkeypatch.setattr(
+            ingest_dlt_source_module, "ingest_dlt_source", AsyncMock(return_value=["row"])
         )
-        assert spool_dir is None
-        assert items[0].name == "people"
-
-    async def test_upload_is_spooled_and_named_after_filename(self, tmp_path):
-        items, spool_dir = await _normalize_structured_inputs(
-            [_upload("Employee Roster.csv")], None
+        monkeypatch.setattr(
+            resolve_module, "_build_source_manifest_item", AsyncMock(return_value=manifest_item)
         )
-        try:
-            assert spool_dir is not None
-            assert items[0].name == "employee_roster"
-            spooled = os.path.join(spool_dir, "employee_roster.csv")
-            with open(spooled, "rb") as spooled_file:
-                assert spooled_file.read() == CSV_BYTES
-        finally:
-            if spool_dir:
-                import shutil
 
-                shutil.rmtree(spool_dir, ignore_errors=True)
+        stored = {}
 
-    async def test_non_structured_items_pass_through(self):
-        items, spool_dir = await _normalize_structured_inputs(["a plain note"], None)
-        assert spool_dir is None
-        assert items == ["a plain note"]
+        def fake_get_file_storage(root):
+            async def store(name, content):
+                stored["name"] = name
+                stored["content"] = content
+                return str(tmp_path / name)
 
-    async def test_same_name_uploads_fail_loudly(self):
-        with pytest.raises(ValueError, match="same source name"):
-            await _normalize_structured_inputs([_upload("dup.csv"), _upload("dup.csv")], None)
+            return SimpleNamespace(store=store)
 
-    async def test_s3_path_is_downloaded_via_storage_layer(self, monkeypatch):
-        opened = []
-
-        @asynccontextmanager
-        async def fake_open_data_file(file_path, mode="rb", **kwargs):
-            opened.append((file_path, mode))
-            yield io.BytesIO(CSV_BYTES)
-
-        monkeypatch.setattr(open_data_file_module, "open_data_file", fake_open_data_file)
-
-        items, spool_dir = await _normalize_structured_inputs(
-            ["s3://bucket/exports/orders.csv"], None
+        monkeypatch.setattr(loader_module, "get_file_storage", fake_get_file_storage)
+        monkeypatch.setattr(
+            loader_module,
+            "get_storage_config",
+            lambda: {"data_root_directory": str(tmp_path)},
         )
-        try:
-            assert opened == [("s3://bucket/exports/orders.csv", "rb")]
-            assert items[0].name == "orders"
-            spooled = os.path.join(spool_dir, "orders.csv")
-            with open(spooled, "rb") as spooled_file:
-                assert spooled_file.read() == CSV_BYTES
-        finally:
-            if spool_dir:
-                import shutil
 
-                shutil.rmtree(spool_dir, ignore_errors=True)
+        result = await DltCsvLoader().load(
+            csv_file,
+            dataset_name="ds",
+            user=SimpleNamespace(id=uuid4()),
+            original_file_name="Lab Machines.csv",
+        )
 
+        assert isinstance(result, LoaderResult)
+        assert result.data_id == manifest_id
+        assert result.system_metadata == stamp
+        assert stored["content"] == '{"rows": []}'
+        assert result.file_path.endswith(stored["name"])
+        # The manifest identity derives from the ORIGINAL file name, not the
+        # (possibly temp/stored) copy the loader actually read.
+        assert captured["source_name"] == "lab_machines"
+        assert captured["path"] == csv_file
 
-class TestDltMissingWarning:
-    def test_warns_for_structured_inputs(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            _log_structured_inputs_without_dlt(
-                [
-                    "data/people.csv",
-                    _upload("roster.csv"),
-                    "postgresql://user:secret@host/db",
-                    "a plain note",
-                ]
-            )
-        assert "3 structured input(s)" in caplog.text
-        assert "people.csv" in caplog.text
-        assert "roster.csv" in caplog.text
-        # Connection strings can embed credentials — never logged verbatim.
-        assert "secret" not in caplog.text
-        assert "<connection string>" in caplog.text
+    @pytest.mark.asyncio
+    async def test_load_without_ingestion_context_fails_loudly(self, csv_file):
+        with pytest.raises(IngestionError):
+            await DltCsvLoader().load(csv_file)
 
-    def test_silent_when_nothing_structured(self, caplog):
-        with caplog.at_level(logging.WARNING):
-            _log_structured_inputs_without_dlt(["a plain note", 42])
-        assert caplog.text == ""
+    @pytest.mark.asyncio
+    async def test_empty_source_fails_loudly(self, csv_file, monkeypatch):
+        monkeypatch.setattr(
+            ingest_dlt_source_module, "ingest_dlt_source", AsyncMock(return_value=[])
+        )
+        monkeypatch.setattr(
+            resolve_module, "_build_source_manifest_item", AsyncMock(return_value=None)
+        )
+        with pytest.raises(IngestionError, match="no rows"):
+            await DltCsvLoader().load(csv_file, dataset_name="ds", user=SimpleNamespace(id=uuid4()))

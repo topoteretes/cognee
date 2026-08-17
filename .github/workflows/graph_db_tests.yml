@@ -115,6 +115,19 @@ jobs:
           DB_NAME: cognee_db
         run: uv run pytest cognee/tests/e2e/postgres/test_postgres_adapter.py -v
 
+      - name: Run Shared Schema Isolation Tests
+        env:
+          DB_PROVIDER: postgres
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+          DB_NAME: cognee_db
+          VECTOR_DB_PROVIDER: pgvector
+          GRAPH_DATABASE_PROVIDER: postgres
+          GRAPH_DATABASE_URL: "postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db"
+        run: uv run pytest cognee/tests/e2e/postgres/test_shared_schema_isolation.py -v
+
       - name: Run Postgres Graph E2E Test
         env:
           ENV: 'dev'
