@@ -36,14 +36,12 @@ from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import and_, delete, select
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.cognify.config import get_cognify_config
-from cognee.modules.graph.models import Node
 from cognee.modules.ontology.get_default_ontology_resolver import (
     get_default_ontology_resolver,
     get_ontology_resolver_from_env,
@@ -75,7 +73,15 @@ from cognee.modules.chunking.chunk_policy import (
 )
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.methods import get_authorized_dataset, get_data
+from cognee.modules.data.methods import (
+    StagedContent,
+    get_authorized_dataset,
+    get_data,
+    is_data_processed,
+    mark_data_processed,
+    merged_external_metadata,
+    publish_updated_data,
+)
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.models import Data
@@ -86,12 +92,12 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
+from cognee.modules.graph.methods.prune_ledger_rows import prune_ledger_rows
 from cognee.modules.ingestion import classify
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
-from cognee.modules.pipelines.operations.run_tasks_data_item import DataItemStatus
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
@@ -103,6 +109,8 @@ PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status
 # Distinct run-record name: dashboards see incremental runs without touching
 # the skip logic that keys on cognify_pipeline's per-item status.
 RUN_PIPELINE_NAME = "incremental_update_pipeline"
+# Matches cognify's own fallback when chunks_per_batch is unset.
+DEFAULT_CHUNKS_PER_BATCH = 2000
 
 
 class RefusalReason(str, Enum):
@@ -183,21 +191,6 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
     return sorted(chunks, key=lambda node: int(node.get("chunk_index", -1)))
 
 
-def _merged_external_metadata(data: Data, node_set: Optional[List[str]]) -> dict:
-    """The row's external metadata with an explicitly supplied node_set applied.
-
-    Mirrors ``ingest_data``'s ``ext_metadata["node_set"] = node_set`` so the
-    incremental path tags new chunks with the node_set the CALLER passed rather
-    than the one stored before the update. ``_publish_staged`` writes the same
-    merged dict back, keeping the chunks, ``Data.node_set`` and
-    ``Data.external_metadata`` on one value instead of three.
-    """
-    metadata = dict(data.external_metadata or {})
-    if node_set:
-        metadata["node_set"] = node_set
-    return metadata
-
-
 def _build_document(
     data: Data,
     staged: Optional["StagedContent"] = None,
@@ -223,7 +216,7 @@ def _build_document(
         raw_data_location=staged.raw_data_location if staged else data.raw_data_location,
         name=name,
         mime_type=staged.mime_type if staged else data.mime_type,
-        external_metadata=json.dumps(_merged_external_metadata(data, node_set), indent=4),
+        external_metadata=json.dumps(merged_external_metadata(data, node_set), indent=4),
         importance_weight=data.importance_weight if data.importance_weight is not None else 0.5,
     )
     update_node_set(document)  # NodeSet tagging parity with classify_documents
@@ -244,21 +237,6 @@ def _resolve_extraction_config() -> Config:
             }
         }
     return {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
-
-
-async def _prune_ledger_rows(data_id: UUID, dataset_id: UUID, doomed_ids: List[str]) -> None:
-    """Drop rollback-ledger rows for nodes the incremental delete removed."""
-    if not doomed_ids:
-        return
-    slugs = [UUID(doomed) for doomed in doomed_ids]
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        await session.execute(
-            delete(Node).where(
-                and_(Node.data_id == data_id, Node.dataset_id == dataset_id, Node.slug.in_(slugs))
-            )
-        )
-        await session.commit()
 
 
 def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
@@ -343,9 +321,8 @@ async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> 
             )
         except UnsupportedGraphOperation:
             await add_data_points(chunks, ctx=context, graph_only=True)
-        # Only chunk_index changed; content_hash is deliberately not written
-        # here — legacy collections may predate the field in their payload
-        # schema.
+        # Only chunk_index changed, and it is the one field the interface's
+        # caller contract guarantees is present in every collection's schema.
         await vector_engine.update_payload(
             "DocumentChunk_text",
             {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
@@ -353,27 +330,6 @@ async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> 
         return
 
     await add_data_points(chunks, ctx=context)
-
-
-class StagedContent(BaseModel):
-    """The new content, processed and stored — with the Data row untouched.
-
-    Content-addressed storage writes are safe to make before anything is
-    decided: until ``_publish_staged`` flips the row, readers keep resolving
-    the old file, and an abandoned staged file is inert garbage.
-    """
-
-    name: str
-    raw_data_location: str
-    original_data_location: str
-    extension: str
-    mime_type: str
-    original_extension: str
-    original_mime_type: str
-    loader_engine: str
-    content_hash: str
-    raw_content_hash: str
-    data_size: int
 
 
 async def _stage_new_content(data, preferred_loaders) -> StagedContent:
@@ -414,82 +370,6 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
     )
 
 
-async def _publish_staged(
-    data_id: UUID,
-    dataset_id: UUID,
-    staged: StagedContent,
-    token_count: int,
-    node_set: Optional[List[str]],
-) -> None:
-    """The one-transaction publish: content, metadata, and status flip together.
-
-    Everything readers can observe about the document — stored text location,
-    hashes, size, token count, and the cognify-completed stamp — commits
-    atomically. Any crash before this leaves the row entirely on the old
-    version.
-    """
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
-        ).scalar_one_or_none()
-        if data_point is None:
-            raise IncrementalUpdateNotPossible("data row disappeared before publish")
-
-        data_point.name = staged.name
-        data_point.raw_data_location = staged.raw_data_location
-        data_point.original_data_location = staged.original_data_location
-        data_point.extension = staged.extension
-        data_point.mime_type = staged.mime_type
-        data_point.original_extension = staged.original_extension
-        data_point.original_mime_type = staged.original_mime_type
-        data_point.loader_engine = staged.loader_engine
-        data_point.content_hash = staged.content_hash
-        data_point.raw_content_hash = staged.raw_content_hash
-        data_point.data_size = staged.data_size
-        data_point.token_count = token_count
-        if node_set:
-            # Both copies move together: the column readers filter on, and the
-            # metadata a later full cognify rebuilds its NodeSet tags from.
-            # Writing only the column would leave a document whose chunks and
-            # whose row disagree about their grouping.
-            data_point.node_set = json.dumps(node_set)
-            data_point.external_metadata = _merged_external_metadata(data_point, node_set)
-
-        status_for_pipeline = data_point.pipeline_status.setdefault(PIPELINE_NAME, {})
-        status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-
-        await session.merge(data_point)
-        await session.commit()
-
-
-async def _mark_document_processed(data_id: UUID, dataset_id: UUID) -> None:
-    """Stamp cognify completion so a later cognify() doesn't redo the document."""
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
-        ).scalar_one_or_none()
-        status_for_pipeline = data_point.pipeline_status.setdefault(PIPELINE_NAME, {})
-        status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-        await session.merge(data_point)
-        await session.commit()
-
-
-async def _is_document_processed(data_id: UUID, dataset_id: UUID) -> bool:
-    """Whether the cognify-completion stamp is already on the row."""
-    db_engine = get_relational_engine()
-    async with db_engine.get_async_session() as session:
-        data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
-        ).scalar_one_or_none()
-        if data_point is None:
-            return False
-        return (data_point.pipeline_status or {}).get(PIPELINE_NAME, {}).get(
-            str(dataset_id)
-        ) == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-
-
 def _unchanged_result(reindexed: int) -> dict:
     """The no-op result, shaped like the incremental one.
 
@@ -526,7 +406,7 @@ async def _repair_unchanged(
             pipeline_name=PIPELINE_NAME,
         )
         await _restore_repositioned_chunks(shifted, context)
-    await _mark_document_processed(data_id, dataset.id)
+    await mark_data_processed(data_id, dataset.id)
     logger.info(
         "incremental update: content unchanged, repaired %s",
         ", ".join(bundle.get("repairs") or ["nothing"]),
@@ -740,7 +620,7 @@ async def _stage_and_plan(
         shifted = _build_shifted_chunks(
             document, stored_chunks, set(), {i: i for i in range(len(stored_chunks))}
         )
-        needs_stamp = not await _is_document_processed(data_id, dataset_id)
+        needs_stamp = not await is_data_processed(data_id, dataset_id)
         repairs = ["indexes"] if shifted else []
         if needs_stamp:
             repairs.append("stamp")
@@ -873,11 +753,18 @@ async def _write_and_publish(
     ]
 
     cognify_config = get_cognify_config()
-    if plan.fresh:
-        # Same extraction + summarization the cognify pipeline runs, with the
-        # same ontology resolution, model, and prompt plumbing.
+    # Same extraction + summarization the cognify pipeline runs, with the same
+    # ontology resolution, model, and prompt plumbing — and the same batch
+    # bound. Cognify gets its batching from the pipeline task machinery
+    # (task_config={"batch_size": ...}), which this path does not run through,
+    # so the slicing is explicit here. Unbounded, a rewrite of most of a large
+    # document becomes one oversized extraction step with no intermediate
+    # progress and a single all-or-nothing failure.
+    batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
+    for start in range(0, len(plan.fresh), batch_size):
+        batch = plan.fresh[start : start + batch_size]
         summaries = await extract_graph_and_summarize(
-            plan.fresh,
+            batch,
             graph_model=graph_model,
             config=_resolve_extraction_config(),
             custom_prompt=custom_prompt,
@@ -894,7 +781,7 @@ async def _write_and_publish(
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     if plan.deleted_ids:
         doomed = await delete_chunks_incremental(plan.deleted_ids, dataset_id, data_id)
-        await _prune_ledger_rows(data_id, dataset_id, doomed)
+        await prune_ledger_rows(data_id, dataset_id, doomed)
 
     # -- Renumber kept chunks whose position shifted --------------------------- #
     shifted_chunks = [
@@ -911,7 +798,7 @@ async def _write_and_publish(
     )
     new_tokens = sum(chunk.chunk_size for chunk in plan.fresh)
     new_tokens += sum(int(stored_by_id[chunk_id].get("chunk_size", 0)) for chunk_id in plan.reused)
-    await _publish_staged(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
+    await publish_updated_data(data_id, dataset_id, staged, surviving_tokens + new_tokens, node_set)
 
     added_chunks = len(plan.fresh) + len(plan.reused)
     kept_count = len(stored_chunks) - len(replaced)

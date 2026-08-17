@@ -49,23 +49,43 @@ def _relationship_name(edge: dict) -> str:
 
 
 async def _strip_dead_chunk_refs(graph_engine, deleting, dataset_id, data_id) -> None:
-    """Remove the deleted chunks' v2 ownership keys from surviving artifacts."""
+    """Remove the deleted chunks' v2 ownership keys from surviving artifacts.
+
+    Reads the dataset's ref maps ONCE and filters locally, rather than issuing
+    ``find_nodes_by_source_ref`` + ``find_edges_by_source_ref`` per deleted
+    chunk. Those are unindexed ``... CONTAINS $token`` scans, so the per-chunk
+    shape cost two full graph scans for every chunk retired — the one place
+    where this feature's cost grew with graph size instead of edit size, which
+    is the property it exists to fix. This is the shape ``delete_by_document``
+    already uses.
+    """
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 
     if not await stores_provenance_in_graph(graph_engine):
         return
 
-    for chunk_id in sorted(deleting):
-        key = make_chunk_source_ref_key(
-            UUID(str(dataset_id)), UUID(str(data_id)), UUID(str(chunk_id))
-        )
-        node_holders = await graph_engine.find_nodes_by_source_ref(key)
-        if node_holders:
-            await graph_engine.remove_node_source_refs(node_holders, [key])
-        edge_holders = await graph_engine.find_edges_by_source_ref(key)
-        if edge_holders:
-            await graph_engine.remove_edge_source_refs(edge_holders, [key])
+    dead_keys = {
+        make_chunk_source_ref_key(UUID(str(dataset_id)), UUID(str(data_id)), UUID(str(chunk_id)))
+        for chunk_id in deleting
+    }
+
+    refs_by_node = await graph_engine.find_node_source_refs_by_dataset(str(dataset_id))
+    refs_by_edge = await graph_engine.find_edge_source_refs_by_dataset(str(dataset_id))
+
+    for ref_map, remove in (
+        (refs_by_node, graph_engine.remove_node_source_refs),
+        (refs_by_edge, graph_engine.remove_edge_source_refs),
+    ):
+        # One removal call per distinct set of dead keys, so an artifact owned
+        # by several retired chunks is read and rewritten once.
+        holders_by_keys: dict = {}
+        for holder, refs in ref_map.items():
+            doomed = tuple(sorted(dead_keys.intersection(refs)))
+            if doomed:
+                holders_by_keys.setdefault(doomed, []).append(holder)
+        for keys, holders in holders_by_keys.items():
+            await remove(holders, list(keys))
 
 
 async def delete_chunks_incremental(chunk_ids: List[str], dataset_id, data_id) -> List[str]:

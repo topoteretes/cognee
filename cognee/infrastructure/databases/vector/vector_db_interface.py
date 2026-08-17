@@ -169,8 +169,16 @@ class VectorDBInterface(Protocol):
 
         Used for metadata-only changes (e.g. a chunk's ``chunk_index`` after an
         incremental document update repositioned it): the stored vector is
-        preserved exactly, so no embedding call happens. Fields must already
-        exist in the collection's payload schema. Missing ids are skipped.
+        preserved exactly, so no embedding call happens. Missing ids are skipped.
+
+        CALLER CONTRACT: every field named here must ALREADY exist in the
+        collection's payload schema. Collections written by older versions
+        predate fields added since (``content_hash``, for one), and this call
+        does not migrate a schema — it writes into the one that is there. A
+        caller wanting to set a field that may be absent has to go through the
+        re-embedding write path instead. This is stated on the interface rather
+        than in one caller's comment because it binds every implementation and
+        the next caller will not otherwise know the rule exists.
 
         Parameters:
         -----------

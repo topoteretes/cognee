@@ -36,6 +36,21 @@ if TYPE_CHECKING:
 logger = get_logger("add_data_points")
 
 
+def _group_by_extra_keys(owner_map: dict) -> dict:
+    """Artifacts that need the same extra ref keys, grouped into one call.
+
+    An artifact's FIRST owner folds into the statement that writes the row, so
+    only ``owners[1:]`` need a separate attach. Returns
+    ``{(key, ...): [artifact, ...]}``.
+    """
+    groups: dict = {}
+    for artifact, owners in owner_map.items():
+        extra = tuple(owners[1:])
+        if extra:
+            groups.setdefault(extra, []).append(artifact)
+    return groups
+
+
 @task_summary("Stored {n} data point(s)")
 async def add_data_points(
     data_points: List[DataPoint],
@@ -232,12 +247,15 @@ async def add_data_points(
                     group, source_ref_key=key, pipeline_run_id=fold_run_arg
                 )
         if ownership:
-            extra_owner_nodes: dict = {}
-            for node_id, owners in ownership.node_owners.items():
-                for owner in owners[1:]:
-                    extra_owner_nodes.setdefault(owner, []).append(node_id)
-            for ref_key, node_ids in extra_owner_nodes.items():
-                await graph_engine.attach_node_source_refs(node_ids, [ref_key], fold_run_arg)
+            # Group by the SET of extra keys, not by individual key. Each call
+            # is a lock-serialized read-then-write query pair, so grouping per
+            # key costs one round-trip per owning chunk — linear in chunk count
+            # (measured: 39 node calls at 40 chunks, 99 at 100). Artifacts
+            # needing the same keys collapse into one call instead, making the
+            # cost scale with distinct sharing patterns rather than document
+            # length. Every artifact still receives exactly its own key set.
+            for keys, node_ids in _group_by_extra_keys(ownership.node_owners).items():
+                await graph_engine.attach_node_source_refs(node_ids, list(keys), fold_run_arg)
 
     async def _write_edges_grouped(edge_list):
         if per_row_refs:
@@ -258,16 +276,15 @@ async def add_data_points(
                 )
         if ownership:
             batch_keys = {(str(e[0]), str(e[1]), str(e[2])) for e in edge_list}
-            extra_owner_edges: dict = {}
-            for edge_key, owners in ownership.edge_owners.items():
-                if edge_key not in batch_keys:
-                    continue
-                for owner in owners[1:]:
-                    extra_owner_edges.setdefault(owner, []).append(
-                        EdgeIdentity(edge_key[0], edge_key[1], edge_key[2])
-                    )
-            for ref_key, identities in extra_owner_edges.items():
-                await graph_engine.attach_edge_source_refs(identities, [ref_key], fold_run_arg)
+            in_batch = {
+                edge_key: owners
+                for edge_key, owners in ownership.edge_owners.items()
+                if edge_key in batch_keys
+            }
+            # Grouped by key set, like the nodes above.
+            for keys, edge_keys in _group_by_extra_keys(in_batch).items():
+                identities = [EdgeIdentity(key[0], key[1], key[2]) for key in edge_keys]
+                await graph_engine.attach_edge_source_refs(identities, list(keys), fold_run_arg)
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
