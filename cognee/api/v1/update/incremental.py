@@ -159,7 +159,7 @@ async def _read_processed_text(raw_data_location: str) -> str:
         ) from error
 
 
-async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
+async def _get_stored_chunks(document_id: UUID) -> List[dict]:
     """Return the document's stored chunk nodes (full props) in document order.
 
     Chunks are discovered via their ``is_part_of`` edges and ordered by their
@@ -599,7 +599,7 @@ async def _stage_and_plan(
         )
 
     old_text = await _read_processed_text(old_data.raw_data_location)
-    stored_chunks = await _get_stored_chunks(data_id, old_text)
+    stored_chunks = await _get_stored_chunks(data_id)
 
     # Stage the new content through ingestion's own loader machinery. The Data
     # row is NOT written: readers keep resolving the old version until publish.
