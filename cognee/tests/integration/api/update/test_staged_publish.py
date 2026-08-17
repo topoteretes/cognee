@@ -162,18 +162,18 @@ async def _scenario():
     # ── 1. crash BEFORE publish: readers stay on the old version ─────────── #
     import cognee.api.v1.update.incremental as engine
 
-    original_publish = engine._publish_staged
+    original_publish = engine.publish_updated_data
 
     async def _explode(*args, **kwargs):
         raise RuntimeError("simulated crash before publish")
 
-    engine._publish_staged = _explode
+    engine.publish_updated_data = _explode
     text_v2 = text_v1.replace("ENTB", "ENTB2", 1)
     try:
         with pytest.raises(RuntimeError, match="simulated crash"):
             await cognee.update(data_id, text_v2, dataset.id, user=user)
     finally:
-        engine._publish_staged = original_publish
+        engine.publish_updated_data = original_publish
 
     row_after_crash = await get_data(user.id, data_id, dataset.id)
     assert row_after_crash.content_hash == hash_v1, (
