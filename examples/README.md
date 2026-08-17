@@ -26,6 +26,7 @@ to verify behaviour across the SDK.
 | [`demos/`](demos/) | Feature demos — broadest coverage | 22 |
 | [`guides/`](guides/) | Short focused how-to guides | 13 |
 | [`integrations/`](integrations/) | Data-source connectors — installed from cognee-community | 1 |
+| [`python/`](python/) | Standalone Python scripts for focused API workflows | 1 |
 | [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
 | [`tutorials/`](tutorials/) | Step-by-step tutorials for common workflows (migration, ...) | 1 |
 
@@ -154,6 +155,7 @@ Same scripts, indexed by what they demonstrate.
 ### Temporal awareness
 - [`advanced_guides/temporal_awareness_example/temporal_awareness_example.py`](advanced_guides/temporal_awareness_example/temporal_awareness_example.py)
 - [`guides/temporal_recall.py`](guides/temporal_recall.py)
+- [`python/temporal_search_demo.py`](python/temporal_search_demo.py)
 
 ### Ontology
 - [`advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py)
