@@ -111,6 +111,19 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_seed: int | None = None
     llm_streaming: bool = False
+
+    # Stream answer tokens out of the plain-text completion path so a caller can
+    # render them as they arrive (env LLM_ANSWER_STREAMING). Off by default: the
+    # returned value is identical either way, so enabling it changes nothing for
+    # a caller that is not consuming a token sink.
+    #
+    # Deliberately NOT llm_streaming above, which is a different, older flag:
+    # that one is unread by OpenAI/Azure, absent from every other provider, and
+    # on Bedrock injects stream=True into the instructor path where nothing
+    # consumes a stream. It is also part of the adapter LRU cache key, so
+    # flipping it changes adapter identity.
+    llm_answer_streaming: bool = False
+
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"

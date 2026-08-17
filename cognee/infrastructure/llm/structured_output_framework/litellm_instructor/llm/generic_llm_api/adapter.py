@@ -20,6 +20,8 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
@@ -137,7 +139,17 @@ class GenericAPIAdapter(LLMInterface):
         llama.cpp-compatible servers don't honour, causing repeated parse
         failures and retry storms. A plain string needs no schema, so call
         litellm directly using this adapter's own connection config.
+
+        Returns the complete answer either way — streaming only changes whether
+        the tokens are *also* pushed to a listening sink on the way past, so no
+        caller of this method needs to know which path ran.
         """
+        sink = get_active_token_sink() if get_llm_context_config().llm_answer_streaming else None
+        if sink is not None:
+            return await self._acreate_str_output_streaming(
+                sink, text_input, system_prompt, **merged_kwargs
+            )
+
         async with llm_rate_limiter_context_manager():
             response = await litellm.acompletion(
                 model=self.model,
@@ -151,6 +163,46 @@ class GenericAPIAdapter(LLMInterface):
                 **merged_kwargs,
             )
         return response.choices[0].message.content or ""
+
+    async def _acreate_str_output_streaming(
+        self, sink, text_input: str, system_prompt: str, **merged_kwargs: Any
+    ) -> str:
+        """Same call with ``stream=True``, fanning deltas out as they arrive."""
+        sink.begin_attempt()
+        parts: list[str] = []
+
+        # The whole iteration stays inside the rate limiter. `acompletion(stream=True)`
+        # returns as soon as the connection is open, so releasing there would let an
+        # unlimited number of generations run concurrently.
+        async with llm_rate_limiter_context_manager():
+            stream = await litellm.acompletion(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_input},
+                ],
+                api_key=self.api_key,
+                api_base=self.endpoint,
+                api_version=self.api_version,
+                stream=True,
+                stream_options=merged_kwargs.pop("stream_options", {"include_usage": True}),
+                **merged_kwargs,
+            )
+            async for chunk in stream:
+                # The final usage chunk carries `choices == []`; indexing it is the
+                # single most common way to break a streaming integration.
+                if not chunk.choices:
+                    continue
+                piece = chunk.choices[0].delta.content
+                if not piece:  # role-only and finish chunks carry None
+                    continue
+                parts.append(piece)
+                sink.put_delta(piece)
+
+        # Exceptions deliberately propagate: the tenacity retry on
+        # acreate_structured_output must still fire, and begin_attempt() emits a
+        # `reset` on re-entry so the consumer discards the partial answer.
+        return "".join(parts)
 
     @observe(as_type="generation")
     @retry(
