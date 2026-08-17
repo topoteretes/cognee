@@ -33,6 +33,7 @@ from gliner_graph_extractor import (
     DEFAULT_RELATION_TYPES,
     _to_knowledge_graph,
 )
+from parallel_gliner import pack_texts, unpack_results
 
 
 def _sentence_ranges(text: str, sentences: list[str]) -> list[tuple[int, int]]:
@@ -124,6 +125,8 @@ async def gliner_extract_and_summarize(
     threshold: float = 0.5,
     batch_size: int = 32,
     schema_tuner=None,
+    worker_pool=None,
+    pack_target_chars: int = 1800,
     ctx=None,
     **kwargs,
 ) -> list[TextSummary]:
@@ -132,6 +135,11 @@ async def gliner_extract_and_summarize(
     A single `batch_extract` call (entities with spans + relations) feeds both
     the knowledge-graph construction and the extractive summaries, halving
     GLiNER compute versus running the two tasks separately.
+
+    Chunk texts are PACKED to ~`pack_target_chars` per GLiNER input (spans
+    remapped back to source chunks) so forward passes carry content instead
+    of padding. Pass a `GLiNERWorkerPool` as `worker_pool` to shard the
+    packed inputs across processes; `extractor` is then not needed.
 
     Pass an `AdaptiveSchemaTuner` as `schema_tuner` to monitor per-batch
     entity density and expand the label set (one discovery LLM call) when a
@@ -145,31 +153,33 @@ async def gliner_extract_and_summarize(
         entity_types = schema_tuner.entity_types
         relation_types = schema_tuner.relation_types
 
-    def _build_schema():
-        return (
-            extractor.create_schema()
-            .entities(entity_types or DEFAULT_ENTITY_TYPES)
-            .relations(relation_types or DEFAULT_RELATION_TYPES)
-        )
-
-    async def _extract(schema):
-        return await asyncio.to_thread(
-            extractor.batch_extract,
-            texts,
-            schema,
-            batch_size=batch_size,
-            threshold=threshold,
-            include_spans=True,
-        )
-
     texts = [chunk.text for chunk in data_chunks]
-    results = await _extract(_build_schema())
+
+    async def _extract(ents, rels):
+        packed_texts, packs = pack_texts(texts, target_chars=pack_target_chars)
+        if worker_pool is not None:
+            packed_results = await worker_pool.extract(
+                packed_texts, ents, rels, threshold=threshold, batch_size=batch_size
+            )
+        else:
+            schema = extractor.create_schema().entities(ents).relations(rels)
+            packed_results = await asyncio.to_thread(
+                extractor.batch_extract,
+                packed_texts,
+                schema,
+                batch_size=batch_size,
+                threshold=threshold,
+                include_spans=True,
+            )
+        return unpack_results(packed_results, packs, len(texts))
+
+    results = await _extract(
+        entity_types or DEFAULT_ENTITY_TYPES, relation_types or DEFAULT_RELATION_TYPES
+    )
 
     if schema_tuner is not None and await schema_tuner.observe_and_maybe_expand(texts, results):
         # Schema grew — re-extract this batch once with the expanded labels.
-        entity_types = schema_tuner.entity_types
-        relation_types = schema_tuner.relation_types
-        results = await _extract(_build_schema())
+        results = await _extract(schema_tuner.entity_types, schema_tuner.relation_types)
 
     chunk_graphs = [_to_knowledge_graph(result) for result in results]
     await extract_graph_from_data(
@@ -192,17 +202,56 @@ async def gliner_extract_and_summarize(
     ]
 
 
+class _BackgroundStorage:
+    """Overlap storage with extraction: add_data_points runs as a background
+    asyncio task (bounded to one outstanding batch) so the runner returns to
+    GLiNER extraction of the next batch while the previous batch embeds and
+    writes. `flush()` must be awaited after the pipeline to persist the tail
+    batch and surface any storage error."""
+
+    def __init__(self):
+        self._pending = None
+
+    async def store_data_points(self, data_points: list, ctx=None) -> list:
+        if self._pending is not None:
+            await self._pending  # bound queue depth to 1 outstanding batch
+        self._pending = asyncio.create_task(add_data_points(data_points, ctx=ctx))
+        return []
+
+    async def flush(self):
+        if self._pending is not None:
+            await self._pending
+            self._pending = None
+
+
 async def gliner_cognify(
     datasets,
-    extractor,
+    extractor=None,
     entity_types: dict | list | None = None,
     relation_types: dict | list | None = None,
     chunk_size: int = 1024,
     chunks_per_batch: int = 100,
     gliner_batch_size: int = 32,
     schema_tuner=None,
+    workers: int = 0,
+    pack_target_chars: int = 1800,
+    model_name: str = "fastino/gliner2-base-v1",
 ):
-    """Run the whole cognify pipeline with GLiNER2 instead of an LLM."""
+    """Run the whole cognify pipeline with GLiNER2 instead of an LLM.
+
+    With `workers > 0`, extraction runs in that many GLiNER worker processes
+    (~2 GB RAM each) and `extractor` is not needed. Storage always overlaps
+    extraction of the next batch.
+    """
+    worker_pool = None
+    if workers > 0:
+        from parallel_gliner import GLiNERWorkerPool
+
+        worker_pool = GLiNERWorkerPool(model_name=model_name, workers=workers)
+    elif extractor is None:
+        raise ValueError("Provide `extractor` or set `workers` > 0")
+
+    storage = _BackgroundStorage()
     tasks = [
         Task(classify_documents),
         Task(extract_chunks_from_documents, max_chunk_size=chunk_size, chunker=TextChunker),
@@ -213,20 +262,28 @@ async def gliner_cognify(
             relation_types=relation_types,
             batch_size=gliner_batch_size,
             schema_tuner=schema_tuner,
+            worker_pool=worker_pool,
+            pack_target_chars=pack_target_chars,
             task_config={"batch_size": chunks_per_batch},
         ),
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+        Task(storage.store_data_points, task_config={"batch_size": chunks_per_batch}),
     ]
 
-    run_infos = []
-    async for run_info in run_pipeline(
-        tasks=tasks,
-        datasets=datasets,
-        pipeline_name="gliner_cognify_pipeline",
-        incremental_loading=False,
-        # The default connection test pings the LLM; this pipeline never
-        # calls one, so skip it (same as cognee's LLM-free code pipeline).
-        skip_connection_test=True,
-    ):
-        run_infos.append(run_info)
-    return run_infos
+    try:
+        run_infos = []
+        async for run_info in run_pipeline(
+            tasks=tasks,
+            datasets=datasets,
+            pipeline_name="gliner_cognify_pipeline",
+            incremental_loading=False,
+            # The default connection test pings the LLM; this pipeline never
+            # calls one, so skip it (same as cognee's LLM-free code pipeline).
+            skip_connection_test=True,
+        ):
+            run_infos.append(run_info)
+        await storage.flush()
+        return run_infos
+    finally:
+        await storage.flush()
+        if worker_pool is not None:
+            worker_pool.shutdown()
