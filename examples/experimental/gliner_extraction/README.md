@@ -124,21 +124,26 @@ discovery call (+8 entity, +8 relation types), and the re-extraction found
 
 ## Measured performance (M-series laptop, CPU only)
 
-War & Peace, 2,043-page PDF, chunk_size=512:
+War & Peace, 2,043-page PDF, chunk_size=512. Baseline = single process, no
+packing, serial batches. Optimized = `workers=3` + packing + overlapped
+storage (`perf:` commit):
 
-| Metric | Value |
-|---|---|
-| Total wall clock (add + cognify) | ~22 min |
-| Chunks / summaries | 3,140 / 3,140 |
-| Unique entities | 6,933 |
-| Edges | 48,159 |
-| GLiNER share of cognify time | ~54% (rest: embedding round-trips + graph writes) |
-| Marginal cost | ~$0.10 (embeddings only) |
-| GLiNER throughput | ~30 chunks/s per forward pass; 70 ms/text sequential, 23 ms/text batched (32 short texts) |
+| Metric | Baseline | Optimized (3 workers) |
+|---|---|---|
+| cognify wall clock | 1,290 s (21.5 min) | **911 s (15.2 min)** |
+| batch cycle | 12.7 s (6.9 extract + 5.8 store, serial) | 9.0 s (storage-bound) |
+| Chunks / summaries | 3,140 / 3,140 | 3,140 / 3,140 |
+| Unique entities | 6,933 | **8,151** (+18% — packing gives GLiNER more context) |
+| Edges | 48,159 | 50,467 |
+| Marginal cost | ~$0.10 (embeddings only) | same |
 
-Scaling levers: worker processes (~2 GB each, linear), CUDA GPU
-(`map_location="cuda"`, `quantize=True`), local embeddings, larger pipeline
-batch delivery. Apple MPS tested slower than batched CPU for short inputs.
+After these changes extraction is fully hidden behind storage: the critical
+path is now `add_data_points` (OpenAI embedding round-trips + single-threaded
+graph writes, slowed further by CPU contention with the workers). The next
+meaningful levers are therefore local/in-process embeddings and cheaper
+summary indexing — not more extraction speed. On GPU hardware
+(`map_location="cuda"`, `quantize=True`, FlashDeberta) extraction itself has
+another 5–20x of headroom. Apple MPS tested slower than batched CPU.
 
 ## Trade-offs vs LLM extraction
 
