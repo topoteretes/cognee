@@ -123,6 +123,7 @@ async def gliner_extract_and_summarize(
     relation_types: dict | list | None = None,
     threshold: float = 0.5,
     batch_size: int = 32,
+    schema_tuner=None,
     ctx=None,
     **kwargs,
 ) -> list[TextSummary]:
@@ -131,23 +132,44 @@ async def gliner_extract_and_summarize(
     A single `batch_extract` call (entities with spans + relations) feeds both
     the knowledge-graph construction and the extractive summaries, halving
     GLiNER compute versus running the two tasks separately.
+
+    Pass an `AdaptiveSchemaTuner` as `schema_tuner` to monitor per-batch
+    entity density and expand the label set (one discovery LLM call) when a
+    batch's coverage drops; the batch is then re-extracted once with the
+    expanded schema.
     """
     if not data_chunks:
         return data_chunks
 
-    schema = (
-        extractor.create_schema()
-        .entities(entity_types or DEFAULT_ENTITY_TYPES)
-        .relations(relation_types or DEFAULT_RELATION_TYPES)
-    )
-    results = await asyncio.to_thread(
-        extractor.batch_extract,
-        [chunk.text for chunk in data_chunks],
-        schema,
-        batch_size=batch_size,
-        threshold=threshold,
-        include_spans=True,
-    )
+    if schema_tuner is not None:
+        entity_types = schema_tuner.entity_types
+        relation_types = schema_tuner.relation_types
+
+    def _build_schema():
+        return (
+            extractor.create_schema()
+            .entities(entity_types or DEFAULT_ENTITY_TYPES)
+            .relations(relation_types or DEFAULT_RELATION_TYPES)
+        )
+
+    async def _extract(schema):
+        return await asyncio.to_thread(
+            extractor.batch_extract,
+            texts,
+            schema,
+            batch_size=batch_size,
+            threshold=threshold,
+            include_spans=True,
+        )
+
+    texts = [chunk.text for chunk in data_chunks]
+    results = await _extract(_build_schema())
+
+    if schema_tuner is not None and await schema_tuner.observe_and_maybe_expand(texts, results):
+        # Schema grew — re-extract this batch once with the expanded labels.
+        entity_types = schema_tuner.entity_types
+        relation_types = schema_tuner.relation_types
+        results = await _extract(_build_schema())
 
     chunk_graphs = [_to_knowledge_graph(result) for result in results]
     await extract_graph_from_data(
@@ -178,6 +200,7 @@ async def gliner_cognify(
     chunk_size: int = 1024,
     chunks_per_batch: int = 100,
     gliner_batch_size: int = 32,
+    schema_tuner=None,
 ):
     """Run the whole cognify pipeline with GLiNER2 instead of an LLM."""
     tasks = [
@@ -189,6 +212,7 @@ async def gliner_cognify(
             entity_types=entity_types,
             relation_types=relation_types,
             batch_size=gliner_batch_size,
+            schema_tuner=schema_tuner,
             task_config={"batch_size": chunks_per_batch},
         ),
         Task(add_data_points, task_config={"batch_size": chunks_per_batch}),

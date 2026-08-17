@@ -85,6 +85,29 @@ LLM-free per chunk. Additionally, when `ONTOLOGY_FILE_PATH` is set, cognee's
 existing ontology resolver canonicalizes and enriches the extracted graph
 against the same OWL — that mechanism applies to GLiNER output unchanged.
 
+### Adaptive resampling (per-batch density monitoring)
+
+A single up-front sample can under-cover heterogeneous datasets. The
+`AdaptiveSchemaTuner` uses GLiNER's own output as the coverage signal:
+it tracks entity density (mentions per 1k chars) per batch, and when a
+batch drops below `trigger_ratio` x the running average, it samples that
+batch's lowest-density chunks, makes ONE discovery LLM call, merges the new
+labels, and re-extracts the batch with the expanded schema. LLM cost is
+capped by `max_discoveries`; `report()` gives a post-run coverage summary.
+
+```python
+from adaptive_schema import AdaptiveSchemaTuner
+
+tuner = AdaptiveSchemaTuner(entity_types, relation_types)
+await gliner_cognify(datasets=["my_dataset"], extractor=extractor, schema_tuner=tuner)
+print(tuner.report())   # densities per batch, what was discovered and when
+```
+
+Verified on synthetic two-domain data: military batches ran at density ~47,
+a medical batch scored 0.0 under the military schema, triggered one
+discovery call (+8 entity, +8 relation types), and the re-extraction found
+`medication`/`dosage`/`condition` spans immediately.
+
 ## Files
 
 - `gliner_graph_extractor.py` — the `calculate_chunk_graphs` hook; maps GLiNER
@@ -93,6 +116,8 @@ against the same OWL — that mechanism applies to GLiNER output unchanged.
   task + `gliner_cognify()` runner).
 - `ontology_schema.py` — OWL → GLiNER schema derivation + per-dataset LLM
   discovery of types the ontology doesn't cover.
+- `adaptive_schema.py` — per-batch entity-density monitoring with
+  density-triggered schema expansion and re-extraction.
 - `demo_gliner_cognify.py` — end-to-end demo that runs with a deliberately
   broken LLM key as proof of zero LLM calls.
 - `benchmark_book.py` — whole-book benchmark (`python benchmark_book.py book.pdf`).
