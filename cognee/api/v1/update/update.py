@@ -90,9 +90,9 @@ async def update(
                  Permission errors always propagate and never trigger the fallback.
 
     Returns:
-        With chunk_level_diff, a summary dict:
-            {"status": "incremental" | "unchanged", "deleted_chunks": n, "added_chunks": n,
-             "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}
+        With chunk_level_diff, a summary dict with the same keys for either status:
+            {"status": "incremental" | "unchanged", "regions": n, "deleted_chunks": n,
+             "added_chunks": n, "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}
         Otherwise PipelineRunInfo: Information about the ingestion pipeline execution including:
             - Pipeline run ID for tracking
             - Dataset ID where data was stored

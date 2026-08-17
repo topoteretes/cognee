@@ -32,7 +32,7 @@ to run the full update instead.
 
 import json
 from typing import List, Optional
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, select
@@ -76,7 +76,8 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.methods import get_authorized_dataset, get_data
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data
-from cognee.modules.data.processing.document_types.TextDocument import TextDocument
+from cognee.modules.data.processing.document_types.Document import Document
+from cognee.tasks.documents.classify_documents import document_class_for
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
@@ -151,8 +152,31 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
     return sorted(chunks, key=lambda node: int(node.get("chunk_index", -1)))
 
 
-def _build_document(data: Data, staged: Optional["StagedContent"] = None) -> TextDocument:
+def _merged_external_metadata(data: Data, node_set: Optional[List[str]]) -> dict:
+    """The row's external metadata with an explicitly supplied node_set applied.
+
+    Mirrors ``ingest_data``'s ``ext_metadata["node_set"] = node_set`` so the
+    incremental path tags new chunks with the node_set the CALLER passed rather
+    than the one stored before the update. ``_publish_staged`` writes the same
+    merged dict back, keeping the chunks, ``Data.node_set`` and
+    ``Data.external_metadata`` on one value instead of three.
+    """
+    metadata = dict(data.external_metadata or {})
+    if node_set:
+        metadata["node_set"] = node_set
+    return metadata
+
+
+def _build_document(
+    data: Data,
+    staged: Optional["StagedContent"] = None,
+    node_set: Optional[List[str]] = None,
+) -> Document:
     """Mirror classify_documents' Document construction for this data row.
+
+    The class comes from ``document_class_for`` — the same dispatch
+    classify_documents and cognify routing use — so an update never rewrites a
+    row's document type to ``text``.
 
     With ``staged`` the document describes the NEW content (name, location,
     mime type from the staged files) under the row's stable id — the chunks
@@ -161,13 +185,14 @@ def _build_document(data: Data, staged: Optional["StagedContent"] = None) -> Tex
     """
     name = staged.name if staged else data.name
     extension = staged.extension if staged else data.extension
-    document = TextDocument(
+    document_class = document_class_for(data)
+    document = document_class(
         id=data.id,
         title=f"{name}.{extension}",
         raw_data_location=staged.raw_data_location if staged else data.raw_data_location,
         name=name,
         mime_type=staged.mime_type if staged else data.mime_type,
-        external_metadata=json.dumps(data.external_metadata, indent=4),
+        external_metadata=json.dumps(_merged_external_metadata(data, node_set), indent=4),
         importance_weight=data.importance_weight if data.importance_weight is not None else 0.5,
     )
     update_node_set(document)  # NodeSet tagging parity with classify_documents
@@ -206,7 +231,7 @@ async def _prune_ledger_rows(data_id: UUID, dataset_id: UUID, doomed_ids: List[s
 
 
 async def _chunk_region(
-    document: TextDocument, region_text: str, max_chunk_size: int
+    document: Document, region_text: str, max_chunk_size: int
 ) -> List[DocumentChunk]:
     """Run the standard TextChunker over the replacement region.
 
@@ -226,7 +251,7 @@ async def _chunk_region(
 
 
 def _assemble_final_chunks(
-    document: TextDocument,
+    document: Document,
     stored_chunks: List[dict],
     plan: IncrementalPlan,
     region_chunk_lists: List[List[DocumentChunk]],
@@ -305,7 +330,7 @@ def _region_chunk_budget(stored_chunks: List[dict], region, fallback: int) -> in
     return fallback
 
 
-def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> DocumentChunk:
+def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> DocumentChunk:
     """Rebuild a stored chunk at a new position, preserving every model field.
 
     Adapters replace the node's whole property set on MERGE (ladybug rewrites
@@ -338,7 +363,7 @@ def _rehydrate_chunk(document: TextDocument, node: dict, chunk_index: int) -> Do
 
 
 def _build_shifted_chunks(
-    document: TextDocument,
+    document: Document,
     stored_chunks: List[dict],
     affected: set,
     kept_final_index: dict,
@@ -491,7 +516,12 @@ async def _publish_staged(
         data_point.data_size = staged.data_size
         data_point.token_count = token_count
         if node_set:
+            # Both copies move together: the column readers filter on, and the
+            # metadata a later full cognify rebuilds its NodeSet tags from.
+            # Writing only the column would leave a document whose chunks and
+            # whose row disagree about their grouping.
             data_point.node_set = json.dumps(node_set)
+            data_point.external_metadata = _merged_external_metadata(data_point, node_set)
 
         status_for_pipeline = data_point.pipeline_status.setdefault(PIPELINE_NAME, {})
         status_for_pipeline[str(dataset_id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
@@ -513,6 +543,64 @@ async def _mark_document_processed(data_id: UUID, dataset_id: UUID) -> None:
         await session.commit()
 
 
+async def _is_document_processed(data_id: UUID, dataset_id: UUID) -> bool:
+    """Whether the cognify-completion stamp is already on the row."""
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if data_point is None:
+            return False
+        return (data_point.pipeline_status or {}).get(PIPELINE_NAME, {}).get(
+            str(dataset_id)
+        ) == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+
+
+def _unchanged_result(reindexed: int) -> dict:
+    """The no-op result, shaped like the incremental one.
+
+    The router returns this dict verbatim as the HTTP body, and both the SDK
+    docstring and the route documentation advertise the same keys for either
+    status — so a client reading kept_chunks must not get a KeyError on a no-op.
+    """
+    return {
+        "status": "unchanged",
+        "regions": 0,
+        "deleted_chunks": 0,
+        "added_chunks": 0,
+        "reused_chunks": 0,
+        "kept_chunks": 0,
+        "reindexed_chunks": reindexed,
+    }
+
+
+async def _repair_unchanged(
+    bundle: dict,
+    data_id: UUID,
+    dataset,
+    user: User,
+    pipeline_run_id: UUID,
+) -> dict:
+    """Execute the self-heal the planning phase found, under the caller's run."""
+    shifted = bundle.get("shifted_chunks") or []
+    if shifted:
+        context = PipelineContext(
+            user=user,
+            data_item=bundle.get("data_item"),
+            dataset=dataset,
+            pipeline_run_id=pipeline_run_id,
+            pipeline_name=PIPELINE_NAME,
+        )
+        await _restore_repositioned_chunks(shifted, context)
+    await _mark_document_processed(data_id, dataset.id)
+    logger.info(
+        "incremental update: content unchanged, repaired %s",
+        ", ".join(bundle.get("repairs") or ["nothing"]),
+    )
+    return _unchanged_result(len(shifted))
+
+
 async def incremental_update(
     data_id: UUID,
     data,
@@ -530,14 +618,11 @@ async def incremental_update(
             f"graph provider '{graph_provider}' is not verified for chunk-level updates"
         )
 
-    # The HTTP router (and permissive SDK callers) send a list of files; a
-    # chunk-level update targets exactly one document by definition.
-    if isinstance(data, (list, tuple)):
-        if len(data) != 1:
-            raise IncrementalUpdateNotPossible(
-                f"chunk-level update targets exactly one document, got {len(data)} items"
-            )
-        data = data[0]
+    # Single-item input is update()'s contract, enforced there with
+    # IngestionError. Re-checking it here would be unreachable from update()
+    # and, worse, would raise IncrementalUpdateNotPossible — which means "fall
+    # back", routing a multi-item update into a full flow that has already
+    # unwrapped it.
 
     # -- Permissions: dataset write + membership + ownership ---------------- #
     dataset = await get_authorized_dataset(user, dataset_id, "write")
@@ -581,14 +666,17 @@ async def _run_incremental_update(
 ) -> dict:
     """Stage → validate → (record) → write → publish.
 
-    Run-record discipline: no PipelineRun exists until staging and validation
-    have succeeded — a refused or unchanged update leaves no run-record noise.
-    Errors after the record is created are logged against it.
+    Run-record discipline: no PipelineRun exists until there is something to
+    WRITE — a refused or genuinely no-op update leaves no run-record noise.
+    Errors after the record is created are logged against it. Every write,
+    including the unchanged branch's self-heal, happens under a run.
     """
     bundle = await _stage_and_plan(data_id, data, dataset, user, node_set, preferred_loaders)
 
-    if bundle.get("status") == "unchanged":
-        return bundle
+    # A no-op with nothing to repair is the only path that writes nothing, and
+    # so the only one that records no run.
+    if bundle.get("status") == "unchanged" and not bundle.get("repairs"):
+        return _unchanged_result(0)
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, RUN_PIPELINE_NAME)
     pipeline_run = await log_pipeline_run_start(
@@ -600,9 +688,21 @@ async def _run_incremental_update(
         additional_properties={"dataset_id": str(dataset.id), "data_id": str(data_id)},
     )
     try:
-        result = await _write_and_publish(
-            bundle, data_id, dataset, user, node_set, graph_model, custom_prompt
-        )
+        if bundle.get("status") == "unchanged":
+            result = await _repair_unchanged(
+                bundle, data_id, dataset, user, pipeline_run.pipeline_run_id
+            )
+        else:
+            result = await _write_and_publish(
+                bundle,
+                data_id,
+                dataset,
+                user,
+                node_set,
+                graph_model,
+                custom_prompt,
+                pipeline_run.pipeline_run_id,
+            )
     except Exception as error:
         await log_pipeline_run_error(
             pipeline_run.pipeline_run_id,
@@ -638,6 +738,10 @@ async def _stage_and_plan(
     reads the old state, plans the diff, chunks the regions at their recorded
     budgets, and proves no-loss. Raises IncrementalUpdateNotPossible freely —
     at this point nothing observable has changed and no run record exists.
+
+    This holds for the unchanged branch too: it reports the repairs it found
+    and performs none of them. The caller opens a run and executes them, so a
+    self-heal that fails is recorded rather than invisible.
     """
     dataset_id = dataset.id
 
@@ -656,31 +760,28 @@ async def _stage_and_plan(
     staged = await _stage_new_content(data, preferred_loaders)
     new_text = await _read_processed_text(staged.raw_data_location)
 
-    document = _build_document(old_data, staged)
+    document = _build_document(old_data, staged, node_set)
 
     if staged.content_hash == old_data.content_hash and new_text == old_text:
-        # Same content re-submitted. Self-heal: a crash between an earlier
-        # delete and its renumbering can leave stale indexes — repair them.
-        context = PipelineContext(
-            user=user,
-            data_item=old_data,
-            dataset=dataset,
-            pipeline_run_id=uuid4(),
-            pipeline_name=PIPELINE_NAME,
-        )
-        repaired = _build_shifted_chunks(
+        # Same content re-submitted. Two things can still be stale, and both
+        # are reported rather than repaired here: chunk indexes left behind by
+        # a crash between an earlier delete and its renumbering, and a missing
+        # cognify-completion stamp (without which a later cognify would redo
+        # the whole document). A missing stamp counts as a repair so the
+        # self-heal keeps its reach — it is a write either way, and every write
+        # belongs under a run.
+        shifted = _build_shifted_chunks(
             document, stored_chunks, set(), {i: i for i in range(len(stored_chunks))}
         )
-        if repaired:
-            await _restore_repositioned_chunks(repaired, context)
-        await _mark_document_processed(data_id, dataset_id)
-        logger.info("incremental update: content unchanged, repaired %d indexes", len(repaired))
+        needs_stamp = not await _is_document_processed(data_id, dataset_id)
+        repairs = ["indexes"] if shifted else []
+        if needs_stamp:
+            repairs.append("stamp")
         return {
             "status": "unchanged",
-            "deleted_chunks": 0,
-            "added_chunks": 0,
-            "reused_chunks": 0,
-            "reindexed_chunks": len(repaired),
+            "repairs": repairs,
+            "data_item": old_data,
+            "shifted_chunks": shifted,
         }
 
     stored_texts = [node["text"] for node in stored_chunks]
@@ -730,6 +831,7 @@ async def _write_and_publish(
     node_set: Optional[List[str]],
     graph_model: type[BaseModel],
     custom_prompt: Optional[str],
+    pipeline_run_id: UUID,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.
 
@@ -749,11 +851,14 @@ async def _write_and_publish(
     new_chunks = bundle["new_chunks"]
     kept_final_index = bundle["kept_final_index"]
 
+    # The run that is recording this write, not a fresh id: the provenance
+    # stamped on every node and edge below embeds it, and that stamp is what
+    # makes the write rollbackable and auditable by run.
     context = PipelineContext(
         user=user,
         data_item=bundle.get("data_item"),
         dataset=dataset,
-        pipeline_run_id=uuid4(),
+        pipeline_run_id=pipeline_run_id,
         pipeline_name=PIPELINE_NAME,
     )
 

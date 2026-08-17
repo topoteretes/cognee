@@ -55,11 +55,8 @@ def get_dataset_id_from_source_ref_key(source_ref_key: str) -> UUID:
 
 
 def get_data_id_from_source_ref_key(source_ref_key: str) -> UUID:
-    """Extract the data item id from a source ref key."""
-    prefix, version, _dataset_id, data_id = source_ref_key.split(":", 3)
-    if f"{prefix}:{version}" != SOURCE_REF_PREFIX:
-        raise ValueError("Unsupported source ref key format")
-    return UUID(data_id)
+    """Extract the data item id from a source ref key (v1 or v2)."""
+    return parse_source_ref_key(source_ref_key).data_id
 
 
 def make_source_run_ref(pipeline_run_id: UUID, source_ref_key: str) -> str:

@@ -86,6 +86,10 @@ async def collect_chunk_ownership(
     ownership = ChunkOwnership()
     seen_chunk_keys: dict = {}
     document_scoped_names = _document_scoped_type_names()
+    # Ids of every document-scoped node seen so far, accumulated across roots so
+    # an edge can be classified even when its endpoints surfaced in different
+    # expansions. Node types do not change between roots.
+    document_scoped_ids: set = set()
 
     for root in data_points:
         sub_nodes, sub_edges = await get_graph_from_model(
@@ -99,6 +103,8 @@ async def collect_chunk_ownership(
                 if key not in seen_chunk_keys:
                     seen_chunk_keys[key] = True
                     ownership.chunk_ref_keys.append(key)
+            elif type(sub_node).__name__ in document_scoped_names:
+                document_scoped_ids.add(str(sub_node.id))
         if not owner_keys:
             continue
         for sub_node in sub_nodes:
@@ -109,6 +115,17 @@ async def collect_chunk_ownership(
                 if key not in owners:
                     owners.append(key)
         for sub_edge in sub_edges:
+            # An edge BETWEEN two document-scoped nodes is document-scoped too:
+            # `document -[belongs_to_set]-> NodeSet` outlives every chunk, so
+            # chunk-owning it would hand it the chunk's v2 key as its write
+            # group — it would never carry the document's v1 key, and stripping
+            # the dead chunk's refs would leave it with none at all. An edge
+            # with no refs is invisible to delete_by_document (which resolves
+            # artifacts through the dataset's ref maps), so it would leak.
+            # `chunk -[is_part_of]-> document` keeps its chunk owner: that edge
+            # exists only because the chunk does, and must die with it.
+            if str(sub_edge[0]) in document_scoped_ids and str(sub_edge[1]) in document_scoped_ids:
+                continue
             owners = ownership.edge_owners.setdefault(_edge_key(sub_edge), [])
             for key in owner_keys:
                 if key not in owners:

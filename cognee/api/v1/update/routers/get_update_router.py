@@ -90,9 +90,10 @@ def get_update_router() -> APIRouter:
                  by the edit instead of re-ingesting the whole document.
 
         ## Response
-        With chunk_level_diff, a summary of the incremental operation:
-        `{"status": "incremental" | "unchanged", "deleted_chunks": n, "added_chunks": n,
-        "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}`.
+        With chunk_level_diff, a summary of the incremental operation (same keys for
+        either status):
+        `{"status": "incremental" | "unchanged", "regions": n, "deleted_chunks": n,
+        "added_chunks": n, "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}`.
         When the full flow runs (chunk_level_diff disabled, or its preconditions not met),
         pipeline run information for the delete + re-add + cognify operation.
 

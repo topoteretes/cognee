@@ -171,5 +171,51 @@ def test_document_scope_uses_the_type_hierarchy_not_names():
     asyncio.run(scenario())
 
 
+def test_document_scoped_edges_are_not_chunk_owned():
+    """An edge whose BOTH endpoints are document-scoped stays document-scoped.
+
+    ``document -[belongs_to_set]-> NodeSet`` outlives every chunk. Chunk-owning
+    it would make the chunk's v2 key its write group, so it would never carry
+    the document's v1 key — and stripping the dead chunk's refs would leave it
+    with no refs at all. ``delete_by_document`` resolves artifacts through the
+    dataset's ref maps, so a ref-less edge is invisible to it and leaks.
+
+    Note the tag is on the DOCUMENT here, not on the chunk: a chunk's expansion
+    reaches its document and, through it, the document's tags.
+    """
+
+    async def scenario():
+        dataset_id, data_id = uuid4(), uuid4()
+        node_set = NodeSet(id=uuid4(), name="tag")
+        document = _instantiate(document_types.TextDocument)
+        document.belongs_to_set = [node_set]
+        chunk = DocumentChunk(
+            id=uuid4(),
+            text="Tagged document.",
+            chunk_size=2,
+            chunk_index=0,
+            cut_type="paragraph_end",
+            is_part_of=document,
+            contains=[],
+        )
+
+        ownership = await collect_chunk_ownership([chunk], dataset_id, data_id)
+
+        document_to_node_set = (str(document.id), str(node_set.id), "belongs_to_set")
+        assert document_to_node_set not in ownership.edge_owners, (
+            "document -> NodeSet must keep the document-scoped v1 key; chunk-owning "
+            "it strips it into an unowned, undeletable state when the chunk dies"
+        )
+
+        # The chunk's own edge to the document MUST stay chunk-owned: it exists
+        # only because the chunk does, so it has to die with it.
+        chunk_to_document = (str(chunk.id), str(document.id), "is_part_of")
+        assert ownership.edge_owners.get(chunk_to_document), (
+            "chunk -> document is chunk-scoped and must be deleted with its chunk"
+        )
+
+    asyncio.run(scenario())
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
