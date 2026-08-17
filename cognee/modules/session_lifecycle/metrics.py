@@ -463,7 +463,13 @@ async def touch_session(*, session_id, user_id, dataset_id=None):
 _session_record_write_failed = False
 
 
-async def record_session_activity(user_id: str, session_id: str, *, errored: bool = False) -> None:
+async def record_session_activity(
+    user_id: str,
+    session_id: str,
+    *,
+    dataset_id: Optional[UUIDType] = None,
+    errored: bool = False,
+) -> None:
     """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.
 
     Accepts a string ``user_id`` (coerced to UUID). Swallows failures — the
@@ -478,7 +484,11 @@ async def record_session_activity(user_id: str, session_id: str, *, errored: boo
         except (ValueError, TypeError):
             return
 
-        await ensure_and_touch_session(session_id=session_id, user_id=user_uuid)
+        await ensure_and_touch_session(
+            session_id=session_id,
+            user_id=user_uuid,
+            dataset_id=dataset_id,
+        )
         if errored:
             await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
     except Exception as exc:

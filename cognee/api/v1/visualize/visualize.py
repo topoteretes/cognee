@@ -87,7 +87,11 @@ async def fetch_visualization_data(
     if include_session_events:
         from cognee.modules.visualization.session_events import collect_session_events
 
-        search_events = await collect_session_events(user=user, session_ids=session_ids)
+        search_events = await collect_session_events(
+            user=user,
+            session_ids=session_ids,
+            dataset_id=getattr(dataset, "id", None),
+        )
 
     return graph_data, search_events
 
@@ -358,18 +362,10 @@ async def get_live_events(
     """Delta of search/improve events since a cursor, for the Memory tab's
     live timeline.
 
-    ``dataset_id`` gates who may call this — the same read-permission check
-    every other visualize endpoint runs (``get_authorized_existing_datasets``)
-    — not which events come back. Session events are collected per *user*,
-    not per dataset, matching how ``visualize_graph``'s own
-    ``include_session_events`` already embeds the same events into whichever
-    dataset's page happens to be open. Scoping the event *content* to one
-    dataset would mean checking each event's referenced node/edge ids against
-    that dataset's graph membership — real extra cost that this endpoint's
-    one job (avoid recomputing the whole graph payload every ~1.5s just to
-    refresh a timeline) does not need, and it would make this endpoint
-    disagree with the very same events already shown in ``search_events`` on
-    ``/visualize/json`` for that dataset.
+    ``dataset_id`` both gates access and scopes the returned events. Session
+    lifecycle rows are tagged with the dataset used by the session manager;
+    unscoped/legacy rows are excluded from a dataset-scoped visualization so
+    that a missing tag cannot become a data leak.
 
     ``since=None`` returns every available event — the first call, before a
     client has a cursor of its own.
@@ -392,7 +388,7 @@ async def get_live_events(
     if not authorized:
         raise PermissionDeniedError(message="Not authorized to read this dataset")
 
-    events = await collect_session_events(user=user)
+    events = await collect_session_events(user=user, dataset_id=dataset_id)
 
     if since is not None:
         cutoff = _as_naive_utc(since)

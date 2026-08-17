@@ -194,7 +194,7 @@ class SessionManager:
                 question=question,
                 answer=answer,
             )
-            await record_session_activity(user_id, session_id)
+            await record_session_activity(user_id, session_id, dataset_id=self.dataset_id)
             return qa_id
 
     async def add_agent_trace_step(
@@ -249,7 +249,12 @@ class SessionManager:
             error_message=error_message,
             session_feedback=session_feedback,
         )
-        await record_session_activity(user_id, session_id, errored=status == "error")
+        await record_session_activity(
+            user_id,
+            session_id,
+            dataset_id=self.dataset_id,
+            errored=status == "error",
+        )
         await self._maybe_extract_agent_context(
             user_id=user_id,
             session_id=session_id,

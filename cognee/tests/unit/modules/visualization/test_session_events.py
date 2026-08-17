@@ -1,6 +1,13 @@
 """Unit tests for the session operation-event mapper (pure, no cache/DB)."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+from uuid import UUID
+
+import pytest
+
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.modules.visualization import session_events
 from cognee.modules.visualization.session_events import map_session_entries_to_events
 
 
@@ -64,3 +71,35 @@ class TestMapSessionEntriesToEvents:
         assert map_session_entries_to_events("s1", entries) == map_session_entries_to_events(
             "s1", entries
         )
+
+
+@pytest.mark.asyncio
+async def test_collect_session_events_filters_explicit_sessions_by_dataset():
+    session_manager = SimpleNamespace(
+        is_available=True,
+        get_session=AsyncMock(return_value=[]),
+    )
+    user = SimpleNamespace(id=UUID("11111111-1111-1111-1111-111111111111"))
+    dataset_id = UUID("22222222-2222-2222-2222-222222222222")
+
+    with (
+        patch(
+            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch.object(
+            session_events,
+            "_list_recent_session_ids",
+            AsyncMock(return_value=["allowed-session"]),
+        ) as list_sessions,
+    ):
+        await session_events.collect_session_events(
+            user=user,
+            session_ids=["allowed-session", "private-session"],
+            dataset_id=dataset_id,
+        )
+
+    list_sessions.assert_awaited_once_with(user.id, session_events.MAX_SESSIONS_SCANNED, dataset_id)
+    session_manager.get_session.assert_awaited_once_with(
+        user_id=str(user.id), session_id="allowed-session"
+    )
