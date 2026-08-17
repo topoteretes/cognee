@@ -10,6 +10,9 @@ Covered here:
 - log_pipeline_run_progress updates the run's one STARTED row in place
   instead of inserting a new pipeline_runs row per tick, so a long batch
   doesn't grow the table unboundedly.
+- A tick arriving after the run already reached a terminal status is
+  dropped, not inserted as a spurious new STARTED row (future-proofing —
+  today's only caller, run_tasks.py, can't actually trigger this).
 - pipeline_run_info_queues correctly round-trips a PipelineRunProgress event,
   the same way it already does for the other PipelineRunInfo subclasses.
 """
@@ -22,10 +25,13 @@ import pytest
 from sqlalchemy import select
 
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
-from cognee.modules.pipelines.models import PipelineRun
+from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunProgress
 from cognee.modules.pipelines.operations.log_pipeline_run_progress import (
     log_pipeline_run_progress,
+)
+from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
+    log_pipeline_run_complete,
 )
 from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
 from cognee.modules.pipelines.queues import pipeline_run_info_queues as queues_module
@@ -216,6 +222,72 @@ async def test_log_pipeline_run_progress_updates_in_place():
         "total_items": 5,
         "current_stage": "stage-5",
     }
+
+
+@pytest.mark.asyncio
+async def test_log_pipeline_run_progress_drops_tick_after_terminal_status():
+    """A tick that arrives with no STARTED row left for this pipeline_run_id
+    but a terminal (COMPLETED) row already present. Today's only caller
+    (run_tasks.py) can't produce this — the STARTED row is never deleted,
+    so log_pipeline_run_progress's own first query always finds and updates
+    it in place instead, terminal status or not. This test simulates a
+    hypothetical future where STARTED rows get pruned/archived, to prove the
+    fallback path won't insert a spurious new STARTED row with a created_at
+    newer than the terminal row (which would make get_pipeline_status
+    report STARTED for a completed run)."""
+    await create_db_and_tables()
+
+    dataset_id = uuid4()
+    pipeline_id = uuid4()
+
+    pipeline_run = await log_pipeline_run_start(pipeline_id, "cognify_pipeline", dataset_id, None)
+    pipeline_run_id = pipeline_run.pipeline_run_id
+    await log_pipeline_run_complete(
+        pipeline_run_id, pipeline_id, "cognify_pipeline", dataset_id, None
+    )
+
+    # Simulate the STARTED row no longer existing (e.g. pruned/archived),
+    # leaving only the terminal COMPLETED row — the scenario the fallback
+    # insert's terminal-status guard exists for.
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        started_row = (
+            await session.execute(
+                select(PipelineRun)
+                .filter(PipelineRun.pipeline_run_id == pipeline_run_id)
+                .filter(PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_STARTED)
+            )
+        ).scalar_one()
+        await session.delete(started_row)
+        await session.commit()
+
+    result = await log_pipeline_run_progress(
+        pipeline_run_id=pipeline_run_id,
+        pipeline_id=pipeline_id,
+        pipeline_name="cognify_pipeline",
+        dataset_id=dataset_id,
+        completed_items=1,
+        total_items=1,
+    )
+
+    # The tick was dropped: no new row inserted, and the terminal row's
+    # own status/run_info come back untouched.
+    assert result.status.value == "DATASET_PROCESSING_COMPLETED"
+
+    async with db_engine.get_async_session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PipelineRun).filter(PipelineRun.pipeline_run_id == pipeline_run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    # Only the terminal row remains — no new STARTED row from the dropped tick.
+    assert len(rows) == 1
+    assert rows[0].status.value == "DATASET_PROCESSING_COMPLETED"
 
 
 def test_queue_round_trips_pipeline_run_progress():

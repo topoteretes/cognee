@@ -32,11 +32,24 @@ def upgrade() -> None:
 
     existing_indexes = [idx["name"] for idx in inspector.get_indexes("pipeline_runs")]
     if INDEX_NAME not in existing_indexes:
-        op.create_index(
-            INDEX_NAME,
-            "pipeline_runs",
-            ["dataset_id", "pipeline_name", "created_at"],
-        )
+        if conn.dialect.name == "postgresql":
+            # CREATE INDEX (without CONCURRENTLY) takes a table-wide lock for
+            # the duration of the build — fine for the small dev/test tables
+            # every other migration in this repo targets, but pipeline_runs
+            # now grows throughout a run (see module docstring), so a large
+            # production table deserves the non-blocking path. CONCURRENTLY
+            # cannot run inside a transaction, hence autocommit_block().
+            with op.get_context().autocommit_block():
+                op.execute(
+                    f"CREATE INDEX CONCURRENTLY {INDEX_NAME} ON pipeline_runs "
+                    f"(dataset_id, pipeline_name, created_at)"
+                )
+        else:
+            op.create_index(
+                INDEX_NAME,
+                "pipeline_runs",
+                ["dataset_id", "pipeline_name", "created_at"],
+            )
 
 
 def downgrade() -> None:
@@ -45,4 +58,8 @@ def downgrade() -> None:
 
     existing_indexes = [idx["name"] for idx in inspector.get_indexes("pipeline_runs")]
     if INDEX_NAME in existing_indexes:
-        op.drop_index(INDEX_NAME, "pipeline_runs")
+        if conn.dialect.name == "postgresql":
+            with op.get_context().autocommit_block():
+                op.execute(f"DROP INDEX CONCURRENTLY {INDEX_NAME}")
+        else:
+            op.drop_index(INDEX_NAME, "pipeline_runs")

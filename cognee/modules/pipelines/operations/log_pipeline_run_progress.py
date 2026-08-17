@@ -54,10 +54,38 @@ async def log_pipeline_run_progress(
             pipeline_run.run_info = run_info
             session.add(pipeline_run)
         else:
-            # No STARTED row found — e.g. called racing log_pipeline_run_start's
-            # own commit, or after the run already reached a terminal status.
-            # Insert rather than drop the tick, matching the pre-existing
-            # log_pipeline_run_start/complete/error insert pattern.
+            # No STARTED row found. In today's only caller (run_tasks.py) this
+            # can't happen — log_pipeline_run_start's commit always precedes
+            # every item's progress tick, and log_pipeline_run_complete/error
+            # only run after all ticks are done — but a future caller could
+            # break that ordering, so don't assume it here too.
+            terminal_run = (
+                await session.execute(
+                    select(PipelineRun)
+                    .filter(PipelineRun.pipeline_run_id == pipeline_run_id)
+                    .filter(
+                        PipelineRun.status.in_(
+                            [
+                                PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+                                PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+                            ]
+                        )
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            if terminal_run is not None:
+                # The run already finished — inserting a STARTED row now would
+                # give it a later created_at than the terminal row, making
+                # get_pipeline_status report STARTED for a completed run.
+                # Progress is metadata-only, so dropping this tick is harmless.
+                return terminal_run
+
+            # Truly no row for this pipeline_run_id yet (e.g. racing
+            # log_pipeline_run_start's own commit) — insert rather than drop
+            # the tick, matching the pre-existing log_pipeline_run_start/
+            # complete/error insert pattern.
             pipeline_run = PipelineRun(
                 pipeline_run_id=pipeline_run_id,
                 pipeline_name=pipeline_name,
