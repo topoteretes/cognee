@@ -4,6 +4,11 @@ from uuid import uuid4
 import pytest
 
 from cognee.modules.cognify import rollback as rollback_module
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunAlreadyCompleted,
+    PipelineRunCompleted,
+    PipelineRunErrored,
+)
 
 
 class _FakeScalarsResult:
@@ -234,3 +239,89 @@ async def test_cognify_rollback_keeps_relational_rows_if_graph_delete_fails(monk
         )
 
     assert engine.calls == 1
+
+
+def test_extract_data_ids_skips_already_completed_items():
+    """An item skipped as already-completed belongs to an EARLIER run, so the run
+    being rolled back must not claim its marker."""
+    completed_id = uuid4()
+    errored_id = uuid4()
+    skipped_id = uuid4()
+    run_info_fields = {
+        "pipeline_run_id": uuid4(),
+        "dataset_id": uuid4(),
+        "dataset_name": "some-dataset",
+    }
+
+    data_ingestion_info = [
+        {"run_info": PipelineRunCompleted(**run_info_fields), "data_id": completed_id},
+        {"run_info": PipelineRunAlreadyCompleted(**run_info_fields), "data_id": skipped_id},
+        {
+            "run_info": PipelineRunErrored(**run_info_fields, payload="boom"),
+            "data_id": errored_id,
+        },
+    ]
+
+    assert rollback_module._extract_data_ids(data_ingestion_info) == {completed_id, errored_id}
+
+
+@pytest.mark.asyncio
+async def test_rollback_preserves_markers_of_previously_extracted_data(monkeypatch):
+    """One unprocessable document must not cost the whole dataset its markers.
+
+    ``run_tasks`` raises as soon as any item errors and passes the rollback EVERY
+    per-item result, including the already-completed ones an earlier run extracted.
+    Clearing those markers strands records whose nodes are still in the graph — the
+    node/edge deletion is scoped by pipeline_run_id and never removes them — so the
+    next cognify re-extracts them at full LLM cost.
+    """
+    pipeline_run_id = uuid4()
+    dataset_id = uuid4()
+    errored_id = uuid4()
+    previously_extracted_id = uuid4()
+
+    # No nodes or edges from this run: the run died before writing any, so the only
+    # source of target ids is data_ingestion_info — which is where the bug lived.
+    session_discovery = _FakeSession([_FakeExecuteResult([]), _FakeExecuteResult([])])
+    session_mutation = _FakeSession([])
+    engine = _FakeEngine([session_discovery, session_mutation])
+
+    reset_calls = []
+
+    async def _capture_reset(_session, target_data_ids, _dataset_id):
+        reset_calls.append(set(target_data_ids))
+
+    async def _get_unified_engine():
+        return SimpleNamespace(supports_graph_provenance_delete=lambda: False)
+
+    monkeypatch.setattr(rollback_module, "get_unified_engine", _get_unified_engine)
+    monkeypatch.setattr(rollback_module, "get_relational_engine", lambda: engine)
+    monkeypatch.setattr(rollback_module, "multi_user_support_possible", lambda: False)
+    monkeypatch.setattr(rollback_module, "_reset_pipeline_status", _capture_reset)
+
+    await rollback_module.cognify_rollback_handler(
+        pipeline_run_id=pipeline_run_id,
+        dataset=SimpleNamespace(id=dataset_id),
+        data_ingestion_info=[
+            {
+                "run_info": PipelineRunErrored(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset_id,
+                    dataset_name="some-dataset",
+                    payload="boom",
+                ),
+                "data_id": errored_id,
+            },
+            {
+                "run_info": PipelineRunAlreadyCompleted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset_id,
+                    dataset_name="some-dataset",
+                ),
+                "data_id": previously_extracted_id,
+            },
+        ],
+    )
+
+    assert reset_calls == [{errored_id}]
+    assert previously_extracted_id not in reset_calls[0]
