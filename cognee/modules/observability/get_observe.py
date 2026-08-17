@@ -163,9 +163,9 @@ def _wrap_with_otel(inner_decorator):
                             _set_generation_output(span, result)
                         return result
 
-                import asyncio
+                import inspect
 
-                if asyncio.iscoroutinefunction(func):
+                if inspect.iscoroutinefunction(func):
                     return async_wrapper
                 return sync_wrapper
 
@@ -207,9 +207,9 @@ def _wrap_with_otel(inner_decorator):
             with tracer.start_as_current_span(f"cognee.observe.{func.__name__}"):
                 return wrapped(*args, **kwargs)
 
-        import asyncio
+        import inspect
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 
