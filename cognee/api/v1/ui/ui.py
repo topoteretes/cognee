@@ -421,50 +421,6 @@ def prompt_user_for_download() -> bool:
         return False
 
 
-# TODO(subpath-deployment): support serving frontend, backend, and MCP behind one
-# port, reachable at a single domain.
-# Currently, start_ui() always serves the frontend, backend, and MCP server on three
-# separate ports, each assuming it owns the root path ("/") of its own origin.
-# This makes it impossible to expose all three under a single public domain,
-# since none of them can be reached at a distinguishing path prefix.
-#
-# Proposed signature:
-#
-# def start_ui(
-#     pid_callback: Callable[[int], None],
-#     port: int = 3000,
-#     open_browser: bool = True,
-#     auto_download: bool = False,
-#     start_backend: bool = False,
-#     backend_port: int = 8000,
-#     start_mcp: bool = False,
-#     mcp_port: int = 8001,
-#     gateway_port: Optional[int] = None,
-#     frontend_path: str = "/frontend",
-#     backend_path: str = "/backend",
-#     mcp_path: str = "/mcp",
-# ) -> Optional[subprocess.Popen]:
-#
-# Default behavior (gateway_port=None): unchanged from current behavior. The frontend, backend,
-# and MCP server each run independently on their own port (port, backend_port,
-# mcp_port), with no awareness of any path prefix.
-#
-# New behavior (gateway_port=<int>): a single ASGI gateway app is started on
-# gateway_port, exposing all three services under one public port and domain,
-# distinguished by path prefix:
-#   - backend_path  -> the FastAPI backend app, mounted in-process
-#   - mcp_path      -> the MCP ASGI app, mounted in-process
-#   - frontend_path -> proxied through to the Next.js subprocess, which still runs
-#                       on its own internal port (a separate JS runtime cannot be
-#                       mounted in-process)
-# port, backend_port, and mcp_port then become internal bind ports behind the
-# gateway rather than publicly reachable addresses.
-#
-# Intended use case: reaching all of cognee's stack at a single domain, by putting
-# everything behind one port with no external reverse proxy required. The gateway
-# mounts the backend and MCP app in-process, and proxies requests to the frontend
-# internally since Next.js runs as a separate process that can't be mounted the
-# same way.
 def start_ui(
     pid_callback: Callable[[int], None],
     port: int = 3000,
@@ -474,6 +430,10 @@ def start_ui(
     backend_port: int = 8000,
     start_mcp: bool = False,
     mcp_port: int = 8001,
+    gateway_port: Optional[int] = None,
+    frontend_path: str = "/",
+    backend_path: str = "/backend",
+    mcp_path: str = "/mcp",
 ) -> Optional[subprocess.Popen]:
     """
     Start the cognee frontend UI server, optionally with the backend API server and MCP server.
@@ -485,7 +445,8 @@ def start_ui(
     4. Check if Node.js and npm are available (for development mode)
     5. Install dependencies if needed (development mode)
     6. Start the frontend server
-    7. Optionally open the browser
+    7. Optionally start a gateway serving all of the above behind a single port
+    8. Optionally open the browser
 
     Args:
         pid_callback: Callback to notify with PID of each spawned process
@@ -496,6 +457,26 @@ def start_ui(
         backend_port: Port to run the backend server on (default: 8000)
         start_mcp: If True, also start the cognee MCP server (default: False)
         mcp_port: Port to run the MCP server on (default: 8001)
+        gateway_port: If set, serve every started service behind this single port,
+            distinguished by path prefix (default: None, meaning no gateway)
+        frontend_path: Gateway path prefix for the frontend (default: "/")
+        backend_path: Gateway path prefix for the backend API (default: "/backend")
+        mcp_path: Gateway path prefix for the MCP server (default: "/mcp")
+
+    Gateway mode:
+        Without gateway_port the three services each own a port and a root path, and all
+        three ports have to be publicly reachable — which a deployment with a single
+        domain cannot do.
+
+        With gateway_port set, one gateway is bound on that port and forwards to the
+        services by path prefix; port, backend_port and mcp_port become internal bind
+        addresses behind it. Reaching all of cognee at a single domain then only takes
+        that one port, with no external reverse proxy involved.
+
+        The frontend keeps the gateway root by default, since Next.js is only aware of a
+        path prefix if it is built with a matching basePath. The backend is told about its
+        prefix through uvicorn's --root-path, so the URLs it generates stay correct, and
+        it is reached from the browser as a same-origin path rather than a second origin.
 
     Returns:
         subprocess.Popen object representing the running frontend server, or None if failed
@@ -517,10 +498,45 @@ def start_ui(
         >>> server = cognee.start_ui(dummy_callback, start_mcp=True)
         >>> # UI will be available at http://localhost:3000
         >>> # MCP server will be available at http://127.0.0.1:8001/sse
+        >>>
+        >>> # Serve everything behind a single port
+        >>> server = cognee.start_ui(
+        ...     dummy_callback, start_backend=True, start_mcp=True, gateway_port=9000
+        ... )
+        >>> # UI will be available at http://localhost:9000/
+        >>> # API will be available at http://localhost:9000/backend
+        >>> # MCP server will be available at http://localhost:9000/mcp
         >>> # To stop all servers later:
         >>> server.terminate()
     """
     logger.info("Starting cognee UI...")
+
+    if gateway_port:
+        # Imported here rather than at module scope: cognee/__init__.py imports start_ui,
+        # so a top-level import would put uvicorn on the path of every `import cognee`,
+        # including scripts that never start a server.
+        from .gateway import normalize_prefix
+
+        frontend_path = normalize_prefix(frontend_path)
+        backend_path = normalize_prefix(backend_path)
+        mcp_path = normalize_prefix(mcp_path)
+
+        if frontend_path != "/":
+            logger.warning(
+                f"Serving the frontend under '{frontend_path}' requires the frontend to be "
+                f"built with a matching Next.js basePath, otherwise its assets will 404. "
+                f"Use frontend_path='/' unless you have configured one."
+            )
+
+        if start_mcp:
+            logger.warning(
+                f"The MCP server is routed at '{mcp_path}', but it runs the SSE transport, "
+                f"whose handshake hands the client a message URL relative to the server "
+                f"root — which does not account for the prefix. Reaching MCP through the "
+                f"gateway also needs the public host in MCP_ALLOWED_HOSTS, since FastMCP "
+                f"rejects a Host header it does not recognise. Until MCP moves to the "
+                f"streamable-HTTP transport, reach it on port {mcp_port} directly."
+            )
 
     ports_to_check = [(port, "Frontend UI")]
 
@@ -529,6 +545,9 @@ def start_ui(
 
     if start_mcp:
         ports_to_check.append((mcp_port, "MCP Server"))
+
+    if gateway_port:
+        ports_to_check.append((gateway_port, "Gateway"))
 
     logger.info("Checking port availability...")
     all_ports_available, unavailable_services = _check_required_ports(ports_to_check)
@@ -631,17 +650,26 @@ def start_ui(
         try:
             import sys
 
+            backend_command = [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "cognee.api.client:app",
+                "--host",
+                "localhost",
+                "--port",
+                str(backend_port),
+            ]
+
+            if gateway_port and backend_path != "/":
+                # The gateway strips the prefix before forwarding, so the app still routes
+                # on the paths it already knows. root_path is how it learns the prefix
+                # anyway, so the URLs it generates — redirects, OpenAPI servers — remain
+                # valid at the publicly reachable address.
+                backend_command.extend(["--root-path", backend_path])
+
             backend_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "uvicorn",
-                    "cognee.api.client:app",
-                    "--host",
-                    "localhost",
-                    "--port",
-                    str(backend_port),
-                ],
+                backend_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
@@ -666,17 +694,18 @@ def start_ui(
             logger.error(f"Failed to start backend server: {str(e)}")
             return None
 
-    # Find frontend directory
-    frontend_path = find_frontend_path()
+    # Find frontend directory. Note this is a filesystem path, distinct from the
+    # frontend_path parameter above, which is the URL prefix the gateway serves it under.
+    frontend_dir = find_frontend_path()
 
-    if not frontend_path:
+    if not frontend_dir:
         logger.info("Frontend not found locally. This is normal for pip-installed cognee.")
 
         # Offer to download the frontend
         if auto_download or prompt_user_for_download():
             if download_frontend_assets():
-                frontend_path = find_frontend_path()
-                if not frontend_path:
+                frontend_dir = find_frontend_path()
+                if not frontend_dir:
                     logger.error(
                         "Download succeeded but frontend still not found. This is unexpected."
                     )
@@ -699,7 +728,7 @@ def start_ui(
     logger.debug(f"Environment check passed: {node_message}")
 
     # Install dependencies if needed
-    if not install_frontend_dependencies(frontend_path):
+    if not install_frontend_dependencies(frontend_dir):
         logger.error("Failed to install frontend dependencies")
         return None
 
@@ -710,6 +739,13 @@ def start_ui(
     # The shared frontend defaults to cloud mode; this launcher always runs
     # against the local backend, so opt into local mode unless overridden.
     env.setdefault("NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT", "false")
+
+    if gateway_port and start_backend:
+        # A relative API URL keeps the browser on whatever origin it loaded the UI from,
+        # which is the point of the single-domain deployment: the API is reachable at the
+        # same host as the UI, whatever that host turns out to be. It also makes every
+        # call same-origin, so CORS never enters the picture.
+        env.setdefault("NEXT_PUBLIC_LOCAL_API_URL", backend_path)
 
     # If nvm is installed, ensure it's available in the environment
     nvm_path = get_nvm_sh_path()
@@ -736,7 +772,7 @@ def start_ui(
         if platform.system() == "Windows":
             process = subprocess.Popen(
                 ["npm", "run", "dev"],
-                cwd=frontend_path,
+                cwd=frontend_dir,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -748,7 +784,7 @@ def start_ui(
                 # Use bash to source nvm and run npm
                 process = subprocess.Popen(
                     ["bash", "-c", f"source {nvm_path} && npm run dev"],
-                    cwd=frontend_path,
+                    cwd=frontend_dir,
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -757,7 +793,7 @@ def start_ui(
             else:
                 process = subprocess.Popen(
                     ["npm", "run", "dev"],
-                    cwd=frontend_path,
+                    cwd=frontend_dir,
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -778,13 +814,29 @@ def start_ui(
             logger.error("Frontend server failed to start - check the logs above for details")
             return None
 
+        # The gateway is started last: every service it forwards to is listening by now,
+        # so the first request through it cannot race a still-booting upstream.
+        public_url = f"http://localhost:{port}"
+
+        if gateway_port:
+            from .gateway import start_gateway
+
+            routes = [(frontend_path, f"http://localhost:{port}")]
+            if start_backend:
+                routes.append((backend_path, f"http://localhost:{backend_port}"))
+            if start_mcp:
+                routes.append((mcp_path, f"http://localhost:{mcp_port}"))
+
+            start_gateway(gateway_port, routes)
+            public_url = f"http://localhost:{gateway_port}{frontend_path.rstrip('/')}"
+
         # Open browser if requested
         if open_browser:
 
             def open_browser_delayed():
                 time.sleep(5)  # Give Next.js time to fully start
                 try:
-                    webbrowser.open(f"http://localhost:{port}")
+                    webbrowser.open(public_url)
                 except Exception as e:
                     logger.warning(f"Could not open browser automatically: {e}")
 
@@ -792,7 +844,7 @@ def start_ui(
             browser_thread.start()
 
         logger.info("✓ Cognee UI is starting up...")
-        logger.info(f"✓ Open your browser to: http://localhost:{port}")
+        logger.info(f"✓ Open your browser to: {public_url}")
         logger.info("✓ The UI will be available once Next.js finishes compiling")
 
         return process

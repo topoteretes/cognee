@@ -52,6 +52,9 @@ dependencies = [
     "limits>=4.4.1,<5",
     "fastapi>=0.116.2,<1.0.0",
     "starlette>=0.48",
+    # Already imported unconditionally on runtime paths (embedding engines, web scraper)
+    # and by the single-port UI gateway, so it is declared rather than left transitive.
+    "httpx>=0.27.0,<1.0.0",
     "python-multipart>=0.0.22,<1.0.0",
     "fastapi-users[sqlalchemy]>=15.0.2",
     "structlog>=25.2.0,<26",
