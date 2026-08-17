@@ -216,6 +216,9 @@ class LadybugAdapter(GraphDBInterface):
     # ownership stamps in ONE statement instead of one call per owner group.
     supports_per_row_source_refs = True
 
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
+
     @classmethod
     def create_subprocess(
         cls,

@@ -31,6 +31,7 @@ to run the full update instead.
 """
 
 import json
+from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
@@ -39,7 +40,6 @@ from sqlalchemy import and_, delete, select
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.cognify.config import get_cognify_config
@@ -75,8 +75,10 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.methods import get_authorized_dataset, get_data
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.tasks.documents.classify_documents import document_class_for
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
@@ -100,20 +102,46 @@ PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status
 # the skip logic that keys on cognify_pipeline's per-item status.
 RUN_PIPELINE_NAME = "incremental_update_pipeline"
 
-# Graph adapters whose get_connections/get_nodes shapes the incremental path
-# has been verified against (see edge_endpoints for the shape differences).
-# Anything else falls back to the full update.
-SUPPORTED_GRAPH_PROVIDERS = {"kuzu", "ladybug", "neo4j", "postgres"}
+
+class RefusalReason(str, Enum):
+    """Why a chunk-level update fell back to the full flow.
+
+    Every refusal used to surface as one free-text message and one log line, so
+    a permanent misconfiguration (an incompatible chunker, an unsupported
+    backend) looked exactly like a first ingestion. The reason is logged as a
+    structured field so they are separable.
+    """
+
+    UNSUPPORTED_BACKEND = "unsupported_backend"
+    UNSUPPORTED_CHUNKER = "unsupported_chunker"
+    NO_BASELINE = "no_baseline"
+    CHUNKS_NOT_TILING = "chunks_not_tiling"
+    UNREADABLE_TEXT = "unreadable_text"
 
 
 class IncrementalUpdateNotPossible(Exception):
     """Preconditions for a chunk-level update are not met; run a full update."""
 
+    def __init__(self, message: str, reason: RefusalReason = RefusalReason.NO_BASELINE):
+        super().__init__(message)
+        self.reason = reason
+
 
 async def _read_processed_text(raw_data_location: str) -> str:
-    """Read the stored processed text file (pattern from TextDocument.read)."""
-    async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
-        return file.read()
+    """Read the stored processed text file (pattern from TextDocument.read).
+
+    A row still pointing at binary content (pre-0.3.7 ingestion) is a refusal,
+    not a 500: the full rebuild handles it. Supporting those rows on this path
+    stays out of scope; falling back instead of failing does not.
+    """
+    try:
+        async with open_data_file(raw_data_location, mode="r", encoding="utf-8") as file:
+            return file.read()
+    except UnicodeDecodeError as error:
+        raise IncrementalUpdateNotPossible(
+            f"stored text at {raw_data_location} is not valid UTF-8",
+            RefusalReason.UNREADABLE_TEXT,
+        ) from error
 
 
 async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
@@ -146,7 +174,8 @@ async def _get_stored_chunks(document_id: UUID, old_text: str) -> List[dict]:
 
     if not chunks:
         raise IncrementalUpdateNotPossible(
-            f"document {document_id} has no stored chunks in the graph (not cognified yet?)"
+            f"document {document_id} has no stored chunks in the graph (not cognified yet?)",
+            RefusalReason.NO_BASELINE,
         )
 
     return sorted(chunks, key=lambda node: int(node.get("chunk_index", -1)))
@@ -459,7 +488,9 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
         actual_file_path, preferred_loaders
     )
     if loader_engine is None:
-        raise IncrementalUpdateNotPossible("no loader accepted the new content")
+        raise IncrementalUpdateNotPossible(
+            "no loader accepted the new content", RefusalReason.UNREADABLE_TEXT
+        )
 
     async with open_data_file(original_file_path) as file:
         original_metadata = classify(file).get_metadata()
@@ -612,10 +643,11 @@ async def incremental_update(
     custom_prompt: Optional[str] = None,
 ) -> dict:
     """Perform a chunk-level incremental update of one document."""
-    graph_provider = str(get_graph_config().graph_database_provider).lower()
-    if graph_provider not in SUPPORTED_GRAPH_PROVIDERS:
+    graph_engine = await get_graph_engine()
+    if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
         raise IncrementalUpdateNotPossible(
-            f"graph provider '{graph_provider}' is not verified for chunk-level updates"
+            f"graph backend {type(graph_engine).__name__} does not support chunk-level updates",
+            RefusalReason.UNSUPPORTED_BACKEND,
         )
 
     # Single-item input is update()'s contract, enforced there with
@@ -624,14 +656,29 @@ async def incremental_update(
     # back", routing a multi-item update into a full flow that has already
     # unwrapped it.
 
-    # -- Permissions: dataset write + membership + ownership ---------------- #
-    dataset = await get_authorized_dataset(user, dataset_id, "write")
+    # -- Permissions: dataset write + delete + membership + ownership -------- #
+    # Delete as well as write: this path removes chunks, summaries,
+    # chunk-orphaned entities, orphaned entity types and triplet embeddings.
+    # The full fallback path reaches the same destruction through
+    # datasets.delete_data, which requires "delete" — without this check the
+    # permission demanded by update() would depend on which branch it happened
+    # to take, and the faster branch would be the weaker one. Raise the same
+    # exception type delete_data raises for the same denial.
+    try:
+        dataset = await get_authorized_dataset(user, dataset_id, "write")
+        await get_authorized_dataset(user, dataset_id, "delete")
+    except PermissionDeniedError:
+        raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
     dataset_data = await get_dataset_data(dataset.id)
     if not any(item.id == data_id for item in dataset_data):
-        raise IncrementalUpdateNotPossible(f"data {data_id} is not part of dataset {dataset_id}")
+        raise IncrementalUpdateNotPossible(
+            f"data {data_id} is not part of dataset {dataset_id}", RefusalReason.NO_BASELINE
+        )
     old_data = await get_data(user.id, data_id, dataset.id)  # raises on foreign data
     if old_data is None or not old_data.raw_data_location:
-        raise IncrementalUpdateNotPossible("no stored processed text for this data item")
+        raise IncrementalUpdateNotPossible(
+            "no stored processed text for this data item", RefusalReason.NO_BASELINE
+        )
 
     # Same per-dataset lock as pipeline runs and delete_data: serialize against
     # concurrent cognify/delete/update on this dataset (re-entrant, so the
@@ -750,7 +797,9 @@ async def _stage_and_plan(
     # the pre-lock snapshot would use a stale baseline.
     old_data = await get_data(user.id, data_id, dataset_id)
     if old_data is None or not old_data.raw_data_location:
-        raise IncrementalUpdateNotPossible("data row disappeared before the update ran")
+        raise IncrementalUpdateNotPossible(
+            "data row disappeared before the update ran", RefusalReason.NO_BASELINE
+        )
 
     old_text = await _read_processed_text(old_data.raw_data_location)
     stored_chunks = await _get_stored_chunks(data_id, old_text)
@@ -788,7 +837,7 @@ async def _stage_and_plan(
     try:
         plan = compute_incremental_plan(old_text, stored_texts, new_text)
     except IncrementalPlanError as error:
-        raise IncrementalUpdateNotPossible(str(error)) from error
+        raise IncrementalUpdateNotPossible(str(error), RefusalReason.CHUNKS_NOT_TILING) from error
 
     fallback_budget = await get_max_chunk_tokens()
     region_chunk_lists = [
@@ -810,7 +859,7 @@ async def _stage_and_plan(
             new_text,
         )
     except IncrementalPlanError as error:
-        raise IncrementalUpdateNotPossible(str(error)) from error
+        raise IncrementalUpdateNotPossible(str(error), RefusalReason.CHUNKS_NOT_TILING) from error
 
     return {
         "staged": staged,

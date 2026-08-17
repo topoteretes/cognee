@@ -57,6 +57,15 @@ class GraphDBInterface(ABC):
     # statement; others get one grouped call per owner key from the caller.
     supports_per_row_source_refs: bool = False
 
+    # Whether chunk-level incremental updates can run against this backend.
+    # The requirement is a ``get_connections`` result shape that
+    # ``edge_endpoints`` can normalise into (source_id, target_id) — adapters
+    # disagree here, and the incremental path reads a document's chunks through
+    # those connections. Declared on the adapter rather than matched against a
+    # provider-name list so a backend registered at runtime through
+    # ``use_graph_adapter()`` can participate by satisfying the contract.
+    supports_incremental_chunk_updates: bool = False
+
     @abstractmethod
     async def is_empty(self) -> bool:
         """Return True when the graph contains no nodes."""

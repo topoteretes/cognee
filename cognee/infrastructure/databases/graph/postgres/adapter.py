@@ -123,8 +123,8 @@ class PostgresAdapter(GraphDBInterface):
     # ``query()`` executes SQL against the graph tables, not Cypher.
     supports_cypher_queries = False
 
-    # ``query()`` executes SQL against the graph tables, not Cypher.
-    supports_cypher_queries = False
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 

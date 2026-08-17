@@ -154,6 +154,9 @@ class Neo4jAdapter(GraphDBInterface):
     managing sessions and projecting graphs.
     """
 
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
+
     def __init__(
         self,
         graph_database_url: str,

@@ -168,8 +168,16 @@ async def update(
                 graph_model=graph_model,
                 custom_prompt=custom_prompt,
             )
-        except IncrementalUpdateNotPossible as reason:
-            logger.info("chunk-level update not possible (%s); running full update", reason)
+        except IncrementalUpdateNotPossible as refusal:
+            # The reason is a structured field, not just prose: an unsupported
+            # chunker and a first ingestion produce the same sentence otherwise,
+            # so a permanent misconfiguration is indistinguishable from a
+            # one-off in the logs.
+            logger.info(
+                "chunk-level update not possible (%s); running full update",
+                refusal,
+                extra={"refusal_reason": refusal.reason.value},
+            )
 
     await datasets.delete_data(
         dataset_id=dataset_id,
