@@ -20,7 +20,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
 from cognee.infrastructure.llm.streaming.token_sink import TokenSink, get_active_token_sink
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
@@ -144,7 +144,12 @@ class GenericAPIAdapter(LLMInterface):
         the tokens are *also* pushed to a listening sink on the way past, so no
         caller of this method needs to know which path ran.
         """
-        sink = get_active_token_sink() if get_llm_context_config().llm_answer_streaming else None
+        # No second flag check: the promotion site already decided. Reading the
+        # config again here can disagree with it — search_in_datasets_context
+        # sets a per-dataset llm_config ContextVar — and a promotion whose
+        # adapter then refuses to stream is exactly how a request ends up
+        # promoted, claimed, and silent.
+        sink = get_active_token_sink()
         if sink is not None:
             return await self._acreate_str_output_streaming(
                 sink, text_input, system_prompt, **merged_kwargs
@@ -170,73 +175,20 @@ class GenericAPIAdapter(LLMInterface):
         return response.choices[0].message.content or ""
 
     async def _acreate_str_output_streaming(
-        self,
-        sink: TokenSink,
-        text_input: str,
-        system_prompt: str,
-        **merged_kwargs: Any,
+        self, sink: TokenSink, text_input: str, system_prompt: str, **merged_kwargs: Any
     ) -> str:
-        """Same call with ``stream=True``, fanning deltas out as they arrive."""
-        sink.begin_attempt()
-        parts: list[str] = []
-
-        # Both popped into locals before the call. llm_args is user-settable, so
-        # LLM_ARGS='{"stream": false}' would otherwise reach litellm as a
-        # duplicate keyword and raise TypeError on every completion.
-        merged_kwargs.pop("stream", None)
-        stream_options = merged_kwargs.pop("stream_options", {"include_usage": True})
-
-        # This method exists for OpenAI-compatible servers that reject unknown
-        # body keys (llama.cpp, LM Studio, older vLLM). stream_options is exactly
-        # such a key, so let litellm drop it rather than hard-fail the request —
-        # the usage chunk is a nice-to-have, a 400 is not.
-        merged_kwargs.setdefault("drop_params", True)
-
-        # The iteration stays inside the rate limiter so a mid-stream failure is
-        # still seen by the overload policy. Note this does NOT bound how many
-        # generations run at once: AsyncLimiter caps request *rate* and releases
-        # nothing on exit, so concurrency here is unbounded either way.
-        async with llm_rate_limiter_context_manager():
-            stream = await litellm.acompletion(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text_input},
-                ],
-                api_key=self.api_key,
-                api_base=self.endpoint,
-                api_version=self.api_version,
-                stream=True,
-                stream_options=stream_options,
-                **merged_kwargs,
-            )
-            try:
-                async for chunk in stream:
-                    # The final usage chunk carries `choices == []`; indexing it is
-                    # the single most common way to break a streaming integration.
-                    if not chunk.choices:
-                        continue
-                    piece = chunk.choices[0].delta.content
-                    if not piece:  # role-only and finish chunks carry None
-                        continue
-                    parts.append(piece)
-                    sink.put_delta(piece)
-            finally:
-                # litellm hands back a CustomStreamWrapper, not a native async
-                # generator, so abandoning iteration runs no cleanup at all —
-                # every failed attempt would leak its underlying HTTP response,
-                # and tenacity retries the whole call.
-                aclose = getattr(stream, "aclose", None)
-                if aclose is not None:
-                    try:
-                        await aclose()
-                    except Exception:  # noqa: BLE001 - cleanup must not mask the real error
-                        logger.debug("Failed to close LLM stream", exc_info=True)
-
-        # Exceptions deliberately propagate: the tenacity retry on
-        # acreate_structured_output must still fire, and begin_attempt() emits a
-        # `reset` on re-entry so the consumer discards the partial answer.
-        return "".join(parts)
+        """Stream into ``sink`` and return the same string the blocking call would."""
+        return await stream_text_completion(
+            sink=sink,
+            model=self.model,
+            system_prompt=system_prompt,
+            text_input=text_input,
+            api_key=self.api_key,
+            endpoint=self.endpoint,
+            api_version=self.api_version,
+            adapter_name=self.name,
+            **merged_kwargs,
+        )
 
     @observe(as_type="generation")
     @retry(

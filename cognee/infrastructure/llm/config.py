@@ -68,6 +68,7 @@ class LLMConfig(BaseSettings):
     - llm_api_version
     - llm_temperature
     - llm_streaming
+    - llm_answer_streaming
     - llm_max_completion_tokens
     - transcription_model
     - graph_prompt_path

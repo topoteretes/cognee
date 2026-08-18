@@ -3,9 +3,10 @@
 Streaming is never allowed to be load-bearing — the adapter still returns the
 complete string, every existing signature is unchanged, and a request with no
 sink installed behaves exactly as it did before. These tests pin that, plus the
-three properties that are easy to regress: only the answer call may stream, only
-one producer may claim a sink, and a retry must not leave the consumer holding
-two copies of the answer.
+properties that are easy to regress: only the answer call may stream, only one
+lane's tokens reach the consumer, a retry must not leave two copies of the
+answer, and nothing the request does may hang a consumer or leak provider detail
+to it.
 """
 
 import asyncio
@@ -17,7 +18,6 @@ import pytest
 
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
-    active_token_sink,
     get_active_token_sink,
     requested_token_sink,
     stream_answer_tokens,
@@ -53,23 +53,14 @@ def _requested(sink: TokenSink):
 @pytest.mark.asyncio
 async def test_deltas_reach_the_consumer_in_order():
     sink = TokenSink()
-    sink.put_delta("Hello")
-    sink.put_delta(" world")
-    sink.answer_done()
-    sink.close()
+    with _flag(True), _requested(sink):
+        async with stream_answer_tokens():
+            sink.put_delta("Hello")
+            sink.put_delta(" world")
 
     events = await _drain(sink)
     assert [e.type for e in events] == ["delta", "delta", "answer_done"]
     assert "".join(e.text for e in events if e.type == "delta") == "Hello world"
-
-
-@pytest.mark.asyncio
-async def test_claim_admits_exactly_one_producer():
-    """search_in_datasets_context runs one answer call per dataset. Without a
-    single claim they would interleave into one incoherent stream."""
-    sink = TokenSink()
-    assert sink.try_claim() is True
-    assert sink.try_claim() is False
 
 
 @pytest.mark.asyncio
@@ -83,8 +74,7 @@ async def test_retry_emits_reset_so_the_answer_is_not_duplicated():
     sink.put_delta("complete")
     sink.close()
 
-    types = [e.type for e in await _drain(sink)]
-    assert types == ["delta", "delta", "reset", "delta"]
+    assert [e.type for e in await _drain(sink)] == ["delta", "delta", "reset", "delta"]
 
 
 @pytest.mark.asyncio
@@ -97,19 +87,44 @@ async def test_detach_stops_buffering_without_killing_the_producer():
     sink.put_delta("unseen")
     sink.close()
 
-    texts = [e.text for e in await _drain(sink) if e.type == "delta"]
-    assert texts == ["seen"]
+    assert [e.text for e in await _drain(sink) if e.type == "delta"] == ["seen"]
 
 
 @pytest.mark.asyncio
-async def test_failure_is_reported_then_the_stream_closes():
+async def test_a_detached_producer_still_counts_as_having_streamed():
+    """`_emitted` records what was produced, not what was delivered. If a
+    disconnect reset it, ownership would pass to another lane mid-answer."""
     sink = TokenSink()
-    sink.put_delta("half an ans")
-    sink.fail(RuntimeError("upstream exploded"))
+    with _flag(True), _requested(sink):
+        async with stream_answer_tokens():
+            sink.detach()
+            sink.put_delta("produced but not delivered")
 
-    events = await _drain(sink)
-    assert [e.type for e in events] == ["delta", "error"]
-    assert "upstream exploded" in events[-1].error
+    assert sink.emitted_any is True
+
+
+@pytest.mark.asyncio
+async def test_the_buffer_is_bounded_when_nobody_drains():
+    """A sink whose consumer never arrives must not retain one object per token
+    for the life of the request."""
+    sink = TokenSink(max_buffered_events=8)
+    with _flag(True), _requested(sink):
+        async with stream_answer_tokens():
+            for index in range(100):
+                sink.put_delta(f"token{index}")
+
+    assert sink._queue.qsize() <= 9  # bounded + the sentinel
+
+
+@pytest.mark.asyncio
+async def test_a_second_consumer_is_refused_rather_than_splitting_the_stream():
+    """Two iterators over one queue would each get an arbitrary half of the
+    deltas, and only one would ever see the sentinel."""
+    sink = TokenSink()
+    sink.close()
+    sink.__aiter__()
+    with pytest.raises(RuntimeError, match="single consumer"):
+        sink.__aiter__()
 
 
 # --------------------------- promotion scoping ---------------------------
@@ -167,92 +182,139 @@ async def test_only_the_answer_task_can_stream():
 
 
 @pytest.mark.asyncio
-async def test_second_concurrent_answer_call_does_not_stream():
-    """Multi-dataset recall: one dataset streams, the rest run normally and
-    still contribute to the final payload."""
+async def test_one_lane_owns_the_stream_and_the_others_are_dropped():
+    """Multi-dataset recall runs one answer call per dataset. Their deltas must
+    not interleave into one incoherent answer."""
     sink = TokenSink()
-    promoted = []
 
-    async def _lane():
+    async def _lane(word: str):
         async with stream_answer_tokens():
             await asyncio.sleep(0)
-            promoted.append(get_active_token_sink() is sink)
+            for _ in range(3):
+                sink.put_delta(word)
+                await asyncio.sleep(0)
 
     with _flag(True), _requested(sink):
-        await asyncio.gather(_lane(), _lane(), _lane())
+        await asyncio.gather(_lane("A"), _lane("B"), _lane("C"))
+    sink.close()
 
-    assert promoted.count(True) == 1, promoted
+    streamed = "".join(e.text for e in await _drain(sink) if e.type == "delta")
+    assert streamed in ("AAA", "BBB", "CCC"), streamed
 
 
 @pytest.mark.asyncio
-async def test_stage_marks_the_retrieval_to_generation_boundary():
-    """Entering promotion emits the stage, which is what makes it possible to
-    measure how much of the wait is retrieval that streaming cannot help."""
+async def test_a_lane_that_cannot_stream_does_not_starve_one_that_can():
+    """Whether a call *can* stream is unknown until it reaches the adapter — a
+    structured response_model never streams, and not every adapter has a
+    plain-text path. Claiming on entry would let such a lane lock out a
+    streamable one and the request would emit nothing."""
     sink = TokenSink()
+
+    async def _cannot_stream():
+        async with stream_answer_tokens():
+            await asyncio.sleep(0.01)  # promoted first, never emits
+
+    async def _can_stream():
+        async with stream_answer_tokens():
+            await asyncio.sleep(0)
+            sink.put_delta("Neon won.")
+
     with _flag(True), _requested(sink):
+        await asyncio.gather(_cannot_stream(), _can_stream())
+    sink.close()
+
+    assert "".join(e.text for e in await _drain(sink) if e.type == "delta") == "Neon won."
+
+
+@pytest.mark.asyncio
+async def test_stage_marks_the_boundary_once_even_with_several_lanes():
+    """The stage is how a consumer times retrieval→generation; seeing it twice
+    for one answer measures the wrong interval."""
+    sink = TokenSink()
+
+    async def _lane():
         async with stream_answer_tokens(stage="generating"):
-            pass
+            await asyncio.sleep(0)
+
+    with _flag(True), _requested(sink):
+        await asyncio.gather(_lane(), _lane(), _lane())
     sink.close()
 
     events = await _drain(sink)
-    assert events[0].type == "stage"
+    assert [e.type for e in events] == ["stage"]
     assert events[0].stage == "generating"
 
 
-# --------------- lifecycle: the sink must always terminate ---------------
-#
-# The consumer's `async for` only ends on a sentinel. Anything that leaves the
-# answer call without emitting one hangs it until the HTTP client times out.
+# --------------- lifecycle: termination and failure ---------------
 
 
 @pytest.mark.asyncio
 async def test_successful_stream_terminates_with_answer_done():
+    """The consumer sees the answer end without waiting for persistence."""
     sink = TokenSink()
     with _flag(True), _requested(sink):
         async with stream_answer_tokens():
             sink.put_delta("hi")
 
     # Terminates on its own — draining must not block.
-    types = [e.type for e in await _drain(sink)]
-    assert types == ["delta", "answer_done"]
-
-
-@pytest.mark.asyncio
-async def test_failed_answer_call_reports_an_error_and_closes():
-    """Without this the consumer hangs forever after an LLM failure."""
-    sink = TokenSink()
-    with _flag(True), _requested(sink):
-        with pytest.raises(RuntimeError, match="llm exploded"):
-            async with stream_answer_tokens():
-                sink.put_delta("half")
-                raise RuntimeError("llm exploded")
-
-    events = await _drain(sink)
-    assert [e.type for e in events] == ["delta", "error"]
-    assert "llm exploded" in events[-1].error
-
-
-@pytest.mark.asyncio
-async def test_call_that_could_not_stream_gives_the_claim_back():
-    """Most adapters have no plain-text streaming path, and a structured
-    response_model never streams. Holding the claim would silently disable
-    streaming for the rest of the request."""
-    sink = TokenSink()
-    with _flag(True), _requested(sink):
-        async with stream_answer_tokens():
-            pass  # nothing streamed
-        assert sink.emitted_any is False
-
-        async with stream_answer_tokens():  # a later call can still claim it
-            sink.put_delta("streamed this time")
-
     assert [e.type for e in await _drain(sink)] == ["delta", "answer_done"]
 
 
 @pytest.mark.asyncio
+async def test_a_failure_is_reported_without_leaking_provider_detail():
+    """Provider errors embed the rendered prompt — i.e. the whole retrieved
+    graph context — plus endpoints and request bodies. None of that may reach
+    an HTTP client, so the event carries a type, and the detail goes to the log.
+    """
+    sink = TokenSink()
+    secret = "ContentPolicyViolation: <entire graph context and api_base>"
+    with _flag(True), _requested(sink):
+        with pytest.raises(RuntimeError):
+            async with stream_answer_tokens():
+                sink.put_delta("half")
+                raise RuntimeError(secret)
+
+    events = await _drain(sink)
+    assert [e.type for e in events] == ["delta", "error"]
+    assert secret not in events[-1].error
+    assert "RuntimeError" in events[-1].error
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_not_reported_as_a_failure():
+    """str(CancelledError()) is "", so reporting it renders a blank error — and
+    it defeats detach(), whose whole purpose is that a vanished consumer does
+    not become a visible failure."""
+    sink = TokenSink()
+    with _flag(True), _requested(sink):
+        with pytest.raises(asyncio.CancelledError):
+            async with stream_answer_tokens():
+                sink.put_delta("half")
+                raise asyncio.CancelledError()
+
+    sink.close()
+    assert [e.type for e in await _drain(sink)] == ["delta"]
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_streamed_nothing_leaves_the_sink_for_the_creator():
+    """Not every call can stream, and a later one in the same request may. The
+    creator owns terminating the sink — the transport does this in a finally."""
+    sink = TokenSink()
+    with _flag(True), _requested(sink):
+        async with stream_answer_tokens():
+            pass
+        assert sink.emitted_any is False
+
+    sink.close()  # what api/v1/recall/recall_stream.py does
+    assert await _drain(sink) == []
+
+
+@pytest.mark.asyncio
 async def test_flag_off_emits_nothing_at_all():
-    """Checked at the promotion site, not only in the adapter: otherwise a
-    flag-off request still claimed the sink and emitted a stage event."""
+    """Checked at the promotion site, not in the adapter: the two can disagree,
+    and a promotion the adapter then refuses to honour emits a stage and no
+    tokens."""
     sink = TokenSink()
     with _flag(False), _requested(sink):
         async with stream_answer_tokens(stage="generating"):
@@ -260,16 +322,3 @@ async def test_flag_off_emits_nothing_at_all():
 
     sink.close()
     assert await _drain(sink) == []
-
-
-@pytest.mark.asyncio
-async def test_retry_keeps_the_streamed_signal_so_the_claim_is_not_returned():
-    """begin_attempt() resets what the consumer shows, not whether we streamed."""
-    sink = TokenSink()
-    assert sink.try_claim() is True
-    sink.put_delta("attempt one")
-    sink.begin_attempt()  # retry: resets the view, not the fact that we streamed
-
-    assert sink.emitted_any is True
-    sink.release_claim()
-    assert sink.try_claim() is False, "a sink that streamed must stay claimed"

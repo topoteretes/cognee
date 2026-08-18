@@ -25,6 +25,23 @@ Two context variables, and both are load-bearing:
   request-scoped flag would interleave ``SessionTurnAnalysis`` output into the
   user's tokens.
 
+**Ownership is decided by the first delta, not by entering the block.** Several
+lanes may be promoted at once — ``search_in_datasets_context`` launches one
+answer call per authorised dataset — and which of them *can* stream is unknown
+until one actually does: a structured ``response_model`` never streams, and not
+every adapter has a plain-text streaming path. Claiming on entry would let a lane
+that turns out not to stream lock out one that would have. So promotion is free,
+the first lane to emit becomes the owner, and later lanes' deltas are dropped.
+The request emits one coherent answer and still returns the complete list.
+
+**Who closes the sink.** The creator does — whoever set ``requested_token_sink``
+owns terminating it, because only they know when the whole request is finished.
+:func:`stream_answer_tokens` closes early *when its answer streamed*, so a
+consumer sees the answer end without waiting for persistence; every other exit
+leaves the sink open because a later call in the same request may still stream.
+A consumer that iterates a sink nobody closes waits forever, which is why the
+transport in ``api/v1/recall/recall_stream.py`` closes in a ``finally``.
+
 **Deltas are a preview, not the payload.** Two things make the streamed text a
 strict prefix of what the caller finally receives, and a consumer must treat the
 returned value as authoritative rather than concatenating deltas and stopping:
@@ -40,12 +57,6 @@ returned value as authoritative rather than concatenating deltas and stopping:
   ``summarize_text`` alongside the answer, and a shared hook would leak the
   summariser's tokens into the user's stream — the same interleaving problem the
   two-ContextVar split exists to prevent.
-
-``try_claim`` handles the other fan-out: ``search_in_datasets_context`` launches
-one task per authorised dataset, each running its own answer call. The first to
-claim wins and the rest simply do not stream, so a multi-dataset recall emits one
-coherent answer instead of several interleaved ones — and still returns the
-complete list at the end.
 """
 
 from __future__ import annotations
@@ -54,7 +65,19 @@ import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Literal, Optional
+
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("token_sink")
+
+EventType = Literal["stage", "delta", "reset", "answer_done", "error"]
+
+# Deltas are a preview and `final` is authoritative, so buffering is bounded:
+# a sink nobody drains (a transport that died before iterating, a background
+# task that inherited the ContextVar) would otherwise retain one object per
+# token for the life of the request.
+MAX_BUFFERED_EVENTS = 2048
 
 
 @dataclass(slots=True)
@@ -66,7 +89,7 @@ class StreamEvent:
     show the answer twice.
     """
 
-    type: str  # "stage" | "delta" | "reset" | "answer_done" | "error"
+    type: EventType
     text: Optional[str] = None
     stage: Optional[str] = None
     error: Optional[str] = None
@@ -74,45 +97,34 @@ class StreamEvent:
 
 _SENTINEL = object()
 
+# Identifies one promoted answer call, so the sink can tell the lane that owns
+# the stream from a concurrent lane whose deltas must be dropped.
+_active_producer: ContextVar[Optional[object]] = ContextVar("active_producer", default=None)
+
 
 class TokenSink:
     """Fan-out channel for answer tokens. Never affects the returned value."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_buffered_events: int = MAX_BUFFERED_EVENTS) -> None:
         self._queue: asyncio.Queue = asyncio.Queue()
-        self._claimed = False
+        self._max_buffered = max_buffered_events
+        self._owner: Optional[object] = None
         self._emitted = False
         self._detached = False
         self._closed = False
+        self._dropped = False
+        self._last_stage: Optional[str] = None
+        self._iterator: Optional[AsyncIterator[StreamEvent]] = None
 
     # -- producer side -------------------------------------------------
 
-    def try_claim(self) -> bool:
-        """Claim the sink for one producer. Later callers get ``False``.
-
-        Not a lock: claiming happens inside a single synchronous block with no
-        await, so it cannot interleave.
-        """
-        if self._claimed:
-            return False
-        self._claimed = True
-        return True
-
-    def release_claim(self) -> None:
-        """Give the claim back because this producer turned out not to stream.
-
-        Whether a call *can* stream is only known once it reaches the adapter —
-        several adapters have no plain-text streaming path, and a structured
-        ``response_model`` never streams. Without this, one such call would
-        claim the sink on the way past and silently disable streaming for the
-        rest of the request.
-        """
-        if not self._emitted:
-            self._claimed = False
+    def owns(self, producer: Optional[object]) -> bool:
+        """Whether this producer is the one whose deltas reach the consumer."""
+        return producer is not None and self._owner is producer
 
     @property
     def emitted_any(self) -> bool:
-        """Whether any delta reached the consumer."""
+        """Whether any delta was produced (whether or not it was delivered)."""
         return self._emitted
 
     def begin_attempt(self) -> None:
@@ -126,20 +138,48 @@ class TokenSink:
             self._put(StreamEvent(type="reset"))
 
     def put_delta(self, text: str) -> None:
-        if not text or self._detached:
+        """Offer one token to the stream.
+
+        The first producer to get here owns the sink for the rest of the request;
+        deltas from any other lane are dropped rather than interleaved.
+        """
+        if not text:
             return
+        producer = _active_producer.get()
+        if self._owner is None:
+            self._owner = producer
+        elif self._owner is not producer:
+            return
+        # Set before the detached check: a consumer that left mid-answer does not
+        # change the fact that this producer streamed, and treating it as "never
+        # streamed" would hand ownership to another lane.
         self._emitted = True
         self._put(StreamEvent(type="delta", text=text))
 
     def mark_stage(self, stage: str) -> None:
+        """Announce a phase change, skipping a repeat of the current phase.
+
+        Promotion happens before it is known whether this lane will stream, so
+        several lanes can mark the same stage for one answer; a consumer timing
+        the retrieval→generation boundary must not see it twice.
+        """
+        if stage == self._last_stage:
+            return
+        self._last_stage = stage
         self._put(StreamEvent(type="stage", stage=stage))
 
     def answer_done(self) -> None:
         """The last token has been generated; work after this is persistence."""
         self._put(StreamEvent(type="answer_done"))
 
-    def fail(self, error: BaseException) -> None:
-        self._put(StreamEvent(type="error", error=str(error)))
+    def fail(self, message: str) -> None:
+        """Report a failure to the consumer, then terminate the stream.
+
+        Takes an already-safe message rather than an exception: provider errors
+        embed the rendered prompt (and therefore the retrieved graph context),
+        endpoints and request bodies, none of which may reach an HTTP client.
+        """
+        self._put(StreamEvent(type="error", error=message))
         self.close()
 
     def close(self) -> None:
@@ -160,13 +200,35 @@ class TokenSink:
     def _put(self, event: StreamEvent) -> None:
         if self._detached or self._closed:
             return
-        # Unbounded and non-blocking: a slow consumer must never apply
-        # backpressure to the LLM call it is watching.
+        if self._queue.qsize() >= self._max_buffered:
+            # Drop rather than block: a slow or absent consumer must never apply
+            # backpressure to the LLM call it is watching. Dropping preview
+            # frames is consistent with `final` being the authoritative answer.
+            if not self._dropped:
+                self._dropped = True
+                logger.warning(
+                    "Token sink buffer full (%d events) — dropping stream events; "
+                    "the returned answer is unaffected",
+                    self._max_buffered,
+                )
+            return
         self._queue.put_nowait(event)
 
     # -- consumer side -------------------------------------------------
 
-    async def __aiter__(self) -> AsyncIterator[StreamEvent]:
+    def __aiter__(self) -> AsyncIterator[StreamEvent]:
+        """Iterate the event stream. Single-consumer by construction.
+
+        Two iterators over one queue would split the events between them and
+        only one would ever see the sentinel, so the second consumer would hang
+        on a stream that looked half-delivered.
+        """
+        if self._iterator is not None:
+            raise RuntimeError("TokenSink supports a single consumer")
+        self._iterator = self._iterate()
+        return self._iterator
+
+    async def _iterate(self) -> AsyncIterator[StreamEvent]:
         while True:
             item = await self._queue.get()
             if item is _SENTINEL:
@@ -193,26 +255,15 @@ def get_active_token_sink() -> Optional[TokenSink]:
 async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[None]:
     """Promote the requested sink to active for this task only.
 
-    Wrap the answer-generating call and nothing else. This is also the single
-    place that decides a stream is happening, so it owns three things the
-    producer below it cannot:
+    Wrap the answer-generating call and nothing else. This is also where the
+    feature switch is read — in one place, so a request cannot promote a sink
+    that the adapter below will then refuse to stream into.
 
-    * **The flag.** Checked here, not only in the adapter. Otherwise a
-      flag-off request with a sink installed would still claim it and emit a
-      stage event, and "off means zero events" would be untrue.
-    * **Termination.** The consumer's ``async for`` only ends on a sentinel, so
-      an answer call that raises would hang it until the client timed out.
-      Exiting emits ``answer_done`` + ``close`` on success and ``fail`` on the
-      way out of an exception.
-    * **Giving the claim back.** Whether the call *could* stream is only known
-      once it reaches the adapter — most adapters have no plain-text streaming
-      path, and a structured ``response_model`` never streams. If nothing came
-      through, the claim is released so a later call can still stream instead of
-      the request being silently degraded for good.
-
-    Entering also marks the stage, which gives the retrieval→generation boundary
-    for free — useful for telling how much of the wait is retrieval that
-    streaming cannot help with.
+    On the way out it ends the stream **when this lane actually streamed**:
+    ``answer_done`` + ``close`` on success, a sanitised ``error`` on failure.
+    Any other exit leaves the sink open, because a later call in the same request
+    may still stream; terminating it for good is the creator's job (see the
+    module docstring).
     """
     from cognee.infrastructure.llm.config import get_llm_context_config
 
@@ -220,27 +271,32 @@ async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[Non
     if sink is None or not get_llm_context_config().llm_answer_streaming:
         yield
         return
-    if not sink.try_claim():
-        yield
-        return
 
+    producer = object()
+    sink_token = active_token_sink.set(sink)
+    producer_token = _active_producer.set(producer)
     if stage:
         sink.mark_stage(stage)
-
-    token = active_token_sink.set(sink)
     try:
         yield
+    except (asyncio.CancelledError, GeneratorExit):
+        # Not a failure: the request was torn down (client disconnect, timeout,
+        # shutdown). str(CancelledError()) is "", so reporting it would render a
+        # blank error — and it would defeat detach(), whose entire purpose is
+        # that a vanished consumer does not become a visible failure.
+        raise
     except BaseException as error:
         # The consumer has already been handed a 200 and part of an answer, so
-        # the failure has to reach it as an event; re-raise so the caller's own
-        # error handling is unchanged.
-        sink.fail(error)
+        # the failure has to reach it as an event. The detail stays server-side:
+        # provider errors embed the rendered prompt and connection details.
+        logger.error("Answer streaming failed: %s", error, exc_info=True)
+        if sink.owns(producer):
+            sink.fail(f"{type(error).__name__} during answer generation")
         raise
     else:
-        if sink.emitted_any:
+        if sink.owns(producer) and sink.emitted_any:
             sink.answer_done()
             sink.close()
-        else:
-            sink.release_claim()
     finally:
-        active_token_sink.reset(token)
+        _active_producer.reset(producer_token)
+        active_token_sink.reset(sink_token)
