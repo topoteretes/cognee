@@ -8,6 +8,10 @@ import { getPipelineSettingsFromStorage } from "../configuration/pipelineSetting
 //   edges: { source: string; target: string; label: string }[];
 // }
 
+// runInBackground=true means the server returns immediately — this only
+// needs to cover a cold pod's startup, not the actual cognify run. See CLO-333.
+const COGNIFY_TIMEOUT_MS = 60_000;
+
 interface CognifyOptions {
   graphModel?: object;
   customPrompt?: string;
@@ -40,6 +44,7 @@ export default async function cognifyDataset(
       chunkSize: options?.chunkSize ?? pipelineSettings.chunkSize,
       ...(options?.llmModel && { llmModel: options.llmModel }),
     }),
+    timeoutMs: COGNIFY_TIMEOUT_MS,
   })
   .then((response) => response.json());
   // .then(() => {
