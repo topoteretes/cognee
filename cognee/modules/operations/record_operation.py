@@ -102,7 +102,7 @@ class OperationContext:
         """Mark whether this call launched background work.
 
         True means outcome="succeeded" records "accepted and started", not
-        "background work finished" (see docs/decisions/0001, point 7).
+        "background work finished" (SDK-399 background-launch semantics).
         """
         self.background = background
 

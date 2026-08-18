@@ -1308,7 +1308,7 @@ async def _remember_inner(
 
         if run_in_background:
             # outcome="succeeded" on this row means "accepted and started"
-            # (see docs/decisions/0001, point 7).
+            # (SDK-399: background launches record the launch, not the work).
             operation_context.set_background(True)
             # Background runs must not depend on caller/request-scoped stream lifetimes.
             # Materialize stream-like inputs into owned in-memory buffers up front.

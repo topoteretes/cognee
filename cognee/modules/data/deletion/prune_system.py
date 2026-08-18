@@ -97,7 +97,7 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
     if metadata:
         # Not recorded: the record could not outlive the prune (the relational DB
         # holding pipeline_runs is dropped), and the recorder's exit write would
-        # recreate an empty database file on connect (see docs/decisions/0001).
+        # recreate an empty database file on connect.
         await _prune()
     else:
         async with record_operation("prune_system"):
