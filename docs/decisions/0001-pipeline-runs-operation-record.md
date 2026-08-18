@@ -119,12 +119,18 @@ Rationale:
    session-bridge improve. Carried by a ContextVar
    (`cognee/modules/operations/origin.py`), so it flows into background
    tasks automatically.
-10. **Nesting is an explicit tree.** Each operation allocates its id at
-    scope entry (persisted as the row's `pipeline_run_id`); children —
-    nested operations and pipeline runs — store it in
-    `parent_operation_id`. The "tokens chain to parents, never SUM across
-    nesting levels" rule is therefore enforceable in SQL: top-level spend
-    is `SUM(tokens) WHERE parent_operation_id IS NULL`.
+10. **Nesting is an explicit tree whose edges mirror the token chain.**
+    Each operation allocates its id at scope entry (persisted as the
+    row's `pipeline_run_id`); operations AND pipeline runs push that id
+    onto a shared parent chain (`parent_run_scope`), and every child row
+    stores the innermost enclosing run in `parent_operation_id`. A
+    pipeline started inside another pipeline (the session bridge runs
+    cognify inside a memify task) parents to that enclosing pipeline —
+    not to the operation above both — so parent edges follow exactly the
+    same path the token totals chain along. Consequently the children of
+    any row sum to ≤ that row's own tokens (no sibling double-count),
+    and top-level spend is `SUM(tokens) WHERE parent_operation_id IS
+    NULL`. Never SUM across nesting levels.
 11. **Session linkage.** Operation rows carry the session-cache id in
     `session_id` (String, indexed — session ids are strings, not FKs),
     set by search/recall/remember and by improve when bridging exactly

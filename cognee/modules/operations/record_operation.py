@@ -27,7 +27,12 @@ from cognee.shared.logging_utils import get_logger
 
 from .origin import get_operation_origin
 from .scrub_error import scrub_error_message
-from .usage_accumulator import OperationUsage, operation_usage_scope
+from .usage_accumulator import (
+    OperationUsage,
+    get_parent_run_id,
+    operation_usage_scope,
+    parent_run_scope,
+)
 
 if TYPE_CHECKING:
     from cognee.modules.users.models import User
@@ -155,14 +160,15 @@ async def record_operation(
     started_at = datetime.now(timezone.utc)
 
     with operation_usage_scope() as usage:
-        parent = _current_operation.get()
         context = OperationContext(
             operation_name=operation_name,
             dataset_id=dataset_id,
             usage=usage,
             session_id=session_id,
             background=background,
-            parent_operation_id=parent.operation_id if parent else None,
+            # The innermost enclosing run — an operation OR a pipeline (a
+            # search inside a custom pipeline parents to that pipeline run).
+            parent_operation_id=get_parent_run_id(),
         )
         if user is not None:
             context.set_user(user)
@@ -173,7 +179,8 @@ async def record_operation(
         error_class: Optional[str] = None
         error_message: Optional[str] = None
         try:
-            yield context
+            with parent_run_scope(context.operation_id):
+                yield context
         except BaseException as exc:
             outcome = OperationOutcome.FAILED
             error_class = type(exc).__name__

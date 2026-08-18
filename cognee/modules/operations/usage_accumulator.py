@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Iterator, Optional
+from uuid import UUID
 
 
 @dataclass
@@ -56,3 +57,47 @@ def operation_usage_scope() -> Iterator[OperationUsage]:
         yield usage
     finally:
         _active_operation_usage.reset(token)
+
+
+@dataclass
+class ParentRun:
+    """One link of the parent-attribution chain (operation OR pipeline run).
+
+    ``pipeline_runs.parent_operation_id`` must mirror the token-chaining
+    structure above: a cognify pipeline running inside a memify pipeline
+    parents to that memify run, not to the enclosing operation. Otherwise
+    the two runs appear as siblings each carrying the same (chained) token
+    totals, and summing a row's children double-counts.
+    """
+
+    run_id: UUID
+    parent: Optional["ParentRun"] = None
+
+
+_current_parent_run: ContextVar[Optional[ParentRun]] = ContextVar(
+    "cognee_current_parent_run", default=None
+)
+
+
+def get_parent_run_id(excluding: Optional[UUID] = None) -> Optional[UUID]:
+    """The innermost enclosing run id — the value for ``parent_operation_id``.
+
+    ``excluding`` skips the caller's own scope: a pipeline's terminal-row
+    writer runs inside that pipeline's own ``parent_run_scope``, and its
+    parent is the next scope up, not itself.
+    """
+    node = _current_parent_run.get()
+    if node is not None and excluding is not None and node.run_id == excluding:
+        node = node.parent
+    return node.run_id if node is not None else None
+
+
+@contextmanager
+def parent_run_scope(run_id: UUID) -> Iterator[None]:
+    """Mark *run_id* (an operation id or pipeline run id) as the current parent."""
+    node = ParentRun(run_id=run_id, parent=_current_parent_run.get())
+    token = _current_parent_run.set(node)
+    try:
+        yield
+    finally:
+        _current_parent_run.reset(token)

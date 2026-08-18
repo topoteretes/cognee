@@ -21,7 +21,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
     PipelineRunStarted,
 )
-from cognee.modules.operations.usage_accumulator import operation_usage_scope
+from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
     log_pipeline_run_complete,
@@ -84,7 +84,10 @@ async def run_tasks(
 
     # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
     #       background mode requiring the pipeline run started yield.
-    with operation_usage_scope() as run_usage:
+    # parent_run_scope makes nested runs (a pipeline started by one of our
+    # tasks, or a recorded operation called mid-pipeline) parent to THIS run,
+    # mirroring how their tokens chain into run_usage.
+    with operation_usage_scope() as run_usage, parent_run_scope(pipeline_run_id):
         async with set_database_global_context_variables(
             dataset.id,
             dataset.owner_id,
