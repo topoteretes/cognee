@@ -2,14 +2,19 @@ from datetime import datetime
 from typing import List, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
+from cognee.api.v1.recall.recall_stream import (
+    SSE_MEDIA_TYPE,
+    stream_recall,
+    wants_event_stream,
+)
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
@@ -94,6 +99,14 @@ class RecallPayloadDTO(InDTO):
             "Omit to use every connection visible to the caller."
         ),
     )
+    stream: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Set false to force a normal JSON response even when the request "
+            "asks for text/event-stream. Streaming is otherwise opted into with "
+            "an explicit `Accept: text/event-stream` header, never by default."
+        ),
+    )
     tools_trigger: str = Field(
         default="always",
         description=(
@@ -156,7 +169,11 @@ def get_recall_router() -> APIRouter:
 
     @router.post("", response_model=list[RecallResponse])
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
-    async def recall(payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def recall(
+        payload: RecallPayloadDTO,
+        request: Request,
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Recall information from the knowledge graph.
 
@@ -214,8 +231,10 @@ def get_recall_router() -> APIRouter:
             else None
         )
 
-        try:
-            results = await cognee_recall(
+        # One call, two transports: the streaming path must not build its own
+        # argument list, or the two drift the moment a parameter is added.
+        def _run_recall():
+            return cognee_recall(
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
@@ -234,6 +253,27 @@ def get_recall_router() -> APIRouter:
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
             )
+
+        if wants_event_stream(request.headers.get("accept"), payload.stream):
+            # Negotiated inside this handler rather than on a route of its own:
+            # anything mounted separately would miss the dependencies attached to
+            # this path — on Cloud that includes the pre-flight credit guard, so a
+            # separate endpoint would answer for free.
+            return StreamingResponse(
+                stream_recall(_run_recall, is_disconnected=request.is_disconnected),
+                media_type=SSE_MEDIA_TYPE,
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    # nginx buffers proxied responses by default, which holds the
+                    # tokens until the answer is finished — exactly what streaming
+                    # exists to avoid.
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
+        try:
+            results = await _run_recall()
             return jsonable_encoder(results)
         except CogneeApiError:
             # Cognee errors carry their own status code and actionable message;
