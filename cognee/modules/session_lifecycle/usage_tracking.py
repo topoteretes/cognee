@@ -6,15 +6,16 @@ Call sites that know the active session_id wrap their work in
 opts in) calls ``record_llm_call`` after each LLM completion. The
 tracker accumulates into the ``SessionRecord`` row.
 
-Token counts are exact for the default instructor-based structured-output
-path — ``LLMGateway`` reads real ``prompt_tokens``/``completion_tokens``
-off the provider response instructor already attaches internally (see
-``LLMGateway._exact_usage_from_result``) and passes them as
-``tokens_in_override``/``tokens_out_override`` below. The litellm_native
-and BAML frameworks, and the plain-string path that skips instructor
-entirely, don't expose that raw response, so calls through those still
-fall back to the ~chars/4 heuristic here — close enough for the
-dashboard's "are we spending?" question on those paths.
+Token counts are exact for the instructor and litellm_native
+structured-output paths — ``LLMGateway`` reads real
+``prompt_tokens``/``completion_tokens`` off the raw provider response
+(instructor attaches it internally; the litellm_native adapter attaches
+it explicitly, see ``_attach_raw_response``) and passes them as
+``tokens_in_override``/``tokens_out_override`` below (see
+``LLMGateway._exact_usage_from_result``). BAML and the plain-string path
+that skips structured output don't expose that raw response, so calls
+through those still fall back to the ~chars/4 heuristic here — close
+enough for the dashboard's "are we spending?" question on those paths.
 """
 
 from contextlib import asynccontextmanager
