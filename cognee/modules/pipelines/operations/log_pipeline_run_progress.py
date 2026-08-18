@@ -90,17 +90,19 @@ async def log_pipeline_run_progress(
             # kept only for a hypothetical future caller that doesn't. If it
             # ever does fire and log_pipeline_run_start's commit lands right
             # after, the result is two STARTED rows for one pipeline_run_id —
-            # this one missing the "data" field log_pipeline_run_start sets —
             # not a duplicate update target, since both /status queries pick
-            # the latest by created_at regardless. Accepted as a harmless
-            # edge case rather than adding upsert-style locking for it.
+            # the latest by created_at regardless. "data" is explicitly None
+            # here (log_pipeline_run_start's own summarized-payload field —
+            # unavailable to this function, which never receives the raw
+            # data) rather than silently omitted, so a row from this path is
+            # distinguishable from one log_pipeline_run_start wrote.
             pipeline_run = PipelineRun(
                 pipeline_run_id=pipeline_run_id,
                 pipeline_name=pipeline_name,
                 pipeline_id=pipeline_id,
                 status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
                 dataset_id=dataset_id,
-                run_info={"progress": progress},
+                run_info={"data": None, "progress": progress},
             )
             session.add(pipeline_run)
 
