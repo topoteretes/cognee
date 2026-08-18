@@ -108,9 +108,9 @@ def test_ladybug_declares_the_capability():
 
 def test_postgres_declares_the_capability():
     pytest.importorskip("asyncpg")
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresDemoAdapter
+    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
 
-    assert PostgresDemoAdapter.supports_incremental_chunk_updates is True
+    assert PostgresAdapter.supports_incremental_chunk_updates is True
 
 
 def test_neo4j_declares_the_capability():

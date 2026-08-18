@@ -102,8 +102,10 @@ async def test_lancedb_update_payload():
 async def test_pgvector_update_payload():
     # An open port is not enough: a machine can be running Postgres while
     # cognee is installed without the postgres extra, and a bare import here
-    # fails the test instead of skipping it.
+    # fails the test instead of skipping it. The adapter needs both halves of
+    # that extra — the driver to connect and pgvector for the column type.
     asyncpg = pytest.importorskip("asyncpg")
+    pytest.importorskip("pgvector")
 
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 

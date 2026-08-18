@@ -12,12 +12,13 @@ logger = get_logger()
 
 class LangchainChunker(Chunker):
     """
-    chunker_id = "langchain_chunker_v1"
     A Chunker that splits text into chunks using Langchain's RecursiveCharacterTextSplitter.
 
     The chunker will split the text into chunks of approximately the given size, but will not split
     a chunk if the split would result in a chunk with fewer than the given overlap tokens.
     """
+
+    chunker_id = "langchain_chunker_v1"
 
     def __init__(
         self,
