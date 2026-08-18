@@ -39,6 +39,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
+from sqlalchemy.exc import IntegrityError
 
 from cognee.api.DTO import OutDTO
 from cognee.modules.agents.create_agent import create_agent
@@ -167,10 +168,16 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
 
 
 async def _rotate_agent_api_key(agent_user: User, plugin_key: str) -> str:
-    """Revoke every key the plugin agent holds and mint a fresh labeled one."""
-    for old_key in await get_api_keys(agent_user):
-        await delete_api_key(agent_user, old_key.id)
+    """Mint a fresh labeled key, then revoke every other key the agent holds.
+
+    Order matters: each key operation commits its own transaction, so minting
+    first means a failure anywhere in the rotation never leaves the plugin
+    keyless — at worst the old key briefly outlives the new one.
+    """
+    old_keys = await get_api_keys(agent_user)
     new_key = await create_api_key(agent_user, plugin_key)
+    for old_key in old_keys:
+        await delete_api_key(agent_user, old_key.id)
     return new_key.api_key
 
 
@@ -220,8 +227,13 @@ def get_integrations_router():
             created = True
             try:
                 agent_user, api_key = await create_agent(plugin_key, user)
-            except UserAlreadyExists:
+            except (UserAlreadyExists, IntegrityError):
                 # Already provisioned — same agent, new key (rotation).
+                # IntegrityError covers the concurrent-first-provision race:
+                # fastapi-users' create is check-then-insert, so two
+                # simultaneous calls can both pass the email check and the
+                # loser hits the unique-email constraint instead of
+                # UserAlreadyExists. Same recovery: resolve and rotate.
                 created = False
                 agent_user = await _find_plugin_agent(user, plugin_key)
                 if agent_user is None:
@@ -243,7 +255,12 @@ def get_integrations_router():
                 connection_type=_PLUGIN_CONNECTION_TYPES.get(plugin_key, "sdk"),
                 source="api",
                 user_id=agent_user.id,
-                tenant_id=getattr(agent_user, "tenant_id", None),
+                # The parent's tenant, not the agent object's: create_agent
+                # sets the agent's tenant_id via a raw UPDATE without
+                # refreshing the returned ORM instance, so on first provision
+                # agent_user.tenant_id still reads the stale pre-update None.
+                # The agent shares the parent's tenant by construction.
+                tenant_id=getattr(user, "tenant_id", None),
                 metadata={"plugin_key": plugin_key},
             )
 

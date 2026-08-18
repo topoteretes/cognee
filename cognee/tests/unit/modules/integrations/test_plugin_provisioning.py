@@ -11,7 +11,7 @@ throttled UserApiKey.last_used_at write that provisioned keys rely on for
 """
 
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -20,6 +20,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_users.exceptions import UserAlreadyExists
+from sqlalchemy.exc import IntegrityError
 
 from cognee.api.v1.integrations.routers.get_integrations_router import get_integrations_router
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, build_agent_connection_id
@@ -28,6 +29,10 @@ from cognee.modules.users.methods import get_authenticated_user
 
 USER_ID = uuid4()
 AGENT_ID = uuid4()
+
+# The methods package rebinds get_authenticated_user to the function; import
+# the submodule explicitly to reach the resolved auth-posture constant.
+_auth_module = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
 
 # Import the submodule explicitly: the router package's __init__.py rebinds
 # get_integrations_router to the *function*, shadowing the submodule (see the
@@ -41,18 +46,21 @@ USER_MANAGER_MODULE = "cognee.modules.users.get_user_manager"
 
 class _FakeUser:
     id = USER_ID
+    tenant_id = None
 
 
-def _fake_agent_user(plugin_key: str = "claude-code"):
+def _fake_agent_user(plugin_key: str = "claude-code", agent_id=AGENT_ID):
     return SimpleNamespace(
-        id=AGENT_ID,
+        id=agent_id,
         email=f"{plugin_key}+{USER_ID}@cognee.agent",
         tenant_id=None,
     )
 
 
-def _fake_agent_info(plugin_key: str = "claude-code"):
-    return SimpleNamespace(user=_fake_agent_user(plugin_key), api_key_label="abcd1234****")
+def _fake_agent_info(plugin_key: str = "claude-code", agent_id=AGENT_ID):
+    return SimpleNamespace(
+        user=_fake_agent_user(plugin_key, agent_id), api_key_label="abcd1234****"
+    )
 
 
 @pytest.fixture
@@ -66,6 +74,19 @@ def client():
 def test_unknown_plugin_404s_on_every_route(client):
     assert client.post("/api/v1/integrations/plugins/notreal/provision").status_code == 404
     assert client.delete("/api/v1/integrations/plugins/notreal").status_code == 404
+
+
+@pytest.mark.skipif(
+    not _auth_module.REQUIRE_AUTHENTICATION,
+    reason="auth disabled in this environment (single-user posture)",
+)
+def test_provision_rejects_unauthenticated_callers():
+    # No dependency override: the real auth stack must gate the route that
+    # mints raw API keys.
+    app = FastAPI()
+    app.include_router(get_integrations_router(), prefix="/api/v1/integrations")
+    response = TestClient(app).post("/api/v1/integrations/plugins/claude-code/provision")
+    assert response.status_code == 401
 
 
 def test_provision_creates_agent_key_and_plugin_record(client):
@@ -95,8 +116,11 @@ def test_provision_creates_agent_key_and_plugin_record(client):
     assert body["apiKey"] == "raw-key-shown-once"
     assert body["created"] is True
 
+    # Provisioned under the plugin key AND the authenticated principal — the
+    # agent must be a child of the requesting user, not of some other user.
     create_agent.assert_awaited_once()
     assert create_agent.await_args.args[0] == "claude-code"
+    assert create_agent.await_args.args[1].id == USER_ID
 
     # plugin_key recorded in the agent's principal configuration blob.
     store_config.assert_awaited_once()
@@ -116,8 +140,56 @@ def test_provision_creates_agent_key_and_plugin_record(client):
     assert register_kwargs["metadata"] == {"plugin_key": "claude-code"}
 
 
+def test_provision_registers_parent_tenant_id():
+    """The registered connection carries the parent's tenant, not the stale agent object's.
+
+    create_agent sets the agent's tenant_id via a raw UPDATE without
+    refreshing the returned ORM instance, so on first provision the agent
+    object still reads tenant_id=None. The router must therefore source the
+    tenant from the authenticated parent (they share it by construction).
+    """
+    tenant_id = uuid4()
+    tenanted_user = SimpleNamespace(id=USER_ID, tenant_id=tenant_id)
+    app = FastAPI()
+    app.include_router(get_integrations_router(), prefix="/api/v1/integrations")
+    app.dependency_overrides[get_authenticated_user] = lambda: tenanted_user
+    tenant_client = TestClient(app)
+
+    with (
+        patch.object(
+            _router_module,
+            "create_agent",
+            # Stale first-provision shape: agent object still has tenant_id=None.
+            new=AsyncMock(return_value=(_fake_agent_user(), "key")),
+        ),
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(
+            _router_module, "register_agent_connection", new=AsyncMock()
+        ) as register_connection,
+    ):
+        response = tenant_client.post("/api/v1/integrations/plugins/claude-code/provision")
+
+    assert response.status_code == 200
+    assert register_connection.await_args.kwargs["tenant_id"] == tenant_id
+
+
 def test_second_provision_returns_same_agent_with_rotated_key(client):
     old_key = SimpleNamespace(id=uuid4())
+    call_order = []
+
+    async def _record_delete(*args, **kwargs):
+        call_order.append("delete")
+
+    async def _record_create(*args, **kwargs):
+        call_order.append("create")
+        return SimpleNamespace(api_key="rotated-key")
+
+    # list_agents returns another plugin's agent first: the router must pick
+    # the claude-code agent by its deterministic email, not the first child.
+    codex_agent_id = uuid4()
     with (
         patch.object(
             _router_module,
@@ -127,14 +199,16 @@ def test_second_provision_returns_same_agent_with_rotated_key(client):
         patch.object(
             _router_module,
             "list_agents",
-            new=AsyncMock(return_value=[_fake_agent_info()]),
+            new=AsyncMock(
+                return_value=[_fake_agent_info("codex", codex_agent_id), _fake_agent_info()]
+            ),
         ),
         patch.object(_router_module, "get_api_keys", new=AsyncMock(return_value=[old_key])),
-        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
         patch.object(
-            _router_module,
-            "create_api_key",
-            new=AsyncMock(return_value=SimpleNamespace(api_key="rotated-key")),
+            _router_module, "delete_api_key", new=AsyncMock(side_effect=_record_delete)
+        ) as delete_key,
+        patch.object(
+            _router_module, "create_api_key", new=AsyncMock(side_effect=_record_create)
         ) as create_key,
         patch.object(
             _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
@@ -150,10 +224,78 @@ def test_second_provision_returns_same_agent_with_rotated_key(client):
     assert body["apiKey"] == "rotated-key"
 
     # Old key revoked, new labeled key minted — rotation is the re-provision.
+    # Both operate on the claude-code agent, never the codex one.
     delete_key.assert_awaited_once()
+    assert delete_key.await_args.args[0].id == AGENT_ID
     assert delete_key.await_args.args[1] == old_key.id
     create_key.assert_awaited_once()
+    assert create_key.await_args.args[0].id == AGENT_ID
     assert create_key.await_args.args[1] == "claude-code"
+    # Mint-before-revoke: a failure mid-rotation must never leave the plugin
+    # keyless.
+    assert call_order == ["create", "delete"]
+
+
+def test_provision_race_integrity_error_takes_rotation_path(client):
+    """Two concurrent first provisions: the loser's insert hits the unique-email
+    constraint (IntegrityError, not UserAlreadyExists) and must recover via the
+    same get-and-rotate path instead of 500ing."""
+    with (
+        patch.object(
+            _router_module,
+            "create_agent",
+            new=AsyncMock(side_effect=IntegrityError("INSERT INTO users", {}, Exception("dup"))),
+        ),
+        patch.object(
+            _router_module,
+            "list_agents",
+            new=AsyncMock(return_value=[_fake_agent_info()]),
+        ),
+        patch.object(_router_module, "get_api_keys", new=AsyncMock(return_value=[])),
+        patch.object(
+            _router_module,
+            "create_api_key",
+            new=AsyncMock(return_value=SimpleNamespace(api_key="rotated-key")),
+        ),
+        patch.object(
+            _router_module, "get_principal_all_configuration", new=AsyncMock(return_value=[])
+        ),
+        patch.object(_router_module, "store_principal_configuration", new=AsyncMock()),
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+    ):
+        response = client.post("/api/v1/integrations/plugins/claude-code/provision")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is False
+    assert body["apiKey"] == "rotated-key"
+
+
+def test_reprovision_409s_when_agent_not_resolvable(client):
+    """UserAlreadyExists but the agent isn't among this user's children: the
+    router must refuse (409) rather than rotate/mint a key for another
+    plugin's — or another owner's — agent."""
+    with (
+        patch.object(
+            _router_module,
+            "create_agent",
+            new=AsyncMock(side_effect=UserAlreadyExists()),
+        ),
+        patch.object(
+            _router_module,
+            "list_agents",
+            # Only a different plugin's agent exists under this user.
+            new=AsyncMock(return_value=[_fake_agent_info("codex", uuid4())]),
+        ),
+        patch.object(_router_module, "create_api_key", new=AsyncMock()) as create_key,
+        patch.object(_router_module, "delete_api_key", new=AsyncMock()) as delete_key,
+        patch.object(_router_module, "register_agent_connection", new=AsyncMock()),
+    ):
+        response = client.post("/api/v1/integrations/plugins/claude-code/provision")
+
+    assert response.status_code == 409
+    create_key.assert_not_awaited()
+    delete_key.assert_not_awaited()
 
 
 def test_reprovision_preserves_original_provisioned_at(client):
@@ -270,6 +412,57 @@ async def test_last_used_at_throttle_two_auths_in_window_one_write():
     assert key.last_used_at is not None
     first_session.commit.assert_awaited_once()
     second_session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_last_used_at_refreshes_once_stale():
+    """The throttle is a throttle, not a one-shot: a timestamp older than the
+    window must be rewritten, or "last seen" freezes after the first auth."""
+    user_id = uuid4()
+    user = SimpleNamespace(id=user_id, is_active=True)
+    stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+    key = SimpleNamespace(id=uuid4(), user_id=user_id, last_used_at=stale)
+
+    session = _FakeSession([_result(key), _result(user)])
+    engine = MagicMock()
+    engine.get_async_session = MagicMock(return_value=session)
+    manager = UserManager(MagicMock())
+
+    with patch(f"{USER_MANAGER_MODULE}.get_relational_engine", return_value=engine):
+        assert await manager.get_by_token("raw-key") is user
+
+    session.commit.assert_awaited_once()
+    assert key.last_used_at > stale
+
+
+@pytest.mark.asyncio
+async def test_naive_fresh_last_used_at_skips_write_without_error():
+    """SQLite hands back tz-naive datetimes; the throttle must normalize them
+    instead of raising TypeError on the aware-naive subtraction. Called
+    directly (not through get_by_token) so a TypeError fails the test instead
+    of being swallowed by the auth path's best-effort except."""
+    session = MagicMock()
+    session.commit = AsyncMock()
+    fresh_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    key = SimpleNamespace(id=uuid4(), last_used_at=fresh_naive)
+
+    await UserManager._touch_api_key_last_used(session, key)
+
+    session.commit.assert_not_awaited()
+    assert key.last_used_at == fresh_naive
+
+
+@pytest.mark.asyncio
+async def test_naive_stale_last_used_at_refreshes():
+    session = MagicMock()
+    session.commit = AsyncMock()
+    stale_naive = (datetime.now(timezone.utc) - timedelta(minutes=10)).replace(tzinfo=None)
+    key = SimpleNamespace(id=uuid4(), last_used_at=stale_naive)
+
+    await UserManager._touch_api_key_last_used(session, key)
+
+    session.commit.assert_awaited_once()
+    assert key.last_used_at.tzinfo is not None
 
 
 @pytest.mark.asyncio
