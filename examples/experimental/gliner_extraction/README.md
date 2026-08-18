@@ -128,14 +128,20 @@ War & Peace, 2,043-page PDF, chunk_size=512. Baseline = single process, no
 packing, serial batches. Optimized = `workers=3` + packing + overlapped
 storage (`perf:` commit):
 
-| Metric | Baseline | Optimized (3 workers) |
-|---|---|---|
-| cognify wall clock | 1,290 s (21.5 min) | **911 s (15.2 min)** |
-| batch cycle | 12.7 s (6.9 extract + 5.8 store, serial) | 9.0 s (storage-bound) |
-| Chunks / summaries | 3,140 / 3,140 | 3,140 / 3,140 |
-| Unique entities | 6,933 | **8,151** (+18% — packing gives GLiNER more context) |
-| Edges | 48,159 | 50,467 |
-| Marginal cost | ~$0.10 (embeddings only) | same |
+| Metric | Baseline | + workers/pack/overlap | + storage_depth=2 |
+|---|---|---|---|
+| cognify wall clock | 1,290 s (21.5 min) | 911 s (15.2 min) | **794 s (13.2 min), 1.63x** |
+| batch cycle | 12.7 s (serial) | 9.0 s (storage-bound) | ~8.0 s |
+| Chunks / summaries | 3,140 / 3,140 | 3,140 / 3,140 | 3,140 / 3,140 |
+| Unique entities | 6,933 | **8,151** (+18% — packing gives GLiNER more context) | 8,151 |
+| Edges | 48,159 | 50,467 | 50,471 |
+| Marginal cost | ~$0.10 (embeddings only) | same | same |
+
+Config for the best run: `workers=3, storage_depth=2, chunks_per_batch=256`,
+OpenAI embeddings. Caveat learned the hard way: switching embedding provider
+can change `HUGGINGFACE_TOKENIZER`, which changes how the chunker counts
+tokens — chunk counts (and therefore all numbers) stop being comparable, and
+oversized chunks degrade GLiNER recall. Pin the tokenizer when comparing.
 
 After these changes extraction is fully hidden behind storage: the critical
 path is now `add_data_points` (OpenAI embedding round-trips + single-threaded
