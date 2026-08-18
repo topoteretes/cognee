@@ -39,6 +39,7 @@ ingestion in the logs. Permission errors are NOT refusals: they propagate.
 
 import json
 from enum import Enum
+from pathlib import PureWindowsPath
 from typing import List, Optional
 from uuid import UUID
 
@@ -46,6 +47,7 @@ from pydantic import BaseModel
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.locks import dataset_lock
@@ -98,10 +100,11 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
-from cognee.modules.ingestion import classify
+from cognee.modules.ingestion import classify, save_data_to_file
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
@@ -195,6 +198,37 @@ async def _get_stored_chunks(document_id: UUID) -> List[dict]:
         )
 
     return sorted(chunks, key=lambda node: int(node.get("chunk_index", -1)))
+
+
+async def _require_chunk_scoped_ownership(
+    stored_chunks: List[dict], dataset_id: UUID, data_id: UUID
+) -> None:
+    """Refuse baselines whose chunks predate v2 ownership.
+
+    The graph provenance marker also exists on older graphs whose artifacts
+    carry only one document-scoped v1 ref. Those graphs are safe for whole-
+    document deletion, but not for deleting one chunk by its v2 ref.
+    """
+    graph_engine = await get_graph_engine()
+    chunk_ids = [str(node["id"]) for node in stored_chunks]
+    delete_data = await graph_engine.get_node_delete_data(chunk_ids)
+    for chunk_id in chunk_ids:
+        expected_ref = make_chunk_source_ref_key(dataset_id, data_id, UUID(chunk_id))
+        snapshot = delete_data.get(chunk_id)
+        if snapshot is None or expected_ref not in snapshot.source_ref_keys:
+            raise IncrementalUpdateNotPossible(
+                f"stored chunk {chunk_id} has no chunk-scoped ownership baseline",
+                RefusalReason.NO_BASELINE,
+            )
+
+
+def _require_stored_chunks_tile(stored_chunks: List[dict], old_text: str) -> None:
+    """Refuse extra, missing, or wrongly ordered chunks before any shortcut."""
+    if "".join(node["text"] for node in stored_chunks) != old_text:
+        raise IncrementalUpdateNotPossible(
+            "stored chunks do not tile the stored document text",
+            RefusalReason.CHUNKS_NOT_TILING,
+        )
 
 
 def _build_document(
@@ -314,11 +348,27 @@ async def _restore_repositioned_chunks(chunks: List[DocumentChunk], _context) ->
 async def _stage_new_content(data, preferred_loaders) -> StagedContent:
     """Run the input through ingestion's loader machinery without row writes.
 
-    Mirrors ingest_data's per-item processing exactly (same storage layout,
-    same metadata derivation), so the published row is indistinguishable from
-    one written by a full ingestion.
+    Mirrors ingest_data's loader and metadata derivation. Upload bytes use a
+    content-addressed staging name so a same-name replacement cannot overwrite
+    the current row's original file before publish.
     """
-    original_file_path = await save_data_item_to_storage(data)
+    source_data = data.data if isinstance(data, DataItem) else data
+    upload_metadata = None
+    if hasattr(source_data, "file") and getattr(source_data, "filename", None):
+        # Normal ingestion stores uploads by their user-visible filename with
+        # overwrite=True. That is unsafe for staging: updating report.pdf could
+        # replace the CURRENT row's original file before publish. Keep the
+        # display name separately and stage bytes under a content-addressed path.
+        upload_metadata = classify(source_data.file, filename=source_data.filename).get_metadata()
+        extension = upload_metadata["extension"]
+        suffix = f".{extension}" if extension else ""
+        staged_filename = f"staged_original_{upload_metadata['content_hash']}{suffix}"
+        original_file_path = await save_data_to_file(
+            source_data.file,
+            filename=staged_filename,
+        )
+    else:
+        original_file_path = await save_data_item_to_storage(data)
     actual_file_path = get_data_file_path(original_file_path)
 
     storage_file_path, loader_engine = await data_item_to_text_file(
@@ -331,6 +381,8 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
 
     async with open_data_file(original_file_path) as file:
         original_metadata = classify(file).get_metadata()
+    if upload_metadata is not None:
+        original_metadata["name"] = PureWindowsPath(str(source_data.filename)).stem
     async with open_data_file(storage_file_path) as file:
         storage_metadata = classify(file).get_metadata()
 
@@ -360,7 +412,8 @@ def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> lis
     ]
     # Direct text gets an internal content-derived filename, so its name is
     # expected to change with its text. User-named uploads and streams are not.
-    if hasattr(data, "filename") or hasattr(data, "name"):
+    source_data = data.data if isinstance(data, DataItem) else data
+    if hasattr(source_data, "filename") or hasattr(source_data, "name"):
         fields.append("name")
     return [
         field for field in fields if getattr(old_data, field, None) != getattr(staged, field, None)
@@ -617,6 +670,8 @@ async def _stage_and_plan(
 
     old_text = await _read_processed_text(old_data.raw_data_location)
     stored_chunks = await _get_stored_chunks(data_id)
+    await _require_chunk_scoped_ownership(stored_chunks, dataset_id, data_id)
+    _require_stored_chunks_tile(stored_chunks, old_text)
 
     # Stage the new content through ingestion's own loader machinery. The Data
     # row is NOT written: readers keep resolving the old version until publish.
@@ -624,13 +679,12 @@ async def _stage_and_plan(
     new_text = await _read_processed_text(staged.raw_data_location)
     content_unchanged = staged.content_hash == old_data.content_hash and new_text == old_text
 
-    if content_unchanged:
-        changed_metadata = _changed_staged_metadata(data, old_data, staged)
-        if changed_metadata:
-            raise IncrementalUpdateNotPossible(
-                f"replacement metadata changed ({', '.join(changed_metadata)})",
-                RefusalReason.UNSUPPORTED_METADATA,
-            )
+    changed_metadata = _changed_staged_metadata(data, old_data, staged)
+    if changed_metadata:
+        raise IncrementalUpdateNotPossible(
+            f"replacement metadata changed ({', '.join(changed_metadata)})",
+            RefusalReason.UNSUPPORTED_METADATA,
+        )
 
     document = _build_document(old_data, staged, node_set)
 

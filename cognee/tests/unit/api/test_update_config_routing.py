@@ -98,6 +98,32 @@ async def test_node_set_change_skips_the_incremental_path():
     assert result == full_result
 
 
+@pytest.mark.parametrize(
+    "config_kwargs",
+    (
+        {"graph_model": type("CustomGraph", (), {})},
+        {"custom_prompt": "Extract only explicitly stated facts."},
+    ),
+)
+async def test_custom_extraction_config_skips_the_incremental_path(config_kwargs):
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock()
+    full_result = {"run": "full"}
+
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
+    with p1, p2, p3, p4, p5, p6:
+        result = await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+            **config_kwargs,
+        )
+
+    incremental.assert_not_called()
+    assert result == full_result
+
+
 async def test_multi_item_input_is_rejected_not_multiplied():
     """update() is the ONLY place that rejects a multi-item list.
 

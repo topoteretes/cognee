@@ -300,9 +300,10 @@ async def test_incremental_update_full_flow(incremental_env):
     assert not (isinstance(retry, dict) and retry.get("status") == "incremental"), (
         "retry after crash must fall back to the full update"
     )
-    # The full update (delete + re-add) mints a NEW content-derived data_id —
-    # pre-existing full-path semantics; only the incremental path preserves it.
-    data_id = (await get_dataset_data(dataset.id))[0].id
+    # The full update is pinned to the existing row too, so callers keep the
+    # same handle even when incremental preconditions fail.
+    healed_data = (await get_dataset_data(dataset.id))[0]
+    assert healed_data.id == data_id
     healed_text = await _stored_text(user, data_id)
     assert healed_text == text_v5
     healed_nodes = await _doc_chunk_nodes(data_id, healed_text)
@@ -322,7 +323,12 @@ async def test_incremental_update_full_flow(incremental_env):
         return UploadFile(file=spooled, filename=filename)
 
     text_v6 = healed_text.replace("Paragraph 3", "Paragraph 3 ENTV6", 1)
-    upload = _upload(text_v6.encode("utf-8"), "update.txt")
+    # Keep the existing user-visible metadata. A rename intentionally takes
+    # the full path; this case exercises safe same-name staging instead.
+    upload = _upload(
+        text_v6.encode("utf-8"),
+        f"{healed_data.name}.{healed_data.original_extension}",
+    )
     result6 = await update_like_an_api_request(data_id, [upload], dataset.id, user=user)
     assert isinstance(result6, dict) and result6.get("status") == "incremental", (
         f"single-UploadFile update must run chunk-level: {result6}"

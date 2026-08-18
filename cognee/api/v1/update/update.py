@@ -156,6 +156,16 @@ async def update(
         )
         chunk_level_diff = False
 
+    if chunk_level_diff and (graph_model is not KnowledgeGraph or custom_prompt is not None):
+        # The baseline does not persist the model/prompt that produced its
+        # graph. Applying a new configuration only to fresh chunks would mix
+        # extraction schemas or rules inside one document.
+        logger.info(
+            "Chunk-level incremental update supports only the default graph model and prompt; "
+            "running full update"
+        )
+        chunk_level_diff = False
+
     if chunk_level_diff and (vector_db_config is not None or graph_db_config is not None):
         # The chunk-level incremental engine resolves its stores through the
         # dataset-context routing system, not per-call config dicts — running

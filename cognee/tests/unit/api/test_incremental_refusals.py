@@ -10,20 +10,31 @@ a graph adapter registered at runtime through ``use_graph_adapter()`` can take
 the incremental path by satisfying the contract.
 """
 
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from starlette.datastructures import UploadFile
 
 from cognee.api.v1.update.incremental import (
     IncrementalUpdateNotPossible,
     RefusalReason,
     _changed_staged_metadata,
+    _require_chunk_scoped_ownership,
+    _require_stored_chunks_tile,
+    _stage_new_content,
     incremental_update,
+)
+from cognee.infrastructure.databases.provenance import (
+    make_chunk_source_ref_key,
+    make_source_ref_key,
 )
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.tasks.ingestion.data_item import DataItem
 
 
 def test_every_reason_is_distinguishable():
@@ -71,6 +82,101 @@ def test_user_named_upload_requires_full_update_when_renamed():
     staged.name = "new.txt"
 
     assert _changed_staged_metadata(SimpleNamespace(filename="new.txt"), old, staged) == ["name"]
+
+
+def test_wrapped_user_named_upload_requires_full_update_when_renamed():
+    old = SimpleNamespace(
+        name="old.txt",
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+    staged = SimpleNamespace(**vars(old))
+    staged.name = "new.txt"
+
+    wrapped_upload = DataItem(data=SimpleNamespace(filename="new.txt"))
+    assert _changed_staged_metadata(wrapped_upload, old, staged) == ["name"]
+
+
+@pytest.mark.asyncio
+async def test_v1_chunk_ownership_refuses_incremental_baseline(monkeypatch):
+    import cognee.api.v1.update.incremental as incremental
+
+    dataset_id, data_id, chunk_id = uuid4(), uuid4(), uuid4()
+    snapshot = SimpleNamespace(source_ref_keys=[make_source_ref_key(dataset_id, data_id)])
+    engine = SimpleNamespace(get_node_delete_data=AsyncMock(return_value={str(chunk_id): snapshot}))
+    monkeypatch.setattr(incremental, "get_graph_engine", AsyncMock(return_value=engine))
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await _require_chunk_scoped_ownership(
+            [{"id": str(chunk_id)}], dataset_id=dataset_id, data_id=data_id
+        )
+
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+
+
+@pytest.mark.asyncio
+async def test_v2_chunk_ownership_is_an_incremental_baseline(monkeypatch):
+    import cognee.api.v1.update.incremental as incremental
+
+    dataset_id, data_id, chunk_id = uuid4(), uuid4(), uuid4()
+    snapshot = SimpleNamespace(
+        source_ref_keys=[make_chunk_source_ref_key(dataset_id, data_id, chunk_id)]
+    )
+    engine = SimpleNamespace(get_node_delete_data=AsyncMock(return_value={str(chunk_id): snapshot}))
+    monkeypatch.setattr(incremental, "get_graph_engine", AsyncMock(return_value=engine))
+
+    await _require_chunk_scoped_ownership(
+        [{"id": str(chunk_id)}], dataset_id=dataset_id, data_id=data_id
+    )
+
+
+def test_stored_chunks_must_tile_the_stored_text():
+    _require_stored_chunks_tile([{"text": "first"}, {"text": " second"}], "first second")
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        _require_stored_chunks_tile([{"text": "first"}, {"text": " third"}], "first second")
+
+    assert raised.value.reason is RefusalReason.CHUNKS_NOT_TILING
+
+
+@pytest.mark.asyncio
+async def test_same_name_upload_uses_isolated_staging_path(monkeypatch, tmp_path):
+    import cognee.api.v1.update.incremental as incremental
+
+    current_original = tmp_path / "report.txt"
+    current_original.write_bytes(b"old content")
+    saved_names = []
+
+    async def _save_staged(file, filename):
+        saved_names.append(filename)
+        destination = tmp_path / filename
+        file.seek(0)
+        destination.write_bytes(file.read())
+        file.seek(0)
+        return destination.as_uri()
+
+    async def _load_staged(path, _preferred_loaders):
+        return path, SimpleNamespace(loader_name="text_loader")
+
+    upload_file = tempfile.SpooledTemporaryFile()
+    upload_file.write(b"new content")
+    upload_file.seek(0)
+    upload = UploadFile(file=upload_file, filename="report.txt")
+
+    monkeypatch.setattr(incremental, "save_data_to_file", _save_staged)
+    monkeypatch.setattr(incremental, "data_item_to_text_file", _load_staged)
+
+    staged = await _stage_new_content(upload, None)
+
+    assert saved_names[0].startswith("staged_original_")
+    assert saved_names[0].endswith(".txt")
+    assert saved_names[0] != current_original.name
+    assert current_original.read_bytes() == b"old content"
+    assert Path(staged.original_data_location.removeprefix("file://")) != current_original
+    assert staged.name == "report"
 
 
 @pytest.mark.asyncio
@@ -236,7 +342,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
         )
 
     async def _read(location):
-        return "old\n" if location == "/tmp/old.txt" else "new\n"
+        return "para\n" if location == "/tmp/old.txt" else "new\n"
 
     async def _stored_chunks(*_args, **_kwargs):
         return stored
@@ -247,6 +353,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     monkeypatch.setattr(incremental, "get_data", _get_data)
     monkeypatch.setattr(incremental, "_read_processed_text", _read)
     monkeypatch.setattr(incremental, "_get_stored_chunks", _stored_chunks)
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock())
     monkeypatch.setattr(incremental, "_stage_new_content", _stage)
     monkeypatch.setattr(incremental, "_build_document", lambda *a, **k: SimpleNamespace(id=uuid4()))
 
@@ -264,6 +371,61 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
 
     assert raised.value.reason is RefusalReason.UNSUPPORTED_CHUNKER
     assert "other_v1" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_changed_content_with_changed_metadata_refuses_before_planning(monkeypatch):
+    import cognee.api.v1.update.incremental as incremental
+
+    data_id, dataset_id = uuid4(), uuid4()
+    old_data = SimpleNamespace(
+        id=data_id,
+        raw_data_location="/tmp/old.txt",
+        content_hash="OLD",
+        external_metadata={},
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+    staged = SimpleNamespace(
+        raw_data_location="/tmp/new.md",
+        content_hash="NEW",
+        extension="md",
+        mime_type="text/markdown",
+        original_extension="md",
+        original_mime_type="text/markdown",
+        loader_engine="text_loader",
+    )
+
+    monkeypatch.setattr(incremental, "get_data", AsyncMock(return_value=old_data))
+    monkeypatch.setattr(
+        incremental,
+        "_read_processed_text",
+        AsyncMock(side_effect=["old content", "new content"]),
+    )
+    monkeypatch.setattr(
+        incremental,
+        "_get_stored_chunks",
+        AsyncMock(return_value=[{"id": str(uuid4()), "text": "old content"}]),
+    )
+    monkeypatch.setattr(incremental, "_require_chunk_scoped_ownership", AsyncMock())
+    monkeypatch.setattr(incremental, "_stage_new_content", AsyncMock(return_value=staged))
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental._stage_and_plan(
+            data_id,
+            "new content",
+            SimpleNamespace(id=dataset_id),
+            SimpleNamespace(id=uuid4()),
+            None,
+            None,
+            chunker=TextChunker,
+            policy=DEFAULT_CHUNK_POLICY,
+        )
+
+    assert raised.value.reason is RefusalReason.UNSUPPORTED_METADATA
 
 
 @pytest.mark.asyncio
