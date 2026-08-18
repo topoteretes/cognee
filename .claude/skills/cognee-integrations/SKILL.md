@@ -21,6 +21,7 @@ Default is OpenAI (`LLM_API_KEY` is all you need). To switch, set
 - **Anthropic** (`cognee[anthropic]`): `LLM_PROVIDER=anthropic`, model e.g. `claude-3-5-sonnet-20241022`.
 - **Ollama, local** (`cognee[ollama]`): `LLM_PROVIDER=ollama`, `LLM_ENDPOINT=http://localhost:11434/v1`, and set the embedding block + `HUGGINGFACE_TOKENIZER` too.
 - **Custom / OpenRouter / vLLM**: `LLM_PROVIDER=custom` with the provider's OpenAI-compatible endpoint.
+- **OrcaRouter**: `LLM_PROVIDER=orcarouter` — first-class OpenAI-compatible gateway; `LLM_ENDPOINT` defaults to `https://api.orcarouter.ai/v1` (key prefix `sk-orca-`). OrcaRouter routes on provider-prefixed ids, so the model needs the prefix twice (`openai/openai/gpt-4o-mini`).
 - **AWS Bedrock** (`cognee[aws]`): `LLM_PROVIDER=bedrock` + AWS credentials/region.
 
 **The classic trap**: LLM and embeddings are configured independently

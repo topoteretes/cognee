@@ -464,6 +464,19 @@ LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
 
+#### OrcaRouter
+[OrcaRouter](https://www.orcarouter.ai) is a first-class provider (OpenAI-compatible
+gateway). `LLM_ENDPOINT` is optional — it defaults to `https://api.orcarouter.ai/v1`.
+OrcaRouter routes on provider-prefixed model ids and litellm strips one prefix for its
+own routing, so the id needs the prefix twice (`openai/openai/gpt-4o-mini`), or use the
+`orcarouter/<catalog-id>` shorthand (`orcarouter/openai/gpt-4o-mini`):
+```bash
+LLM_PROVIDER="orcarouter"
+LLM_MODEL="openai/openai/gpt-4o-mini"  # or orcarouter/openai/gpt-4o-mini
+LLM_API_KEY="sk-orca-..."
+# LLM_ENDPOINT="https://api.orcarouter.ai/v1"  # optional, this is the default
+```
+
 #### AWS Bedrock (requires aws extra)
 ```bash
 LLM_PROVIDER="bedrock"

@@ -72,6 +72,17 @@ def test_infer_provider_from_model(monkeypatch):
     assert config.llm_provider == "anthropic"
 
 
+def test_infer_orcarouter_provider_from_model(monkeypatch):
+    """
+    An ``orcarouter/<model>`` prefix infers the first-class OrcaRouter provider.
+    """
+    for var in ("LLM_PROVIDER", "LLM_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+
+    config = LLMConfig(llm_model="orcarouter/openai/gpt-5-mini", _env_file=None)
+    assert config.llm_provider == "orcarouter"
+
+
 def test_explicit_provider_takes_precedence(monkeypatch):
     """
     An explicitly set llm_provider is never overridden by inference.

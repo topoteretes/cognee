@@ -29,8 +29,13 @@ KNOWN_LLM_PROVIDERS = frozenset(
         "bedrock",
         "llama_cpp",
         "mcp-sampling",
+        "orcarouter",
     }
 )
+
+# Default base URL for the OrcaRouter gateway (an OpenAI-compatible endpoint).
+# ``LLM_ENDPOINT`` overrides it when set explicitly.
+ORCAROUTER_ENDPOINT = "https://api.orcarouter.ai/v1"
 
 # Local inference servers process requests (near-)serially, unlike cloud
 # providers. One definition of the distinction, for everything that needs it:

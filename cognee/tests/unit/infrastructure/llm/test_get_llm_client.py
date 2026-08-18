@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from cognee.context_global_variables import llm_config as llm_config_ctx
-from cognee.infrastructure.llm.config import LLMConfig
+from cognee.infrastructure.llm.config import ORCAROUTER_ENDPOINT, LLMConfig
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api import (
     adapter as generic_adapter,
@@ -131,6 +131,8 @@ def test_api_key_validation_still_happens_before_cache_lookup():
         raise_api_key_error=True,
         use_managed_identity=True,
     )
+    with pytest.raises(LLMAPIKeyNotSetError):
+        _raise_for_missing_api_key(LLMProvider.ORCAROUTER, None, raise_api_key_error=True)
 
 
 def test_inferred_ollama_provider_uses_bare_model_name(monkeypatch):
@@ -155,6 +157,81 @@ def test_inferred_ollama_provider_uses_bare_model_name(monkeypatch):
     assert config.llm_provider == LLMProvider.OLLAMA.value
     assert isinstance(client, OllamaAPIAdapter)
     assert client.model == "llama3.1:8b"
+
+
+def test_orcarouter_provider_builds_generic_adapter_with_default_endpoint(monkeypatch):
+    for environment_variable in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+        monkeypatch.delenv(environment_variable, raising=False)
+
+    config = LLMConfig(
+        llm_provider="orcarouter",
+        llm_model="openai/openai/gpt-5-mini",
+        llm_api_key="sk-orca-test",
+        _env_file=None,
+    )
+    token = llm_config_ctx.set(config)
+    _get_llm_client_cached.cache_clear()
+
+    try:
+        client = get_llm_client()
+    finally:
+        llm_config_ctx.reset(token)
+        _get_llm_client_cached.cache_clear()
+
+    assert isinstance(client, generic_adapter.GenericAPIAdapter)
+    assert client.name == "OrcaRouter"
+    assert client.model == "openai/openai/gpt-5-mini"
+    assert client.endpoint == ORCAROUTER_ENDPOINT
+
+
+def test_orcarouter_provider_expands_orcarouter_model_prefix(monkeypatch):
+    for environment_variable in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+        monkeypatch.delenv(environment_variable, raising=False)
+
+    config = LLMConfig(
+        llm_provider="orcarouter",
+        llm_model="orcarouter/openai/gpt-5-mini",
+        llm_api_key="sk-orca-test",
+        _env_file=None,
+    )
+    token = llm_config_ctx.set(config)
+    _get_llm_client_cached.cache_clear()
+
+    try:
+        client = get_llm_client()
+    finally:
+        llm_config_ctx.reset(token)
+        _get_llm_client_cached.cache_clear()
+
+    assert isinstance(client, generic_adapter.GenericAPIAdapter)
+    assert client.name == "OrcaRouter"
+    # ``orcarouter/<catalog-id>`` expands to a litellm-routable double-prefixed id.
+    assert client.model == "openai/openai/gpt-5-mini"
+    assert client.endpoint == ORCAROUTER_ENDPOINT
+
+
+def test_orcarouter_provider_honors_explicit_endpoint(monkeypatch):
+    for environment_variable in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+        monkeypatch.delenv(environment_variable, raising=False)
+
+    config = LLMConfig(
+        llm_provider="orcarouter",
+        llm_model="openai/openai/gpt-5-mini",
+        llm_api_key="sk-orca-test",
+        llm_endpoint="https://gateway.example.test/v1",
+        _env_file=None,
+    )
+    token = llm_config_ctx.set(config)
+    _get_llm_client_cached.cache_clear()
+
+    try:
+        client = get_llm_client()
+    finally:
+        llm_config_ctx.reset(token)
+        _get_llm_client_cached.cache_clear()
+
+    assert isinstance(client, generic_adapter.GenericAPIAdapter)
+    assert client.endpoint == "https://gateway.example.test/v1"
 
 
 def test_openai_adapter_preserves_default_instructor_mode_for_non_gpt5_models(monkeypatch):

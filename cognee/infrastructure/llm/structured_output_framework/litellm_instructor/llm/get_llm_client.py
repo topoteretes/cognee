@@ -5,7 +5,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Any, Hashable, TypeGuard
 
-from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.config import ORCAROUTER_ENDPOINT, get_llm_context_config
 from cognee.infrastructure.llm.exceptions import (
     LLMAPIKeyNotSetError,
     UnsupportedLLMProviderError,
@@ -80,6 +80,7 @@ class LLMProvider(Enum):
     - GEMINI: Represents the Gemini provider.
     - MISTRAL: Represents the Mistral AI provider.
     - BEDROCK: Represents the AWS Bedrock provider.
+    - ORCAROUTER: Represents the OrcaRouter gateway (OpenAI-compatible, https://api.orcarouter.ai/v1).
     """
 
     OPENAI = "openai"
@@ -93,6 +94,7 @@ class LLMProvider(Enum):
     LLAMA_CPP = "llama_cpp"
     # Delegates completions to the host harness via MCP sampling (no API key).
     MCP_SAMPLING = "mcp-sampling"
+    ORCAROUTER = "orcarouter"
 
 
 _API_KEY_REQUIRED_PROVIDERS = {
@@ -102,6 +104,7 @@ _API_KEY_REQUIRED_PROVIDERS = {
     LLMProvider.GEMINI,
     LLMProvider.MISTRAL,
     LLMProvider.ANTHROPIC,
+    LLMProvider.ORCAROUTER,
 }
 
 
@@ -289,6 +292,32 @@ def _get_llm_client_cached(cache_key: _LLMClientCacheKey) -> LLMInterface:
             max_completion_tokens=max_completion_tokens,
             name="Custom",
             endpoint=cache_key.endpoint,
+            instructor_mode=cache_key.instructor_mode,
+            fallback_api_key=llm_config.fallback_api_key,
+            fallback_endpoint=cache_key.fallback_endpoint,
+            fallback_model=cache_key.fallback_model,
+            llm_args=llm_args,
+        )
+
+    elif provider == LLMProvider.ORCAROUTER:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
+            GenericAPIAdapter,
+        )
+
+        # OrcaRouter routes on provider-prefixed model ids (e.g.
+        # ``openai/gpt-4o-mini``) but litellm strips exactly one prefix for its
+        # own routing, so the id must reach litellm with the prefix twice
+        # (``openai/openai/gpt-4o-mini``). The ``orcarouter/<catalog-id>``
+        # shorthand is expanded here to keep the model config readable.
+        model = cache_key.model
+        if model.startswith("orcarouter/"):
+            model = "openai/" + model.removeprefix("orcarouter/")
+        return GenericAPIAdapter(
+            api_key=llm_api_key,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+            name="OrcaRouter",
+            endpoint=cache_key.endpoint or ORCAROUTER_ENDPOINT,
             instructor_mode=cache_key.instructor_mode,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=cache_key.fallback_endpoint,
