@@ -1,4 +1,5 @@
 from .get_role import get_role
+from .get_role_by_id import get_role_by_id
 from .get_tenant import get_tenant
 from .get_principal import get_principal
 from .get_principal_datasets import get_principal_datasets
@@ -14,3 +15,7 @@ from .give_default_permission_to_tenant import give_default_permission_to_tenant
 from .give_default_permission_to_role import give_default_permission_to_role
 from .give_default_permission_to_user import give_default_permission_to_user
 from .has_user_management_permission import has_user_management_permission
+from .get_effective_capabilities import get_effective_capabilities
+from .grant_capability import grant_capability
+from .revoke_capability import revoke_capability
+from .require_tenant_membership import require_tenant_membership

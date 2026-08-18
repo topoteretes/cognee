@@ -9,4 +9,5 @@ from .TenantDefaultPermissions import TenantDefaultPermissions
 from .Permission import Permission
 from .Tenant import Tenant
 from .ACL import ACL
+from .PrincipalCapability import PrincipalCapability
 from .PrincipalConfiguration import PrincipalConfiguration

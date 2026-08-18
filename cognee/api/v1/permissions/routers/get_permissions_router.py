@@ -1,7 +1,7 @@
 from typing import List, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from cognee import __version__ as cognee_version
@@ -630,5 +630,191 @@ def get_permissions_router() -> APIRouter:
         """
         tenants_list = await method_get_user_tenants(user=user)
         return JSONResponse(status_code=200, content=tenants_list)
+
+    @permissions_router.get("/tenants/{tenant_id}/capabilities/me")
+    async def get_my_capabilities_in_tenant(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        List the capabilities the authenticated user has in a tenant.
+
+        Capabilities are tenant-scoped actions (as opposed to dataset permissions)
+        and are the union of what the tenant and the caller's roles in it grant.
+        The tenant owner holds all of them.
+
+        The caller must belong to the tenant. A tenant they are not a member of
+        and one that does not exist both answer 403, so the endpoint cannot be
+        used to discover which tenant ids are real.
+
+        Intended for the client to decide which controls to show. It is not an
+        authorization boundary on its own: every endpoint still enforces its own
+        capability, since anyone who knows the URL can call it without the UI.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant (find yours via GET /api/v1/permissions/tenants/me)
+
+        ## Response
+        Returns a JSON object: {"capabilities": ["manage_users", ...]}.
+
+        ## Error Codes
+        - **403 Forbidden**: Caller is not a member of the tenant, or it does not exist
+        """
+        from cognee.modules.users.permissions.methods import (
+            get_effective_capabilities,
+            require_tenant_membership,
+        )
+
+        await require_tenant_membership(user.id, tenant_id)
+
+        capabilities = await get_effective_capabilities(user.id, tenant_id)
+
+        return JSONResponse(
+            status_code=200,
+            content={"capabilities": sorted(capabilities)},
+        )
+
+    def _validate_capability(capability: str) -> None:
+        """Reject anything outside the catalog, including dataset permission names.
+
+        read/write/delete/share are scoped to a dataset through ACL and do not
+        belong here; anything else is a name nothing in the code gates, and
+        storing it would look like it worked while granting nothing.
+        """
+        from cognee.modules.users.permissions.permission_types import CAPABILITY_TYPES
+
+        if capability not in CAPABILITY_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown capability '{capability}'. Known: {sorted(CAPABILITY_TYPES)}",
+            )
+
+    async def _capability_scope(principal_id: UUID, tenant_id: UUID | None) -> UUID:
+        """Work out which tenant a capability change on this principal targets.
+
+        Derived when the principal carries it (a role knows its tenant, a tenant
+        is its own scope) and required explicitly for a user, because a person
+        can belong to several tenants and users.tenant_id only names one of
+        them.
+
+        A principal that does not exist raises the same PermissionDeniedError
+        the authorization check raises, so the endpoint cannot be used to
+        discover which ids are real.
+        """
+        from cognee.modules.users.exceptions import PermissionDeniedError
+        from cognee.modules.users.permissions.methods import get_principal
+
+        try:
+            principal = await get_principal(principal_id)
+        except Exception:
+            raise PermissionDeniedError(
+                message="User is not authorized to manage users for this tenant"
+            )
+
+        if principal.type == "tenant":
+            return principal_id
+
+        if principal.type == "role":
+            from cognee.modules.users.permissions.methods import get_role_by_id
+
+            return (await get_role_by_id(principal_id)).tenant_id
+
+        if tenant_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="tenant_id is required when the principal is a user.",
+            )
+        return tenant_id
+
+    @permissions_router.post("/capabilities/{principal_id}")
+    async def give_capability_to_principal(
+        principal_id: UUID,
+        capability: str = Query(
+            ...,
+            examples=["manage_users"],
+            description="Capability to grant. Must be in the capability catalog.",
+        ),
+        tenant_id: UUID | None = Query(
+            default=None,
+            description=(
+                "Tenant the grant is scoped to. Required when the principal is a "
+                "user; derived from the principal when it is a role or a tenant."
+            ),
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Grant a capability to a principal: a user, a role, or a whole tenant.
+
+        Granting to the tenant reaches every current and future member; granting
+        to a role reaches its members; granting to a user reaches that person in
+        the given tenant only. The same endpoint serves all three because a
+        capability row is (principal, tenant, capability) regardless of what the
+        principal is.
+
+        The caller needs user-management permission in the target tenant; the
+        tenant owner always has it, which is how the first grant gets made.
+        Granting is idempotent.
+
+        ## Error Codes
+        - **400 Bad Request**: Capability is not in the catalog, or tenant_id is
+          missing for a user principal
+        - **403 Forbidden**: Caller lacks user-management permission in the
+          target tenant, the principal does not exist, or it belongs to another
+          tenant
+        """
+        from cognee.modules.users.permissions.methods import (
+            grant_capability,
+            has_user_management_permission,
+        )
+
+        _validate_capability(capability)
+        scope = await _capability_scope(principal_id, tenant_id)
+        await has_user_management_permission(requester_id=user.id, tenant_id=scope)
+        await grant_capability(principal_id, scope, capability)
+
+        return JSONResponse(status_code=200, content={"message": "Capability granted."})
+
+    @permissions_router.delete("/capabilities/{principal_id}")
+    async def revoke_capability_from_principal(
+        principal_id: UUID,
+        capability: str = Query(
+            ...,
+            examples=["manage_users"],
+            description="Capability to take away.",
+        ),
+        tenant_id: UUID | None = Query(
+            default=None,
+            description=(
+                "Tenant the revoke is scoped to. Required when the principal is "
+                "a user; derived from the principal when it is a role or a tenant."
+            ),
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Take a capability away from a principal: a user, a role, or a tenant.
+
+        A member keeps the capability if another level still grants it, since
+        resolution is a union. Revoking something the principal never had
+        succeeds and changes nothing, so a retry is safe.
+
+        ## Error Codes
+        - **400 Bad Request**: Capability is not in the catalog, or tenant_id is
+          missing for a user principal
+        - **403 Forbidden**: Caller lacks user-management permission in the
+          target tenant, or the principal does not exist
+        """
+        from cognee.modules.users.permissions.methods import (
+            has_user_management_permission,
+            revoke_capability,
+        )
+
+        _validate_capability(capability)
+        scope = await _capability_scope(principal_id, tenant_id)
+        await has_user_management_permission(requester_id=user.id, tenant_id=scope)
+        await revoke_capability(principal_id, scope, capability)
+
+        return JSONResponse(status_code=200, content={"message": "Capability revoked."})
 
     return permissions_router
