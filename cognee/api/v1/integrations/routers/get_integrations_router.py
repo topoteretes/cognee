@@ -55,12 +55,21 @@ from cognee.modules.integrations.connect import complete_installation
 from cognee.modules.integrations.credentials import (
     CrossUserConflictError,
     get_active_credential_for_user,
+    list_active_credentials_for_user,
     revoke_credential_by_account,
 )
 from cognee.modules.integrations.oauth_flow import make_state, validate_state
-from cognee.modules.integrations.plugins import get_plugin
-from cognee.modules.integrations.registry import get_integration
+from cognee.modules.integrations.plugin_status import (
+    PluginStatusRow,
+    identity_plugin_statuses,
+    legacy_plugin_statuses,
+    merge_plugin_statuses,
+    registry_plugin_statuses,
+)
+from cognee.modules.integrations.plugins import KNOWN_PLUGINS, get_plugin
+from cognee.modules.integrations.registry import get_integration, supported_integrations
 from cognee.modules.observability import new_span
+from cognee.modules.session_lifecycle.visibility import visible_user_ids
 from cognee.modules.users.api_key.create_api_key import create_api_key
 from cognee.modules.users.api_key.delete_api_key import delete_api_key
 from cognee.modules.users.api_key.get_api_keys import get_api_keys
@@ -105,6 +114,29 @@ class PluginProvisionDTO(OutDTO):
     agent_id: UUID
     api_key: str
     created: bool
+
+
+class IntegrationStatusItemDTO(OutDTO):
+    provider: str
+    connected: bool
+    account_label: Optional[str] = None
+    provider_account_id: Optional[str] = None
+    connected_at: Optional[datetime] = None
+
+
+class PluginStatusItemDTO(OutDTO):
+    key: str
+    connected: bool
+    agent_id: Optional[UUID] = None
+    provisioned_at: Optional[datetime] = None
+    last_active_at: Optional[datetime] = None
+    session_count: int = 0
+    source: Optional[str] = None
+
+
+class IntegrationsStatusDTO(OutDTO):
+    integrations: list[IntegrationStatusItemDTO]
+    plugins: list[PluginStatusItemDTO]
 
 
 def _integration_or_404(provider: str) -> OAuthIntegration:
@@ -203,6 +235,97 @@ def _frontend_redirect(integration: OAuthIntegration, outcome: str) -> RedirectR
 
 def get_integrations_router():
     integrations_router = APIRouter()
+
+    # ------------------------------------------------------------------ #
+    # Aggregate status (fixed /status path — before the {provider} routes)
+    # ------------------------------------------------------------------ #
+
+    @integrations_router.get("/status")
+    async def integrations_status(
+        user: User = Depends(get_authenticated_user),
+    ) -> IntegrationsStatusDTO:
+        """Aggregate connection status: every OAuth provider + every known plugin.
+
+        One call powers the whole integrations page. Every registered
+        provider and every known plugin appears, connected or not, with
+        display fields only — never token material. Each status source
+        (credentials, identity plugins, legacy prefixes, agent registry) is
+        fetched independently and degrades to its empty default on failure:
+        a broken source logs server-side and blanks its section rather than
+        500ing the page (same posture as the sessions list).
+        """
+        with new_span("cognee.integrations.status"):
+            credentials = {}
+            try:
+                credentials = await list_active_credentials_for_user(user.id)
+            except Exception:
+                logger.exception(
+                    "integrations status: credential lookup failed for user %s", user.id
+                )
+
+            integrations = []
+            for provider in sorted(supported_integrations):
+                credential = credentials.get(provider)
+                integrations.append(
+                    IntegrationStatusItemDTO(
+                        provider=provider,
+                        connected=credential is not None,
+                        account_label=credential.account_label if credential else None,
+                        provider_account_id=credential.provider_account_id if credential else None,
+                        connected_at=credential.created_at if credential else None,
+                    )
+                )
+
+            plugin_rows: dict[str, PluginStatusRow] = {}
+            try:
+                plugin_rows = await identity_plugin_statuses(user.id)
+            except Exception:
+                logger.exception(
+                    "integrations status: identity plugin lookup failed for user %s", user.id
+                )
+
+            visible_ids = [user.id]
+            try:
+                visible_ids = await visible_user_ids(user)
+            except Exception:
+                logger.exception(
+                    "integrations status: visible-user lookup failed for user %s", user.id
+                )
+
+            try:
+                legacy_rows = await legacy_plugin_statuses(
+                    visible_ids, exclude_keys=set(plugin_rows)
+                )
+                plugin_rows = merge_plugin_statuses(plugin_rows, legacy_rows)
+            except Exception:
+                logger.exception(
+                    "integrations status: legacy session lookup failed for user %s", user.id
+                )
+
+            try:
+                registry_rows = await registry_plugin_statuses(visible_ids)
+                plugin_rows = merge_plugin_statuses(plugin_rows, registry_rows)
+            except Exception:
+                logger.exception(
+                    "integrations status: agent registry lookup failed for user %s", user.id
+                )
+
+            plugins = []
+            for plugin_key in KNOWN_PLUGINS:
+                row = plugin_rows.get(plugin_key) or PluginStatusRow(key=plugin_key)
+                plugins.append(
+                    PluginStatusItemDTO(
+                        key=plugin_key,
+                        connected=row.connected,
+                        agent_id=row.agent_id,
+                        provisioned_at=row.provisioned_at,
+                        last_active_at=row.last_active_at,
+                        session_count=row.session_count,
+                        source=row.source,
+                    )
+                )
+
+            return IntegrationsStatusDTO(integrations=integrations, plugins=plugins)
 
     # ------------------------------------------------------------------ #
     # Agent plugins (fixed /plugins prefix — before the {provider} routes)
