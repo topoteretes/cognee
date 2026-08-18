@@ -56,7 +56,7 @@ class DefaultUrlCrawler:
         headers: Optional[Dict[str, str]] = None,
         robots_cache_ttl: float = 3600.0,
     ):
-        """Initialize the BeautifulSoupCrawler.
+        """Initialize the DefaultUrlCrawler.
 
         Args:
             concurrency: Number of concurrent requests allowed.
