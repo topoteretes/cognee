@@ -25,6 +25,22 @@ Two context variables, and both are load-bearing:
   request-scoped flag would interleave ``SessionTurnAnalysis`` output into the
   user's tokens.
 
+**Deltas are a preview, not the payload.** Two things make the streamed text a
+strict prefix of what the caller finally receives, and a consumer must treat the
+returned value as authoritative rather than concatenating deltas and stopping:
+
+* ``append_references`` runs *after* the answer call, so with
+  ``include_references=True`` the citations are appended to the completion and
+  never appear as deltas.
+* Only the concurrent session path promotes a sink today. A sessionless
+  ``recall()``, ``SESSION_SEARCH_MODE=sequential``, or a retriever outside the
+  concurrent-eligible set answers through the sequential runner and streams
+  nothing at all — the request still succeeds and returns the identical payload.
+  The sequential path is deliberately excluded for now because it gathers
+  ``summarize_text`` alongside the answer, and a shared hook would leak the
+  summariser's tokens into the user's stream — the same interleaving problem the
+  two-ContextVar split exists to prevent.
+
 ``try_claim`` handles the other fan-out: ``search_in_datasets_context`` launches
 one task per authorised dataset, each running its own answer call. The first to
 claim wins and the rest simply do not stream, so a multi-dataset recall emits one
@@ -37,11 +53,11 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Optional
 
 
-@dataclass
+@dataclass(slots=True)
 class StreamEvent:
     """One event on the sink's queue.
 
@@ -54,7 +70,6 @@ class StreamEvent:
     text: Optional[str] = None
     stage: Optional[str] = None
     error: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
 
 
 _SENTINEL = object()
@@ -83,6 +98,23 @@ class TokenSink:
         self._claimed = True
         return True
 
+    def release_claim(self) -> None:
+        """Give the claim back because this producer turned out not to stream.
+
+        Whether a call *can* stream is only known once it reaches the adapter —
+        several adapters have no plain-text streaming path, and a structured
+        ``response_model`` never streams. Without this, one such call would
+        claim the sink on the way past and silently disable streaming for the
+        rest of the request.
+        """
+        if not self._emitted:
+            self._claimed = False
+
+    @property
+    def emitted_any(self) -> bool:
+        """Whether any delta reached the consumer."""
+        return self._emitted
+
     def begin_attempt(self) -> None:
         """Mark the start of an LLM attempt, resetting any partial output.
 
@@ -92,7 +124,6 @@ class TokenSink:
         """
         if self._emitted:
             self._put(StreamEvent(type="reset"))
-            self._emitted = False
 
     def put_delta(self, text: str) -> None:
         if not text or self._detached:
@@ -162,12 +193,34 @@ def get_active_token_sink() -> Optional[TokenSink]:
 async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[None]:
     """Promote the requested sink to active for this task only.
 
-    Wrap the answer-generating call and nothing else. Entering also marks the
-    stage, which gives the retrieval→generation boundary for free — useful for
-    telling how much of the wait is retrieval that streaming cannot help with.
+    Wrap the answer-generating call and nothing else. This is also the single
+    place that decides a stream is happening, so it owns three things the
+    producer below it cannot:
+
+    * **The flag.** Checked here, not only in the adapter. Otherwise a
+      flag-off request with a sink installed would still claim it and emit a
+      stage event, and "off means zero events" would be untrue.
+    * **Termination.** The consumer's ``async for`` only ends on a sentinel, so
+      an answer call that raises would hang it until the client timed out.
+      Exiting emits ``answer_done`` + ``close`` on success and ``fail`` on the
+      way out of an exception.
+    * **Giving the claim back.** Whether the call *could* stream is only known
+      once it reaches the adapter — most adapters have no plain-text streaming
+      path, and a structured ``response_model`` never streams. If nothing came
+      through, the claim is released so a later call can still stream instead of
+      the request being silently degraded for good.
+
+    Entering also marks the stage, which gives the retrieval→generation boundary
+    for free — useful for telling how much of the wait is retrieval that
+    streaming cannot help with.
     """
+    from cognee.infrastructure.llm.config import get_llm_context_config
+
     sink = requested_token_sink.get()
-    if sink is None or not sink.try_claim():
+    if sink is None or not get_llm_context_config().llm_answer_streaming:
+        yield
+        return
+    if not sink.try_claim():
         yield
         return
 
@@ -177,5 +230,17 @@ async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[Non
     token = active_token_sink.set(sink)
     try:
         yield
+    except BaseException as error:
+        # The consumer has already been handed a 200 and part of an answer, so
+        # the failure has to reach it as an event; re-raise so the caller's own
+        # error handling is unchanged.
+        sink.fail(error)
+        raise
+    else:
+        if sink.emitted_any:
+            sink.answer_done()
+            sink.close()
+        else:
+            sink.release_claim()
     finally:
         active_token_sink.reset(token)

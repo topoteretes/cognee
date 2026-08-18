@@ -1,17 +1,6 @@
-from cognee.infrastructure.llm.streaming.token_sink import (
-    StreamEvent,
-    TokenSink,
-    active_token_sink,
-    get_active_token_sink,
-    requested_token_sink,
-    stream_answer_tokens,
-)
+"""Streaming primitives for LLM answer output.
 
-__all__ = [
-    "StreamEvent",
-    "TokenSink",
-    "active_token_sink",
-    "get_active_token_sink",
-    "requested_token_sink",
-    "stream_answer_tokens",
-]
+Import from :mod:`cognee.infrastructure.llm.streaming.token_sink` directly —
+this package deliberately re-exports nothing, so there is exactly one import
+path for each symbol.
+"""

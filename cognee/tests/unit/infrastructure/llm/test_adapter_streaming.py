@@ -6,16 +6,13 @@ to a listening sink on the way past, so nothing upstream — the retriever, the
 session write, usage accounting — can tell the difference.
 """
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from cognee.infrastructure.llm.streaming.token_sink import (
-    TokenSink,
-    active_token_sink,
-    requested_token_sink,
-)
+from cognee.infrastructure.llm.streaming.token_sink import TokenSink, active_token_sink
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
@@ -66,24 +63,33 @@ def _streaming_completion(chunks):
     return _acompletion
 
 
+@contextmanager
+def _active(sink: TokenSink):
+    """Set/reset the ContextVar explicitly.
+
+    An autouse fixture cannot do this: pytest-asyncio runs each test in its own
+    Task, which copies the context, so a `set()` made inside the test never
+    reaches the fixture's context — and calling `set(None)` there would instead
+    permanently shadow the module default for the collector.
+    """
+    token = active_token_sink.set(sink)
+    try:
+        yield sink
+    finally:
+        active_token_sink.reset(token)
+
+
 async def _drain(sink):
     return [event async for event in sink]
-
-
-@pytest.fixture(autouse=True)
-def _reset_context():
-    yield
-    active_token_sink.set(None)
-    requested_token_sink.set(None)
 
 
 @pytest.mark.asyncio
 async def test_streams_deltas_and_returns_the_complete_string():
     sink = TokenSink()
-    active_token_sink.set(sink)
     chunks = [_chunk("Neon "), _chunk("was "), _chunk("chosen."), _usage_chunk()]
 
     with (
+        _active(sink),
         patch(f"{MODULE}.get_llm_context_config") as cfg,
         patch(f"{MODULE}.litellm.acompletion", new=_streaming_completion(chunks)),
     ):
@@ -101,9 +107,9 @@ async def test_streams_deltas_and_returns_the_complete_string():
 async def test_usage_chunk_with_empty_choices_does_not_raise():
     """Regression guard for chunk.choices[0] on the include_usage chunk."""
     sink = TokenSink()
-    active_token_sink.set(sink)
 
     with (
+        _active(sink),
         patch(f"{MODULE}.get_llm_context_config") as cfg,
         patch(
             f"{MODULE}.litellm.acompletion",
@@ -119,10 +125,10 @@ async def test_role_only_and_empty_chunks_are_skipped():
     """Providers send a leading role-only chunk and trailing finish chunks whose
     delta.content is None."""
     sink = TokenSink()
-    active_token_sink.set(sink)
     chunks = [_chunk(None), _chunk("real"), _chunk(""), _chunk(None)]
 
     with (
+        _active(sink),
         patch(f"{MODULE}.get_llm_context_config") as cfg,
         patch(f"{MODULE}.litellm.acompletion", new=_streaming_completion(chunks)),
     ):
@@ -158,7 +164,6 @@ async def test_no_sink_takes_the_original_non_streaming_path():
 async def test_flag_off_ignores_an_active_sink():
     """The whole PR is inert until the flag is turned on."""
     sink = TokenSink()
-    active_token_sink.set(sink)
     seen = {}
 
     async def _acompletion(*_args, **kwargs):
@@ -168,6 +173,7 @@ async def test_flag_off_ignores_an_active_sink():
         )
 
     with (
+        _active(sink),
         patch(f"{MODULE}.get_llm_context_config") as cfg,
         patch(f"{MODULE}.litellm.acompletion", new=_acompletion),
     ):
@@ -183,7 +189,6 @@ async def test_flag_off_ignores_an_active_sink():
 async def test_mid_stream_failure_propagates_so_retry_still_fires():
     """Swallowing this would defeat the tenacity retry on the caller."""
     sink = TokenSink()
-    active_token_sink.set(sink)
 
     class _Exploding:
         def __aiter__(self):
@@ -197,6 +202,7 @@ async def test_mid_stream_failure_propagates_so_retry_still_fires():
         return _Exploding()
 
     with (
+        _active(sink),
         patch(f"{MODULE}.get_llm_context_config") as cfg,
         patch(f"{MODULE}.litellm.acompletion", new=_acompletion),
     ):

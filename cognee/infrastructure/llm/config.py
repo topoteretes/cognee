@@ -363,6 +363,7 @@ class LLMConfig(BaseSettings):
             "temperature": self.llm_temperature,
             "seed": self.llm_seed,
             "streaming": self.llm_streaming,
+            "answer_streaming": self.llm_answer_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
             "graph_prompt_path": self.graph_prompt_path,
