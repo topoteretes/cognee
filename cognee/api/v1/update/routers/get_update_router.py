@@ -1,10 +1,10 @@
 from fastapi.responses import JSONResponse
 from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated, Dict
+from typing import Optional, Annotated, Dict, Literal, Union
 from fastapi import APIRouter
 from typing import List
 from uuid import UUID
-from pydantic import WithJsonSchema
+from pydantic import BaseModel, WithJsonSchema
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -24,12 +24,22 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 logger = get_logger()
 
 
+class IncrementalUpdateResponse(BaseModel):
+    status: Literal["incremental", "unchanged"]
+    regions: int
+    deleted_chunks: int
+    added_chunks: int
+    reused_chunks: int
+    kept_chunks: int
+    reindexed_chunks: int
+
+
 def get_update_router() -> APIRouter:
     router = APIRouter()
 
     @router.patch(
         "",
-        response_model=Dict[UUID, PipelineRunInfo],
+        response_model=Union[IncrementalUpdateResponse, Dict[UUID, PipelineRunInfo]],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -126,7 +136,7 @@ def get_update_router() -> APIRouter:
                 data=data,
                 dataset_id=dataset_id,
                 user=user,
-                node_set=node_set if node_set else None,
+                node_set=node_set if node_set and node_set != [""] else None,
                 chunk_level_diff=chunk_level_diff,
             )
 

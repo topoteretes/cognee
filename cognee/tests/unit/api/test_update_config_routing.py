@@ -79,6 +79,25 @@ async def test_custom_configs_skip_the_incremental_path():
         assert result == full_result, "custom-config updates must return the full-flow result"
 
 
+async def test_node_set_change_skips_the_incremental_path():
+    data_id, dataset_id = uuid4(), uuid4()
+    incremental = AsyncMock()
+    full_result = {"run": "full"}
+
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, incremental, full_result)
+    with p1, p2, p3, p4, p5, p6:
+        result = await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+            node_set=["updated-group"],
+        )
+
+    incremental.assert_not_called()
+    assert result == full_result
+
+
 async def test_multi_item_input_is_rejected_not_multiplied():
     """update() is the ONLY place that rejects a multi-item list.
 

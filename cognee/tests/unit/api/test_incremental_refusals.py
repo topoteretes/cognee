@@ -19,6 +19,7 @@ import pytest
 from cognee.api.v1.update.incremental import (
     IncrementalUpdateNotPossible,
     RefusalReason,
+    _changed_staged_metadata,
     incremental_update,
 )
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY
@@ -40,6 +41,36 @@ def test_refusal_carries_its_reason():
 def test_refusal_defaults_to_no_baseline():
     """Untagged raise sites must still produce a usable structured field."""
     assert IncrementalUpdateNotPossible("nope").reason is RefusalReason.NO_BASELINE
+
+
+def test_direct_text_ignores_its_content_derived_internal_name():
+    old = SimpleNamespace(
+        name="text_old.txt",
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+    staged = SimpleNamespace(**vars(old))
+    staged.name = "text_new.txt"
+
+    assert _changed_staged_metadata("new text", old, staged) == []
+
+
+def test_user_named_upload_requires_full_update_when_renamed():
+    old = SimpleNamespace(
+        name="old.txt",
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+    staged = SimpleNamespace(**vars(old))
+    staged.name = "new.txt"
+
+    assert _changed_staged_metadata(SimpleNamespace(filename="new.txt"), old, staged) == ["name"]
 
 
 @pytest.mark.asyncio
@@ -67,12 +98,12 @@ async def test_unsupported_backend_refuses_before_touching_anything(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_declaring_the_capability_is_enough_to_pass_the_gate(monkeypatch):
-    """A non-in-tree adapter clears the gate by declaring support.
+    """A non-in-tree adapter clears the cheap adapter gate by declaring support.
 
     Impossible before: the gate was a hardcoded {kuzu, ladybug, neo4j,
     postgres} name set, so a community adapter satisfying the contract could
-    never participate. The call still fails afterwards (no user), but it fails
-    PAST the backend check — which is what this pins.
+    never participate. Provenance and vector capabilities are checked later,
+    inside the selected dataset context.
     """
     import cognee.api.v1.update.incremental as incremental
 
@@ -93,6 +124,65 @@ async def test_declaring_the_capability_is_enough_to_pass_the_gate(monkeypatch):
     )
 
 
+@pytest.mark.asyncio
+async def test_unmarked_graph_refuses_before_incremental_work(monkeypatch):
+    """Legacy relational-ledger graphs stay on the full update path."""
+    import cognee.api.v1.update.incremental as incremental
+
+    data_id, dataset_id = uuid4(), uuid4()
+
+    class _Adapter:
+        supports_incremental_chunk_updates = True
+
+    class _Vector:
+        supports_payload_update = True
+
+    class _Context:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def _get_graph_engine():
+        return _Adapter()
+
+    async def _authorize(_user, _dataset_id, _permission):
+        return SimpleNamespace(id=dataset_id)
+
+    monkeypatch.setattr(incremental, "get_graph_engine", _get_graph_engine)
+    monkeypatch.setattr(incremental, "get_vector_engine_async", AsyncMock(return_value=_Vector()))
+    monkeypatch.setattr(incremental, "get_authorized_dataset", _authorize)
+    monkeypatch.setattr(
+        incremental, "get_dataset_data", AsyncMock(return_value=[SimpleNamespace(id=data_id)])
+    )
+    monkeypatch.setattr(
+        incremental,
+        "get_data",
+        AsyncMock(return_value=SimpleNamespace(id=data_id, raw_data_location="old.txt")),
+    )
+    monkeypatch.setattr(incremental, "dataset_lock", lambda _dataset_id: _Context())
+    monkeypatch.setattr(
+        incremental,
+        "set_database_global_context_variables",
+        lambda _dataset_id, _user_id: _Context(),
+    )
+    monkeypatch.setattr(incremental, "stores_provenance_in_graph", AsyncMock(return_value=False))
+    run_incremental = AsyncMock()
+    monkeypatch.setattr(incremental, "_run_incremental_update", run_incremental)
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental_update(
+            data_id,
+            "replacement",
+            dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+        )
+
+    assert raised.value.reason is RefusalReason.UNSUPPORTED_BACKEND
+    run_incremental.assert_not_awaited()
+
+
 def test_the_capability_is_off_by_default():
     """An adapter that has not been verified cannot opt in by accident."""
     from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -106,11 +196,11 @@ def test_ladybug_declares_the_capability():
     assert LadybugAdapter.supports_incremental_chunk_updates is True
 
 
-def test_postgres_declares_the_capability():
+def test_postgres_does_not_declare_the_capability_without_narrow_moves():
     pytest.importorskip("asyncpg")
     from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
 
-    assert PostgresAdapter.supports_incremental_chunk_updates is True
+    assert PostgresAdapter.supports_incremental_chunk_updates is False
 
 
 def test_neo4j_declares_the_capability():
@@ -235,7 +325,6 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
     monkeypatch.setattr(incremental, "_resolve_extraction_config", lambda: None)
     monkeypatch.setattr(incremental, "publish_updated_data", AsyncMock())
     monkeypatch.setattr(incremental, "delete_chunks_incremental", AsyncMock(return_value=[]))
-    monkeypatch.setattr(incremental, "prune_ledger_rows", AsyncMock())
     monkeypatch.setattr(
         incremental,
         "get_cognify_config",

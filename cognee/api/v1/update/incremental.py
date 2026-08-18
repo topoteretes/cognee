@@ -22,8 +22,8 @@ Flow (only runs from the update endpoint):
    refused updates leave no run-record noise.
 5. Write: extract ONLY the fresh chunks, in bounded batches, through the
    standard graph-extraction and storage tasks (attributed to the same
-   ``data_id``), delete the replaced chunks (+ summaries + chunk-orphaned
-   entities), renumber moved survivors.
+   ``data_id``), retire replaced chunk ownership through the shared deletion
+   planner, and renumber moved survivors.
 6. PUBLISH in one relational transaction: content location, hashes, size,
    token count, and the processed stamp flip together. A crash anywhere
    before the publish leaves the row on the old content; the stored chunks
@@ -31,8 +31,8 @@ Flow (only runs from the update endpoint):
    full rebuild (self-heal).
 
 Raises IncrementalUpdateNotPossible when preconditions fail, carrying a typed
-``RefusalReason`` (unsupported backend, unsupported chunker, no baseline,
-chunks not tiling, unreadable text) — the caller decides to run the full
+``RefusalReason`` (unsupported backend, chunker, or metadata; no baseline;
+chunks not tiling; unreadable text) — the caller decides to run the full
 update instead, and can tell a permanent misconfiguration from a first
 ingestion in the logs. Permission errors are NOT refusals: they propagate.
 """
@@ -46,6 +46,7 @@ from pydantic import BaseModel
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.cognify.config import get_cognify_config
@@ -97,7 +98,6 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
-from cognee.modules.graph.methods.prune_ledger_rows import prune_ledger_rows
 from cognee.modules.ingestion import classify
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
@@ -129,6 +129,7 @@ class RefusalReason(str, Enum):
 
     UNSUPPORTED_BACKEND = "unsupported_backend"
     UNSUPPORTED_CHUNKER = "unsupported_chunker"
+    UNSUPPORTED_METADATA = "unsupported_metadata"
     NO_BASELINE = "no_baseline"
     CHUNKS_NOT_TILING = "chunks_not_tiling"
     UNREADABLE_TEXT = "unreadable_text"
@@ -294,41 +295,20 @@ def _misindexed_chunks(document: Document, stored_chunks: List[dict]) -> List[Do
     ]
 
 
-async def _restore_repositioned_chunks(chunks: List[DocumentChunk], context) -> None:
+async def _restore_repositioned_chunks(chunks: List[DocumentChunk], _context) -> None:
     """Write back chunks whose ONLY change is their position (kept or reused).
 
-    Fast path (both stores support narrow moves): the graph adapter's
-    ``update_chunk_index`` patches ONLY the index — the stored node is the
-    source of truth and every other property is carried verbatim, so nothing
-    a rehydrated model forgets to declare can be erased — and the vector row
-    takes a payload-only update (text unchanged, so re-embedding would be
-    pure waste; an early edit in a large document repositions O(document)
-    chunks). Where either store lacks its narrow operation, the full MERGE
-    rewrite of rehydrated models remains: same stored state, higher cost and
-    the carry-list burden.
+    Incremental preflight requires both narrow operations. The graph adapter
+    patches ONLY the index, and the vector adapter changes only its payload.
+    The stored node remains the source of truth for every other field.
     """
-    from cognee.infrastructure.databases.exceptions import UnsupportedGraphOperation
-
     vector_engine = await get_vector_engine_async()
-    supports_payload = getattr(vector_engine, "supports_payload_update", False)
-
-    if supports_payload:
-        graph_engine = await get_graph_engine()
-        try:
-            await graph_engine.update_chunk_index(
-                {str(chunk.id): chunk.chunk_index for chunk in chunks}
-            )
-        except UnsupportedGraphOperation:
-            await add_data_points(chunks, ctx=context, graph_only=True)
-        # Only chunk_index changed, and it is the one field the interface's
-        # caller contract guarantees is present in every collection's schema.
-        await vector_engine.update_payload(
-            "DocumentChunk_text",
-            {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
-        )
-        return
-
-    await add_data_points(chunks, ctx=context)
+    graph_engine = await get_graph_engine()
+    await graph_engine.update_chunk_index({str(chunk.id): chunk.chunk_index for chunk in chunks})
+    await vector_engine.update_payload(
+        "DocumentChunk_text",
+        {str(chunk.id): {"chunk_index": chunk.chunk_index} for chunk in chunks},
+    )
 
 
 async def _stage_new_content(data, preferred_loaders) -> StagedContent:
@@ -367,6 +347,24 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
         raw_content_hash=storage_metadata["content_hash"],
         data_size=original_metadata["file_size"],
     )
+
+
+def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> list[str]:
+    """Return metadata changes that need document-wide full-update handling."""
+    fields = [
+        "extension",
+        "mime_type",
+        "original_extension",
+        "original_mime_type",
+        "loader_engine",
+    ]
+    # Direct text gets an internal content-derived filename, so its name is
+    # expected to change with its text. User-named uploads and streams are not.
+    if hasattr(data, "filename") or hasattr(data, "name"):
+        fields.append("name")
+    return [
+        field for field in fields if getattr(old_data, field, None) != getattr(staged, field, None)
+    ]
 
 
 def _unchanged_result(reindexed: int) -> dict:
@@ -476,6 +474,25 @@ async def incremental_update(
     # resolve per user+dataset, and a fresh API request arrives without it.
     async with dataset_lock(dataset.id):
         async with set_database_global_context_variables(dataset.id, user.id):
+            graph_engine = await get_graph_engine()
+            vector_engine = await get_vector_engine_async()
+            if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
+                raise IncrementalUpdateNotPossible(
+                    f"graph backend {type(graph_engine).__name__} does not support "
+                    "chunk-level updates",
+                    RefusalReason.UNSUPPORTED_BACKEND,
+                )
+            if not getattr(vector_engine, "supports_payload_update", False):
+                raise IncrementalUpdateNotPossible(
+                    f"vector backend {type(vector_engine).__name__} does not support "
+                    "payload-only chunk moves",
+                    RefusalReason.UNSUPPORTED_BACKEND,
+                )
+            if not await stores_provenance_in_graph(graph_engine):
+                raise IncrementalUpdateNotPossible(
+                    "the selected graph does not store ownership provenance in-graph",
+                    RefusalReason.UNSUPPORTED_BACKEND,
+                )
             return await _run_incremental_update(
                 data_id,
                 data,
@@ -605,10 +622,19 @@ async def _stage_and_plan(
     # row is NOT written: readers keep resolving the old version until publish.
     staged = await _stage_new_content(data, preferred_loaders)
     new_text = await _read_processed_text(staged.raw_data_location)
+    content_unchanged = staged.content_hash == old_data.content_hash and new_text == old_text
+
+    if content_unchanged:
+        changed_metadata = _changed_staged_metadata(data, old_data, staged)
+        if changed_metadata:
+            raise IncrementalUpdateNotPossible(
+                f"replacement metadata changed ({', '.join(changed_metadata)})",
+                RefusalReason.UNSUPPORTED_METADATA,
+            )
 
     document = _build_document(old_data, staged, node_set)
 
-    if staged.content_hash == old_data.content_hash and new_text == old_text:
+    if content_unchanged:
         # Same content re-submitted. Two things can still be stale, and both
         # are reported rather than repaired here: chunk indexes left behind by
         # a crash between an earlier delete and its renumbering, and a missing
@@ -781,8 +807,7 @@ async def _write_and_publish(
 
     # -- Delete replaced chunks + summaries + chunk-orphaned entities --------- #
     if plan.deleted_ids:
-        doomed = await delete_chunks_incremental(plan.deleted_ids, dataset_id, data_id)
-        await prune_ledger_rows(data_id, dataset_id, doomed)
+        await delete_chunks_incremental(plan.deleted_ids, dataset_id, data_id)
 
     # -- Renumber kept chunks whose position shifted --------------------------- #
     shifted_chunks = [

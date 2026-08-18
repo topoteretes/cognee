@@ -58,12 +58,10 @@ class GraphDBInterface(ABC):
     supports_per_row_source_refs: bool = False
 
     # Whether chunk-level incremental updates can run against this backend.
-    # The requirement is a ``get_connections`` result shape that
-    # ``edge_endpoints`` can normalise into (source_id, target_id) — adapters
-    # disagree here, and the incremental path reads a document's chunks through
-    # those connections. Declared on the adapter rather than matched against a
-    # provider-name list so a backend registered at runtime through
-    # ``use_graph_adapter()`` can participate by satisfying the contract.
+    # The adapter must provide compatible connection shapes, graph provenance,
+    # and a narrow ``update_chunk_index`` implementation. Declared on the
+    # adapter so a runtime-registered backend can participate by satisfying the
+    # full contract.
     supports_incremental_chunk_updates: bool = False
 
     @abstractmethod
@@ -182,8 +180,8 @@ class GraphDBInterface(ABC):
 
             - chunk_indexes (dict[str, int]): node id -> new chunk_index.
 
-        Default implementation raises UnsupportedGraphOperation; callers fall
-        back to the full node-rewrite path.
+        Default implementation raises UnsupportedGraphOperation. Adapters that
+        do not override it must not declare incremental chunk-update support.
         """
         from cognee.infrastructure.databases.exceptions import UnsupportedGraphOperation
 

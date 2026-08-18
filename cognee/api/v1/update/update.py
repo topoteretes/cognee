@@ -146,6 +146,16 @@ async def update(
         if old_row is not None:
             preserved_legacy_id = old_row.legacy_id
 
+    data_item_changes_metadata = isinstance(data, DataItem) and (
+        data.label is not None or data.external_metadata is not None
+    )
+    if chunk_level_diff and (node_set or data_item_changes_metadata):
+        logger.info(
+            "Chunk-level incremental update does not reconcile document metadata or "
+            "node_set; running full update"
+        )
+        chunk_level_diff = False
+
     if chunk_level_diff and (vector_db_config is not None or graph_db_config is not None):
         # The chunk-level incremental engine resolves its stores through the
         # dataset-context routing system, not per-call config dicts — running
