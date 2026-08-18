@@ -32,10 +32,23 @@ async def permitted_dataset_ids_for(user: User) -> list[UUID]:
 
 async def child_agent_user_ids(user_id: UUID) -> list[UUID]:
     """Return user IDs of agents whose parent_user_id matches this user."""
+    return list(await child_agent_emails(user_id))
+
+
+async def child_agent_emails(user_id: UUID) -> dict[UUID, str]:
+    """Return ``{agent user id: internal email}`` of this user's child agents.
+
+    The email is the deterministic identity ``create_agent`` derives
+    (``<name>+<parent_id>@cognee.agent``) — server-assigned, unlike the
+    agent-writable principal-configuration blob, so callers can trust it
+    for attribution.
+    """
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
-        rows = (await session.execute(select(User.id).where(User.parent_user_id == user_id))).all()
-        return [row.id for row in rows]
+        rows = (
+            await session.execute(select(User.id, User.email).where(User.parent_user_id == user_id))
+        ).all()
+        return {row.id: row.email for row in rows}
 
 
 async def visible_user_ids(user: User) -> list[UUID]:

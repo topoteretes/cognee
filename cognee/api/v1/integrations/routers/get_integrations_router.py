@@ -61,6 +61,7 @@ from cognee.modules.integrations.credentials import (
 from cognee.modules.integrations.oauth_flow import make_state, validate_state
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
+    coerce_provisioned_at,
     identity_plugin_statuses,
     legacy_plugin_statuses,
     merge_plugin_statuses,
@@ -177,7 +178,9 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
     Stored under the same ``AGENT_CONFIG_NAME`` blob the agent-connection
     registry persists to, so no ``User`` schema change is needed. The first
     ``provisioned_at`` sticks across re-provisions (key rotation isn't a new
-    install).
+    install) — but only if it still parses as a datetime: the blob is
+    agent-writable, so a tampered value is repaired here rather than
+    preserved.
     """
     all_configs = await get_principal_all_configuration(agent_user_id)
     existing_config = {}
@@ -186,8 +189,11 @@ async def _record_plugin_on_agent(agent_user_id: UUID, plugin_key: str) -> None:
             existing_config = config.get("configuration", {})
             break
 
-    plugin_entry = existing_config.get("plugin", {})
-    provisioned_at = plugin_entry.get("provisioned_at") or datetime.now(timezone.utc).isoformat()
+    plugin_entry = existing_config.get("plugin")
+    if not isinstance(plugin_entry, dict):
+        plugin_entry = {}
+    existing_provisioned_at = coerce_provisioned_at(plugin_entry.get("provisioned_at"))
+    provisioned_at = (existing_provisioned_at or datetime.now(timezone.utc)).isoformat()
 
     await store_principal_configuration(
         principal_id=agent_user_id,

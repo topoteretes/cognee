@@ -200,7 +200,7 @@ def test_identity_row_surfaces_through_the_dto(client):
         key="claude-code",
         connected=True,
         agent_id=agent_id,
-        provisioned_at="2026-08-10T08:00:00+00:00",
+        provisioned_at=datetime(2026, 8, 10, 8, 0, tzinfo=timezone.utc),
         last_active_at=datetime(2026, 8, 18, 9, 30, tzinfo=timezone.utc),
         session_count=14,
         source=SOURCE_IDENTITY,
@@ -271,6 +271,76 @@ def test_each_failing_source_degrades_its_section_never_500s(client):
     assert all(p["connected"] is False for p in body["plugins"])
 
 
+def test_failing_credentials_source_leaves_plugin_section_intact(client):
+    """Partial failure: only the integrations half degrades; a healthy
+    identity source still surfaces its connected plugin row."""
+    identity_row = PluginStatusRow(key="claude-code", connected=True, source=SOURCE_IDENTITY)
+    with (
+        patch.object(
+            _router_module,
+            "list_active_credentials_for_user",
+            new=AsyncMock(side_effect=RuntimeError("credentials db went away")),
+        ),
+        patch.object(
+            _router_module,
+            "identity_plugin_statuses",
+            new=AsyncMock(return_value={"claude-code": identity_row}),
+        ),
+        patch.object(_router_module, "legacy_plugin_statuses", new=AsyncMock(return_value={})),
+        patch.object(_router_module, "registry_plugin_statuses", new=AsyncMock(return_value={})),
+        patch.object(_router_module, "visible_user_ids", new=AsyncMock(return_value=[USER_ID])),
+    ):
+        response = client.get("/api/v1/integrations/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["integrations"][0]["connected"] is False  # degraded half
+    by_key = {p["key"]: p for p in body["plugins"]}
+    assert by_key["claude-code"]["connected"] is True  # healthy half untouched
+    assert by_key["claude-code"]["source"] == "identity"
+
+
+def test_failing_identity_source_leaves_integrations_section_intact(client):
+    """Partial failure, other direction: identity blows up, but a healthy
+    credential still reports its provider connected."""
+    credential = SimpleNamespace(
+        provider="fake",
+        account_label="Acme Workspace",
+        provider_account_id="ACC1",
+        created_at=datetime(2026, 8, 1, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    with (
+        patch.object(
+            _router_module,
+            "list_active_credentials_for_user",
+            new=AsyncMock(return_value={"fake": credential}),
+        ),
+        patch.object(
+            _router_module,
+            "identity_plugin_statuses",
+            new=AsyncMock(side_effect=RuntimeError("identity lookup went away")),
+        ),
+        patch.object(_router_module, "legacy_plugin_statuses", new=AsyncMock(return_value={})),
+        patch.object(_router_module, "registry_plugin_statuses", new=AsyncMock(return_value={})),
+        patch.object(_router_module, "visible_user_ids", new=AsyncMock(return_value=[USER_ID])),
+    ):
+        response = client.get("/api/v1/integrations/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["integrations"][0]["connected"] is True  # healthy half untouched
+    assert all(p["connected"] is False for p in body["plugins"])  # degraded half
+
+
+def test_status_rejects_unauthenticated_callers():
+    # No dependency override: the real auth stack must gate the aggregate
+    # status route just like the provisioning routes.
+    app = FastAPI()
+    app.include_router(get_integrations_router(), prefix="/api/v1/integrations")
+    response = TestClient(app).get("/api/v1/integrations/status")
+    assert response.status_code == 401
+
+
 # --------------------------------------------------------------------------- #
 # plugin_status sources against a real in-memory SQLite engine
 # --------------------------------------------------------------------------- #
@@ -308,8 +378,14 @@ def _identity_config(plugin_key, provisioned_at="2026-08-10T08:00:00+00:00"):
     ]
 
 
+def _agent_email(plugin_key, parent_id):
+    """The deterministic internal email ``create_agent`` derives."""
+    return f"{plugin_key}+{parent_id}@cognee.agent"
+
+
 @pytest.mark.asyncio
 async def test_identity_status_joins_keys_and_sessions():
+    parent_id = uuid4()
     agent_id = uuid4()
     key_last_used = datetime(2026, 8, 17, 8, 0, tzinfo=timezone.utc)
     latest_session = datetime(2026, 8, 18, 9, 30, tzinfo=timezone.utc)
@@ -332,7 +408,9 @@ async def test_identity_status_joins_keys_and_sessions():
 
         with (
             patch.object(
-                _status_module, "child_agent_user_ids", new=AsyncMock(return_value=[agent_id])
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(return_value={agent_id: _agent_email("claude-code", parent_id)}),
             ),
             patch.object(
                 _status_module,
@@ -341,14 +419,14 @@ async def test_identity_status_joins_keys_and_sessions():
             ),
             patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
         ):
-            statuses = await identity_plugin_statuses(uuid4())
+            statuses = await identity_plugin_statuses(parent_id)
     finally:
         await engine.dispose()
 
     row = statuses["claude-code"]
     assert row.connected is True
     assert row.agent_id == agent_id
-    assert row.provisioned_at == "2026-08-10T08:00:00+00:00"
+    assert row.provisioned_at == datetime(2026, 8, 10, 8, 0, tzinfo=timezone.utc)
     assert row.session_count == 2
     # Sessions are more recent than the key's last auth here — max wins.
     assert row.last_active_at == latest_session
@@ -359,12 +437,15 @@ async def test_identity_status_joins_keys_and_sessions():
 async def test_identity_status_revoked_key_reports_disconnected():
     """Disconnect deletes the agent's keys: no UserApiKey row → connected
     False, while the identity row itself (agent, provisioned_at) survives."""
+    parent_id = uuid4()
     agent_id = uuid4()
     fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
     try:
         with (
             patch.object(
-                _status_module, "child_agent_user_ids", new=AsyncMock(return_value=[agent_id])
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(return_value={agent_id: _agent_email("codex", parent_id)}),
             ),
             patch.object(
                 _status_module,
@@ -373,7 +454,7 @@ async def test_identity_status_revoked_key_reports_disconnected():
             ),
             patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
         ):
-            statuses = await identity_plugin_statuses(uuid4())
+            statuses = await identity_plugin_statuses(parent_id)
     finally:
         await engine.dispose()
 
@@ -382,6 +463,72 @@ async def test_identity_status_revoked_key_reports_disconnected():
     assert row.agent_id == agent_id
     assert row.session_count == 0
     assert row.last_active_at is None
+
+
+@pytest.mark.asyncio
+async def test_identity_status_derives_key_from_email_not_config_blob():
+    """A child agent can rewrite its own configuration blob through the
+    public store_user_configuration endpoint. The email is server-assigned,
+    so a blob claiming another plugin's key must not let the agent
+    impersonate (or clobber) that plugin's status row."""
+    parent_id = uuid4()
+    agent_id = uuid4()
+    fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
+    try:
+        with (
+            patch.object(
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(return_value={agent_id: _agent_email("claude-code", parent_id)}),
+            ),
+            patch.object(
+                _status_module,
+                "get_principal_all_configuration",
+                # Tampered blob claims to be the codex plugin.
+                new=AsyncMock(return_value=_identity_config("codex")),
+            ),
+            patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
+        ):
+            statuses = await identity_plugin_statuses(parent_id)
+    finally:
+        await engine.dispose()
+
+    # The row lands on the email-derived key; the claimed key is ignored.
+    assert set(statuses) == {"claude-code"}
+    assert statuses["claude-code"].agent_id == agent_id
+
+
+@pytest.mark.asyncio
+async def test_identity_status_drops_unparseable_provisioned_at():
+    """provisioned_at comes from the agent-writable blob: a non-datetime
+    value degrades to None instead of 500ing the status page later at DTO
+    validation."""
+    parent_id = uuid4()
+    agent_id = uuid4()
+    fake_engine, engine = await _sqlite_engine(UserApiKey, SessionRecord)
+    try:
+        with (
+            patch.object(
+                _status_module,
+                "child_agent_emails",
+                new=AsyncMock(return_value={agent_id: _agent_email("claude-code", parent_id)}),
+            ),
+            patch.object(
+                _status_module,
+                "get_principal_all_configuration",
+                new=AsyncMock(
+                    return_value=_identity_config("claude-code", provisioned_at="not-a-date")
+                ),
+            ),
+            patch.object(_status_module, "get_relational_engine", return_value=fake_engine),
+        ):
+            statuses = await identity_plugin_statuses(parent_id)
+    finally:
+        await engine.dispose()
+
+    row = statuses["claude-code"]
+    assert row.provisioned_at is None  # dropped, row itself survives
+    assert row.agent_id == agent_id
 
 
 @pytest.mark.asyncio
@@ -465,6 +612,23 @@ async def test_registry_status_buckets_by_metadata_and_connection_type():
             status="active",
             last_active_at=seen_at,
         ),
+        # Unmapped connection type, no metadata: no plugin bucket → skipped.
+        AgentConnection(
+            id="d",
+            agent_session_name="pipeline",
+            type="workflow",
+            status="active",
+            last_active_at=seen_at,
+        ),
+        # Bogus user-supplied metadata plugin_key: not a known plugin → skipped.
+        AgentConnection(
+            id="e",
+            agent_session_name="impostor",
+            type="unknown",
+            status="active",
+            last_active_at=seen_at,
+            metadata={"plugin_key": "not-a-plugin"},
+        ),
     ]
     with patch.object(
         _status_module,
@@ -473,6 +637,7 @@ async def test_registry_status_buckets_by_metadata_and_connection_type():
     ):
         statuses = await registry_plugin_statuses([uuid4()])
 
+    # The workflow and bogus-metadata connections produce no rows at all.
     assert set(statuses) == {"claude-code", "mcp", "api"}
     assert all(row.connected for row in statuses.values())
     assert statuses["mcp"].last_active_at == seen_at + timedelta(hours=1)
@@ -486,12 +651,13 @@ async def test_registry_status_buckets_by_metadata_and_connection_type():
 
 def test_merge_identity_and_registry_rows_for_same_key():
     agent_id = uuid4()
+    provisioned_at = datetime(2026, 8, 10, 8, 0, tzinfo=timezone.utc)
     identity = {
         "claude-code": PluginStatusRow(
             key="claude-code",
-            connected=False,  # key revoked...
+            connected=False,  # every key revoked...
             agent_id=agent_id,
-            provisioned_at="2026-08-10T08:00:00+00:00",
+            provisioned_at=provisioned_at,
             last_active_at=datetime(2026, 8, 12, tzinfo=timezone.utc),
             session_count=3,
             source=SOURCE_IDENTITY,
@@ -500,7 +666,7 @@ def test_merge_identity_and_registry_rows_for_same_key():
     registry = {
         "claude-code": PluginStatusRow(
             key="claude-code",
-            connected=True,  # ...but the registry still holds an active connection
+            connected=True,  # ...but a stale registry connection lingers
             last_active_at=datetime(2026, 8, 15, tzinfo=timezone.utc),
             source=SOURCE_REGISTRY,
         ),
@@ -511,10 +677,23 @@ def test_merge_identity_and_registry_rows_for_same_key():
 
     assert set(merged) == {"claude-code", "mcp"}  # same key → one row
     row = merged["claude-code"]
-    assert row.connected is True  # either source connected
+    # Identity's key-existence check is authoritative: revoking every API
+    # key means disconnected, no matter what the registry still claims.
+    assert row.connected is False
     assert row.last_active_at == datetime(2026, 8, 15, tzinfo=timezone.utc)  # max
     assert row.agent_id == agent_id  # identity wins agentId...
-    assert row.provisioned_at == "2026-08-10T08:00:00+00:00"  # ...and provisionedAt
+    assert row.provisioned_at == provisioned_at  # ...and provisionedAt
     assert row.source == SOURCE_IDENTITY
     assert row.session_count == 3
     assert merged["mcp"].source == SOURCE_REGISTRY
+
+
+def test_merge_ors_connected_for_non_identity_rows():
+    """The identity-authoritative rule is scoped: a legacy (or default) base
+    row still ORs connected in from the registry."""
+    base = {"mcp": PluginStatusRow(key="mcp", connected=False)}
+    extra = {"mcp": PluginStatusRow(key="mcp", connected=True, source=SOURCE_REGISTRY)}
+
+    merged = merge_plugin_statuses(base, extra)
+
+    assert merged["mcp"].connected is True

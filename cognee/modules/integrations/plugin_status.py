@@ -16,7 +16,8 @@ of authority:
   connection type, so e.g. MCP clients registered before first traffic
   show up.
 
-Same key from several sources merges: ``connected`` is the OR,
+Same key from several sources merges: ``connected`` is the OR — unless the
+base row is identity-sourced, whose key-existence check is authoritative —
 ``last_active_at`` the max, and the more authoritative row keeps
 ``agent_id``/``provisioned_at``/``source``.
 """
@@ -34,7 +35,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.agents.registry import AGENT_CONFIG_NAME, list_persisted_agent_connections
 from cognee.modules.integrations.plugins import KNOWN_PLUGINS
 from cognee.modules.session_lifecycle.models import SessionRecord
-from cognee.modules.session_lifecycle.visibility import child_agent_user_ids
+from cognee.modules.session_lifecycle.visibility import child_agent_emails
 from cognee.modules.users.methods.get_principal_configuration import (
     get_principal_all_configuration,
 )
@@ -63,7 +64,7 @@ class PluginStatusRow:
     key: str
     connected: bool = False
     agent_id: Optional[UUID] = None
-    provisioned_at: Optional[str] = None
+    provisioned_at: Optional[datetime] = None
     last_active_at: Optional[datetime] = None
     session_count: int = 0
     source: Optional[str] = None
@@ -83,6 +84,25 @@ def _max_datetime(*values: Optional[datetime]) -> Optional[datetime]:
     return max(present) if present else None
 
 
+def coerce_provisioned_at(value) -> Optional[datetime]:
+    """Coerce the stored ``provisioned_at`` into an aware datetime.
+
+    The value lives in the agent's principal-configuration blob, which the
+    agent itself can rewrite through the public configuration endpoint — so
+    it is untrusted input. Anything unparseable degrades to ``None`` (the
+    row still surfaces) instead of blowing up DTO validation and 500ing the
+    whole status page.
+    """
+    if isinstance(value, datetime):
+        return _as_utc(value)
+    if isinstance(value, str):
+        try:
+            return _as_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
+        except ValueError:
+            return None
+    return None
+
+
 def _escape_like_prefix(prefix: str) -> str:
     r"""Build a LIKE pattern matching ids that start with ``prefix`` literally.
 
@@ -99,21 +119,35 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
 
     A child agent counts as a plugin identity iff its principal
     configuration carries the ``plugin`` entry the provision endpoint
-    writes. ``connected`` means the agent currently holds an API key
+    writes. The plugin *key*, however, is derived from the agent's
+    server-assigned deterministic email
+    (``<plugin_key>+<parent_id>@cognee.agent`` — the same identity the
+    provision endpoint resolves by), never from that configuration blob: a
+    child agent can rewrite its own blob through the public configuration
+    endpoint, so a config-claimed key could impersonate another plugin.
+    ``connected`` means the agent currently holds an API key
     (disconnect deletes keys, so existence == active); ``last_active_at``
     is the max of the key's throttled ``last_used_at`` and the agent's
     latest session activity, so pure-recall plugins that never open
     sessions still report "last seen".
     """
-    plugin_agents: dict[UUID, tuple[str, Optional[str]]] = {}
-    for agent_id in await child_agent_user_ids(user_id):
+    email_suffix = f"+{user_id}@cognee.agent"
+    plugin_agents: dict[UUID, tuple[str, Optional[datetime]]] = {}
+    for agent_id, email in (await child_agent_emails(user_id)).items():
+        if not (email or "").endswith(email_suffix):
+            continue
+        plugin_key = email[: -len(email_suffix)]
+        if plugin_key not in KNOWN_PLUGINS:
+            continue
         for config in await get_principal_all_configuration(agent_id):
             if config.get("name") != AGENT_CONFIG_NAME:
                 continue
-            plugin_entry = (config.get("configuration") or {}).get("plugin") or {}
-            plugin_key = plugin_entry.get("key")
-            if plugin_key in KNOWN_PLUGINS:
-                plugin_agents[agent_id] = (plugin_key, plugin_entry.get("provisioned_at"))
+            plugin_entry = (config.get("configuration") or {}).get("plugin")
+            if isinstance(plugin_entry, dict) and plugin_entry:
+                plugin_agents[agent_id] = (
+                    plugin_key,
+                    coerce_provisioned_at(plugin_entry.get("provisioned_at")),
+                )
             break
 
     if not plugin_agents:
@@ -250,9 +284,13 @@ def merge_plugin_statuses(
 ) -> dict[str, PluginStatusRow]:
     """Merge ``extra`` into ``base``; base rows are the more authoritative.
 
-    Same key: ``connected`` is the OR, ``last_active_at`` the max,
-    ``session_count`` the max (identity and legacy counts never coexist for
-    a key, so max never double-counts), and the base row keeps its
+    Same key: ``connected`` is the OR — except when the base row is
+    identity-sourced, whose key-existence check is authoritative: after
+    disconnect revokes every API key, a stale registry connection (e.g.
+    legacy traffic auto-typed onto the same plugin) must not flip the row
+    back to connected. ``last_active_at`` is the max, ``session_count``
+    the max (identity and legacy counts never coexist for a key, so max
+    never double-counts), and the base row keeps its
     ``agent_id``/``provisioned_at``/``source`` — identity rows win those
     fields over registry echoes of the same plugin.
     """
@@ -262,7 +300,8 @@ def merge_plugin_statuses(
         if existing is None:
             merged[key] = row
             continue
-        existing.connected = existing.connected or row.connected
+        if existing.source != SOURCE_IDENTITY:
+            existing.connected = existing.connected or row.connected
         existing.last_active_at = _max_datetime(existing.last_active_at, row.last_active_at)
         existing.session_count = max(existing.session_count, row.session_count)
         if existing.agent_id is None:
