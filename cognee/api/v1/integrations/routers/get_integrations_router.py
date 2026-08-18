@@ -61,6 +61,7 @@ from cognee.modules.integrations.credentials import (
 from cognee.modules.integrations.oauth_flow import make_state, validate_state
 from cognee.modules.integrations.plugin_status import (
     PluginStatusRow,
+    as_utc,
     coerce_provisioned_at,
     identity_plugin_statuses,
     legacy_plugin_statuses,
@@ -278,7 +279,7 @@ def get_integrations_router():
                         connected=credential is not None,
                         account_label=credential.account_label if credential else None,
                         provider_account_id=credential.provider_account_id if credential else None,
-                        connected_at=credential.created_at if credential else None,
+                        connected_at=as_utc(credential.created_at) if credential else None,
                     )
                 )
 
@@ -510,7 +511,7 @@ def get_integrations_router():
             connected=True,
             account_label=credential.account_label,
             provider_account_id=credential.provider_account_id,
-            connected_at=credential.created_at,
+            connected_at=as_utc(credential.created_at),
         )
 
     @integrations_router.delete("/{provider}/connection")

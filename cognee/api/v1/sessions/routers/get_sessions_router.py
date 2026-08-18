@@ -7,7 +7,6 @@ abandonment-by-idle rule so no sweeper is needed.
 
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
-from uuid import UUID as UUIDType
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder

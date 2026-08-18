@@ -162,7 +162,9 @@ def test_connected_provider_exposes_display_fields_and_no_token_material(client)
     assert row["connected"] is True
     assert row["accountLabel"] == "Acme Workspace"
     assert row["providerAccountId"] == "ACC1"
-    assert row["connectedAt"].startswith("2026-08-01T12:00:00")
+    # Offset required: SQLite hands back tz-naive datetimes, and an
+    # offset-less ISO string gets parsed as local time by JS Date.
+    assert row["connectedAt"] in ("2026-08-01T12:00:00Z", "2026-08-01T12:00:00+00:00")
     # Whitelist, not blacklist: the serialized row is exactly the display
     # fields — nothing token-shaped can leak through renames.
     assert set(row) == {"provider", "connected", "accountLabel", "providerAccountId", "connectedAt"}

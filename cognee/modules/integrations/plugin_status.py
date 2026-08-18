@@ -70,8 +70,12 @@ class PluginStatusRow:
     source: Optional[str] = None
 
 
-def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
-    """Normalize to aware-UTC; SQLite hands back tz-naive datetimes."""
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalize to aware-UTC; SQLite hands back tz-naive datetimes.
+
+    Public: the integrations router runs credential timestamps through this
+    too, so every datetime in the status payload serializes with an offset.
+    """
     if value is None:
         return None
     if value.tzinfo is None:
@@ -80,7 +84,7 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 
 
 def _max_datetime(*values: Optional[datetime]) -> Optional[datetime]:
-    present = [_as_utc(value) for value in values if value is not None]
+    present = [as_utc(value) for value in values if value is not None]
     return max(present) if present else None
 
 
@@ -94,10 +98,10 @@ def coerce_provisioned_at(value) -> Optional[datetime]:
     whole status page.
     """
     if isinstance(value, datetime):
-        return _as_utc(value)
+        return as_utc(value)
     if isinstance(value, str):
         try:
-            return _as_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
+            return as_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
         except ValueError:
             return None
     return None
@@ -249,7 +253,7 @@ async def legacy_plugin_statuses(
         row.plugin_key: PluginStatusRow(
             key=row.plugin_key,
             connected=True,
-            last_active_at=_as_utc(row.last_activity_at),
+            last_active_at=as_utc(row.last_activity_at),
             session_count=int(row.session_count),
             source=SOURCE_SESSIONS_LEGACY,
         )
