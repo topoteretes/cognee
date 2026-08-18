@@ -51,6 +51,18 @@ observe = get_observe()
 _MAX_VALIDATION_RETRIES: int = 3
 
 
+def _attach_raw_response(instance: BaseModel, response) -> BaseModel:
+    """Attach the raw litellm response as ``_raw_response``, like instructor does.
+
+    The LLMGateway usage recorder reads ``result._raw_response.usage`` for the
+    provider-billed token counts (which include hidden reasoning tokens no
+    text-based estimate can see). ``object.__setattr__`` bypasses pydantic's
+    field validation for the non-field attribute.
+    """
+    object.__setattr__(instance, "_raw_response", response)
+    return instance
+
+
 def _supports_native_schema(model_name: str) -> bool:
     """Whether *model_name* can enforce a Pydantic schema via ``response_format``.
 
@@ -185,7 +197,7 @@ class NativeLiteLLMAdapter:
                 **merged_kwargs,
             )
         raw_content = response.choices[0].message.content or "{}"
-        return response_model.model_validate_json(raw_content)
+        return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
     async def _acreate_json_fallback(
         self,
@@ -239,7 +251,9 @@ class NativeLiteLLMAdapter:
 
             raw_content = response.choices[0].message.content or "{}"
             try:
-                return response_model.model_validate_json(raw_content)
+                return _attach_raw_response(
+                    response_model.model_validate_json(raw_content), response
+                )
             except (ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
                 logger.warning(

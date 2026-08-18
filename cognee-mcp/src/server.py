@@ -1937,6 +1937,12 @@ def load_class(model_file, model_name):
 async def main():
     global cognee_client
 
+    # Operations run in-process by this MCP server record origin="mcp" in
+    # pipeline_runs. (In client mode the remote API records origin="api".)
+    from cognee.modules.operations import ORIGIN_MCP, set_operation_origin
+
+    set_operation_origin(ORIGIN_MCP)
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument(

@@ -20,6 +20,10 @@ from uuid import UUID as UUIDType
 
 from cognee.shared.logging_utils import get_logger
 
+# Submodule import on purpose: avoids the cognee.modules.operations
+# package-init chain from this low-level module.
+from cognee.modules.operations.usage_accumulator import get_active_operation_usage
+
 logger = get_logger("session_usage")
 
 
@@ -141,17 +145,25 @@ async def record_llm_call(
     caller has exact counts from ``response.usage``; otherwise the
     char-based estimate is used.
     """
-    target = _active_session.get()
-    if target is None:
-        return
-    session_id, user_id = target
-
     tokens_in = (
         tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
     )
     tokens_out = (
         tokens_out_override if tokens_out_override is not None else _estimate_tokens(output_text)
     )
+
+    # Operation-level accumulation is session-independent: an active
+    # record_operation / run_tasks scope captures tokens even when no
+    # session-usage target is set (SDK-399).
+    op_usage = get_active_operation_usage()
+    if op_usage is not None:
+        op_usage.add(tokens_in, tokens_out)
+
+    target = _active_session.get()
+    if target is None:
+        return
+    session_id, user_id = target
+
     cost = _estimate_cost_usd(model, tokens_in, tokens_out)
 
     try:
