@@ -203,25 +203,28 @@ async def gliner_extract_and_summarize(
 
 
 class _BackgroundStorage:
-    """Overlap storage with extraction: add_data_points runs as a background
-    asyncio task (bounded to one outstanding batch) so the runner returns to
-    GLiNER extraction of the next batch while the previous batch embeds and
-    writes. `flush()` must be awaited after the pipeline to persist the tail
-    batch and surface any storage error."""
+    """Overlap storage with extraction: add_data_points runs as background
+    asyncio tasks (bounded to `depth` outstanding batches) so the runner
+    returns to GLiNER extraction of the next batch while previous batches
+    embed and write. depth=2 additionally overlaps one batch's embedding
+    network wait with another batch's graph write. `flush()` must be awaited
+    after the pipeline to persist the tail and surface any storage error."""
 
-    def __init__(self):
-        self._pending = None
+    def __init__(self, depth: int = 1):
+        self.depth = depth
+        self._pending: list = []
 
     async def store_data_points(self, data_points: list, ctx=None) -> list:
-        if self._pending is not None:
-            await self._pending  # bound queue depth to 1 outstanding batch
-        self._pending = asyncio.create_task(add_data_points(data_points, ctx=ctx))
+        while len(self._pending) >= self.depth:
+            oldest = self._pending.pop(0)
+            await oldest
+        self._pending.append(asyncio.create_task(add_data_points(data_points, ctx=ctx)))
         return []
 
     async def flush(self):
-        if self._pending is not None:
-            await self._pending
-            self._pending = None
+        pending, self._pending = self._pending, []
+        for task in pending:
+            await task
 
 
 async def gliner_cognify(
@@ -236,12 +239,14 @@ async def gliner_cognify(
     workers: int = 0,
     pack_target_chars: int = 1800,
     model_name: str = "fastino/gliner2-base-v1",
+    storage_depth: int = 1,
 ):
     """Run the whole cognify pipeline with GLiNER2 instead of an LLM.
 
     With `workers > 0`, extraction runs in that many GLiNER worker processes
     (~2 GB RAM each) and `extractor` is not needed. Storage always overlaps
-    extraction of the next batch.
+    extraction of the next batch; `storage_depth=2` also overlaps two storage
+    batches with each other (embedding wait vs graph write).
     """
     worker_pool = None
     if workers > 0:
@@ -251,7 +256,7 @@ async def gliner_cognify(
     elif extractor is None:
         raise ValueError("Provide `extractor` or set `workers` > 0")
 
-    storage = _BackgroundStorage()
+    storage = _BackgroundStorage(depth=storage_depth)
     tasks = [
         Task(classify_documents),
         Task(extract_chunks_from_documents, max_chunk_size=chunk_size, chunker=TextChunker),

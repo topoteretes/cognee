@@ -44,6 +44,7 @@ from gliner_cognify import gliner_cognify  # noqa: E402
 
 DATASET = "gliner_benchmark"
 WORKERS = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+STORAGE_DEPTH = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 
 
 def stamp(label, t0, timings):
@@ -70,6 +71,7 @@ async def main():
         chunk_size=512,
         chunks_per_batch=256,
         gliner_batch_size=32,
+        storage_depth=STORAGE_DEPTH,
     )
     t = stamp("gliner_cognify() - full pipeline", t, timings)
 
