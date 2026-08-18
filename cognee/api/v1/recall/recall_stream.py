@@ -3,36 +3,58 @@
 The engine (``infrastructure/llm/streaming/token_sink``) already pushes answer
 tokens sideways out of the LLM call while the call chain keeps returning one
 finished value. This module is the other end: it installs a sink for the
-request, runs the ordinary ``recall()`` inside that context, and relays what the
-sink emits to the client as SSE — then sends the *same* JSON payload a
-non-streaming request would have received as a final event.
+request, runs the ordinary ``recall()`` inside that context, relays what the sink
+emits as SSE, and sends the *same* payload a non-streaming request would have
+received as a final event.
 
-Three properties are deliberate and easy to break:
+**Nothing is sent until the recall has either produced output or failed.** Once
+the first byte goes out the status line is fixed at 200 and a failure can only be
+described in the body, so a permission denial or an invalid ``scope`` would
+arrive as a 200 carrying an opaque error — strictly worse than the JSON path,
+which maps them to 403 and 422. Waiting for the first event costs the retrieval
+phase's head start (the JSON path waits for all of it anyway) and buys back the
+whole error taxonomy: :func:`begin_recall_stream` simply raises what ``recall()``
+raised, and the route's existing handlers turn it into the same response they
+always did. Failures *after* that point are unavoidable as events, and carry the
+status the JSON path would have used so a client can still tell them apart.
 
-* **Deltas are a preview; ``final`` is authoritative.** A consumer must render
-  the concatenated deltas but keep the ``final`` payload as the answer. They can
-  differ: ``include_references=True`` appends citations *after* the answer call,
-  and some paths (a sessionless recall, ``SESSION_SEARCH_MODE=sequential``,
-  ``only_context``) legitimately stream nothing at all and still return a normal
-  payload. "No deltas" is a supported outcome, never an error.
+Three more properties are deliberate and easy to break:
+
+* **Deltas are a preview; ``final`` is authoritative.** They legitimately differ:
+  ``include_references`` appends citations after the answer call, and a
+  sessionless recall, ``SESSION_SEARCH_MODE=sequential`` or ``only_context``
+  stream nothing at all. Zero deltas is a supported outcome. ``final`` is
+  validated against the same model the JSON route declares, so the two
+  transports cannot drift into returning different shapes.
 * **The recall task is awaited, not backgrounded.** ``commit_turn`` writes the
   Q&A inside the session turn lock, and the driver awaits the whole call before
   emitting ``final`` — so the write still happens inside the lock exactly as in
   the blocking path. Backgrounding it here would release the lock early and
   reintroduce the turn-overwrite race.
 * **A disconnect detaches, it does not cancel.** The user closed the tab; the
-  answer is still worth finishing and persisting. Cancelling would lose the turn
-  *and* leave whatever the LLM already charged for unaccounted.
+  answer is still worth finishing and persisting, and cancelling would leave
+  whatever the LLM already charged for unaccounted. Starlette cancels the
+  response generator on disconnect, so that arrives here as ``CancelledError``
+  and is handled where the generator unwinds — not by polling
+  ``request.is_disconnected()``, which reads the same ASGI receive channel
+  Starlette's own disconnect listener is already consuming.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from fastapi.encoders import jsonable_encoder
+from pydantic import TypeAdapter
 
+from cognee.api.sse import (
+    KEEPALIVE_COMMENT,
+    KeepaliveReader,
+    encode_sse,
+    keepalive_until,
+)
+from cognee.api.v1.recall.recall import RecallResponse
 from cognee.infrastructure.llm.streaming.token_sink import (
     StreamEvent,
     TokenSink,
@@ -42,38 +64,17 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("recall_stream")
 
-SSE_MEDIA_TYPE = "text/event-stream"
-
-# Proxies and load balancers drop idle connections, and retrieval can run for
-# seconds before the first token exists. A comment line keeps the socket warm
-# without being an event the client has to know about.
+# Proxies and load balancers drop idle connections, and both the retrieval and
+# the persistence phases can run for seconds without producing an event.
 KEEPALIVE_SECONDS = 15.0
 
 # asyncio.create_task() keeps only a weak reference; without a strong one the
 # recall can be garbage-collected mid-flight. Same idiom as remember.py.
 _STREAM_TASKS: set = set()
 
-
-def wants_event_stream(accept: Optional[str], stream_flag: Optional[bool]) -> bool:
-    """Whether this request asked for SSE.
-
-    Streaming requires an *explicit* ``Accept: text/event-stream``. ``fetch``
-    sends ``*/*`` unless told otherwise, so every existing caller — the frontend,
-    the Slack integration, the SDK's own HTTP client — keeps receiving JSON with
-    no change on their side. ``stream: false`` in the body is an override for a
-    client that cannot control its Accept header.
-    """
-    if stream_flag is False:
-        return False
-    if not accept:
-        return False
-    return any(part.split(";")[0].strip() == SSE_MEDIA_TYPE for part in accept.split(","))
-
-
-def encode_sse(event_type: str, data: Any) -> str:
-    """One SSE frame. ``data`` is JSON so newlines in tokens cannot split it."""
-    payload = json.dumps(data, ensure_ascii=False)
-    return f"event: {event_type}\ndata: {payload}\n\n"
+# The same model the route declares, so `final` is filtered and validated exactly
+# as FastAPI would have done — returning a Response bypasses that machinery.
+_RESULTS_ADAPTER = TypeAdapter(list[RecallResponse])
 
 
 def _encode_stream_event(event: StreamEvent) -> Optional[str]:
@@ -92,31 +93,133 @@ def _encode_stream_event(event: StreamEvent) -> Optional[str]:
     return None
 
 
-async def _next_event(iterator, timeout: float, pending: list):
-    """Next sink event, or ``None`` on a keepalive tick.
+async def _run_and_close(run_recall: Callable[[], Awaitable[Any]], sink: TokenSink) -> Any:
+    """Run the recall, and make sure the relay loop always terminates.
 
-    ``asyncio.wait`` rather than ``wait_for``: a timeout must not cancel the
-    pending queue read. Cancelling an async generator mid-``__anext__`` would
-    leave it unusable, and the event it was about to deliver would be lost.
+    The engine closes the sink when an answer streams, but a recall that never
+    reaches a streaming answer call — no session, a non-streaming retriever, an
+    early error — would otherwise leave the consumer waiting on a sentinel that
+    never comes. The creator of the sink owns terminating it; this is that.
     """
-    if not pending:
-        pending.append(asyncio.ensure_future(iterator.__anext__()))
-    done, _ = await asyncio.wait(pending, timeout=timeout)
-    if not done:
-        return None
-    task = pending.pop()
-    return task.result()  # re-raises StopAsyncIteration when the sink closed
+    try:
+        return await run_recall()
+    finally:
+        sink.close()
 
 
-async def stream_recall(
-    run_recall: Callable[[], Awaitable[Any]],
-    *,
-    is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
-) -> AsyncIterator[str]:
-    """Drive one recall and yield its SSE frames.
+class RecallStream:
+    """A recall that has already started and is known not to have failed yet."""
 
-    ``run_recall`` is the exact call the non-streaming path makes, so the two
-    paths cannot drift: whatever it returns becomes the ``final`` payload.
+    def __init__(
+        self,
+        task: asyncio.Task,
+        sink: TokenSink,
+        iterator: AsyncIterator[StreamEvent],
+        first_event: Optional[StreamEvent],
+    ) -> None:
+        self._task = task
+        self._sink = sink
+        self._reader = KeepaliveReader(iterator, KEEPALIVE_SECONDS)
+        self._first_event = first_event
+        self._errored = False
+        self._exhausted = first_event is None
+
+    async def frames(self) -> AsyncIterator[str]:
+        """The SSE body: relayed events, then the authoritative payload."""
+        try:
+            async for frame in self._relay():
+                yield frame
+        except (asyncio.CancelledError, GeneratorExit):
+            # Starlette cancels this generator when the client disconnects. Stop
+            # buffering, but leave the recall running so the turn is still
+            # answered and persisted.
+            self._sink.detach()
+            await self._reader.aclose()
+            raise
+
+    async def _relay(self) -> AsyncIterator[str]:
+        # The event consumed while deciding the status code is replayed here, so
+        # deciding costs nothing but the wait.
+        if self._first_event is not None:
+            frame = _encode_stream_event(self._first_event)
+            if frame:
+                if self._first_event.type == "error":
+                    self._errored = True
+                yield frame
+
+        while not self._exhausted:
+            try:
+                got_event, event = await self._reader.next_or_keepalive()
+            except StopAsyncIteration:
+                break
+            if not got_event:
+                yield KEEPALIVE_COMMENT
+                continue
+            frame = _encode_stream_event(event)
+            if frame:
+                if event.type == "error":
+                    self._errored = True
+                yield frame
+
+        if self._sink.dropped_events:
+            # The consumer fell behind the model and preview frames were dropped,
+            # so what it has rendered has silent gaps. `final` is authoritative
+            # and is still coming; this tells it to stop trusting the preview.
+            yield encode_sse("reset", {})
+
+        # The answer is generated but persistence is not finished, and the sink
+        # closed with the last token — so this phase produces no events of its
+        # own and would otherwise sit silent past a proxy's idle timeout, losing
+        # `final` altogether.
+        async for pending in keepalive_until(self._task, KEEPALIVE_SECONDS):
+            if pending is None:
+                yield KEEPALIVE_COMMENT
+                continue
+            try:
+                results = pending.result()
+            except (asyncio.CancelledError, GeneratorExit):
+                raise
+            except Exception as error:  # noqa: BLE001 - the client already has a 200
+                logger.error("Streaming recall failed: %s", error, exc_info=True)
+                if not self._errored:
+                    # Only if the engine has not already reported it: a second
+                    # `error` frame would arrive after a client that treats the
+                    # first as terminal has torn its reader down.
+                    yield encode_sse(
+                        "error",
+                        {"message": "An error occurred during recall.", "status": 409},
+                    )
+                return
+            if self._errored:
+                # An inner layer swallowed the failure and recall still returned
+                # a payload. `final` after `error` contradicts error's terminal
+                # meaning, so the payload is dropped and the error stands.
+                logger.warning("Streaming recall reported an error but still returned a payload")
+                return
+            yield encode_sse("final", {"results": jsonable_encoder(_validate(results))})
+
+
+def _validate(results: Any) -> Any:
+    """Apply the route's response model, as FastAPI would for a JSON response.
+
+    Returning a ``Response`` skips ``serialize_response`` entirely, so without
+    this the streamed payload could carry fields the JSON payload filters out —
+    the two transports diverging in exactly the place the tests compare them.
+    """
+    try:
+        return _RESULTS_ADAPTER.validate_python(results)
+    except Exception:  # noqa: BLE001 - a preview must not fail on a shape mismatch
+        logger.warning("Streamed recall payload did not match the response model", exc_info=True)
+        return results
+
+
+async def begin_recall_stream(run_recall: Callable[[], Awaitable[Any]]) -> RecallStream:
+    """Start the recall and wait until it produces output or fails.
+
+    Raises whatever ``recall()`` raised, unchanged, so the caller's existing
+    error handling maps it to the same status code the JSON path would return.
+    No keepalive is possible here — nothing has been sent yet — but this waits no
+    longer than the JSON path would have for the same request.
     """
     sink = TokenSink()
     token = requested_token_sink.set(sink)
@@ -129,57 +232,14 @@ async def stream_recall(
     finally:
         requested_token_sink.reset(token)
 
-    yield encode_sse("stage", {"stage": "retrieving"})
-
     iterator = sink.__aiter__()
-    pending: list = []
-    detached = False
+    first_event: Optional[StreamEvent] = None
     try:
-        while True:
-            try:
-                event = await _next_event(iterator, KEEPALIVE_SECONDS, pending)
-            except StopAsyncIteration:
-                break
-            if event is None:
-                if is_disconnected is not None and await is_disconnected():
-                    # Stop buffering, but let the answer finish and persist.
-                    sink.detach()
-                    detached = True
-                    break
-                yield ": keepalive\n\n"
-                continue
-            frame = _encode_stream_event(event)
-            if frame:
-                yield frame
-    finally:
-        for leftover in pending:
-            leftover.cancel()
-
-    if detached:
-        return
-
-    try:
-        results = await task
-    except Exception as error:  # noqa: BLE001 - the client already has a 200
-        # The status line went out with the first frame, so a failure can only
-        # reach the client as an event. It is logged where the handler's own
-        # error path would have logged it.
-        logger.error("Streaming recall failed: %s", error, exc_info=True)
-        yield encode_sse("error", {"message": "An error occurred during recall."})
-        return
-
-    yield encode_sse("final", {"results": jsonable_encoder(results)})
-
-
-async def _run_and_close(run_recall: Callable[[], Awaitable[Any]], sink: TokenSink) -> Any:
-    """Run the recall, and make sure the relay loop always terminates.
-
-    The engine closes the sink when an answer streams, but a recall that never
-    reaches a streaming answer call — no session, a non-streaming retriever, an
-    early error — would otherwise leave the consumer waiting on a sentinel that
-    never comes.
-    """
-    try:
-        return await run_recall()
-    finally:
-        sink.close()
+        first_event = await iterator.__anext__()
+    except StopAsyncIteration:
+        # Closed without emitting anything: either the recall failed, or it
+        # answered without streaming. Surface a failure now, while a status code
+        # is still possible; a successful payload becomes `final` in the relay.
+        if task.done() and task.exception() is not None:
+            raise task.exception()
+    return RecallStream(task, sink, iterator, first_event)
