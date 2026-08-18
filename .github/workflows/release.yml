@@ -184,6 +184,34 @@ jobs:
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
+      - name: Check MCP lockfile ships the released cognee version
+        # The MCP image installs cognee from PyPI via cognee-mcp/uv.lock, which
+        # can only be re-locked after the new version is published — a manual
+        # step that was missed for 1.4.1 and 1.5.0, shipping images whose tag
+        # did not match the cognee library inside (issue #4360). Fail here
+        # instead of pushing a silently skewed cognee-mcp image. Dev canaries
+        # are exempt: their .devN versions cannot be in the lock before they
+        # are published.
+        if: ${{ github.ref_name == 'main' }}
+        env:
+          RELEASE_VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          LOCKED_VERSION="$(python3 - <<'PY'
+          import tomllib
+
+          with open("cognee-mcp/uv.lock", "rb") as lock_file:
+              lock = tomllib.load(lock_file)
+
+          print(next(p["version"] for p in lock["package"] if p["name"] == "cognee"))
+          PY
+          )"
+          echo "Release version: ${RELEASE_VERSION}"
+          echo "cognee-mcp/uv.lock pins cognee: ${LOCKED_VERSION}"
+          if [ "${LOCKED_VERSION}" != "${RELEASE_VERSION}" ]; then
+            echo "::error file=cognee-mcp/uv.lock::cognee-mcp/uv.lock pins cognee ${LOCKED_VERSION}, but this release is ${RELEASE_VERSION} — the cognee-mcp:${RELEASE_VERSION} image would ship the wrong library (issue #4360). Once cognee ${RELEASE_VERSION} is on PyPI, run 'uv lock --upgrade-package cognee' in cognee-mcp/, merge the lock bump, then re-run this job."
+            exit 1
+          fi
+
       - name: Build and push Dev MCP Docker Image
         if: ${{ github.ref_name == 'dev' }}
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
