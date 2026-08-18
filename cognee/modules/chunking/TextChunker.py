@@ -59,7 +59,7 @@ class TextChunker(Chunker):
                         paragraph_chunks = []
                         self.chunk_size = 0
                     else:
-                        chunk_text = " ".join(chunk["text"] for chunk in paragraph_chunks)
+                        chunk_text = "".join(chunk["text"] for chunk in paragraph_chunks)
                         try:
                             chunk_id, content_hash = chunk_identity(chunk_text)
                             yield DocumentChunk(
@@ -90,7 +90,7 @@ class TextChunker(Chunker):
 
         if len(paragraph_chunks) > 0:
             try:
-                chunk_text = " ".join(chunk["text"] for chunk in paragraph_chunks)
+                chunk_text = "".join(chunk["text"] for chunk in paragraph_chunks)
                 chunk_id, content_hash = chunk_identity(chunk_text)
                 yield DocumentChunk(
                     chunker_id=self.chunker_id,

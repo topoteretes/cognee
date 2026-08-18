@@ -93,15 +93,21 @@ async def _chunk_region(
 def _region_chunk_budget(stored_chunks: List[dict], region, fallback: int) -> int:
     """Token budget for re-chunking one region.
 
-    The budget recorded on the chunks the region replaces wins, so an edit keeps
-    the granularity of the text around it even when the global configuration
-    changed after ingestion. Legacy chunks predate the recorded budget and fall
-    back to the current configuration.
+    The budget recorded on the chunks the region replaces wins when the current
+    providers can still accept it, so an edit keeps the granularity of the text
+    around it across safe configuration changes. A larger recorded budget is
+    refused into a full rebuild; legacy chunks fall back to the current limit.
     """
     for position in region.affected_indices:
         recorded = stored_chunks[position].get("max_chunk_tokens")
         if recorded:
-            return int(recorded)
+            recorded_budget = int(recorded)
+            if recorded_budget > fallback:
+                raise IncrementalPlanError(
+                    f"stored chunk budget {recorded_budget} exceeds current provider "
+                    f"limit {fallback}; run a full update"
+                )
+            return recorded_budget
     return fallback
 
 

@@ -8,7 +8,9 @@ Legacy chunks carry no recorded budget and fall back to the current config.
 
 import asyncio
 
-from cognee.modules.chunking.chunk_policy import _region_chunk_budget
+import pytest
+
+from cognee.modules.chunking.chunk_policy import IncrementalPlanError, _region_chunk_budget
 from cognee.modules.chunking.incremental_chunking import ReplacementRegion
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.Document import Document
@@ -31,6 +33,16 @@ def test_region_budget_skips_unrecorded_and_uses_first_recorded():
 def test_region_budget_falls_back_for_legacy_chunks():
     stored = [{}, {}, {}]
     assert _region_chunk_budget(stored, _region([0, 1]), fallback=400) == 400
+
+
+def test_region_budget_refuses_when_recorded_budget_exceeds_current_limit():
+    stored = [{"max_chunk_tokens": 400}]
+
+    with pytest.raises(
+        IncrementalPlanError,
+        match="stored chunk budget 400 exceeds current provider limit 60",
+    ):
+        _region_chunk_budget(stored, _region([0]), fallback=60)
 
 
 def test_text_chunker_stamps_the_budget_it_cut_against():

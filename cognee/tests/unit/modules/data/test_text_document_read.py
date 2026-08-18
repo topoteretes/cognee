@@ -62,9 +62,7 @@ async def _scenario():
     assert "".join(pieces) == full_text, "the reader must deliver the file byte-for-byte"
     assert len(pieces) >= 3, "the whitespace-only block must be yielded, not treated as EOF"
 
-    # And through the real chunker: the tail must survive end to end.
+    # And through the real chunker: read-block boundaries must not change text.
     chunks = [chunk async for chunk in document.read(TextChunker, max_chunk_size=512)]
     reassembled = "".join(chunk.text for chunk in chunks)
-    assert "TAIL_MARKER" in reassembled, (
-        "content after a whitespace-only read block must not be dropped"
-    )
+    assert reassembled == full_text, "the real chunker must preserve every reader block exactly"
