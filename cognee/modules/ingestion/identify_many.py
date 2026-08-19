@@ -36,9 +36,7 @@ async def identify_many(
     # Dedup is scoped to (dataset, owner, tenant): in a shared multi-writer
     # dataset, two users adding the same bytes stay two rows — matching the
     # old per-user identity semantics and keeping owner_id checks meaningful.
-    tenant_filter = (
-        Data.tenant_id == user.tenant_id if user.tenant_id else Data.tenant_id.is_(None)
-    )
+    tenant_filter = Data.tenant_id == user.tenant_id if user.tenant_id else Data.tenant_id.is_(None)
 
     db_engine = get_relational_engine()
     result: dict[str, UUID] = {}

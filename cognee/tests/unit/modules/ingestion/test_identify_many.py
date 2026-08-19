@@ -200,8 +200,9 @@ async def test_identify_many_agrees_with_identify():
         # Build a minimal IngestionData whose get_identifier() returns our hash.
         classified = SimpleNamespace(get_identifier=lambda: content_hash)
 
-        with patch(_ENGINE_PATCH, return_value=engine), patch(
-            _IDENTIFY_ENGINE_PATCH, return_value=engine
+        with (
+            patch(_ENGINE_PATCH, return_value=engine),
+            patch(_IDENTIFY_ENGINE_PATCH, return_value=engine),
         ):
             many_result = await identify_many([content_hash], user, dataset_id)
             single_result = await identify(classified, user, dataset_id)
