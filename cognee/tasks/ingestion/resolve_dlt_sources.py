@@ -372,9 +372,11 @@ async def _build_source_manifest_item(
     # The data_id is STABLE — seeded from (dataset, source name) with no
     # content hash — so a changed source updates its Data row in place instead
     # of orphaning it (which left the source absent from the graph between add
-    # and cognify). add() is idempotent: a re-add of the same source — changed
-    # or not — keeps the completed record as-is. Updating an existing source
-    # is update()'s job (explicit UUID), or an explicit re-ingest via
+    # and cognify). add() is idempotent for unchanged content: a re-add of
+    # the same source keeps the completed record as-is; a re-add with CHANGED
+    # content raises DataContentConflictError instead of silently keeping the
+    # stale record. Updating an existing source is update()'s job (explicit
+    # UUID), or an explicit re-ingest via
     # add(..., incremental_loading=False, data_cache=False). Renaming a source (or dataset)
     # changes this identity and is remove + add — a one-time full rebuild,
     # by design.
