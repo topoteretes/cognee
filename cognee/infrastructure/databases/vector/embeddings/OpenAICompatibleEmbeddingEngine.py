@@ -41,7 +41,10 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.shared.rate_limiting import (
+    consume_embedding_token_budget,
+    embedding_rate_limiter_context_manager,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
@@ -140,6 +143,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
         try:
             async with embedding_rate_limiter_context_manager():
+                await consume_embedding_token_budget(self.tokenizer, sanitized_text)
                 response = await asyncio.wait_for(
                     self._client.embeddings.create(
                         model=self.model,

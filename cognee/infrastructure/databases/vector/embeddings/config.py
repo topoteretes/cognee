@@ -138,6 +138,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
+            "embedding_rate_limit_tokens": self.embedding_rate_limit_tokens,
         }
 
 
