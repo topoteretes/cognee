@@ -91,7 +91,7 @@ async def search(
     """
     send_telemetry(
         "cognee.search EXECUTION STARTED",
-        user.id,
+        user,
         additional_properties={
             "cognee_version": cognee_version,
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
@@ -136,7 +136,7 @@ async def search(
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
-        user.id,
+        user,
         additional_properties={
             "cognee_version": cognee_version,
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",

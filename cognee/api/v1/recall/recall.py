@@ -429,7 +429,9 @@ async def recall(
             "response_model": response_model,
         }
 
-    telemetry_user = getattr(user, "id", user) or "sdk"
+    # Pass the User through rather than pre-resolving its id: send_telemetry
+    # reads both id and tenant_id off it.
+    telemetry_user = user or "sdk"
 
     # Resolve scope → concrete source list. "auto" (the default) picks
     # sources based on what the caller supplied:
