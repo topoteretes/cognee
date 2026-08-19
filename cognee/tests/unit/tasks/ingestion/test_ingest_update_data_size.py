@@ -87,8 +87,8 @@ def _install_mocks(stack, engine):
     storage, loaders, or dataset/permission machinery — only the relational
     engine is real."""
     meta = _metadata()
-    # get_identifier feeds the pre-loop's batch dedup (batch_id_by_hash); the
-    # mocked `identify` already returns DATA_ID, so the value only has to exist.
+    # get_identifier feeds the batched dedup lookup; the mocked `identify_many`
+    # maps this hash to DATA_ID, so the seeded row is the one that gets updated.
     classified = SimpleNamespace(
         get_metadata=lambda: meta,
         get_identifier=lambda: meta["content_hash"],
@@ -113,8 +113,15 @@ def _install_mocks(stack, engine):
         )
     )
     stack.enter_context(patch.object(ingest_module.ingestion, "classify", lambda _f: classified))
+    # Dedup now runs as one batched lookup for the whole add() batch instead of a
+    # per-file identify(); report DATA_ID as the row already holding this content
+    # hash so the existing-record UPDATE branch runs.
     stack.enter_context(
-        patch.object(ingest_module.ingestion, "identify", AsyncMock(return_value=DATA_ID))
+        patch.object(
+            ingest_module,
+            "identify_many",
+            AsyncMock(return_value={meta["content_hash"]: DATA_ID}),
+        )
     )
     # Dataset resolution: return the seeded dataset and report DATA_ID as already
     # belonging to it, so the existing-record UPDATE branch (not CREATE) runs.
