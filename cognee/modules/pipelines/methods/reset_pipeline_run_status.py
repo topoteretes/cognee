@@ -13,4 +13,5 @@ async def reset_pipeline_run_status(user_id: UUID, dataset_id: UUID, pipeline_na
         pipeline_id=pipeline_id,
         pipeline_name=pipeline_name,
         dataset_id=dataset_id,
+        user_id=user_id,
     )

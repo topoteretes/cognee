@@ -238,6 +238,13 @@ async def add(
 
     await setup()
 
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
+
     import time as _time
 
     _add_start_ns = _time.monotonic_ns()
