@@ -66,8 +66,16 @@ WORKDIR /app
 # single layer. A separate `chown -R /app` rewrites metadata on every file,
 # which forces overlayfs to copy up the entire ~9GB /app tree into a second
 # layer (the venv effectively stored twice). `COPY --chown` avoids that.
+# ``chown cognee /app`` (the directory inode only): WORKDIR created /app as
+# root, and ``COPY --chown`` sets ownership on the copied content, not the
+# pre-existing target dir — without this the JSON-extension pre-install below
+# cannot create ``$HOME/.lbdb`` and has been silently falling back to its
+# build warning (and the runtime install fails the same way as non-root).
 RUN groupadd --system --gid 1000 cognee \
-    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee
+    && useradd --system --uid 1000 --gid cognee --no-create-home --shell /usr/sbin/nologin cognee \
+    && mkdir -p /cognee-storage/system /cognee-storage/data \
+    && chown -R cognee:cognee /cognee-storage \
+    && chown cognee:cognee /app
 
 # Copy the virtual environment from the uv stage
 COPY --from=uv /usr/local /usr/local
@@ -85,6 +93,10 @@ ENV PYTHONPATH=/app
 # Give the non-root user a stable, writable HOME so Kuzu/Ladybug caches its
 # downloaded extensions in a consistent location across build and runtime.
 ENV HOME=/app
+# Default storage OUTSIDE the source tree, matching the main image — both
+# containers share the same named volumes with the same uid (1000).
+ENV SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
+ENV DATA_ROOT_DIRECTORY=/cognee-storage/data
 
 # Add labels for API mode usage
 LABEL org.opencontainers.image.description="Cognee MCP Server with API mode support"
