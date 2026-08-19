@@ -225,9 +225,9 @@ async def _forget_dataset(dataset_ref: Union[str, UUID], user: Any) -> dict:
     - Relational DB (datasets, data records): yes
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache: no (sessions are keyed by user_id+session_id,
-      not by dataset — targeted cleanup requires tagging sessions
-      with dataset_id, which is a future enhancement)
+    - Session cache: yes — sessions attributed to the dataset (via
+      session_records.dataset_id or the per-dataset default session id)
+      are deleted inside datasets.empty_dataset (non-fatal, best-effort)
     """
     from cognee.api.v1.datasets.datasets import datasets
 
@@ -270,6 +270,8 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     Cleanup scope:
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
+    - Session cache: yes — sessions attributed to the dataset are deleted
+      (their answers reference the removed graph; non-fatal, best-effort)
     - Pipeline status: reset (so cognify re-processes all data)
     - Relational DB (dataset, data records): preserved
     - Raw files: preserved
@@ -293,6 +295,22 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     async with dataset_lock(dataset_id):
         # 1. Delete graph nodes/edges and vector embeddings
         await delete_dataset_nodes_and_edges(dataset_id, user.id)
+
+        # 1b. Drop sessions attributed to this dataset: their cached answers
+        # assert graph content that no longer exists, and a re-cognify with
+        # different settings should not replay them (non-fatal).
+        try:
+            from cognee.modules.session_lifecycle.invalidate_sessions import (
+                invalidate_sessions_for_dataset,
+            )
+
+            await invalidate_sessions_for_dataset(dataset_id)
+        except Exception as error:
+            logger.warning(
+                "forget: session invalidation failed for dataset %s (non-fatal): %s",
+                dataset_id,
+                error,
+            )
 
         # 2. Reset pipeline_status on all data records in this dataset
         db_engine = get_relational_engine()
@@ -346,6 +364,8 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     Cleanup scope:
     - Graph DB (nodes, edges for this data item): yes
     - Vector DB (embeddings for this data item): yes
+    - Session cache: targeted — session entries whose answers used the
+      deleted graph elements are removed (non-fatal, best-effort)
     - Pipeline status (for this data item): reset for cognify only
     - Relational DB (data record): preserved
     - Raw file: preserved
@@ -365,7 +385,25 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     # on this dataset and exclude concurrent deletes.
     async with dataset_lock(dataset_id):
         # 1. Delete graph nodes/edges and vector embeddings for this data item
-        await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+        deleted_elements = await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
+
+        # 1b. Remove session entries whose answers used the deleted graph
+        # elements, so completions stop asserting the removed content (non-fatal).
+        try:
+            from cognee.modules.session_lifecycle.invalidate_sessions import (
+                invalidate_sessions_for_deleted_data,
+            )
+
+            await invalidate_sessions_for_deleted_data(
+                dataset_id, deleted_elements.node_ids, deleted_elements.edge_ids
+            )
+        except Exception as error:
+            logger.warning(
+                "forget: session invalidation failed for data %s in dataset %s (non-fatal): %s",
+                data_id,
+                dataset_id,
+                error,
+            )
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()
