@@ -13,6 +13,7 @@ Contract under test:
   - large input (> _CHUNK_SIZE hashes)     → chunked correctly, all hits returned
 """
 
+import importlib
 import os
 import tempfile
 from types import SimpleNamespace
@@ -32,8 +33,13 @@ from cognee.modules.ingestion.identify_many import _CHUNK_SIZE, identify_many
 # Helpers
 # ---------------------------------------------------------------------------
 
-_ENGINE_PATCH = "cognee.modules.ingestion.identify_many.get_relational_engine"
-_IDENTIFY_ENGINE_PATCH = "cognee.modules.ingestion.identify.get_relational_engine"
+# Import the module objects explicitly and patch through them. Dotted-string
+# targets are unreliable here: `cognee.modules.ingestion.__init__` re-exports the
+# identify/identify_many *functions*, which shadow the same-named submodules on
+# the package, so patch("...ingestion.identify_many.get_relational_engine") can
+# resolve to the function and raise AttributeError depending on import order.
+_IDENTIFY_MANY_MODULE = importlib.import_module("cognee.modules.ingestion.identify_many")
+_IDENTIFY_MODULE = importlib.import_module("cognee.modules.ingestion.identify")
 
 
 async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
@@ -95,7 +101,7 @@ async def test_hit_returns_correct_data_id():
 
     engine, db_path = await _make_engine([row])
     try:
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with patch.object(_IDENTIFY_MANY_MODULE, "get_relational_engine", return_value=engine):
             result = await identify_many([content_hash], user, dataset_id)
 
         assert result == {content_hash: data_id}, (
@@ -114,7 +120,7 @@ async def test_miss_for_unknown_hash():
 
     engine, db_path = await _make_engine([])
     try:
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with patch.object(_IDENTIFY_MANY_MODULE, "get_relational_engine", return_value=engine):
             result = await identify_many(["no-such-hash"], user, dataset_id)
 
         assert result == {}, "unknown hash must not appear in the result dict"
@@ -138,7 +144,7 @@ async def test_different_owner_gets_no_result():
         [_row(dataset_id=dataset_id, owner_id=owner.id, content_hash=content_hash)]
     )
     try:
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with patch.object(_IDENTIFY_MANY_MODULE, "get_relational_engine", return_value=engine):
             result = await identify_many([content_hash], stranger, dataset_id)
 
         assert result == {}, "another owner's row must not be returned"
@@ -168,7 +174,7 @@ async def test_different_tenant_gets_no_result():
         ]
     )
     try:
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with patch.object(_IDENTIFY_MANY_MODULE, "get_relational_engine", return_value=engine):
             user_no_tenant = SimpleNamespace(id=user_with_tenant.id, tenant_id=None)
             result = await identify_many([content_hash], user_no_tenant, dataset_id)
 
@@ -201,8 +207,8 @@ async def test_identify_many_agrees_with_identify():
         classified = SimpleNamespace(get_identifier=lambda: content_hash)
 
         with (
-            patch(_ENGINE_PATCH, return_value=engine),
-            patch(_IDENTIFY_ENGINE_PATCH, return_value=engine),
+            patch.object(_IDENTIFY_MANY_MODULE, "get_relational_engine", return_value=engine),
+            patch.object(_IDENTIFY_MODULE, "get_relational_engine", return_value=engine),
         ):
             many_result = await identify_many([content_hash], user, dataset_id)
             single_result = await identify(classified, user, dataset_id)
@@ -245,7 +251,7 @@ async def test_chunking_handles_large_input():
         filler[0] = hash_a
         filler[_CHUNK_SIZE] = hash_b  # guaranteed to be in the second chunk
 
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with patch.object(_IDENTIFY_MANY_MODULE, "get_relational_engine", return_value=engine):
             result = await identify_many(filler, user, dataset_id)
 
         assert result.get(hash_a) == id_a, "hash_a must be found in the first chunk"
