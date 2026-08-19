@@ -187,7 +187,7 @@ def get_cognify_router() -> APIRouter:
         """
         send_telemetry(
             "Cognify API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/cognify",
                 "cognee_version": cognee_version,

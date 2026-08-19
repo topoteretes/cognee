@@ -159,12 +159,15 @@ class HealthChecker:
             provider = "s3" if base_config.data_root_directory.startswith("s3://") else "local"
 
             import uuid
+
             test_id = str(uuid.uuid4())
             # Test storage accessibility - for local storage, just check directory exists
             if provider == "local":
                 os.makedirs(base_config.data_root_directory, exist_ok=True)
                 # Simple write/read test
-                test_file = os.path.join(base_config.data_root_directory, f"health_check_test_{test_id}")
+                test_file = os.path.join(
+                    base_config.data_root_directory, f"health_check_test_{test_id}"
+                )
                 with open(test_file, "w") as f:
                     f.write("test")
                 os.remove(test_file)

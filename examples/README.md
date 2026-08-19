@@ -1,215 +1,169 @@
 # Cognee Examples
 
-This directory contains 60+ runnable example scripts that demonstrate cognee's
-features end-to-end. They double as the smoke-test corpus that the team uses
-to verify behaviour across the SDK.
+Runnable example scripts demonstrating cognee end-to-end — 69 scripts across three folders.
+They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
-> **New here?** Start with [`demos/simple_cognee_example.py`](demos/simple_cognee_example.py) (the canonical `remember → recall` flow), then follow the quickstart map below.
+> **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
+> (the canonical `remember → recall` flow), then follow the quickstart map below.
 
 ## 🚀 Quickstart map (5 examples to start with)
 
 | Example | What you'll learn |
 |---|---|
-| [`demos/simple_cognee_example.py`](demos/simple_cognee_example.py) | Canonical `remember → recall` pipeline |
+| [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py) | Canonical `remember → recall` pipeline |
 | [`advanced_guides/remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | The v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
 | [`guides/agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with cognee memory |
 | [`guides/graph_visualization.py`](guides/graph_visualization.py) | Render the resulting knowledge graph |
-| [`demos/start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py) | Launch the cognee UI alongside the API server |
+| [`guides/start_local_ui_frontend_example.py`](guides/start_local_ui_frontend_example.py) | Launch the cognee UI alongside the API server |
 
 ## 📁 Top-level layout
 
-| Folder | Purpose | Count |
+| Folder | What lives there | Count |
 |---|---|---|
-| [`configurations/`](configurations/) | Database & permissions configuration recipes | 8 |
-| [`custom_pipelines/`](custom_pipelines/) | Build your own pipeline / extend `cognify` | 7 |
-| [`database_examples/`](database_examples/) | Smoke tests per supported backend | 5 |
-| [`demos/`](demos/) | Feature demos — broadest coverage | 22 |
-| [`guides/`](guides/) | Short focused how-to guides | 13 |
-| [`integrations/`](integrations/) | Data-source connectors — installed from cognee-community | 1 |
-| [`pocs/`](pocs/) | Research-grade proofs of concept (entity disambiguation, canonicalization, prefetch) | 7 |
-| [`tutorials/`](tutorials/) | Step-by-step tutorials for common workflows (migration, ...) | 1 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 36 |
+| [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
 
-Most runnable demos and backend examples use the v1.0 memory API (`remember`, `recall`, `forget`, `improve`). The lower-level `add`, `cognify`, `search`, and `prune` calls are intentionally kept in examples that demonstrate pipeline internals, permissions, relational migrations, or research POCs.
+One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
+features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
 
-## 🔧 `configurations/` — backend & permissions setup
+## 📘 `guides/` — one feature per script
 
-### Database configuration
+### Getting started
 | Script | Demonstrates |
 |---|---|
-| [`database_examples/ladybug_graph_database_configuration.py`](configurations/database_examples/ladybug_graph_database_configuration.py) | Ladybug (default) graph backend |
-| [`database_examples/neo4j_graph_database_configuration.py`](configurations/database_examples/neo4j_graph_database_configuration.py) | Neo4j graph backend |
-| [`database_examples/neptune_analytics_aws_database_configuration.py`](configurations/database_examples/neptune_analytics_aws_database_configuration.py) | AWS Neptune Analytics graph backend |
-| [`database_examples/pgvector_postgres_vector_database_configuration.py`](configurations/database_examples/pgvector_postgres_vector_database_configuration.py) | Postgres + pgvector hybrid (vector + relational in one) |
-
-### Permissions / multi-tenancy (set `ENABLE_BACKEND_ACCESS_CONTROL=True`)
-| Script | Demonstrates |
-|---|---|
-| [`permissions_example/tenant_role_setup_example.py`](configurations/permissions_example/tenant_role_setup_example.py) | Create tenants and assign roles |
-| [`permissions_example/tenant_role_constraints_example.py`](configurations/permissions_example/tenant_role_constraints_example.py) | Constrain what a role can do |
-| [`permissions_example/user_permissions_and_access_control_example.py`](configurations/permissions_example/user_permissions_and_access_control_example.py) | Per-user dataset access control |
-| [`permissions_example/data_access_control_example.py`](configurations/permissions_example/data_access_control_example.py) | Filter retrieval by ACL |
-
-## 🔄 `custom_pipelines/` — extend cognify
-
-| Script | Demonstrates |
-|---|---|
-| [`custom_cognify_pipeline_example.py`](custom_pipelines/custom_cognify_pipeline_example.py) | Replace the default `cognify` task list with your own |
-| [`memify_coding_agent_rule_extraction_example.py`](custom_pipelines/memify_coding_agent_rule_extraction_example.py) | Distill coding-agent traces into reusable rules |
-| [`relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py) | Lift a SQL schema + data into a knowledge graph |
-| [`agentic_reasoning_procurement_example.py`](custom_pipelines/agentic_reasoning_procurement_example.py) | Multi-step reasoning over a procurement dataset |
-| [`dynamic_steps_resume_analysis_hr_example.py`](custom_pipelines/dynamic_steps_resume_analysis_hr_example.py) | Pipeline that branches based on resume content |
-| [`organizational_hierarchy/organizational_hierarchy_pipeline_example.py`](custom_pipelines/organizational_hierarchy/organizational_hierarchy_pipeline_example.py) | Org-chart ingestion (high-level API) |
-| [`organizational_hierarchy/organizational_hierarchy_pipeline_low_level_example.py`](custom_pipelines/organizational_hierarchy/organizational_hierarchy_pipeline_low_level_example.py) | Same dataset via the low-level Task API |
-
-## 🗄️ `database_examples/` — smoke tests per backend
-
-| Script | Demonstrates |
-|---|---|
-| [`ladybug_example.py`](database_examples/ladybug_example.py) | Ladybug (default) — graph |
-| [`neo4j_example.py`](database_examples/neo4j_example.py) | Neo4j — graph |
-| [`neptune_analytics_example.py`](database_examples/neptune_analytics_example.py) | Neptune Analytics — graph |
-| [`chromadb_example.py`](database_examples/chromadb_example.py) | ChromaDB — vector |
-| [`pgvector_example.py`](database_examples/pgvector_example.py) | pgvector — vector + relational |
-
-## 🎯 `demos/` — feature breadth
-
-| Script | Demonstrates |
-|---|---|
-| [`simple_cognee_example.py`](demos/simple_cognee_example.py) | Canonical `remember → recall` pipeline (start here) |
-| [`comprehensive_example/cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | End-to-end with most features stitched together |
-| [`remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | v1.0 memory API (`remember`, `recall`, `improve`, `forget`) |
-| [`conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py) | Session memory persisted across runs |
-| [`session_feedback_example.py`](demos/session_feedback_example.py) | Capturing thumbs-up/down feedback on retrieval |
-| [`session_feedback_lifecycle_demo/backend/app.py`](demos/session_feedback_lifecycle_demo/backend/app.py) | Full feedback-loop backend (FastAPI + cognee) |
-| [`feedback_score_shifting_example.py`](demos/feedback_score_shifting_example.py) | How feedback nudges retrieval scores |
-| [`references_example.py`](demos/references_example.py) | Search answers with lightweight evidence references |
-| [`custom_graph_model_entity_schema_definition.py`](demos/custom_graph_model_entity_schema_definition.py) | Define your own entity schema for graph extraction |
-| [`custom_pipeline_single_object_example.py`](demos/custom_pipeline_single_object_example.py) | Run a custom pipeline on a single object |
-| [`dynamic_multiple_weighted_edges_example.py`](demos/dynamic_multiple_weighted_edges_example.py) | Many-to-many edges with per-edge weights |
-| [`nodeset_grouping_example.py`](demos/nodeset_grouping_example.py) | Group nodes into named sets for filtered retrieval |
-| [`temporal_awareness_example/temporal_awareness_example.py`](advanced_guides/temporal_awareness_example/temporal_awareness_example.py) | Time-aware retrieval (`Event` model) |
-| [`ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py) | Ontology as a constraining vocabulary for extraction |
-| [`web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py) | Crawl a URL and cognify the content |
-| [`dlt_ingestion_example.py`](demos/dlt_ingestion_example.py) | Ingest via [dlt](https://dlthub.com/) sources |
-| [`multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py) | Audio + image ingestion |
-| [`simple_document_qa/simple_document_qa_demo.py`](advanced_guides/simple_document_qa/simple_document_qa_demo.py) | Q&A over a single document |
-| [`simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py) | SQL → graph (small schema) |
-| [`complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py) | SQL → graph (richer schema) |
-| [`schema_inventory_demo.py`](demos/schema_inventory_demo.py) | Schema and entity inventory visualization |
-| [`memory_provenance_demo.py`](demos/memory_provenance_demo.py) | Memory provenance projection and visualization |
-| [`sync_local_to_cloud_example.py`](demos/sync_local_to_cloud_example.py) | Sync a local dataset to Cognee Cloud |
-| [`pipeline_api_proposal.py`](demos/pipeline_api_proposal.py) | Proposal-style API exploration |
-| [`start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py) | Spin up cognee UI + backend |
-
-## 📘 `guides/` — focused how-tos
-
-| Script | Demonstrates |
-|---|---|
-| [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with cognee memory |
-| [`improve_quickstart.py`](guides/improve_quickstart.py) | The `improve` step in the V2 API |
+| [`simple_cognee_example.py`](guides/simple_cognee_example.py) | Canonical `remember → recall` flow (start here) |
 | [`recall_core.py`](guides/recall_core.py) | `recall` semantics and parameters |
-| [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded recall queries |
-| [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Supply a hand-written ontology |
-| [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses |
-| [`custom_graph_model.py`](guides/custom_graph_model.py) | Custom graph model used by extraction |
-| [`custom_prompts.py`](guides/custom_prompts.py) | Override the LLM prompts used in the pipeline |
-| [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Author your own tasks and compose them |
-| [`importance_weight.py`](guides/importance_weight.py) | Boost specific nodes in retrieval ranking |
-| [`graph_visualization.py`](guides/graph_visualization.py) | Render the resulting knowledge graph |
-| [`low_level_llm.py`](guides/low_level_llm.py) | Direct access to the LLM gateway (skip pipelines) |
-| [`s3_storage.py`](guides/s3_storage.py) | Store data and metadata on S3 |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Merge near-duplicate entity descriptions |
+| [`improve_quickstart.py`](guides/improve_quickstart.py) | Graph enrichment before/after `improve()` |
+| [`agent_memory_quickstart.py`](guides/agent_memory_quickstart.py) | Wrap an LLM agent with `@cognee.agent_memory` |
 
-## 🧪 `pocs/` — research / proofs of concept
-
-These are exploratory scripts; conventions evolve faster here than in `guides/` or `demos/`.
-
+### Sessions & self-improvement
 | Script | Demonstrates |
 |---|---|
-| [`disambiguation/disambiguate_entities.py`](pocs/disambiguation/disambiguate_entities.py) | Entity-disambiguation primitive |
-| [`disambiguation/disambiguate_entities_example.py`](pocs/disambiguation/disambiguate_entities_example.py) | End-to-end disambiguation flow |
-| [`disambiguation/extract_graph_from_data_with_entity_disambiguation.py`](pocs/disambiguation/extract_graph_from_data_with_entity_disambiguation.py) | Graph extraction with disambiguation enabled |
-| [`post_extraction_canonicalization/post_extraction_canonicalization.py`](pocs/post_extraction_canonicalization/post_extraction_canonicalization.py) | Canonicalize entities after extraction |
-| [`post_extraction_canonicalization/post_extraction_canonicalization_example.py`](pocs/post_extraction_canonicalization/post_extraction_canonicalization_example.py) | Worked example for the canonicalization flow |
-| [`prefetch_disambiguation/prefetch_disambiguation.py`](pocs/prefetch_disambiguation/prefetch_disambiguation.py) | Prefetch candidates before disambiguation |
-| [`prefetch_disambiguation/prefetch_disambiguation_example.py`](pocs/prefetch_disambiguation/prefetch_disambiguation_example.py) | Worked example combining prefetch + disambiguation |
+| [`sessions.py`](guides/sessions.py) | Session-scoped memory via `session_id` |
+| [`session_distillation.py`](guides/session_distillation.py) | Distilling a session into durable preferences |
+| [`global_context_index.py`](guides/global_context_index.py) | Building the index with `improve(build_global_context_index=True)` and updating it incrementally |
+| [`global_context_index_recall.py`](guides/global_context_index_recall.py) | What `include_global_context_index` adds to `GRAPH_COMPLETION` retrieval |
+| [`importance_weight.py`](guides/importance_weight.py) | Boosting specific memories in retrieval ranking |
 
-## 🔍 By feature (cross-folder index)
+### Retrieval
+| Script | Demonstrates |
+|---|---|
+| [`truth_subspace_reranking.py`](guides/truth_subspace_reranking.py) | Teaching retrieval a preference — truth-weighted reranking on/off |
+| [`temporal_recall.py`](guides/temporal_recall.py) | Time-bounded queries with `SearchType.TEMPORAL` |
+| [`references_example.py`](guides/references_example.py) | `include_references` — answers with evidence |
+| [`nodeset_grouping_example.py`](guides/nodeset_grouping_example.py) | `node_set` grouping for filtered retrieval |
 
-Same scripts, indexed by what they demonstrate.
+### Graph modeling & extraction
+| Script | Demonstrates |
+|---|---|
+| [`custom_graph_model.py`](guides/custom_graph_model.py) | `graph_model=` on `remember` |
+| [`custom_data_models.py`](guides/custom_data_models.py) | Custom `DataPoint` subclasses and edges |
+| [`custom_prompts.py`](guides/custom_prompts.py) | Overriding the extraction prompt |
+| [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
+| [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
+| [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Merging near-duplicate entity descriptions |
+| [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
-### Memory API (v1.0: remember / recall / improve / forget)
-- [`advanced_guides/remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py)
-- [`guides/agent_memory_quickstart.py`](guides/agent_memory_quickstart.py)
-- [`guides/improve_quickstart.py`](guides/improve_quickstart.py)
-- [`guides/recall_core.py`](guides/recall_core.py)
+### Ingestion
+| Script | Demonstrates |
+|---|---|
+| [`web_url_content_ingestion_example.py`](guides/web_url_content_ingestion_example.py) | Ingesting a URL with `preferred_loaders` (needs network) |
+| [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
+| [`video_processing_example.py`](guides/video_processing_example.py) | Video ingestion (supply your own file) |
+| [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
+| [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
 
-### Session memory & feedback
-- [`advanced_guides/conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py)
-- [`demos/session_feedback_example.py`](demos/session_feedback_example.py)
-- [`demos/session_feedback_lifecycle_demo/backend/app.py`](demos/session_feedback_lifecycle_demo/backend/app.py)
-- [`demos/feedback_score_shifting_example.py`](demos/feedback_score_shifting_example.py)
-- [`guides/importance_weight.py`](guides/importance_weight.py)
+### Visualization
+| Script | Demonstrates |
+|---|---|
+| [`graph_visualization.py`](guides/graph_visualization.py) | Rendering the graph — all seeding modes |
+| [`semantic_memory_map.py`](guides/semantic_memory_map.py) | The Semantic memory-map view |
+| [`schema_inventory.py`](guides/schema_inventory.py) | Schema/entity inventory side panel |
+| [`memory_provenance.py`](guides/memory_provenance.py) | The memory-provenance graph |
 
-### Temporal awareness
-- [`advanced_guides/temporal_awareness_example/temporal_awareness_example.py`](advanced_guides/temporal_awareness_example/temporal_awareness_example.py)
-- [`guides/temporal_recall.py`](guides/temporal_recall.py)
+### Backends & deployment
+| Script | Prerequisite |
+|---|---|
+| [`ladybug_example.py`](guides/ladybug_example.py) | None — embedded default backend |
+| [`neo4j_example.py`](guides/neo4j_example.py) | Neo4j server + `cognee[neo4j]` |
+| [`pgvector_example.py`](guides/pgvector_example.py) | Postgres + `cognee[postgres]` |
+| [`neptune_analytics_example.py`](guides/neptune_analytics_example.py) | AWS account + provisioned Neptune Analytics graph |
+| [`local_ollama_example.py`](guides/local_ollama_example.py) | `ollama serve` + two pulled models — fully local |
+| [`s3_storage.py`](guides/s3_storage.py) | Your S3 bucket + AWS credentials |
+| [`start_local_ui_frontend_example.py`](guides/start_local_ui_frontend_example.py) | Built frontend; blocks until Ctrl-C |
 
-### Ontology
-- [`advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py`](advanced_guides/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py)
-- [`guides/ontology_quickstart.py`](guides/ontology_quickstart.py)
+## 🎓 `advanced_guides/` — the same topic, deeper
 
-### Multimedia & non-text ingestion
-- [`demos/multimedia_processing/multimedia_audio_image_processing_example.py`](demos/multimedia_processing/multimedia_audio_image_processing_example.py)
-- [`demos/web_url_content_ingestion_example.py`](demos/web_url_content_ingestion_example.py)
-- [`demos/dlt_ingestion_example.py`](demos/dlt_ingestion_example.py)
+Each script names the simpler guide it builds on and states what it adds.
 
-### Connectors / Integrations
-- [`integrations/`](integrations/) — data-source connectors (installed from cognee-community)
-- [`tutorials/migrate_from_mem0_tutorial.py`](tutorials/migrate_from_mem0_tutorial.py) — import mem0 memories into Cognee
+| Script | Builds on | What it adds |
+|---|---|---|
+| [`remember_recall_improve_example.py`](advanced_guides/remember_recall_improve_example.py) | `guides/simple_cognee_example.py` + `guides/improve_quickstart.py` | Nine-step tour of the full v1.0 memory API |
+| [`conversation_session_persistence_example.py`](advanced_guides/conversation_session_persistence_example.py) | `guides/sessions.py` | Recalls across two sessions, then persists both into the graph |
+| [`session_distillation_demo.py`](advanced_guides/session_distillation_demo.py) | `guides/session_distillation.py` | Eight-message session, hybrid recall, post-distillation verification |
+| [`global_context_index_smoke_demo.py`](advanced_guides/global_context_index_smoke_demo.py) | `guides/global_context_index.py` + `guides/global_context_index_recall.py` | 12-turn fixture, three-question sweep, pass/fail verdict |
+| [`temporal_awareness_example/`](advanced_guides/temporal_awareness_example/) | `guides/temporal_recall.py` | Real biography documents instead of inline text |
+| [`ontology_reference_vocabulary/`](advanced_guides/ontology_reference_vocabulary/) | `guides/ontology_quickstart.py` | Bundled OWL + texts as a constraining vocabulary |
+| [`simple_document_qa/`](advanced_guides/simple_document_qa/) | `guides/simple_cognee_example.py` | Q&A over a real 150 KB document |
+| [`truth_centroid_slots_demo.py`](advanced_guides/truth_centroid_slots_demo.py) | `guides/truth_subspace_reranking.py` | Centroid slots, epochs, and rebuilds behind truth-subspace reranking |
 
-### SQL → knowledge graph
-- [`custom_pipelines/relational_database_to_knowledge_graph_migration_example.py`](custom_pipelines/relational_database_to_knowledge_graph_migration_example.py)
-- [`demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py`](demos/simple_relational_database_migration_example/simple_relational_database_migration_example.py)
-- [`demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py`](demos/complex_relational_database_migration_example/complex_relational_database_migration_example.py)
+## 🎯 `demos/` — features combined into use cases
 
-### Custom pipelines / tasks
-- [`custom_pipelines/custom_cognify_pipeline_example.py`](custom_pipelines/custom_cognify_pipeline_example.py)
-- [`custom_pipelines/agentic_reasoning_procurement_example.py`](custom_pipelines/agentic_reasoning_procurement_example.py)
-- [`custom_pipelines/dynamic_steps_resume_analysis_hr_example.py`](custom_pipelines/dynamic_steps_resume_analysis_hr_example.py)
-- [`custom_pipelines/memify_coding_agent_rule_extraction_example.py`](custom_pipelines/memify_coding_agent_rule_extraction_example.py)
-- [`custom_pipelines/organizational_hierarchy/`](custom_pipelines/organizational_hierarchy/) (high-level + low-level variants)
-- [`guides/custom_data_models.py`](guides/custom_data_models.py)
-- [`guides/custom_graph_model.py`](guides/custom_graph_model.py)
-- [`guides/custom_prompts.py`](guides/custom_prompts.py)
-- [`guides/custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py)
-- [`demos/custom_pipeline_single_object_example.py`](demos/custom_pipeline_single_object_example.py)
-- [`demos/custom_graph_model_entity_schema_definition.py`](demos/custom_graph_model_entity_schema_definition.py)
+Every demo lives in a topic folder.
 
-### Multi-tenant / permissions
-- [`configurations/permissions_example/`](configurations/permissions_example/) (4 scripts)
+### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
+| Script | Demonstrates |
+|---|---|
+| [`cognee_comprehensive_example.py`](demos/comprehensive_example/cognee_comprehensive_example.py) | Three sources, node sets, ontology, memify, filtered recall — stitched together |
 
-### Backends
-- [`database_examples/`](database_examples/) — 5 backends end-to-end
-- [`configurations/database_examples/`](configurations/database_examples/) — 4 graph + 1 hybrid configurations
+### [`agentic/`](demos/agentic/) — agents reasoning over memory
+| Script | Demonstrates |
+|---|---|
+| [`agentic_reasoning_procurement_example.py`](demos/agentic/agentic_reasoning_procurement_example.py) | Research-then-decide over `node_set`-categorized memory: scoped recalls per category, then an LLM decision justified by the evidence |
 
-### Visualization & UI
-- [`guides/graph_visualization.py`](guides/graph_visualization.py)
-- [`demos/schema_inventory_demo.py`](demos/schema_inventory_demo.py)
-- [`demos/memory_provenance_demo.py`](demos/memory_provenance_demo.py)
-- [`demos/start_local_ui_frontend_example.py`](demos/start_local_ui_frontend_example.py)
+### [`sessions/`](demos/sessions/) — session memory in action
+| Script | Demonstrates |
+|---|---|
+| [`session_flow_stepwise_demo.py`](demos/sessions/session_flow_stepwise_demo.py) | Narrated five-stage trace of the memory loop |
+| [`live_session_context_feedback_demo.py`](demos/sessions/live_session_context_feedback_demo.py) | Learning lessons from conversation feedback, live |
+| [`agentic_session_context_demo.py`](demos/sessions/agentic_session_context_demo.py) | Learning agent-profile lessons from tool/action traces |
+| [`session_feedback_example.py`](demos/sessions/session_feedback_example.py) | The session feedback API surface (`get_session`, `add_feedback`, …) |
+| [`session_feedback_lifecycle_demo/`](demos/sessions/session_feedback_lifecycle_demo/) | Full feedback-loop application (FastAPI backend + frontend) |
 
-### References / evidence
-- [`demos/references_example.py`](demos/references_example.py)
+### [`feedback/`](demos/feedback/) — feedback signals and what they do to the graph/ranking
+| Script | Demonstrates |
+|---|---|
+| [`contradiction_feedback_demo.py`](demos/feedback/contradiction_feedback_demo.py) | Contradiction detection + feedback, visualized step by step |
+| [`feedback_score_shifting_example.py`](demos/feedback/feedback_score_shifting_example.py) | Feedback nudging retrieval scores, with a beta sweep |
+| [`skill_feedback_loop/`](demos/feedback/skill_feedback_loop/) | Skills scored, improved, and re-applied in a loop |
 
-### Storage backends
-- [`guides/s3_storage.py`](guides/s3_storage.py)
+### [`ingestion_and_migration/`](demos/ingestion_and_migration/) — getting external data in
+| Script | Demonstrates |
+|---|---|
+| [`dlt_ingestion_example.py`](demos/ingestion_and_migration/dlt_ingestion_example.py) | Six [dlt](https://dlthub.com/) ingestion modes + ontology (needs `cognee[dlt]`) |
+| [`simple_relational_database_migration_example/`](demos/ingestion_and_migration/simple_relational_database_migration_example/) | SQL → knowledge graph (small schema) |
+| [`complex_relational_database_migration_example/`](demos/ingestion_and_migration/complex_relational_database_migration_example/) | SQL → knowledge graph (richer schema, optional ontology) |
+| [`migrate_from_mem0/`](demos/ingestion_and_migration/migrate_from_mem0/) | Importing mem0 memories into cognee |
 
-### Disambiguation / canonicalization
-- [`pocs/disambiguation/`](pocs/disambiguation/) (3 scripts)
-- [`pocs/post_extraction_canonicalization/`](pocs/post_extraction_canonicalization/) (2 scripts)
-- [`pocs/prefetch_disambiguation/`](pocs/prefetch_disambiguation/) (2 scripts)
-- [`guides/consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py)
+### [`custom_pipelines/`](demos/custom_pipelines/) — pipeline composition
+| Script | Demonstrates |
+|---|---|
+| [`custom_cognify_pipeline_example.py`](demos/custom_pipelines/custom_cognify_pipeline_example.py) | Replacing the default `cognify` task list |
+| [`custom_pipeline_single_object_example.py`](demos/custom_pipelines/custom_pipeline_single_object_example.py) | Deferred-call pipeline pattern with typed `DataPoint`s |
+| [`memify_coding_agent_rule_extraction_example.py`](demos/custom_pipelines/memify_coding_agent_rule_extraction_example.py) | Distilling coding-agent traces into reusable rules |
+| [`relational_database_to_knowledge_graph_migration_example.py`](demos/custom_pipelines/relational_database_to_knowledge_graph_migration_example.py) | Migration config + tuned recalls |
+| [`dynamic_steps_resume_analysis_hr_example.py`](demos/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py) | Self-coded run stages toggled per run, over a CV corpus |
+| [`organizational_hierarchy/`](demos/custom_pipelines/organizational_hierarchy/) | Org-chart ingestion — high-level and low-level variants |
+
+### [`permissions/`](demos/permissions/) — multi-tenancy (set `ENABLE_BACKEND_ACCESS_CONTROL=True`)
+| Script | Demonstrates |
+|---|---|
+| [`tenant_role_setup_example.py`](demos/permissions/tenant_role_setup_example.py) | Creating tenants and assigning roles |
+| [`tenant_role_constraints_example.py`](demos/permissions/tenant_role_constraints_example.py) | What a role may not do |
+| [`user_permissions_and_access_control_example.py`](demos/permissions/user_permissions_and_access_control_example.py) | The full ACL surface across users, roles, tenants |
+| [`data_access_control_example.py`](demos/permissions/data_access_control_example.py) | Retrieval filtered by ACL, `PermissionDeniedError` paths |
 
 ## ⚙️ Running an example
 
@@ -222,7 +176,7 @@ cp .env.template .env
 # edit .env: set LLM_API_KEY (your OpenAI key) at minimum
 
 # Run any example
-uv run python examples/demos/simple_cognee_example.py
+uv run python examples/guides/simple_cognee_example.py
 ```
 
 For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
@@ -230,13 +184,31 @@ For non-OpenAI providers (Anthropic, Bedrock, Ollama, fastembed, …) see
 
 ## 🤝 Contributing a new example
 
-1. Pick the right folder:
-   - `demos/` — broad feature demonstration
-   - `guides/` — small focused how-to
-   - `custom_pipelines/` — custom pipeline composition
-   - `pocs/` — research-shaped exploration
-2. Self-contained: an example should run with `uv run python <path>` after `uv sync` and a configured `.env`. No global setup.
-3. Add an entry to the appropriate table above.
-4. If your example demonstrates a feature, add it to the **By feature** cross-index too.
+Pick the folder by these rules:
+
+**`guides/`** — teaches exactly one functionality. Three criteria: **(1) single feature** —
+one API surface, one lesson; **(2) concise** — one linear flow, readable top-to-bottom in one
+sitting; **(3) self-contained** — runnable from the get-go, every input inline. Reading a
+bundled file, a remote store, or a third-party account disqualifies it; a pip extra or a
+startable local service (Neo4j, Postgres, Ollama) is fine as a documented prerequisite, and
+writing output the script creates itself is always fine. *Coverage exception:* if a topic's
+only possible script can't be self-contained (binary media, S3), it still becomes the topic's
+basic guide.
+
+**`advanced_guides/`** — a guide on a topic **that already has a simpler guide**, going deeper
+while staying on that one topic. May be long and may read bundled files, but the docstring must
+name the basic guide it builds on and state what it adds.
+
+**`demos/`** — multiple cognee features stitched together, or a realistic scenario/use case.
+Lives in a topic subfolder (`agentic/`, `sessions/`, `feedback/`, `ingestion_and_migration/`,
+`custom_pipelines/`, `permissions/`) — never loose at the `demos/` root. Scenario folders keep
+their own `data/`. If your demo really demonstrates one feature and its length is padding,
+it's a guide that grew — trim it.
+
+Research-grade proofs of concept don't belong in `examples/` — keep experiment drivers on a
+branch or in the issue that tracks the research.
+
+Then: make sure it runs with `uv run python <path>` after `uv sync` and a configured `.env`,
+and add a row to the matching table in this README.
 
 See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the broader contribution flow.
