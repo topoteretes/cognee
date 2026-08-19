@@ -9,22 +9,13 @@ Interested in further development or production use of Postgres as a graph datab
 us at social@cognee.ai to explore the options.
 """
 
-import asyncio
 import json
 from uuid import UUID
-from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
+from typing import Callable, Dict, Any, List, Union, Optional, Tuple, Type
 
-from sqlalchemy import NullPool, text, values, select, exists, func, String, case
-from sqlalchemy import column as sa_column
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from sqlalchemy.exc import DBAPIError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-from asyncpg import DeadlockDetectedError
+from sqlalchemy import NullPool, text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.databases.relational import get_relational_config
@@ -41,89 +32,130 @@ from cognee.infrastructure.databases.provenance.source_refs import (
     get_source_ref_key_from_source_run_ref,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
-    ProvenanceAttachInputs,
+    ProvenanceColumns,
     provenance_after_attach,
     provenance_after_remove,
-    provenance_attach_inputs,
 )
 
-from .tables import _meta, _node_table, _edge_table, _metadata_table
-
-logger = get_logger()
-
-# Rows per INSERT statement for bulk node/edge writes. Bounds the size of the
-# compiled SQLAlchemy statement and the asyncpg parameter buffer per execute, so
-# a large single-batch write (e.g. the whole of War and Peace) streams to
-# Postgres in fixed-size chunks instead of materializing one multi-thousand-row
-# statement in memory. Does not change how many data points the pipeline batches.
-_WRITE_CHUNK_SIZE = 1000
+from .tables import _meta
 
 
-def _provenance_insert_values(inputs: ProvenanceAttachInputs) -> Dict[str, List[str]]:
-    """Initial provenance arrays for a freshly INSERTed node/edge (single source ref)."""
+def _prepare_node_rows(
+    nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+) -> list[dict[str, Any]]:
+    """Copy, sanitize, deduplicate, and sort nodes for one database write."""
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    for node in nodes:
+        if isinstance(node, tuple):
+            properties = {**(node[1] or {}), "id": node[0]}
+        elif hasattr(node, "model_dump"):
+            properties = dict(node.model_dump())
+        else:
+            properties = dict(vars(node))
+
+        node_id = sanitize_relational_payload(str(properties.get("id", "")))
+        extra = {
+            key: value for key, value in properties.items() if key not in {"id", "name", "type"}
+        }
+        rows_by_id[node_id] = {
+            "id": node_id,
+            "name": sanitize_relational_payload(str(properties.get("name", ""))),
+            "type": sanitize_relational_payload(str(properties.get("type", ""))),
+            "properties": json.dumps(sanitize_relational_payload(extra), cls=JSONEncoder),
+        }
+
+    return [rows_by_id[node_id] for node_id in sorted(rows_by_id)]
+
+
+def _prepare_edge_rows(
+    edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
+) -> list[dict[str, Any]]:
+    """Copy, sanitize, deduplicate, and sort edges for one database write."""
+    rows_by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for source_id, target_id, relationship_name, *property_values in edges:
+        identity = (
+            sanitize_relational_payload(str(source_id)),
+            sanitize_relational_payload(str(target_id)),
+            sanitize_relational_payload(str(relationship_name)),
+        )
+        properties = property_values[0] if property_values and property_values[0] else {}
+        rows_by_identity[identity] = {
+            "source_id": identity[0],
+            "target_id": identity[1],
+            "relationship_name": identity[2],
+            "properties": json.dumps(
+                sanitize_relational_payload(dict(properties)), cls=JSONEncoder
+            ),
+        }
+
+    return [rows_by_identity[identity] for identity in sorted(rows_by_identity)]
+
+
+def _edge_identities(edges: list[EdgeIdentity]) -> list[tuple[str, str, str]]:
+    """Deduplicate edge identities, sorted so concurrent writers lock rows in one order."""
+    return sorted(
+        {(str(edge.source_id), str(edge.target_id), str(edge.relationship_name)) for edge in edges}
+    )
+
+
+def _decode_properties(value: Any) -> dict[str, Any]:
+    """Return a new dictionary for a JSONB value."""
+    if not value:
+        return {}
+    return dict(value) if isinstance(value, dict) else json.loads(value)
+
+
+def _component_sizes(node_ids: list[str], edge_pairs: list[tuple[str, str]]) -> list[int]:
+    """Return the sizes of undirected connected components, largest first."""
+    neighbors: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    for source_id, target_id in edge_pairs:
+        neighbors.setdefault(source_id, set()).add(target_id)
+        neighbors.setdefault(target_id, set()).add(source_id)
+
+    unseen = set(node_ids)
+    sizes = []
+    while unseen:
+        pending = [unseen.pop()]
+        size = 0
+        while pending:
+            node_id = pending.pop()
+            size += 1
+            new_neighbors = neighbors.get(node_id, set()) & unseen
+            unseen.difference_update(new_neighbors)
+            pending.extend(new_neighbors)
+        sizes.append(size)
+
+    return sorted(sizes, reverse=True)
+
+
+def _select_nodeset_neighbor_ids(
+    primary_ids: set[str], edge_pairs: list[tuple[str, str]], operator: str
+) -> set[str]:
+    """Select neighbors connected to any or every primary node."""
+    if operator not in {"OR", "AND"}:
+        raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
+    if not primary_ids:
+        return set()
+
+    connected_primaries: dict[str, set[str]] = {}
+    for source_id, target_id in edge_pairs:
+        if source_id in primary_ids:
+            connected_primaries.setdefault(target_id, set()).add(source_id)
+        if target_id in primary_ids:
+            connected_primaries.setdefault(source_id, set()).add(target_id)
+
+    if operator == "OR":
+        return set(connected_primaries)
     return {
-        "source_ref_keys": inputs.add_keys,
-        "source_dataset_ids": inputs.add_dataset_ids,
-        "source_run_ids": inputs.add_run_ids,
-        "source_run_refs": inputs.add_run_refs,
+        node_id
+        for node_id, connections in connected_primaries.items()
+        if connections >= primary_ids
     }
 
 
-def _provenance_conflict_set(table, inputs: ProvenanceAttachInputs) -> Dict[str, Any]:
-    """``ON CONFLICT`` SET that set-merges one source ref into committed arrays.
+class PostgresDemoAdapter(GraphDBInterface):
+    """Reference graph adapter using one node table and one directed-edge table."""
 
-    Postgres analogue of the Ladybug fold clause: a node/edge is created and
-    stamped in one atomic upsert, so there is no read-then-write window (closes
-    the write-then-attach gap and the concurrent lost update, COG-5522 #4/#8).
-    The ``CASE`` guards read the *pre-update* ``source_ref_keys`` column, so the
-    run ref/id are appended only when the key was not already present (Model A) —
-    re-attaching an existing key adds no new run mapping. Dataset id is deduped
-    independently against its own column.
-    """
-    sr_key = inputs.source_ref_key
-    ds_id = inputs.add_dataset_ids[0]
-    key_present = table.c.source_ref_keys.any(sr_key)
-    ds_present = table.c.source_dataset_ids.any(ds_id)
-    set_: Dict[str, Any] = {
-        "source_ref_keys": case(
-            (key_present, table.c.source_ref_keys),
-            else_=func.array_append(table.c.source_ref_keys, sr_key),
-        ),
-        "source_dataset_ids": case(
-            (ds_present, table.c.source_dataset_ids),
-            else_=func.array_append(table.c.source_dataset_ids, ds_id),
-        ),
-    }
-    # Run ref/id only exist when the write carried a pipeline_run_id; otherwise the
-    # run columns are left untouched on conflict (the write is not rollbackable by run).
-    if inputs.add_run_refs:
-        set_["source_run_refs"] = case(
-            (key_present, table.c.source_run_refs),
-            else_=func.array_append(table.c.source_run_refs, inputs.add_run_refs[0]),
-        )
-        set_["source_run_ids"] = case(
-            (key_present, table.c.source_run_ids),
-            else_=func.array_append(table.c.source_run_ids, inputs.add_run_ids[0]),
-        )
-    return set_
-
-
-class PostgresAdapter(GraphDBInterface):
-    """Graph-as-tables adapter backed by Postgres, accessed via SQLAlchemy async sessions.
-
-    DEMO: Using Postgres as a graph store is currently a demo feature and is not
-    production-ready. Use it to demo keeping relational metadata, PGVector, and
-    graph state in a single Postgres service, but rely on a graph-native backend such as Kuzu
-    or Neo4j for production workloads.
-
-    Interested in further development or production use of Postgres as a graph database? Write
-    to us at social@cognee.ai to explore the options.
-    """
-
-    # ``query()`` executes SQL against the graph tables, not Cypher.
-    supports_cypher_queries = False
-
-    # ``query()`` executes SQL against the graph tables, not Cypher.
     supports_cypher_queries = False
 
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
@@ -144,26 +176,14 @@ class PostgresAdapter(GraphDBInterface):
         self.schema = schema or ""
 
         relational_config = get_relational_config()
-        pool_args: dict = dict(relational_config.pool_args) if relational_config.pool_args else {}
-        if pool_args.get("poolclass", "").lower() == "nullpool":
-            pool_args["poolclass"] = NullPool
+        configured_pool_args = (
+            dict(relational_config.pool_args) if relational_config.pool_args else {}
+        )
+        engine_args = {}
+        if str(configured_pool_args.get("poolclass", "")).lower() == "nullpool":
+            engine_args["poolclass"] = NullPool
         else:
-            # QueuePool defaults, mirroring SQLAlchemyAdapter: pre-ping detects
-            # connections killed when another process drops/recreates a per-dataset
-            # database (in-process cache eviction cannot reach other workers' pools);
-            # recycle refreshes idle connections before NAT/load balancers cut them.
-            # Pool sizing is deliberately leaner than the relational adapter's:
-            # per-dataset graph engines multiply with datasets, so retain almost no
-            # idle connections and serve bursts from overflow connections, which
-            # close on release instead of idling.
-            pool_args.setdefault("pool_size", 2)
-            pool_args.setdefault("max_overflow", 20)
-            pool_args.setdefault("pool_pre_ping", True)
-            pool_args.setdefault("pool_recycle", 280)
-            pool_args.setdefault("pool_timeout", 280)
-        # Managed Postgres (e.g. Neon, RDS) requires SSL;
-        # reuse the relational DATABASE_CONNECT_ARGS (asyncpg `ssl`) for the graph
-        # engine too. Empty dict is a no-op for in-cluster Postgres.
+            engine_args["pool_pre_ping"] = True
         connect_args: dict = (
             dict(relational_config.database_connect_args)
             if relational_config.database_connect_args
@@ -175,62 +195,25 @@ class PostgresAdapter(GraphDBInterface):
             server_settings["search_path"] = self.schema
             connect_args["server_settings"] = server_settings
 
-        # Serialize JSONB columns once, at execute time, with the UUID/datetime-aware
-        # encoder. This lets add_nodes/add_edges pass raw property dicts straight through
-        # instead of doing a per-row json.loads(json.dumps(...)) round-trip, which on a
-        # large single-batch write (e.g. War and Peace) generated millions of transient
-        # dict/string allocations -> pymalloc arena fragmentation and cyclic-GC thrash.
         self.engine = create_async_engine(
             self.db_uri,
             json_serializer=lambda obj: json.dumps(obj, cls=JSONEncoder),
             connect_args=connect_args,
-            **pool_args,
+            **engine_args,
         )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
-        self._write_lock = asyncio.Lock()
 
     async def close(self) -> None:
-        """Dispose the connection pool. Called by ``closing_lru_cache`` on eviction."""
+        """Dispose the database engine."""
         await self.engine.dispose(close=True)
 
     async def initialize(self) -> None:
-        """Create tables and indexes if they do not exist.
-
-        This creates a fresh schema (including the graph-provenance columns defined
-        in tables.py). Adding those columns to a graph_node/graph_edge left over from
-        a pre-provenance release is handled by the ``postgres_graph_provenance_columns``
-        data migration (create_all cannot ALTER an existing table).
-        """
+        """Create the existing graph schema when it is absent."""
         async with self.engine.begin() as conn:
             await conn.run_sync(_meta.create_all, checkfirst=True)
 
-    @asynccontextmanager
-    async def _session(self) -> AsyncIterator[Any]:
-        """Yield an async session from the underlying engine."""
-        async with self.sessionmaker() as session:
-            yield session
-
-    def _serialize_properties(self, props: Dict[str, Any]) -> str:
-        """Serialize a dict to a JSON string, handling datetimes and UUIDs."""
-        return json.dumps(props, cls=JSONEncoder)
-
-    def _parse_node_row(self, row) -> Dict[str, Any]:
-        """Convert a (id, name, type, properties) row to a merged dict."""
-        data = {"id": row.id, "name": row.name, "type": row.type}
-        if row.properties is not None:
-            props = (
-                row.properties if isinstance(row.properties, dict) else json.loads(row.properties)
-            )
-            data.update(props)
-        return data
-
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
-        """Not supported. Use typed adapter methods or a Cypher-capable graph backend.
-
-        Raises:
-        -------
-            NotImplementedError
-        """
+        """Reject raw Cypher; callers must use the typed graph methods."""
         raise NotImplementedError(
             "The Postgres graph backend does not support raw Cypher queries. "
             "Use a Cypher-capable graph backend (Neo4j, Ladybug) for raw query support, "
@@ -238,31 +221,18 @@ class PostgresAdapter(GraphDBInterface):
         )
 
     async def is_empty(self) -> bool:
-        """Check whether the graph contains any nodes.
-
-        Returns:
-        --------
-            bool: True if the graph has no nodes.
-        """
+        """Return whether the graph contains no nodes."""
         await self.initialize()
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(text("SELECT EXISTS(SELECT 1 FROM graph_node LIMIT 1)"))
             return not result.scalar()
 
     async def add_node(
         self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Add a single node. Delegates to add_nodes.
-
-        Parameters:
-        -----------
-            node: A DataPoint instance or a string node ID.
-            properties: Optional property dict when node is a string ID.
-        """
+        """Add one node, given either a DataPoint or a node id with properties."""
         if isinstance(node, str):
-            props = properties or {}
-            props.setdefault("id", node)
-            await self.add_nodes([(node, props)])
+            await self.add_nodes([(node, properties or {})])
         else:
             await self.add_nodes([node])
 
@@ -272,141 +242,81 @@ class PostgresAdapter(GraphDBInterface):
         source_ref_key: Optional[str] = None,
         pipeline_run_id: Optional[str] = None,
     ) -> None:
-        """Add multiple nodes via batch upsert.
-
-        Parameters:
-        -----------
-            nodes: A list of (id, properties) tuples or DataPoint instances.
-        """
+        """Add or replace nodes, optionally attaching one provenance reference."""
         if not nodes:
             return
 
-        now = datetime.now(timezone.utc)
-        core_keys = {"id", "name", "type"}
-
-        rows = []
-        for node in nodes:
-            if isinstance(node, tuple):
-                props = {**(node[1] or {}), "id": node[0]}
-            elif hasattr(node, "model_dump"):
-                props = node.model_dump()
-            else:
-                props = vars(node)
-
-            extra = {k: v for k, v in props.items() if k not in core_keys}
-            # NUL bytes break Postgres text columns and JSONB (the \u0000 escape is rejected);
-            # ids are sanitized the same way in add_edges so references stay consistent.
-            rows.append(
-                {
-                    "id": sanitize_relational_payload(str(props.get("id", ""))),
-                    "name": sanitize_relational_payload(str(props.get("name", ""))),
-                    "type": sanitize_relational_payload(str(props.get("type", ""))),
-                    "properties": sanitize_relational_payload(extra),
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            )
-
-        # Deduplicate by id (last wins) to avoid ON CONFLICT errors within one batch
-        rows = list({r["id"]: r for r in rows}.values())
-
-        # Fold graph provenance into the same upsert when a source ref is supplied
-        # (Model A, atomic). Without one (plain add_node / non-provenance write) the
-        # provenance columns are left to their '{}' default on insert and untouched
-        # on conflict, so a non-provenance re-write never clobbers existing refs.
-        provenance_set: Dict[str, Any] = {}
-        if source_ref_key is not None:
-            inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
-            insert_prov = _provenance_insert_values(inputs)
-            for r in rows:
-                r.update(insert_prov)
-            provenance_set = _provenance_conflict_set(_node_table, inputs)
-
-        async with self._write_lock:
-            async with self._session() as session:
-                for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
-                    chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                    stmt = pg_insert(_node_table).values(chunk)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={
-                            "name": stmt.excluded.name,
-                            "type": stmt.excluded.type,
-                            "properties": stmt.excluded.properties,
-                            "updated_at": func.now(),
-                            **provenance_set,
-                        },
-                    )
-                    await session.execute(stmt)
-                await session.commit()
+        rows = _prepare_node_rows(nodes)
+        # Provenance columns are absent here on purpose: a rewrite without a
+        # source ref must not erase existing ownership.
+        upsert = text("""
+            INSERT INTO graph_node (id, name, type, properties, created_at, updated_at)
+            VALUES (:id, :name, :type, CAST(:properties AS jsonb), now(), now())
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                type = EXCLUDED.type,
+                properties = EXCLUDED.properties,
+                updated_at = now()
+        """)
+        async with self.sessionmaker() as session:
+            await session.execute(upsert, rows)
+            if source_ref_key is not None:
+                await self._update_node_provenance(
+                    session,
+                    [row["id"] for row in rows],
+                    lambda keys, run_refs: provenance_after_attach(
+                        keys, run_refs, [source_ref_key], pipeline_run_id
+                    ),
+                )
+            await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
-        """Delete a single node. Delegates to delete_nodes.
-
-        Parameters:
-        -----------
-            node_id: The ID of the node to delete.
-        """
+        """Delete one node. Delegates to delete_nodes."""
         await self.delete_nodes([node_id])
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
-        """Delete multiple nodes by ID. Cascade-deletes connected edges.
-
-        Parameters:
-        -----------
-            node_ids: List of node IDs to delete.
-        """
+        """Delete nodes by id; the schema's foreign keys remove their incident edges."""
         if not node_ids:
             return
-        async with self._write_lock:
-            async with self._session() as session:
-                await session.execute(
-                    text("DELETE FROM graph_node WHERE id = ANY(:ids)"), {"ids": node_ids}
-                )
-                await session.commit()
+        async with self.sessionmaker() as session:
+            await session.execute(
+                text("DELETE FROM graph_node WHERE id = ANY(:ids)"),
+                {"ids": [str(node_id) for node_id in node_ids]},
+            )
+            await session.commit()
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve a single node by ID.
-
-        Parameters:
-        -----------
-            node_id: The ID of the node to retrieve.
-
-        Returns:
-        --------
-            A property dict for the node, or None if not found.
-        """
+        """Return one flat node dictionary, or None when the node does not exist."""
         results = await self.get_nodes([node_id])
         return results[0] if results else None
 
     async def has_node(self, node_id: str) -> bool:
         """Return True when a node with the given id exists."""
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
                 text("SELECT EXISTS(SELECT 1 FROM graph_node WHERE id = :id)"),
-                {"id": node_id},
+                {"id": str(node_id)},
             )
             return bool(result.scalar())
 
     async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
-        """Retrieve multiple nodes by ID.
-
-        Parameters:
-        -----------
-            node_ids: List of node IDs to retrieve.
-
-        Returns:
-        --------
-            A list of property dicts, one per found node.
-        """
+        """Return flat node dictionaries, omitting ids that do not exist."""
         if not node_ids:
             return []
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
                 text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
-                {"ids": node_ids},
+                {"ids": [str(node_id) for node_id in node_ids]},
             )
-            return [self._parse_node_row(row) for row in result.fetchall()]
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "type": row["type"],
+                    **_decode_properties(row["properties"]),
+                }
+                for row in result.mappings().all()
+            ]
 
     async def add_edge(
         self,
@@ -415,15 +325,7 @@ class PostgresAdapter(GraphDBInterface):
         relationship_name: str,
         properties: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Add a single edge. Delegates to add_edges.
-
-        Parameters:
-        -----------
-            source_id: Source node ID.
-            target_id: Target node ID.
-            relationship_name: The edge label.
-            properties: Optional property dict for the edge.
-        """
+        """Add one directed edge. Delegates to add_edges."""
         await self.add_edges(
             [(str(source_id), str(target_id), relationship_name, properties or {})]
         )
@@ -434,269 +336,265 @@ class PostgresAdapter(GraphDBInterface):
         source_ref_key: Optional[str] = None,
         pipeline_run_id: Optional[str] = None,
     ) -> None:
-        """Add multiple edges via batch upsert.
-
-        Parameters:
-        -----------
-            edges: A list of (source_id, target_id, relationship_name, properties) tuples.
-        """
+        """Add or replace edges, optionally attaching one provenance reference."""
         if not edges:
             return
 
-        now = datetime.now(timezone.utc)
-
-        rows = []
-        for edge in edges:
-            raw_props = edge[3] if len(edge) > 3 and edge[3] else {}
-            # NUL bytes break Postgres text columns and JSONB; ids are sanitized
-            # the same way in add_nodes so references stay consistent.
-            rows.append(
-                {
-                    "source_id": sanitize_relational_payload(str(edge[0])),
-                    "target_id": sanitize_relational_payload(str(edge[1])),
-                    "relationship_name": sanitize_relational_payload(edge[2]),
-                    "properties": sanitize_relational_payload(raw_props),
-                    "created_at": now,
-                    "updated_at": now,
-                }
+        rows = _prepare_edge_rows(edges)
+        # Provenance columns are absent here on purpose: a rewrite without a
+        # source ref must not erase existing ownership.
+        upsert = text("""
+            INSERT INTO graph_edge (
+                source_id, target_id, relationship_name, properties, created_at, updated_at
             )
-
-        # Deduplicate by composite key (last wins) to avoid ON CONFLICT errors within one batch
-        rows = list(
-            {(r["source_id"], r["target_id"], r["relationship_name"]): r for r in rows}.values()
-        )
-
-        # Fold graph provenance into the same upsert (see add_nodes for the rationale).
-        provenance_set: Dict[str, Any] = {}
-        if source_ref_key is not None:
-            inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
-            insert_prov = _provenance_insert_values(inputs)
-            for r in rows:
-                r.update(insert_prov)
-            provenance_set = _provenance_conflict_set(_edge_table, inputs)
-
-        async with self._write_lock:
-            async with self._session() as session:
-                for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
-                    chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                    stmt = pg_insert(_edge_table).values(chunk)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["source_id", "target_id", "relationship_name"],
-                        set_={
-                            "properties": stmt.excluded.properties,
-                            "updated_at": func.now(),
-                            **provenance_set,
-                        },
-                    )
-                    await session.execute(stmt)
-                await session.commit()
+            VALUES (
+                :source_id, :target_id, :relationship_name,
+                CAST(:properties AS jsonb), now(), now()
+            )
+            ON CONFLICT (source_id, target_id, relationship_name) DO UPDATE SET
+                properties = EXCLUDED.properties,
+                updated_at = now()
+        """)
+        async with self.sessionmaker() as session:
+            await session.execute(upsert, rows)
+            if source_ref_key is not None:
+                await self._update_edge_provenance(
+                    session,
+                    [
+                        EdgeIdentity(
+                            source_id=row["source_id"],
+                            target_id=row["target_id"],
+                            relationship_name=row["relationship_name"],
+                        )
+                        for row in rows
+                    ],
+                    lambda keys, run_refs: provenance_after_attach(
+                        keys, run_refs, [source_ref_key], pipeline_run_id
+                    ),
+                )
+            await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
-        """Check whether a single edge exists.
-
-        Parameters:
-        -----------
-            source_id: Source node ID.
-            target_id: Target node ID.
-            relationship_name: The edge label.
-
-        Returns:
-        --------
-            True if the edge exists.
-        """
+        """Return whether one directed edge triple exists."""
         result = await self.has_edges([(str(source_id), str(target_id), relationship_name)])
         return len(result) > 0
 
     async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
-        """Check which of the given edges exist.
-
-        Parameters:
-        -----------
-            edges: A list of (source_id, target_id, relationship_name) tuples to check.
-
-        Returns:
-        --------
-            The subset of input tuples that exist in the database.
-        """
+        """Return the subset of the requested directed triples that exist."""
         if not edges:
             return []
 
-        # asyncpg caps bind parameters at 32767; each edge uses 3 params.
-        CHUNK_SIZE = 10_000
         found: List[Tuple[str, str, str]] = []
-
-        async with self._session() as session:
-            for i in range(0, len(edges), CHUNK_SIZE):
-                chunk = edges[i : i + CHUNK_SIZE]
-                candidates = values(
-                    sa_column("src", String),
-                    sa_column("tgt", String),
-                    sa_column("rel", String),
-                    name="q",
-                ).data([(str(s), str(t), str(r)) for s, t, r in chunk])
-
-                stmt = select(candidates.c.src, candidates.c.tgt, candidates.c.rel).where(
-                    exists(
-                        select(text("1"))
-                        .select_from(_edge_table)
-                        .where(_edge_table.c.source_id == candidates.c.src)
-                        .where(_edge_table.c.target_id == candidates.c.tgt)
-                        .where(_edge_table.c.relationship_name == candidates.c.rel)
-                    )
+        statement = text("""
+            SELECT EXISTS(
+                SELECT 1 FROM graph_edge
+                WHERE source_id = :source_id
+                  AND target_id = :target_id
+                  AND relationship_name = :relationship_name
+            )
+        """)
+        async with self.sessionmaker() as session:
+            for source_id, target_id, relationship_name in edges:
+                identity = (str(source_id), str(target_id), str(relationship_name))
+                result = await session.execute(
+                    statement,
+                    {
+                        "source_id": identity[0],
+                        "target_id": identity[1],
+                        "relationship_name": identity[2],
+                    },
                 )
-
-                result = await session.execute(stmt)
-                found.extend((row[0], row[1], row[2]) for row in result.fetchall())
+                if result.scalar():
+                    found.append(identity)
 
         return found
 
     async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
-        """Retrieve all edges connected to a node.
+        """Return every incident edge with its directed source and target nodes."""
+        rows = await self._fetch_incident_edge_rows(str(node_id))
+        edges = []
+        for row in rows:
+            source = {
+                "id": row["source_id"],
+                "name": row["source_name"],
+                "type": row["source_type"],
+                **_decode_properties(row["source_properties"]),
+            }
+            target = {
+                "id": row["target_id"],
+                "name": row["target_name"],
+                "type": row["target_type"],
+                **_decode_properties(row["target_properties"]),
+            }
+            edges.append((source, row["relationship_name"], target))
+        return edges
 
-        Parameters:
-        -----------
-            node_id: The ID of the node.
-
-        Returns:
-        --------
-            A list of (source_dict, relationship_name, target_dict) tuples.
-        """
-        async with self._session() as session:
+    async def _fetch_incident_edge_rows(self, node_id: str) -> list[dict[str, Any]]:
+        """Read incident edges together with both endpoint nodes."""
+        async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
                     SELECT
-                        n.id, n.name, n.type, n.properties,
-                        e.relationship_name,
-                        m.id, m.name, m.type, m.properties
-                    FROM graph_edge e
-                    JOIN graph_node n ON n.id = e.source_id
-                    JOIN graph_node m ON m.id = e.target_id
-                    WHERE e.source_id = :nid OR e.target_id = :nid
+                        source.id AS source_id,
+                        source.name AS source_name,
+                        source.type AS source_type,
+                        source.properties AS source_properties,
+                        edge.relationship_name,
+                        edge.properties AS edge_properties,
+                        target.id AS target_id,
+                        target.name AS target_name,
+                        target.type AS target_type,
+                        target.properties AS target_properties
+                    FROM graph_edge AS edge
+                    JOIN graph_node AS source ON source.id = edge.source_id
+                    JOIN graph_node AS target ON target.id = edge.target_id
+                    WHERE edge.source_id = :node_id OR edge.target_id = :node_id
                 """),
-                {"nid": node_id},
+                {"node_id": node_id},
             )
-            edges = []
-            for row in result.fetchall():
-                src = {"id": row[0], "name": row[1], "type": row[2]}
-                if row[3]:
-                    src.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-                tgt = {"id": row[5], "name": row[6], "type": row[7]}
-                if row[8]:
-                    tgt.update(row[8] if isinstance(row[8], dict) else json.loads(row[8]))
-                edges.append((src, row[4], tgt))
-            return edges
+            return list(result.mappings().all())
 
     async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
-        """Retrieve all nodes directly connected to a given node.
-
-        Parameters:
-        -----------
-            node_id: The ID of the node.
-
-        Returns:
-        --------
-            A list of property dicts for neighboring nodes.
-        """
-        async with self._session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT DISTINCT m.id, m.name, m.type, m.properties
-                    FROM graph_edge e
-                    JOIN graph_node m ON m.id = CASE
-                        WHEN e.source_id = :nid THEN e.target_id
-                        ELSE e.source_id
-                    END
-                    WHERE e.source_id = :nid OR e.target_id = :nid
-                """),
-                {"nid": node_id},
-            )
-            return [self._parse_node_row(row) for row in result.fetchall()]
+        """Return unique incident neighbors, including the node for a self-loop."""
+        requested_id = str(node_id)
+        rows = await self._fetch_incident_edge_rows(requested_id)
+        neighbors: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            prefix = "target" if row["source_id"] == requested_id else "source"
+            neighbor = {
+                "id": row[f"{prefix}_id"],
+                "name": row[f"{prefix}_name"],
+                "type": row[f"{prefix}_type"],
+                **_decode_properties(row[f"{prefix}_properties"]),
+            }
+            neighbors[neighbor["id"]] = neighbor
+        return list(neighbors.values())
 
     async def get_connections(
         self, node_id: Union[str, UUID]
     ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
-        """Retrieve all connections (source, edge, target) for a node.
+        """Return every incident source-edge-target connection."""
+        rows = await self._fetch_incident_edge_rows(str(node_id))
+        connections = []
+        for row in rows:
+            source = {
+                "id": row["source_id"],
+                "name": row["source_name"],
+                "type": row["source_type"],
+                **_decode_properties(row["source_properties"]),
+            }
+            edge = {
+                "relationship_name": row["relationship_name"],
+                **_decode_properties(row["edge_properties"]),
+            }
+            target = {
+                "id": row["target_id"],
+                "name": row["target_name"],
+                "type": row["target_type"],
+                **_decode_properties(row["target_properties"]),
+            }
+            connections.append((source, edge, target))
+        return connections
 
-        Parameters:
-        -----------
-            node_id: The ID of the node.
+    @staticmethod
+    async def _fetch_nodes_by_id(
+        session: AsyncSession, node_ids: list[str]
+    ) -> list[tuple[str, dict[str, Any]]]:
+        if not node_ids:
+            return []
+        result = await session.execute(
+            text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
+            {"ids": node_ids},
+        )
+        nodes = []
+        for row in result.mappings().all():
+            properties = {
+                "name": row["name"],
+                "type": row["type"],
+                **_decode_properties(row["properties"]),
+            }
+            nodes.append((row["id"], properties))
+        return nodes
 
-        Returns:
-        --------
-            A list of (source_dict, edge_dict, target_dict) tuples.
-        """
-        nid = str(node_id)
-
-        async with self._session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT
-                        n.id, n.name, n.type, n.properties,
-                        e.relationship_name, e.properties AS edge_props,
-                        m.id, m.name, m.type, m.properties
-                    FROM graph_edge e
-                    JOIN graph_node n ON n.id = e.source_id
-                    JOIN graph_node m ON m.id = e.target_id
-                    WHERE e.source_id = :nid OR e.target_id = :nid
-                """),
-                {"nid": nid},
+    @staticmethod
+    async def _fetch_edges_touching(
+        session: AsyncSession, node_ids: list[str]
+    ) -> list[tuple[str, str, str, dict[str, Any]]]:
+        if not node_ids:
+            return []
+        result = await session.execute(
+            text("""
+                SELECT source_id, target_id, relationship_name, properties
+                FROM graph_edge
+                WHERE source_id = ANY(:ids) OR target_id = ANY(:ids)
+            """),
+            {"ids": node_ids},
+        )
+        return [
+            (
+                row["source_id"],
+                row["target_id"],
+                row["relationship_name"],
+                _decode_properties(row["properties"]),
             )
+            for row in result.mappings().all()
+        ]
 
-            connections = []
-            for row in result.fetchall():
-                src = {"id": row[0], "name": row[1], "type": row[2]}
-                if row[3]:
-                    src.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-
-                edge = {"relationship_name": row[4]}
-                if row[5]:
-                    edge_props = row[5] if isinstance(row[5], dict) else json.loads(row[5])
-                    edge.update(edge_props)
-
-                tgt = {"id": row[6], "name": row[7], "type": row[8]}
-                if row[9]:
-                    tgt.update(row[9] if isinstance(row[9], dict) else json.loads(row[9]))
-
-                connections.append((src, edge, tgt))
-            return connections
+    @staticmethod
+    async def _fetch_edges_within(
+        session: AsyncSession, node_ids: list[str]
+    ) -> list[tuple[str, str, str, dict[str, Any]]]:
+        if not node_ids:
+            return []
+        result = await session.execute(
+            text("""
+                SELECT source_id, target_id, relationship_name, properties
+                FROM graph_edge
+                WHERE source_id = ANY(:ids) AND target_id = ANY(:ids)
+            """),
+            {"ids": node_ids},
+        )
+        return [
+            (
+                row["source_id"],
+                row["target_id"],
+                row["relationship_name"],
+                _decode_properties(row["properties"]),
+            )
+            for row in result.mappings().all()
+        ]
 
     async def get_graph_data(
         self,
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
-        """Retrieve all nodes and edges in the graph.
-
-        Returns:
-        --------
-            A tuple of (nodes, edges) where nodes are (id, props) and
-            edges are (source_id, target_id, relationship_name, props).
-        """
-        async with self._session() as session:
+        """Return every node as (id, properties) and every edge as (source, target, name, props)."""
+        async with self.sessionmaker() as session:
             node_result = await session.execute(
                 text("SELECT id, name, type, properties FROM graph_node")
             )
             nodes = []
-            for row in node_result.fetchall():
-                data = {"name": row[1], "type": row[2]}
-                if row[3]:
-                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-                nodes.append((row[0], data))
-
+            for row in node_result.mappings().all():
+                properties = {
+                    "name": row["name"],
+                    "type": row["type"],
+                    **_decode_properties(row["properties"]),
+                }
+                nodes.append((row["id"], properties))
             if not nodes:
                 return [], []
 
             edge_result = await session.execute(
-                text("""
-                    SELECT source_id, target_id, relationship_name, properties
-                    FROM graph_edge
-                """)
+                text("SELECT source_id, target_id, relationship_name, properties FROM graph_edge")
             )
-            edges = []
-            for row in edge_result.fetchall():
-                props = {}
-                if row[3]:
-                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-                edges.append((row[0], row[1], row[2], props))
-
+            edges = [
+                (
+                    row["source_id"],
+                    row["target_id"],
+                    row["relationship_name"],
+                    _decode_properties(row["properties"]),
+                )
+                for row in edge_result.mappings().all()
+            ]
             return nodes, edges
 
     async def get_id_filtered_graph_data(
@@ -711,284 +609,108 @@ class PostgresAdapter(GraphDBInterface):
             return [], []
         ids = [str(i) for i in target_ids]
 
-        async with self._session() as session:
-            edge_result = await session.execute(
-                text("""
-                    SELECT source_id, target_id, relationship_name, properties
-                    FROM graph_edge
-                    WHERE source_id = ANY(:ids) OR target_id = ANY(:ids)
-                """),
-                {"ids": ids},
-            )
-            edges = []
-            endpoint_ids = set()
-            for row in edge_result.fetchall():
-                props = {}
-                if row[3]:
-                    props = row[3] if isinstance(row[3], dict) else json.loads(row[3])
-                endpoint_ids.update((row[0], row[1]))
-                edges.append((row[0], row[1], row[2], props))
-
+        async with self.sessionmaker() as session:
+            edges = await self._fetch_edges_touching(session, ids)
+            endpoint_ids = {
+                endpoint
+                for source_id, target_id, _, _ in edges
+                for endpoint in (source_id, target_id)
+            }
             if not endpoint_ids:
                 return [], []
-
-            node_result = await session.execute(
-                text("SELECT id, name, type, properties FROM graph_node WHERE id = ANY(:ids)"),
-                {"ids": list(endpoint_ids)},
-            )
-            nodes = []
-            for row in node_result.fetchall():
-                data = {"name": row[1], "type": row[2]}
-                if row[3]:
-                    data.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-                nodes.append((row[0], data))
-
+            nodes = await self._fetch_nodes_by_id(session, list(endpoint_ids))
             return nodes, edges
 
     async def get_filtered_graph_data(
         self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
     ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
-        """Retrieve nodes matching attribute filters, plus edges between them.
-
-        Parameters:
-        -----------
-            attribute_filters: A list of {attr: [values]} dicts. Only 'id',
-                'name', and 'type' are valid filter attributes.
-
-        Returns:
-        --------
-            A tuple of (nodes, edges) matching the filters.
-        """
+        """Return core-field matches and the edges induced by those nodes."""
         if not attribute_filters:
             return await self.get_graph_data()
 
-        # Validate attribute names against whitelist to prevent SQL injection
-        where_parts = []
-        params = {}
-        for i, filter_dict in enumerate(attribute_filters):
+        filters: list[tuple[str, set[str]]] = []
+        for filter_dict in attribute_filters:
             for attr, filter_values in filter_dict.items():
                 if attr not in self._ALLOWED_FILTER_ATTRS:
                     raise ValueError(f"Invalid filter attribute: {attr!r}")
-                param = f"filt_{i}_{attr}"
-                where_parts.append(f"n.{attr} = ANY(:{param})")
-                params[param] = filter_values
+                filters.append((attr, {str(value) for value in filter_values}))
 
-        if not where_parts:
+        if not filters:
             return await self.get_graph_data()
 
-        where_clause = " AND ".join(where_parts)
-
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text(f"""
-                    WITH filtered_nodes AS (
-                        SELECT id, name, type, properties
-                        FROM graph_node n
-                        WHERE {where_clause}
-                    )
-                    SELECT 'node' AS kind, fn.id, fn.name, fn.type, fn.properties,
-                           NULL AS source_id, NULL AS target_id,
-                           NULL AS relationship_name, NULL AS edge_props
-                    FROM filtered_nodes fn
-                    UNION ALL
-                    SELECT 'edge', NULL, NULL, NULL, NULL,
-                           e.source_id, e.target_id,
-                           e.relationship_name, e.properties
-                    FROM graph_edge e
-                    WHERE e.source_id IN (SELECT id FROM filtered_nodes)
-                      AND e.target_id IN (SELECT id FROM filtered_nodes)
-                """),
-                params,
+                text("SELECT id, name, type, properties FROM graph_node")
             )
-
             nodes = []
-            edges = []
-            for row in result.fetchall():
-                if row[0] == "node":
-                    data = {"name": row[2], "type": row[3]}
-                    if row[4]:
-                        data.update(row[4] if isinstance(row[4], dict) else json.loads(row[4]))
-                    nodes.append((row[1], data))
-                else:
-                    props = {}
-                    if row[8]:
-                        props = row[8] if isinstance(row[8], dict) else json.loads(row[8])
-                    edges.append((row[5], row[6], row[7], props))
+            for row in result.mappings().all():
+                if all(str(row[attribute]) in values for attribute, values in filters):
+                    properties = {
+                        "name": row["name"],
+                        "type": row["type"],
+                        **_decode_properties(row["properties"]),
+                    }
+                    nodes.append((row["id"], properties))
 
+            edges = await self._fetch_edges_within(session, [node_id for node_id, _ in nodes])
             return nodes, edges
 
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
-        """Retrieve a subgraph containing matching nodes, their neighbors, and interconnecting edges.
+        """Return matching primary nodes and their qualifying neighbors."""
+        if node_name_filter_operator not in {"OR", "AND"}:
+            raise ValueError("node_name_filter_operator must be 'OR' or 'AND'")
+        if not node_name:
+            return [], []
 
-        Parameters:
-        -----------
-            node_type: The DataPoint subclass whose __name__ is the type label.
-            node_name: List of node names to match.
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                text("SELECT id FROM graph_node WHERE type = :type AND name = ANY(:names)"),
+                {"type": node_type.__name__, "names": [str(name) for name in node_name]},
+            )
+            primary_ids = {row["id"] for row in result.mappings().all()}
+            if not primary_ids:
+                return [], []
 
-        Returns:
-        --------
-            A tuple of (nodes, edges) for the subgraph.
-        """
-        label = node_type.__name__
-
-        # OR: neighbor of any primary node qualifies
-        # AND: neighbor must be connected to every primary node
-        if node_name_filter_operator == "OR":
-            neighbor_cte = """
-                    neighbor_ids AS (
-                        SELECT DISTINCT CASE
-                            WHEN e.source_id IN (SELECT id FROM primary_nodes)
-                            THEN e.target_id ELSE e.source_id
-                        END AS id
-                        FROM graph_edge e
-                        WHERE e.source_id IN (SELECT id FROM primary_nodes)
-                           OR e.target_id IN (SELECT id FROM primary_nodes)
-                    )"""
-        else:
-            neighbor_cte = """
-                    neighbor_ids AS (
-                        SELECT nbr_id AS id FROM (
-                            SELECT CASE
-                                WHEN e.source_id IN (SELECT id FROM primary_nodes)
-                                THEN e.target_id ELSE e.source_id
-                            END AS nbr_id,
-                            CASE
-                                WHEN e.source_id IN (SELECT id FROM primary_nodes)
-                                THEN e.source_id ELSE e.target_id
-                            END AS primary_id
-                            FROM graph_edge e
-                            WHERE e.source_id IN (SELECT id FROM primary_nodes)
-                               OR e.target_id IN (SELECT id FROM primary_nodes)
-                        ) sub
-                        GROUP BY nbr_id
-                        HAVING COUNT(DISTINCT primary_id) = :primary_count
-                    )"""
-
-        query_str = f"""
-                    WITH primary_nodes AS (
-                        SELECT DISTINCT id
-                        FROM graph_node
-                        WHERE type = :label AND name = ANY(:names)
-                    ),
-                    {neighbor_cte},
-                    all_ids AS (
-                        SELECT id FROM primary_nodes
-                        UNION
-                        SELECT id FROM neighbor_ids
-                    )
-                    SELECT 'node' AS kind,
-                           n.id, n.name, n.type, n.properties,
-                           NULL AS source_id, NULL AS target_id,
-                           NULL AS relationship_name, NULL AS edge_props
-                    FROM graph_node n
-                    WHERE n.id IN (SELECT id FROM all_ids)
-                    UNION ALL
-                    SELECT 'edge', NULL, NULL, NULL, NULL,
-                           e.source_id, e.target_id,
-                           e.relationship_name, e.properties
-                    FROM graph_edge e
-                    WHERE e.source_id IN (SELECT id FROM all_ids)
-                      AND e.target_id IN (SELECT id FROM all_ids)
-                """
-
-        params = {"label": label, "names": node_name}
-        if node_name_filter_operator != "OR":
-            params["primary_count"] = len(node_name)
-
-        async with self._session() as session:
-            result = await session.execute(text(query_str), params)
-
-            nodes = []
-            edges = []
-            for row in result.fetchall():
-                if row[0] == "node":
-                    data = {"name": row[2], "type": row[3]}
-                    if row[4]:
-                        data.update(row[4] if isinstance(row[4], dict) else json.loads(row[4]))
-                    nodes.append((row[1], data))
-                else:
-                    props = {}
-                    if row[8]:
-                        props = row[8] if isinstance(row[8], dict) else json.loads(row[8])
-                    edges.append((row[5], row[6], row[7], props))
-
+            incident_edges = await self._fetch_edges_touching(session, list(primary_ids))
+            neighbor_ids = _select_nodeset_neighbor_ids(
+                primary_ids,
+                [(source_id, target_id) for source_id, target_id, _, _ in incident_edges],
+                node_name_filter_operator,
+            )
+            subgraph_ids = list(primary_ids | neighbor_ids)
+            nodes = await self._fetch_nodes_by_id(session, subgraph_ids)
+            edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
-        """Compute graph metrics (node/edge counts, degree, density, components).
+        """Compute the supported graph metrics in Python."""
+        async with self.sessionmaker() as session:
+            node_result = await session.execute(text("SELECT id FROM graph_node"))
+            edge_result = await session.execute(text("SELECT source_id, target_id FROM graph_edge"))
+            node_ids = [row["id"] for row in node_result.mappings().all()]
+            edge_pairs = [
+                (row["source_id"], row["target_id"]) for row in edge_result.mappings().all()
+            ]
+        num_nodes = len(node_ids)
+        num_edges = len(edge_pairs)
+        component_sizes = _component_sizes(node_ids, edge_pairs)
 
-        Parameters:
-        -----------
-            include_optional: If True, also compute self-loop count.
-
-        Returns:
-        --------
-            A dict of metric names to values. Diameter, avg shortest path,
-            and clustering return -1 (not computed).
-        """
-        async with self._session() as session:
-            n_result = await session.execute(text("SELECT count(*) FROM graph_node"))
-            num_nodes = n_result.scalar()
-            e_result = await session.execute(text("SELECT count(*) FROM graph_edge"))
-            num_edges = e_result.scalar()
-
-            mean_degree = (2 * num_edges) / num_nodes if num_nodes else None
-            edge_density = num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
-
-            # Connected components via recursive CTE
-            comp_result = await session.execute(
-                text("""
-                WITH RECURSIVE component AS (
-                    SELECT id AS node_id, id AS comp_root
-                    FROM graph_node
-                    UNION
-                    SELECT
-                        CASE WHEN e.source_id = c.node_id THEN e.target_id ELSE e.source_id END,
-                        c.comp_root
-                    FROM component c
-                    JOIN graph_edge e ON e.source_id = c.node_id OR e.target_id = c.node_id
-                ),
-                node_comp AS (
-                    SELECT node_id, MIN(comp_root) AS comp_id
-                    FROM component
-                    GROUP BY node_id
-                )
-                SELECT comp_id, count(*) AS sz
-                FROM node_comp
-                GROUP BY comp_id
-                ORDER BY sz DESC
-            """)
-            )
-            comp_rows = comp_result.fetchall()
-            num_components = len(comp_rows)
-            component_sizes = [row[1] for row in comp_rows]
-
-            metrics = {
-                "num_nodes": num_nodes,
-                "num_edges": num_edges,
-                "mean_degree": mean_degree,
-                "edge_density": edge_density,
-                "num_connected_components": num_components,
-                "sizes_of_connected_components": component_sizes,
-            }
-
-            if include_optional:
-                sl_result = await session.execute(
-                    text("SELECT count(*) FROM graph_edge WHERE source_id = target_id")
-                )
-                metrics["num_selfloops"] = sl_result.scalar()
-                metrics["diameter"] = -1
-                metrics["avg_shortest_path_length"] = -1
-                metrics["avg_clustering"] = -1
-            else:
-                metrics["num_selfloops"] = -1
-                metrics["diameter"] = -1
-                metrics["avg_shortest_path_length"] = -1
-                metrics["avg_clustering"] = -1
-
-            return metrics
+        return {
+            "num_nodes": num_nodes,
+            "num_edges": num_edges,
+            "mean_degree": (2 * num_edges) / num_nodes if num_nodes else None,
+            "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
+            "num_connected_components": len(component_sizes),
+            "sizes_of_connected_components": component_sizes,
+            "num_selfloops": sum(source == target for source, target in edge_pairs)
+            if include_optional
+            else -1,
+            "diameter": -1,
+            "avg_shortest_path_length": -1,
+            "avg_clustering": -1,
+        }
 
     async def get_neighborhood(
         self,
@@ -996,242 +718,143 @@ class PostgresAdapter(GraphDBInterface):
         depth: int = 1,
         edge_types: Optional[List[str]] = None,
     ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
-        """Get the k-hop neighborhood subgraph around seed nodes.
-
-        Uses a single recursive CTE query to collect all node IDs within
-        `depth` hops, then returns nodes and edges for that subgraph.
-        """
+        """Walk incident edges breadth-first and return the induced subgraph."""
+        if depth < 0:
+            raise ValueError("depth must be non-negative")
         if not node_ids:
             return [], []
 
-        # Optional edge type filter for the CTE traversal
-        edge_filter = ""
-        if edge_types:
-            placeholders = ", ".join(f":et_{i}" for i in range(len(edge_types)))
-            edge_filter = f"AND e.relationship_name IN ({placeholders})"
+        reached = {str(node_id) for node_id in node_ids}
+        frontier = set(reached)
+        unfiltered_hop = text("""
+            SELECT source_id, target_id FROM graph_edge
+            WHERE source_id = ANY(:ids) OR target_id = ANY(:ids)
+        """)
+        filtered_hop = text("""
+            SELECT source_id, target_id FROM graph_edge
+            WHERE (source_id = ANY(:ids) OR target_id = ANY(:ids))
+              AND relationship_name = ANY(:edge_types)
+        """)
 
-        # Single query: recursive CTE finds reachable IDs, then joins
-        # nodes and edges in two unioned result sets distinguished by 'kind'
-        query_str = f"""
-            WITH RECURSIVE neighborhood(id, hops) AS (
-                SELECT unnest(CAST(:seeds AS text[])), 0
-              UNION
-                SELECT CASE WHEN e.source_id = n.id THEN e.target_id
-                            ELSE e.source_id END,
-                       n.hops + 1
-                FROM neighborhood n
-                JOIN graph_edge e ON (e.source_id = n.id OR e.target_id = n.id)
-                    {edge_filter}
-                WHERE n.hops < :depth
-            ),
-            ids AS (SELECT DISTINCT id FROM neighborhood)
+        async with self.sessionmaker() as session:
+            for _ in range(depth):
+                if not frontier:
+                    break
+                params = {"ids": list(frontier)}
+                statement = unfiltered_hop
+                if edge_types:
+                    statement = filtered_hop
+                    params["edge_types"] = [str(edge_type) for edge_type in edge_types]
+                result = await session.execute(statement, params)
 
-            SELECT 'node' AS kind,
-                   gn.id, gn.name, gn.type, gn.properties,
-                   NULL AS source_id, NULL AS target_id,
-                   NULL AS relationship_name, NULL AS edge_properties
-            FROM graph_node gn
-            JOIN ids ON gn.id = ids.id
+                next_frontier = set()
+                for row in result.mappings().all():
+                    for endpoint in (row["source_id"], row["target_id"]):
+                        if endpoint not in reached:
+                            reached.add(endpoint)
+                            next_frontier.add(endpoint)
+                frontier = next_frontier
 
-            UNION ALL
-
-            SELECT 'edge' AS kind,
-                   NULL, NULL, NULL, NULL,
-                   ge.source_id, ge.target_id,
-                   ge.relationship_name, ge.properties
-            FROM graph_edge ge
-            WHERE ge.source_id IN (SELECT id FROM ids)
-              AND ge.target_id IN (SELECT id FROM ids)
-        """
-
-        params: Dict[str, Any] = {"seeds": list(node_ids), "depth": depth}
-        if edge_types:
-            for i, et in enumerate(edge_types):
-                params[f"et_{i}"] = et
-
-        async with self._session() as session:
-            result = await session.execute(text(query_str), params)
-
-            nodes = []
-            edges = []
-            for row in result.fetchall():
-                if row.kind == "node":
-                    data = self._parse_node_row(row)
-                    data.pop("id", None)
-                    nodes.append((row.id, data))
-                else:
-                    props = {}
-                    if row.edge_properties is not None:
-                        props = (
-                            row.edge_properties
-                            if isinstance(row.edge_properties, dict)
-                            else json.loads(row.edge_properties)
-                        )
-                    edges.append((row.source_id, row.target_id, row.relationship_name, props))
-
+            subgraph_ids = list(reached)
+            nodes = await self._fetch_nodes_by_id(session, subgraph_ids)
+            edges = await self._fetch_edges_within(session, subgraph_ids)
             return nodes, edges
 
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self._write_lock:
-            async with self._session() as session:
-                await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
-                await session.commit()
-
-    # ------------------------------------------------------------------ #
-    # Graph provenance (COG-5522 Part 1).                                  #
-    #                                                                      #
-    # The four provenance fields live in declared ``text[]`` columns on    #
-    # both graph_node and graph_edge — never inside the JSON ``properties`` #
-    # blob — so delete/rollback can filter by source ref, dataset id, or    #
-    # pipeline run id with an array-membership scan. The pure set-merge /   #
-    # derive logic is shared with every other adapter via                  #
-    # ``provenance.source_ref_state``; only the storage I/O is per-backend. #
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _props_dict(raw: Any) -> Dict[str, Any]:
-        """Decode a JSONB ``properties`` value, tolerating dict, str, or empty."""
-        if not raw:
-            return {}
-        return raw if isinstance(raw, dict) else json.loads(raw)
-
-    @staticmethod
-    def _node_identity_row(node_id: str) -> dict:
-        return {"id": node_id}
-
-    @staticmethod
-    def _edge_identity_row(edge: EdgeIdentity) -> dict:
-        return {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
-
-    async def _read_node_provenance(
-        self, node_ids: List[str]
-    ) -> Dict[str, Tuple[List[str], List[str]]]:
-        """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
-        async with self._session() as session:
-            result = await session.execute(
-                text(
-                    "SELECT id, source_ref_keys, source_run_refs "
-                    "FROM graph_node WHERE id = ANY(:ids)"
-                ),
-                {"ids": list(node_ids)},
-            )
-            return {row[0]: (list(row[1] or []), list(row[2] or [])) for row in result.fetchall()}
-
-    async def _write_node_provenance(self, batch: List[dict]) -> None:
-        """Overwrite the four provenance columns for each ``{id, refs, ...}`` row.
-
-        Casts are explicit so asyncpg sends Python lists as ``text[]`` instead of
-        failing to infer the parameter type.
-        """
-        if not batch:
-            return
-        async with self._session() as session:
-            for row in batch:
-                await session.execute(
-                    text(
-                        "UPDATE graph_node SET "
-                        "source_ref_keys = CAST(:refs AS text[]), "
-                        "source_dataset_ids = CAST(:datasets AS text[]), "
-                        "source_run_ids = CAST(:runs AS text[]), "
-                        "source_run_refs = CAST(:run_refs AS text[]), "
-                        "updated_at = now() WHERE id = :id"
-                    ),
-                    {
-                        "id": row["id"],
-                        "refs": row["refs"],
-                        "datasets": row["datasets"],
-                        "runs": row["runs"],
-                        "run_refs": row["run_refs"],
-                    },
-                )
+        async with self.sessionmaker() as session:
+            await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
 
-    async def _read_edge_provenance(
-        self, edges: List[EdgeIdentity]
-    ) -> Dict[EdgeIdentity, Tuple[List[str], List[str]]]:
-        """Return ``{edge: (source_ref_keys, source_run_refs)}`` for existing edges."""
-        src = [e.source_id for e in edges]
-        tgt = [e.target_id for e in edges]
-        rel = [e.relationship_name for e in edges]
-        async with self._session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT e.source_id, e.target_id, e.relationship_name,
-                           e.source_ref_keys, e.source_run_refs
-                    FROM graph_edge e
-                    JOIN unnest(CAST(:src AS text[]), CAST(:tgt AS text[]), CAST(:rel AS text[]))
-                         AS q(s, t, r)
-                      ON e.source_id = q.s AND e.target_id = q.t AND e.relationship_name = q.r
-                """),
-                {"src": src, "tgt": tgt, "rel": rel},
-            )
-            out: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
-            for row in result.fetchall():
-                edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
-                out[edge] = (list(row[3] or []), list(row[4] or []))
-            return out
+    # Provenance is stored in four text-array columns on both graph tables.
 
-    async def _write_edge_provenance(self, batch: List[dict]) -> None:
-        """Overwrite the four provenance columns for each ``{s, t, rel, refs, ...}`` row."""
-        if not batch:
-            return
-        async with self._session() as session:
-            for row in batch:
-                await session.execute(
-                    text(
-                        "UPDATE graph_edge SET "
-                        "source_ref_keys = CAST(:refs AS text[]), "
-                        "source_dataset_ids = CAST(:datasets AS text[]), "
-                        "source_run_ids = CAST(:runs AS text[]), "
-                        "source_run_refs = CAST(:run_refs AS text[]), "
-                        "updated_at = now() "
-                        "WHERE source_id = :s AND target_id = :t AND relationship_name = :rel"
-                    ),
-                    {
-                        "s": row["s"],
-                        "t": row["t"],
-                        "rel": row["rel"],
-                        "refs": row["refs"],
-                        "datasets": row["datasets"],
-                        "runs": row["runs"],
-                        "run_refs": row["run_refs"],
-                    },
-                )
-            await session.commit()
-
-    async def _apply_source_ref_change(
+    async def _update_node_provenance(
         self,
-        artifacts,
-        read_provenance,
-        write_provenance,
-        identity_row,
-        transition,
+        session: AsyncSession,
+        node_ids: list[str],
+        transition: Callable[[list[str], list[str]], ProvenanceColumns],
     ) -> None:
-        """Read each artifact's provenance, apply a pure transition, write it back.
+        """Lock each node and apply a provenance state transition."""
+        lock = text("""
+            SELECT source_ref_keys, source_run_refs
+            FROM graph_node
+            WHERE id = :id
+            FOR UPDATE
+        """)
+        update = text("""
+            UPDATE graph_node SET
+                source_ref_keys = CAST(:source_ref_keys AS text[]),
+                source_dataset_ids = CAST(:source_dataset_ids AS text[]),
+                source_run_ids = CAST(:source_run_ids AS text[]),
+                source_run_refs = CAST(:source_run_refs AS text[]),
+                updated_at = now()
+            WHERE id = :id
+        """)
+        for node_id in sorted({str(node_id) for node_id in node_ids}):
+            result = await session.execute(lock, {"id": node_id})
+            current = result.first()
+            if current is None:
+                continue
+            updated = transition(list(current[0] or []), list(current[1] or []))
+            await session.execute(
+                update,
+                {
+                    "id": node_id,
+                    "source_ref_keys": updated.source_ref_keys,
+                    "source_dataset_ids": updated.source_dataset_ids,
+                    "source_run_ids": updated.source_run_ids,
+                    "source_run_refs": updated.source_run_refs,
+                },
+            )
 
-        Shared by attach/remove for both nodes and edges. The write lock serializes
-        this read-modify-write within one adapter instance so concurrent explicit
-        attach/remove calls do not overwrite each other's provenance updates.
-        """
-        if not artifacts:
-            return
-        async with self._write_lock:
-            current = await read_provenance(artifacts)
-            batch = []
-            for identity, (keys, run_refs) in current.items():
-                cols = transition(keys, run_refs)
-                batch.append(
-                    {
-                        **identity_row(identity),
-                        "refs": cols.source_ref_keys,
-                        "datasets": cols.source_dataset_ids,
-                        "runs": cols.source_run_ids,
-                        "run_refs": cols.source_run_refs,
-                    }
-                )
-            await write_provenance(batch)
+    async def _update_edge_provenance(
+        self,
+        session: AsyncSession,
+        edges: list[EdgeIdentity],
+        transition: Callable[[list[str], list[str]], ProvenanceColumns],
+    ) -> None:
+        """Lock each edge and apply a provenance state transition."""
+        lock = text("""
+            SELECT source_ref_keys, source_run_refs
+            FROM graph_edge
+            WHERE source_id = :source_id
+              AND target_id = :target_id
+              AND relationship_name = :relationship_name
+            FOR UPDATE
+        """)
+        update = text("""
+            UPDATE graph_edge SET
+                source_ref_keys = CAST(:source_ref_keys AS text[]),
+                source_dataset_ids = CAST(:source_dataset_ids AS text[]),
+                source_run_ids = CAST(:source_run_ids AS text[]),
+                source_run_refs = CAST(:source_run_refs AS text[]),
+                updated_at = now()
+            WHERE source_id = :source_id
+              AND target_id = :target_id
+              AND relationship_name = :relationship_name
+        """)
+        for source_id, target_id, relationship_name in _edge_identities(edges):
+            identity = {
+                "source_id": source_id,
+                "target_id": target_id,
+                "relationship_name": relationship_name,
+            }
+            result = await session.execute(lock, identity)
+            current = result.first()
+            if current is None:
+                continue
+            updated = transition(list(current[0] or []), list(current[1] or []))
+            await session.execute(
+                update,
+                {
+                    **identity,
+                    "source_ref_keys": updated.source_ref_keys,
+                    "source_dataset_ids": updated.source_dataset_ids,
+                    "source_run_ids": updated.source_run_ids,
+                    "source_run_refs": updated.source_run_refs,
+                },
+            )
 
     async def attach_node_source_refs(
         self,
@@ -1241,16 +864,16 @@ class PostgresAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
-        add_keys = list(source_ref_keys)
-        await self._apply_source_ref_change(
-            node_ids,
-            self._read_node_provenance,
-            self._write_node_provenance,
-            self._node_identity_row,
-            lambda keys, run_refs: provenance_after_attach(
-                keys, run_refs, add_keys, pipeline_run_id
-            ),
-        )
+        keys_to_add = list(source_ref_keys)
+        async with self.sessionmaker() as session:
+            await self._update_node_provenance(
+                session,
+                node_ids,
+                lambda keys, run_refs: provenance_after_attach(
+                    keys, run_refs, keys_to_add, pipeline_run_id
+                ),
+            )
+            await session.commit()
 
     async def attach_edge_source_refs(
         self,
@@ -1260,16 +883,16 @@ class PostgresAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
-        add_keys = list(source_ref_keys)
-        await self._apply_source_ref_change(
-            edges,
-            self._read_edge_provenance,
-            self._write_edge_provenance,
-            self._edge_identity_row,
-            lambda keys, run_refs: provenance_after_attach(
-                keys, run_refs, add_keys, pipeline_run_id
-            ),
-        )
+        keys_to_add = list(source_ref_keys)
+        async with self.sessionmaker() as session:
+            await self._update_edge_provenance(
+                session,
+                edges,
+                lambda keys, run_refs: provenance_after_attach(
+                    keys, run_refs, keys_to_add, pipeline_run_id
+                ),
+            )
+            await session.commit()
 
     async def remove_node_source_refs(
         self,
@@ -1278,14 +901,14 @@ class PostgresAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
-        remove_keys = list(source_ref_keys)
-        await self._apply_source_ref_change(
-            node_ids,
-            self._read_node_provenance,
-            self._write_node_provenance,
-            self._node_identity_row,
-            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
-        )
+        keys_to_remove = list(source_ref_keys)
+        async with self.sessionmaker() as session:
+            await self._update_node_provenance(
+                session,
+                node_ids,
+                lambda keys, run_refs: provenance_after_remove(keys, run_refs, keys_to_remove),
+            )
+            await session.commit()
 
     async def remove_edge_source_refs(
         self,
@@ -1294,69 +917,66 @@ class PostgresAdapter(GraphDBInterface):
     ) -> None:
         if not source_ref_keys:
             return
-        remove_keys = list(source_ref_keys)
-        await self._apply_source_ref_change(
-            edges,
-            self._read_edge_provenance,
-            self._write_edge_provenance,
-            self._edge_identity_row,
-            lambda keys, run_refs: provenance_after_remove(keys, run_refs, remove_keys),
-        )
+        keys_to_remove = list(source_ref_keys)
+        async with self.sessionmaker() as session:
+            await self._update_edge_provenance(
+                session,
+                edges,
+                lambda keys, run_refs: provenance_after_remove(keys, run_refs, keys_to_remove),
+            )
+            await session.commit()
 
     async def delete_edge_triples(self, edges: list[EdgeIdentity]) -> None:
         """Delete edges by (source, target, relationship); keep the endpoint nodes."""
         if not edges:
             return
-        src = [e.source_id for e in edges]
-        tgt = [e.target_id for e in edges]
-        rel = [e.relationship_name for e in edges]
-        async with self._write_lock:
-            async with self._session() as session:
+        statement = text("""
+            DELETE FROM graph_edge
+            WHERE source_id = :source_id
+              AND target_id = :target_id
+              AND relationship_name = :relationship_name
+        """)
+        async with self.sessionmaker() as session:
+            for source_id, target_id, relationship_name in _edge_identities(edges):
                 await session.execute(
-                    text("""
-                        DELETE FROM graph_edge e
-                        USING unnest(CAST(:src AS text[]), CAST(:tgt AS text[]),
-                                     CAST(:rel AS text[])) AS q(s, t, r)
-                        WHERE e.source_id = q.s AND e.target_id = q.t
-                          AND e.relationship_name = q.r
-                    """),
-                    {"src": src, "tgt": tgt, "rel": rel},
+                    statement,
+                    {
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "relationship_name": relationship_name,
+                    },
                 )
-                await session.commit()
+            await session.commit()
 
     async def get_node_delete_data(self, node_ids: list[str]) -> dict[str, NodeDeleteData]:
         if not node_ids:
             return {}
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
                     SELECT id, name, type, properties,
                            source_ref_keys, source_dataset_ids, source_run_ids, source_run_refs
                     FROM graph_node WHERE id = ANY(:ids)
                 """),
-                {"ids": list(node_ids)},
+                {"ids": [str(node_id) for node_id in node_ids]},
             )
             out: dict[str, NodeDeleteData] = {}
-            for row in result.fetchall():
-                properties = self._props_dict(row[3])
-                # Reconstruct the flat payload the way get_node does: core columns
-                # merged over the JSON blob.
-                properties["id"] = row[0]
-                properties["name"] = row[1]
-                properties["type"] = row[2]
+            for row in result.mappings().all():
+                properties = _decode_properties(row["properties"])
+                properties.update(id=row["id"], name=row["name"], type=row["type"])
                 metadata = properties.get("metadata") or {}
                 indexed_fields = (
                     list(metadata.get("index_fields") or []) if isinstance(metadata, dict) else []
                 )
-                out[row[0]] = NodeDeleteData(
-                    node_id=row[0],
-                    node_type=row[2] or "",
+                out[row["id"]] = NodeDeleteData(
+                    node_id=row["id"],
+                    node_type=row["type"] or "",
                     indexed_fields=indexed_fields,
                     node_properties=properties,
-                    source_ref_keys=list(row[4] or []),
-                    source_dataset_ids=list(row[5] or []),
-                    source_run_ids=list(row[6] or []),
-                    source_run_refs=list(row[7] or []),
+                    source_ref_keys=list(row["source_ref_keys"] or []),
+                    source_dataset_ids=list(row["source_dataset_ids"] or []),
+                    source_run_ids=list(row["source_run_ids"] or []),
+                    source_run_refs=list(row["source_run_refs"] or []),
                 )
             return out
 
@@ -1365,109 +985,127 @@ class PostgresAdapter(GraphDBInterface):
     ) -> dict[EdgeIdentity, EdgeDeleteData]:
         if not edges:
             return {}
-        src = [e.source_id for e in edges]
-        tgt = [e.target_id for e in edges]
-        rel = [e.relationship_name for e in edges]
-        async with self._session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT e.source_id, e.target_id, e.relationship_name, e.properties,
-                           e.source_ref_keys, e.source_dataset_ids,
-                           e.source_run_ids, e.source_run_refs
-                    FROM graph_edge e
-                    JOIN unnest(CAST(:src AS text[]), CAST(:tgt AS text[]), CAST(:rel AS text[]))
-                         AS q(s, t, r)
-                      ON e.source_id = q.s AND e.target_id = q.t AND e.relationship_name = q.r
-                """),
-                {"src": src, "tgt": tgt, "rel": rel},
-            )
-            rows = result.fetchall()
-
+        statement = text("""
+            SELECT source_id, target_id, relationship_name, properties,
+                   source_ref_keys, source_dataset_ids, source_run_ids, source_run_refs
+            FROM graph_edge
+            WHERE source_id = :source_id
+              AND target_id = :target_id
+              AND relationship_name = :relationship_name
+        """)
         # Lazy import: prepare_edges_for_storage lives in the modules layer, whose
         # package __init__ imports get_graph_engine -> this adapter. Importing it at
         # module load would create a cycle; at delete-time it is safe.
         from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 
         out: dict[EdgeIdentity, EdgeDeleteData] = {}
-        for row in rows:
-            edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
-            properties = self._props_dict(row[3])
-            # Stored edge_text wins; fall back to relationship_name when absent.
-            edge_text = get_edge_retrieval_text(properties.get("edge_text"), edge.relationship_name)
-            out[edge] = EdgeDeleteData(
-                edge=edge,
-                edge_text=edge_text,
-                edge_properties=properties,
-                source_ref_keys=list(row[4] or []),
-                source_dataset_ids=list(row[5] or []),
-                source_run_ids=list(row[6] or []),
-                source_run_refs=list(row[7] or []),
-            )
+        async with self.sessionmaker() as session:
+            for source_id, target_id, relationship_name in _edge_identities(edges):
+                result = await session.execute(
+                    statement,
+                    {
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "relationship_name": relationship_name,
+                    },
+                )
+                row = result.mappings().first()
+                if row is None:
+                    continue
+
+                edge = EdgeIdentity(
+                    source_id=row["source_id"],
+                    target_id=row["target_id"],
+                    relationship_name=row["relationship_name"],
+                )
+                properties = _decode_properties(row["properties"])
+                out[edge] = EdgeDeleteData(
+                    edge=edge,
+                    edge_text=get_edge_retrieval_text(
+                        properties.get("edge_text"), edge.relationship_name
+                    ),
+                    edge_properties=properties,
+                    source_ref_keys=list(row["source_ref_keys"] or []),
+                    source_dataset_ids=list(row["source_dataset_ids"] or []),
+                    source_run_ids=list(row["source_run_ids"] or []),
+                    source_run_refs=list(row["source_run_refs"] or []),
+                )
         return out
 
     async def find_nodes_by_source_ref(self, source_ref_key: str) -> list[str]:
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text("SELECT id FROM graph_node WHERE :token = ANY(source_ref_keys)"),
-                {"token": source_ref_key},
+                text("SELECT id FROM graph_node WHERE :source_ref = ANY(source_ref_keys)"),
+                {"source_ref": source_ref_key},
             )
-            return [row[0] for row in result.fetchall()]
+            return [row["id"] for row in result.mappings().all()]
 
     async def find_edges_by_source_ref(self, source_ref_key: str) -> list[EdgeIdentity]:
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text(
-                    "SELECT source_id, target_id, relationship_name "
-                    "FROM graph_edge WHERE :token = ANY(source_ref_keys)"
-                ),
-                {"token": source_ref_key},
+                text("""
+                    SELECT source_id, target_id, relationship_name
+                    FROM graph_edge
+                    WHERE :source_ref = ANY(source_ref_keys)
+                """),
+                {"source_ref": source_ref_key},
             )
             return [
-                EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
-                for row in result.fetchall()
+                EdgeIdentity(
+                    source_id=row["source_id"],
+                    target_id=row["target_id"],
+                    relationship_name=row["relationship_name"],
+                )
+                for row in result.mappings().all()
             ]
 
     async def find_node_source_refs_by_dataset(self, dataset_id: str) -> dict[str, list[str]]:
-        async with self._session() as session:
+        dataset_id = str(dataset_id)
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text(
-                    "SELECT id, source_ref_keys "
-                    "FROM graph_node WHERE :token = ANY(source_dataset_ids)"
-                ),
-                {"token": dataset_id},
+                text("""
+                    SELECT id, source_ref_keys
+                    FROM graph_node
+                    WHERE :dataset_id = ANY(source_dataset_ids)
+                """),
+                {"dataset_id": dataset_id},
             )
             out: dict[str, list[str]] = {}
-            for row in result.fetchall():
+            for row in result.mappings().all():
                 owned = [
                     key
-                    for key in (row[1] or [])
+                    for key in (row["source_ref_keys"] or [])
                     if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
                 ]
                 if owned:
-                    out[row[0]] = owned
+                    out[row["id"]] = owned
             return out
 
     async def find_edge_source_refs_by_dataset(
         self, dataset_id: str
     ) -> dict[EdgeIdentity, list[str]]:
-        async with self._session() as session:
+        dataset_id = str(dataset_id)
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text(
-                    "SELECT source_id, target_id, relationship_name, source_ref_keys "
-                    "FROM graph_edge WHERE :token = ANY(source_dataset_ids)"
-                ),
-                {"token": dataset_id},
+                text("""
+                    SELECT source_id, target_id, relationship_name, source_ref_keys
+                    FROM graph_edge
+                    WHERE :dataset_id = ANY(source_dataset_ids)
+                """),
+                {"dataset_id": dataset_id},
             )
             out: dict[EdgeIdentity, list[str]] = {}
-            for row in result.fetchall():
+            for row in result.mappings().all():
                 owned = [
                     key
-                    for key in (row[3] or [])
+                    for key in (row["source_ref_keys"] or [])
                     if str(get_dataset_id_from_source_ref_key(key)) == dataset_id
                 ]
                 if owned:
                     edge = EdgeIdentity(
-                        source_id=row[0], target_id=row[1], relationship_name=row[2]
+                        source_id=row["source_id"],
+                        target_id=row["target_id"],
+                        relationship_name=row["relationship_name"],
                     )
                     out[edge] = owned
             return out
@@ -1475,69 +1113,77 @@ class PostgresAdapter(GraphDBInterface):
     async def find_node_source_refs_by_pipeline_run(
         self, pipeline_run_id: str
     ) -> dict[str, list[str]]:
-        async with self._session() as session:
+        pipeline_run_id = str(pipeline_run_id)
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text(
-                    "SELECT id, source_run_refs FROM graph_node WHERE :token = ANY(source_run_ids)"
-                ),
-                {"token": pipeline_run_id},
+                text("""
+                    SELECT id, source_run_refs
+                    FROM graph_node
+                    WHERE :pipeline_run_id = ANY(source_run_ids)
+                """),
+                {"pipeline_run_id": pipeline_run_id},
             )
             out: dict[str, list[str]] = {}
-            for row in result.fetchall():
+            for row in result.mappings().all():
                 contributed = [
                     get_source_ref_key_from_source_run_ref(ref)
-                    for ref in (row[1] or [])
+                    for ref in (row["source_run_refs"] or [])
                     if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
                 ]
                 if contributed:
-                    out[row[0]] = contributed
+                    out[row["id"]] = contributed
             return out
 
     async def find_edge_source_refs_by_pipeline_run(
         self, pipeline_run_id: str
     ) -> dict[EdgeIdentity, list[str]]:
-        async with self._session() as session:
+        pipeline_run_id = str(pipeline_run_id)
+        async with self.sessionmaker() as session:
             result = await session.execute(
-                text(
-                    "SELECT source_id, target_id, relationship_name, source_run_refs "
-                    "FROM graph_edge WHERE :token = ANY(source_run_ids)"
-                ),
-                {"token": pipeline_run_id},
+                text("""
+                    SELECT source_id, target_id, relationship_name, source_run_refs
+                    FROM graph_edge
+                    WHERE :pipeline_run_id = ANY(source_run_ids)
+                """),
+                {"pipeline_run_id": pipeline_run_id},
             )
             out: dict[EdgeIdentity, list[str]] = {}
-            for row in result.fetchall():
+            for row in result.mappings().all():
                 contributed = [
                     get_source_ref_key_from_source_run_ref(ref)
-                    for ref in (row[3] or [])
+                    for ref in (row["source_run_refs"] or [])
                     if str(get_pipeline_run_id_from_source_run_ref(ref)) == pipeline_run_id
                 ]
                 if contributed:
                     edge = EdgeIdentity(
-                        source_id=row[0], target_id=row[1], relationship_name=row[2]
+                        source_id=row["source_id"],
+                        target_id=row["target_id"],
+                        relationship_name=row["relationship_name"],
                     )
                     out[edge] = contributed
             return out
 
     async def set_graph_metadata(self, metadata: dict[str, str]) -> None:
+        """Upsert graph-level metadata keys."""
         if not metadata:
             return
         await self.initialize()
-        async with self._write_lock:
-            async with self._session() as session:
-                for key, value in metadata.items():
-                    stmt = pg_insert(_metadata_table).values(key=str(key), value=str(value))
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["key"],
-                        set_={"value": stmt.excluded.value},
-                    )
-                    await session.execute(stmt)
-                await session.commit()
+        rows = [{"key": str(key), "value": str(value)} for key, value in sorted(metadata.items())]
+        upsert = text("""
+            INSERT INTO graph_metadata (key, value)
+            VALUES (:key, :value)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """)
+        async with self.sessionmaker() as session:
+            await session.execute(upsert, rows)
+            await session.commit()
 
     async def get_graph_metadata(self) -> dict[str, str]:
+        """Return every graph-level metadata key and value."""
         await self.initialize()
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(text("SELECT key, value FROM graph_metadata"))
-            return {row[0]: row[1] for row in result.fetchall()}
+            return {row["key"]: row["value"] for row in result.mappings().all()}
 
     async def remove_belongs_to_set_tags(
         self,
@@ -1546,105 +1192,108 @@ class PostgresAdapter(GraphDBInterface):
     ) -> None:
         """Strip ``tags`` from each node's ``belongs_to_set`` property array.
 
-        Keeps the graph node's denormalized membership list consistent with the
-        additive belongs_to_set edges after a NodeSet (or its dataset) is deleted.
-        ``belongs_to_set`` lives inside the JSONB ``properties`` blob (it is not a
-        core column), so this is a read-filter-write over that array. When
-        ``node_ids`` is given, only those nodes are reconciled.
+        Keeps the denormalized membership list consistent with the additive
+        belongs_to_set edges after a NodeSet (or its dataset) is deleted. The tags
+        live inside the JSONB ``properties`` blob rather than in a core column, so
+        this is a read-modify-write: the rows stay locked in node-id order for the
+        whole transaction so a concurrent cleanup cannot overwrite this one.
         """
         if not tags:
-            return None
+            return
         if node_ids is not None and not node_ids:
-            return None
+            return
 
-        tag_set = set(tags)
-        async with self._session() as session:
-            if node_ids is not None:
-                result = await session.execute(
-                    text("SELECT id, properties FROM graph_node WHERE id = ANY(:ids)"),
-                    {"ids": [str(nid) for nid in node_ids]},
-                )
+        tags_to_remove = set(tags)
+        select_scoped = text("""
+            SELECT id, properties FROM graph_node
+            WHERE id = ANY(:ids)
+            ORDER BY id
+            FOR UPDATE
+        """)
+        select_all = text("SELECT id, properties FROM graph_node ORDER BY id FOR UPDATE")
+        update_properties = text("""
+            UPDATE graph_node
+            SET properties = CAST(:properties AS jsonb), updated_at = now()
+            WHERE id = :id
+        """)
+
+        async with self.sessionmaker() as session:
+            if node_ids is None:
+                result = await session.execute(select_all)
             else:
-                result = await session.execute(text("SELECT id, properties FROM graph_node"))
-            rows = result.fetchall()
+                result = await session.execute(
+                    select_scoped, {"ids": [str(node_id) for node_id in node_ids]}
+                )
 
-        updates = []
-        for row in rows:
-            properties = self._props_dict(row[1])
-            current = properties.get("belongs_to_set")
-            if not isinstance(current, list) or not any(tag in tag_set for tag in current):
-                continue
-            properties["belongs_to_set"] = [tag for tag in current if tag not in tag_set]
-            updates.append({"id": row[0], "properties": json.dumps(properties, cls=JSONEncoder)})
-
-        if updates:
-            async with self._write_lock:
-                async with self._session() as session:
-                    for update in updates:
-                        await session.execute(
-                            text(
-                                "UPDATE graph_node SET properties = CAST(:p AS jsonb), "
-                                "updated_at = now() WHERE id = :id"
-                            ),
-                            {"id": update["id"], "p": update["properties"]},
-                        )
-                    await session.commit()
-        return None
+            for row in result.mappings().all():
+                properties = _decode_properties(row["properties"])
+                current_tags = properties.get("belongs_to_set")
+                if not isinstance(current_tags, list) or tags_to_remove.isdisjoint(current_tags):
+                    continue
+                properties["belongs_to_set"] = [
+                    tag for tag in current_tags if tag not in tags_to_remove
+                ]
+                await session.execute(
+                    update_properties,
+                    {
+                        "id": row["id"],
+                        "properties": json.dumps(properties, cls=JSONEncoder),
+                    },
+                )
+            await session.commit()
 
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
-        """Retrieve a batch of (source, relationship, target) triplets.
+        """Return one page of source-edge-target triplets.
 
-        Parameters:
-        -----------
-            offset: Number of triplets to skip.
-            limit: Maximum number of triplets to return.
-
-        Returns:
-        --------
-            A list of dicts with 'start_node', 'relationship_properties',
-            and 'end_node' keys.
+        Ordering by the full edge identity keeps pagination stable, so exporting
+        the graph page by page visits every triplet exactly once.
         """
         if offset < 0:
             raise ValueError(f"Offset must be non-negative, got {offset}")
         if limit < 0:
             raise ValueError(f"Limit must be non-negative, got {limit}")
 
-        async with self._session() as session:
+        async with self.sessionmaker() as session:
             result = await session.execute(
                 text("""
                     SELECT
-                        s.id, s.name, s.type, s.properties,
-                        e.relationship_name, e.properties AS edge_props,
-                        t.id, t.name, t.type, t.properties
-                    FROM graph_edge e
-                    JOIN graph_node s ON s.id = e.source_id
-                    JOIN graph_node t ON t.id = e.target_id
-                    ORDER BY e.source_id, e.target_id, e.relationship_name
-                    OFFSET :off LIMIT :lim
+                        source.id AS source_id,
+                        source.name AS source_name,
+                        source.type AS source_type,
+                        source.properties AS source_properties,
+                        edge.relationship_name,
+                        edge.properties AS edge_properties,
+                        target.id AS target_id,
+                        target.name AS target_name,
+                        target.type AS target_type,
+                        target.properties AS target_properties
+                    FROM graph_edge AS edge
+                    JOIN graph_node AS source ON source.id = edge.source_id
+                    JOIN graph_node AS target ON target.id = edge.target_id
+                    ORDER BY edge.source_id, edge.target_id, edge.relationship_name
+                    OFFSET :offset LIMIT :limit
                 """),
-                {"off": offset, "lim": limit},
+                {"offset": offset, "limit": limit},
             )
 
-            triplets = []
-            for row in result.fetchall():
-                start_node = {"id": row[0], "name": row[1], "type": row[2]}
-                if row[3]:
-                    start_node.update(row[3] if isinstance(row[3], dict) else json.loads(row[3]))
-
-                rel = {"relationship_name": row[4]}
-                if row[5]:
-                    rel_props = row[5] if isinstance(row[5], dict) else json.loads(row[5])
-                    rel.update(rel_props)
-
-                end_node = {"id": row[6], "name": row[7], "type": row[8]}
-                if row[9]:
-                    end_node.update(row[9] if isinstance(row[9], dict) else json.loads(row[9]))
-
-                triplets.append(
-                    {
-                        "start_node": start_node,
-                        "relationship_properties": rel,
-                        "end_node": end_node,
-                    }
-                )
-            return triplets
+            return [
+                {
+                    "start_node": {
+                        "id": row["source_id"],
+                        "name": row["source_name"],
+                        "type": row["source_type"],
+                        **_decode_properties(row["source_properties"]),
+                    },
+                    "relationship_properties": {
+                        "relationship_name": row["relationship_name"],
+                        **_decode_properties(row["edge_properties"]),
+                    },
+                    "end_node": {
+                        "id": row["target_id"],
+                        "name": row["target_name"],
+                        "type": row["target_type"],
+                        **_decode_properties(row["target_properties"]),
+                    },
+                }
+                for row in result.mappings().all()
+            ]

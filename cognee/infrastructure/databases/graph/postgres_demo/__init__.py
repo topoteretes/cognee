@@ -1,4 +1,7 @@
-"""Postgres graph backend (graph-as-tables).
+"""Postgres demo graph backend (graph-as-tables).
+
+Selected with ``GRAPH_DATABASE_PROVIDER=postgres_demo``. The older value
+``postgres`` resolves here too, so existing deployments keep working.
 
 DEMO: Using Postgres as a graph store is currently a demo feature and is not
 production-ready. Use it to demo keeping relational metadata, PGVector, and graph
