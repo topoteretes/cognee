@@ -15,7 +15,13 @@ from typing import Any, AsyncIterator, Optional
 SSE_MEDIA_TYPE = "text/event-stream"
 JSON_MEDIA_TYPE = "application/json"
 
-SSE_HEADERS = {
+
+def sse_headers() -> dict:
+    """A fresh copy per response, so a per-request header cannot leak globally."""
+    return dict(_SSE_HEADERS)
+
+
+_SSE_HEADERS = {
     "Cache-Control": "no-cache",
     # nginx buffers proxied responses by default, which holds every token until
     # the answer is finished — exactly what streaming exists to avoid.
@@ -29,11 +35,14 @@ SSE_HEADERS = {
 def _quality(accept: str, media_type: str) -> float:
     """The client's q-value for ``media_type``, 0.0 if it does not accept it.
 
-    Media types are case-insensitive (RFC 7231) and wildcards count, so
-    ``*/*`` and ``TEXT/*`` both match ``text/event-stream``.
+    RFC 7231 §5.3.2 ranks by *specificity*, not by the highest match: an exact
+    type beats ``type/*``, which beats ``*/*``. Taking the maximum instead would
+    make ``application/json;q=0.1, */*`` score JSON at 1.0, so a client could
+    never deprioritise a type while keeping a wildcard fallback.
     """
-    type_, _, subtype = media_type.partition("/")
-    best = 0.0
+    type_ = media_type.partition("/")[0]
+    # Most specific first; the first tier that matches wins.
+    by_specificity: dict[str, float] = {}
     for part in accept.split(","):
         segments = part.split(";")
         candidate = segments[0].strip().lower()
@@ -47,8 +56,11 @@ def _quality(accept: str, media_type: str) -> float:
                     quality = float(value.strip())
                 except ValueError:
                     quality = 0.0
-        best = max(best, quality)
-    return best
+        by_specificity[candidate] = max(by_specificity.get(candidate, 0.0), quality)
+    for tier in (media_type, f"{type_}/*", "*/*"):
+        if tier in by_specificity:
+            return by_specificity[tier]
+    return 0.0
 
 
 def wants_event_stream(accept: Optional[str], stream_flag: Optional[bool] = None) -> bool:
@@ -67,6 +79,11 @@ def wants_event_stream(accept: Optional[str], stream_flag: Optional[bool] = None
     if stream_flag is not None:
         return stream_flag
     if not accept:
+        return False
+    # A wildcard is not a request for SSE. `text/*` matches text/event-stream but
+    # can never match application/json, so scoring it would hand a stream to any
+    # client that merely normalised its Accept header.
+    if not any(part.split(";")[0].strip().lower() == SSE_MEDIA_TYPE for part in accept.split(",")):
         return False
     sse = _quality(accept, SSE_MEDIA_TYPE)
     if sse <= 0.0:

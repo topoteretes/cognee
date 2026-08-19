@@ -55,6 +55,7 @@ from cognee.api.sse import (
     keepalive_until,
 )
 from cognee.api.v1.recall.recall import RecallResponse
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.llm.streaming.token_sink import (
     StreamEvent,
     TokenSink,
@@ -122,7 +123,6 @@ class RecallStream:
         self._reader = KeepaliveReader(iterator, KEEPALIVE_SECONDS)
         self._first_event = first_event
         self._errored = False
-        self._exhausted = first_event is None
 
     async def frames(self) -> AsyncIterator[str]:
         """The SSE body: relayed events, then the authoritative payload."""
@@ -138,6 +138,12 @@ class RecallStream:
             raise
 
     async def _relay(self) -> AsyncIterator[str]:
+        # Retrieval has already happened by the time the first byte can be sent —
+        # holding headers back is what buys the real status codes — so this
+        # records the phase for a consumer reading the transcript rather than
+        # driving a spinner. `generating` follows immediately.
+        yield encode_sse("stage", {"stage": "retrieving"})
+
         # The event consumed while deciding the status code is replayed here, so
         # deciding costs nothing but the wait.
         if self._first_event is not None:
@@ -147,7 +153,7 @@ class RecallStream:
                     self._errored = True
                 yield frame
 
-        while not self._exhausted:
+        while self._first_event is not None:
             try:
                 got_event, event = await self._reader.next_or_keepalive()
             except StopAsyncIteration:
@@ -185,18 +191,41 @@ class RecallStream:
                     # Only if the engine has not already reported it: a second
                     # `error` frame would arrive after a client that treats the
                     # first as terminal has torn its reader down.
-                    yield encode_sse(
-                        "error",
-                        {"message": "An error occurred during recall.", "status": 409},
-                    )
+                    yield encode_sse("error", _error_payload(error))
+                return
+            try:
+                final = encode_sse("final", {"results": jsonable_encoder(_validate(results))})
+            except Exception as error:  # noqa: BLE001 - never abort mid-body
+                # _validate deliberately passes a mismatched payload through
+                # unvalidated, which is exactly the shape jsonable_encoder can
+                # fail on. Letting that propagate would truncate the response
+                # with no terminal event at all; the JSON path degrades to a 409.
+                logger.error("Could not encode the streamed recall payload", exc_info=True)
+                if not self._errored:
+                    yield encode_sse("error", _error_payload(error))
                 return
             if self._errored:
                 # An inner layer swallowed the failure and recall still returned
-                # a payload. `final` after `error` contradicts error's terminal
-                # meaning, so the payload is dropped and the error stands.
+                # a payload. The answer is real, so it is still delivered — the
+                # earlier `error` described one lane, not the request.
                 logger.warning("Streaming recall reported an error but still returned a payload")
-                return
-            yield encode_sse("final", {"results": jsonable_encoder(_validate(results))})
+            yield final
+
+
+def _error_payload(error: BaseException) -> dict:
+    """The status the JSON transport would have returned, carried as data.
+
+    After the first byte the status line is fixed at 200, so a client can only
+    tell "top up your credits" from "transient fault" if the code travels in the
+    event. CogneeApiError subclasses carry their own; anything else is the 409
+    the route's catch-all uses.
+    """
+    status = getattr(error, "status_code", None)
+    if isinstance(error, CogneeApiError) and isinstance(status, int):
+        return {"message": str(getattr(error, "message", None) or error), "status": status}
+    if isinstance(error, ValueError):
+        return {"message": str(error), "status": 422}
+    return {"message": "An error occurred during recall.", "status": 409}
 
 
 def _validate(results: Any) -> Any:

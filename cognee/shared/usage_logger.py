@@ -266,9 +266,24 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
             error = str(streaming_error) or type(streaming_error).__name__
             raise
         finally:
+            # Closing the wrapped iterator explicitly. A disconnect that lands
+            # while the consumer is suspended in send() never reaches `inner`,
+            # so its own cleanup — which is where a streaming endpoint releases
+            # per-request resources — would never run.
+            aclose = getattr(inner, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except BaseException:  # noqa: BLE001 - cleanup must not mask the outcome
+                    logger.debug("Failed to close streaming body", exc_info=True)
+            # Shielded because the common ending is a client disconnect, which
+            # cancels this scope: an unshielded await would be cancelled at its
+            # first suspension point and the record would be lost precisely for
+            # the requests most worth recording. BaseException, not Exception,
+            # for the same reason — CancelledError is not an Exception.
             try:
-                await emit(None, success, error)
-            except Exception as log_error:  # noqa: BLE001
+                await asyncio.shield(asyncio.ensure_future(emit(None, success, error)))
+            except BaseException as log_error:  # noqa: BLE001
                 logger.error(
                     f"Failed to log usage for {function_name}: {str(log_error)}",
                     exc_info=True,
@@ -389,9 +404,7 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
             finally:
                 # Skipped when the body iterator took over the logging; a bare
                 # return here would discard an in-flight exception.
-                if deferred_to_stream:
-                    pass
-                else:
+                if not deferred_to_stream:
                     try:
                         await _emit(result, success, error)
                     except Exception as e:
