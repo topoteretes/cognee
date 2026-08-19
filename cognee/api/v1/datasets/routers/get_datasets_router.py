@@ -35,6 +35,45 @@ class ErrorResponseDTO(BaseModel):
     message: str
 
 
+# Shared by GET /status and GET /status/progress — both accept the same
+# dataset/pipeline selection, so the query param definitions (alias,
+# description, examples) live here once instead of twice.
+StatusDatasetIdsQuery = Annotated[
+    List[UUID],
+    Query(
+        alias="dataset",
+        description=(
+            "Dataset UUIDs to check (from GET /api/v1/datasets)."
+            " Omit to get status for all datasets you can read."
+        ),
+        examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
+    ),
+]
+
+StatusPipelineNamesQuery = Annotated[
+    List[str],
+    Query(
+        alias="pipeline",
+        description=(
+            "Pipeline names to check: 'add_pipeline' or 'cognify_pipeline'."
+            " Omit to default to cognify_pipeline."
+        ),
+        examples=[["cognify_pipeline"]],
+    ),
+]
+
+
+class PipelineRunStatusWithProgress(BaseModel):
+    status: PipelineRunStatus
+    # Present only once a run has emitted at least one progress tick (see
+    # log_pipeline_run_progress); None before that or for terminal runs that
+    # predate this field.
+    progress: Optional[Dict[str, Any]] = Field(
+        default=None,
+        examples=[{"completed_items": 3, "total_items": 10, "current_stage": "extract_graph"}],
+    )
+
+
 class DatasetDTO(OutDTO):
     id: UUID
     name: str
@@ -417,28 +456,8 @@ def get_datasets_router() -> APIRouter:
         response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
     )
     async def get_dataset_status(
-        datasets: Annotated[
-            List[UUID],
-            Query(
-                alias="dataset",
-                description=(
-                    "Dataset UUIDs to check (from GET /api/v1/datasets)."
-                    " Omit to get status for all datasets you can read."
-                ),
-                examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
-            ),
-        ] = [],
-        pipelines: Annotated[
-            List[str],
-            Query(
-                alias="pipeline",
-                description=(
-                    "Pipeline names to check: 'add_pipeline' or 'cognify_pipeline'."
-                    " Omit to default to cognify_pipeline."
-                ),
-                examples=[["cognify_pipeline"]],
-            ),
-        ] = [],
+        datasets: StatusDatasetIdsQuery = [],
+        pipelines: StatusPipelineNamesQuery = [],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -467,6 +486,11 @@ def get_datasets_router() -> APIRouter:
         - **running**: Dataset is currently being processed
         - **completed**: Dataset processing completed successfully
         - **failed**: Dataset processing encountered an error
+
+        For in-flight progress (files completed / total, current stage), see
+        **GET /v1/datasets/status/progress** — a separate endpoint with its own
+        fixed response shape, rather than a flag here that would change what
+        this endpoint returns depending on how it's called.
 
         ## Error Codes
         - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
@@ -500,6 +524,69 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset statuses."},
+            )
+
+    @router.get(
+        "/status/progress",
+        response_model=Union[
+            dict[str, PipelineRunStatusWithProgress],
+            dict[str, dict[str, PipelineRunStatusWithProgress]],
+        ],
+    )
+    async def get_dataset_progress(
+        datasets: StatusDatasetIdsQuery = [],
+        pipelines: StatusPipelineNamesQuery = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get the processing status of datasets, together with in-flight progress.
+
+        Same dataset/pipeline selection as **GET /v1/datasets/status**, but each
+        status value is always an object {status, progress} instead of a bare
+        status — a dedicated endpoint rather than a flag on /status, so neither
+        endpoint's response shape ever depends on how it was called.
+
+        ## Response
+        - Single pipeline (default): {dataset_id: {status, progress}}
+        - Multiple pipelines: {dataset_id: {pipeline_name: {status, progress}}}
+
+        **progress** is `null` until the first in-flight progress tick, then an
+        object with `completed_items`, `total_items`, and `current_stage` —
+        present only while the pipeline is running; terminal runs (completed/
+        errored) do not carry a progress snapshot.
+
+        ## Error Codes
+        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
+          read permission for)
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/status/progress",
+                "datasets": [str(dataset_id) for dataset_id in datasets],
+                "pipelines": pipelines,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+
+        try:
+            # Verify user has permission to read dataset
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+
+            datasets_progress = await cognee_datasets.get_progress(
+                [dataset.id for dataset in authorized_datasets],
+                pipeline_names=pipelines or None,
+            )
+
+            return datasets_progress
+        except Exception as error:
+            logger.error("Error retrieving dataset progress: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset progress."},
             )
 
     @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
