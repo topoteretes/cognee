@@ -8,6 +8,7 @@ import cognee.modules.ingestion as ingestion
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.ingestion.identify_many import identify_many
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.users.models import User
@@ -117,22 +118,11 @@ async def ingest_data(
 
         # Single batch query: find existing rows for all content hashes in this
         # dataset+owner+tenant scope — replaces N per-file identify() calls.
-        tenant_filter = (
-            Data.tenant_id == user.tenant_id if user.tenant_id else Data.tenant_id.is_(None)
+        # identify_many() shares the exact same filter as identify() and chunks
+        # large inputs to stay within SQLite's bind-parameter limit.
+        existing_by_hash: dict[str, UUID] = await identify_many(
+            list(content_hash_to_items.keys()), user, dataset.id
         )
-        existing_by_hash: dict[str, UUID] = {}
-        if content_hash_to_items:
-            async with db_engine.get_async_session() as session:
-                rows = await session.execute(
-                    select(Data.id, Data.content_hash).filter(
-                        Data.dataset_id == dataset.id,
-                        Data.content_hash.in_(content_hash_to_items.keys()),
-                        Data.owner_id == user.id,
-                        tenant_filter,
-                    )
-                )
-                for row in rows.fetchall():
-                    existing_by_hash[row[1]] = row[0]
 
         # Resolve pinned IDs (items with explicit data_id) — still needs DB for
         # resolve_data_id, but only for the subset that actually has a pinned id.
