@@ -149,3 +149,48 @@ def test_telemetry_disabled_still_wins(monkeypatch):
     send_telemetry("cognee.remember", FakeUser(uuid.uuid4(), uuid.uuid4()))
 
     assert payloads == []
+
+
+class DetachedUser:
+    """Simulates an expired/detached ORM instance: attribute access raises
+    something that is NOT AttributeError (DetachedInstanceError,
+    MissingGreenlet), which getattr's default does not swallow."""
+
+    def __init__(self, user_id=None, broken_attrs=("id", "tenant_id")):
+        object.__setattr__(self, "_user_id", user_id)
+        object.__setattr__(self, "_broken", set(broken_attrs))
+
+    def __getattr__(self, name):
+        if name in self._broken:
+            raise RuntimeError(f"Instance is not bound to a Session ({name})")
+        if name == "id" and self._user_id is not None:
+            return self._user_id
+        raise AttributeError(name)
+
+
+def test_resolve_identity_survives_a_fully_detached_instance():
+    """Telemetry identity must never break the operation that emitted it."""
+    resolved_user, resolved_tenant = _resolve_identity(DetachedUser())
+
+    assert resolved_user == "unknown-user"
+    assert resolved_tenant is None
+
+
+def test_resolve_identity_keeps_id_when_only_tenant_access_fails():
+    user_id = uuid.uuid4()
+
+    resolved_user, resolved_tenant = _resolve_identity(
+        DetachedUser(user_id, broken_attrs=("tenant_id",))
+    )
+
+    assert resolved_user == str(user_id)
+    assert resolved_tenant is None
+
+
+def test_send_telemetry_emits_despite_detached_user(monkeypatch):
+    payloads = _capture_telemetry(monkeypatch)
+
+    send_telemetry("cognee.remember", DetachedUser())  # must not raise
+
+    assert payloads[0]["properties"]["user_id"] == "unknown-user"
+    assert payloads[0]["properties"]["tenant_id"] == "Single User Tenant"

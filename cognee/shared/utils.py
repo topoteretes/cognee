@@ -247,9 +247,21 @@ def _resolve_identity(user) -> tuple[str, str | None]:
     every emitter at once and keeps ``tenant_id`` from having to be threaded
     through ~40 call sites by hand.
     """
-    resolved_id = getattr(user, "id", user)
-    tenant_id = getattr(user, "tenant_id", None)
-    return str(resolved_id), str(tenant_id) if tenant_id else None
+    # Guarded attribute-by-attribute: getattr's default only swallows
+    # AttributeError, but an expired/detached ORM instance raises
+    # DetachedInstanceError (or MissingGreenlet under async lazy-load) on
+    # attribute access — and telemetry identity must never break the
+    # operation that emitted the event. Partial failure keeps what resolved.
+    try:
+        resolved_id = str(getattr(user, "id", user))
+    except Exception:
+        resolved_id = "unknown-user"
+    try:
+        tenant_id = getattr(user, "tenant_id", None)
+        resolved_tenant = str(tenant_id) if tenant_id else None
+    except Exception:
+        resolved_tenant = None
+    return resolved_id, resolved_tenant
 
 
 def send_telemetry(
