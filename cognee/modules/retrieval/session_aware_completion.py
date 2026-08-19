@@ -28,6 +28,7 @@ from cognee.infrastructure.session.session_concurrent_turn import (
     complete_turn,
     load_turn_context,
 )
+from cognee.infrastructure.session.session_turn import decide_turn_answer
 from cognee.modules.observability import (
     COGNEE_RESULT_COUNT,
     COGNEE_RESULT_SUMMARY,
@@ -36,6 +37,9 @@ from cognee.modules.observability import (
 )
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("session_aware_completion")
 
 CONCURRENT_MODE = "concurrent"
 MAX_CONVERSATIONAL_QUERY_CHARS = 2000
@@ -320,20 +324,53 @@ async def run_concurrent_session_turn(
         else:
             analysis = SessionTurnAnalysis()
             answer_lane_result = await answer_lane
-        retrieved_objects, context, answer = answer_lane_result
+        retrieved_objects, context, generated_answer = answer_lane_result
+
+        decision = decide_turn_answer(
+            analysis,
+            raw_query=snapshot.raw_message,
+            has_previous_qa=bool(snapshot.previous_qa_id),
+        )
+        stored_answer = generated_answer if decision.should_answer else decision.response_to_user
 
         await commit_turn(
             session_manager,
             snapshot=snapshot,
             analysis=analysis,
-            answer=answer,
+            answer=stored_answer,
             user_id=user_cache_key,
             session_id=session_id,
             used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
         )
 
-    completions = await retriever.append_references([answer], retrieved_objects)
+    if not decision.should_answer:
+        return retrieved_objects, context, [decision.response_to_user]
+    completions = await retriever.append_references([generated_answer], retrieved_objects)
     return retrieved_objects, context, completions
+
+
+async def _record_no_answer_turn(retriever, *, raw_query: str, answer: str) -> None:
+    """Store a no-answer turn's raw message and acknowledgement as its own QA entry.
+
+    Fail-open: a failed cache write must never surface as a search error, matching the
+    fail-open contract of the rest of the session-turn machinery.
+    """
+    try:
+        user = session_user.get()
+        user_uuid = getattr(user, "id", None)
+        if not user_uuid:
+            return
+        session_manager = get_session_manager()
+        session_id = session_manager.resolve_session_id(retriever.session_id)
+        await session_manager.add_qa(
+            user_id=str(user_uuid),
+            question=raw_query,
+            context="",
+            answer=answer,
+            session_id=session_id,
+        )
+    except Exception as error:
+        logger.warning("Sequential no-answer turn QA write failed open: %s", error)
 
 
 async def run_sequential_session_turn(
@@ -354,7 +391,9 @@ async def run_sequential_session_turn(
     if not only_context and getattr(retriever, "supports_session_turn_preparation", True):
         turn_preparation = await retriever.prepare_session_turn_for_retrieval(raw_query)
         if not turn_preparation.should_answer:
-            return None, None, [turn_preparation.response_to_user or "Got it."]
+            acknowledgement = turn_preparation.response_to_user or "Got it."
+            await _record_no_answer_turn(retriever, raw_query=raw_query, answer=acknowledgement)
+            return None, None, [acknowledgement]
         effective_query = turn_preparation.effective_query or raw_query
 
     with new_span("cognee.retrieval.get_objects") as span:

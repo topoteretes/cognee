@@ -63,6 +63,47 @@ def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
     return SessionTurnPreparation(should_answer=True, effective_query=query)
 
 
+@dataclass(frozen=True)
+class TurnAnswerDecision:
+    """Whether a turn needs a generated answer, and what to use if it doesn't."""
+
+    should_answer: bool
+    effective_query: str
+    response_to_user: str | None
+
+
+def decide_turn_answer(
+    analysis: SessionTurnAnalysis,
+    *,
+    raw_query: str,
+    has_previous_qa: bool,
+) -> TurnAnswerDecision:
+    """The one answer decision shared by the sequential and concurrent session paths.
+
+    Answers when the analysis names a query to answer, when the analysis found nothing
+    worth acting on (so there is nothing to acknowledge instead), or when there is no
+    previous QA entry for the message to be feedback about. Otherwise the turn is a
+    no-answer turn: it gets an acknowledgement instead of a generated answer.
+    """
+    query_to_answer = (analysis.query_to_answer or "").strip()
+    response_to_user = (analysis.response_to_user or "").strip() or None
+    has_analysis_signal = bool(
+        query_to_answer
+        or response_to_user
+        or analysis.candidate_context_updates
+        or analysis.served_context_ratings
+    )
+    should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_qa)
+    effective_query = query_to_answer or raw_query
+    if not should_answer and not response_to_user:
+        response_to_user = "Got it."
+    return TurnAnswerDecision(
+        should_answer=should_answer,
+        effective_query=effective_query,
+        response_to_user=response_to_user,
+    )
+
+
 def coerce_qa_entry(entry: Any) -> dict:
     """Normalize a stored QA entry (model or dict) to a plain dict."""
     if hasattr(entry, "model_dump"):
@@ -404,24 +445,16 @@ async def prepare_session_turn(
         logger.warning("Session turn analysis application failed open: %s", error)
         accepted_context_ids = []
 
-    query_to_answer = (analysis.query_to_answer or "").strip()
-    response_to_user = (analysis.response_to_user or "").strip() or None
-    has_analysis_signal = bool(
-        query_to_answer
-        or response_to_user
-        or analysis.candidate_context_updates
-        or analysis.served_context_ratings
+    decision = decide_turn_answer(
+        analysis,
+        raw_query=query,
+        has_previous_qa=bool(previous_qa_id),
     )
-    has_previous_answer = bool(previous_qa_id)
-    should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
-    effective_query = query_to_answer or query
-    if not should_answer and not response_to_user:
-        response_to_user = "Got it."
 
     return SessionTurnPreparation(
-        should_answer=should_answer,
-        response_to_user=response_to_user,
-        effective_query=effective_query,
+        should_answer=decision.should_answer,
+        response_to_user=decision.response_to_user,
+        effective_query=decision.effective_query,
         analysis=analysis,
         accepted_context_ids=accepted_context_ids,
         previous_qa_id=previous_qa_id,

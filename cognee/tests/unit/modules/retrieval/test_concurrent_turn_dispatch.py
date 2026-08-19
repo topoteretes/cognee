@@ -347,6 +347,74 @@ class TestTurnCost:
         assert len(concurrent_env.manager.qas) == 2
 
 
+class TestNoAnswerTurns:
+    """SDK-402: every session turn, answered or not, lands in QA history."""
+
+    @pytest.mark.asyncio
+    async def test_sequential_no_answer_turn_records_acknowledgement_qa(
+        self, concurrent_env, monkeypatch
+    ):
+        concurrent_env.mode = "sequential"
+        retriever = build_retriever(CompletionRetriever)
+        retriever.prepare_session_turn_for_retrieval = AsyncMock(
+            return_value=SessionTurnPreparation(should_answer=False, response_to_user="Got it.")
+        )
+
+        objects, context, completion = await run_session_aware_completion(
+            retriever, raw_query="thanks, that was helpful!"
+        )
+
+        assert objects is None
+        assert context is None
+        assert completion == ["Got it."]
+        retriever.get_retrieved_objects.assert_not_awaited()
+        assert len(concurrent_env.manager.qas) == 1
+        qa = concurrent_env.manager.qas[0]
+        assert qa["question"] == "thanks, that was helpful!"
+        assert qa["answer"] == "Got it."
+
+    @pytest.mark.asyncio
+    async def test_concurrent_no_answer_turn_stores_and_returns_acknowledgement(
+        self, concurrent_env, monkeypatch
+    ):
+        """The answer lane's generated text must not be returned or stored once the
+        analysis lane decides the turn is feedback-only."""
+        monkeypatch.setattr(
+            session_aware_completion,
+            "load_turn_context",
+            AsyncMock(
+                return_value=SessionTurnContext(
+                    raw_message="thanks, that was helpful!",
+                    previous_qa_id="qa-1",
+                    previous_question="What is X?",
+                    previous_answer="X is Y.",
+                )
+            ),
+        )
+
+        async def fake_llm(text_input, system_prompt, response_model, **kwargs):
+            concurrent_env.llm_calls.append(response_model)
+            if response_model is SessionTurnAnalysis:
+                return SessionTurnAnalysis(response_to_user="Got it.")
+            if response_model is str:
+                return "a generated answer that must be discarded"
+            return response_model(text="a generated answer that must be discarded")
+
+        monkeypatch.setattr(LLMGateway, "acreate_structured_output", staticmethod(fake_llm))
+        retriever = build_retriever(CompletionRetriever)
+
+        _objects, _context, completion = await run_session_aware_completion(
+            retriever, raw_query="thanks, that was helpful!"
+        )
+
+        assert completion == ["Got it."]
+        retriever.append_references.assert_not_awaited()
+        assert len(concurrent_env.manager.qas) == 1
+        qa = concurrent_env.manager.qas[0]
+        assert qa["question"] == "thanks, that was helpful!"
+        assert qa["answer"] == "Got it."
+
+
 def test_session_facade_stays_free_of_search_mode_state():
     """Ownership boundaries: no search-mode state on the facade, no wrapper leakage."""
     from cognee.infrastructure.session import session_manager

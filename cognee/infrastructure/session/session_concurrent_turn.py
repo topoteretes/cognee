@@ -160,8 +160,10 @@ async def load_turn_context(
 async def analyze_turn(snapshot: SessionTurnContext) -> SessionTurnAnalysis:
     """Analyze one turn under a timeout. Fail open to no context updates.
 
-    Concurrent mode uses only the two context-maintenance outputs; the routing fields are
-    ignored because retrieval and the answer are already in flight by the time this lands.
+    Retrieval and the answer are already in flight by the time this lands, so the
+    routing fields (``query_to_answer`` / ``response_to_user``) cannot steer them — but
+    the caller still uses them, via the shared ``decide_turn_answer``, to decide whether
+    to keep the generated answer or store an acknowledgement instead.
     """
     try:
         return await asyncio.wait_for(
