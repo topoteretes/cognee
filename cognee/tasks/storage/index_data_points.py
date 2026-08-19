@@ -1,9 +1,9 @@
 import asyncio
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("index_data_points")
 
@@ -50,7 +50,7 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
                 await vector_engine.create_vector_index(type_name, field_name)
                 data_points_by_type[type_name][field_name] = []
 
-            indexed_data_point = data_point.model_copy()
+            indexed_data_point = data_point.model_copy(deep=True)
             indexed_data_point.metadata["index_fields"] = [field_name]
             data_points_by_type[type_name][field_name].append(indexed_data_point)
 

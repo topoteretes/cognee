@@ -24,6 +24,8 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
+from cognee.tasks.code_graph.code_files import get_code_file_tasks
+from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph import detect_contradictions
 from cognee.tasks.provenance import record_provenance
@@ -64,7 +66,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     functional_relationships: Optional[Collection[str]] = None,
-    data_per_batch: int = 2000,
+    data_per_batch: int = 20,
     llm_config: Optional[LLMConfig] = None,
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = True,
@@ -293,21 +295,24 @@ async def cognify(
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
         # Per-item routing: each data item resolves to the task list its kind
-        # requires — DLT-source manifests run the deterministic DLT list,
-        # everything else runs the standard (or temporal) list. The lists are
-        # built once up front and the resolver is a sync closure over them
-        # (the distributed runner materializes per-item task columns, so it
-        # needs concrete lists, not an async factory). One run_pipeline call,
-        # one cognify_pipeline run per dataset, mixed datasets included.
-        # Every route is wired EXPLICITLY, the standard route included — no
-        # implicit default. An unmapped route (a CognifyRoute member added
-        # without a task list here) raises KeyError instead of silently
-        # running the standard LLM list on data that was routed away from it.
+        # requires — DLT-source manifests run the deterministic DLT list, code
+        # files run the enola code graph list, everything else runs the
+        # standard (or temporal) list. The lists are built once up front and
+        # the resolver is a sync closure over them (the distributed runner
+        # materializes per-item task columns, so it needs concrete lists, not
+        # an async factory). One run_pipeline call, one cognify_pipeline run
+        # per dataset, mixed datasets included. Every route is wired
+        # EXPLICITLY, the standard route included — no implicit default. An
+        # unmapped route (a CognifyRoute member added without a task list
+        # here) raises KeyError instead of silently running the standard LLM
+        # list on data that was routed away from it.
         tasks_by_route = {
             CognifyRoute.STANDARD: tasks,
             CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
                 chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
             ),
+            CognifyRoute.CODE: get_code_file_tasks(),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
         }
 
         def resolve_cognify_tasks(data_item):
