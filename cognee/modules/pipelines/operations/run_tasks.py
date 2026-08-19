@@ -71,9 +71,9 @@ async def run_tasks(
         pipeline_id, pipeline_name, dataset.id, data, user=user
     )
     pipeline_run_id = pipeline_run.pipeline_run_id
-    run_started_at = getattr(pipeline_run, "started_at", None) or getattr(
-        pipeline_run, "created_at", None
-    )
+    # getattr (not attribute access) because unit tests stub
+    # log_pipeline_run_start with plain namespaces lacking the field.
+    run_started_at = getattr(pipeline_run, "started_at", None)
 
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,

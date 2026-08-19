@@ -33,7 +33,9 @@ async def log_pipeline_run_error(
         dataset_id=dataset_id,
         run_info={
             "data": data_info,
-            "error": str(e),
+            # Scrubbed like error_message — persisting the raw text here would
+            # defeat the redaction (and run_info growth is capped, COG-5359).
+            "error": scrub_error_message(e),
         },
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,

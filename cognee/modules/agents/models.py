@@ -15,6 +15,9 @@ from pydantic import BaseModel, Field
 # is only a best-effort fallback for sessions that never registered. This
 # list is documentation, not an enum member set — pick a value from it when
 # your client matches one, otherwise just use your own lowercase name.
+# "unknown" is deliberately NOT in this list: it is the fallback
+# derive_connection_type() returns when nothing matched, not a type a
+# client should ever self-declare.
 KNOWN_AGENT_CONNECTION_TYPES = (
     "sdk",
     "api",
@@ -24,7 +27,6 @@ KNOWN_AGENT_CONNECTION_TYPES = (
     "slack",
     "opencode",
     "workflow",
-    "unknown",
 )
 AgentConnectionType = str
 AgentMemoryMode = Literal["session", "cognee", "hybrid", "none", "unknown"]

@@ -56,7 +56,16 @@ def operation_usage_scope() -> Iterator[OperationUsage]:
     try:
         yield usage
     finally:
-        _active_operation_usage.reset(token)
+        # This scope is opened inside the run_tasks async GENERATOR, which has
+        # no context of its own — if the generator is finalized from a context
+        # other than the one that resumed it last (executor teardown, GC),
+        # reset() raises ValueError. The accounting outcome is identical
+        # either way (usage keeps its totals; the var falls out with the dead
+        # context), so never let cleanup mask the pipeline's real error.
+        try:
+            _active_operation_usage.reset(token)
+        except ValueError:
+            pass
 
 
 @dataclass
@@ -100,4 +109,8 @@ def parent_run_scope(run_id: UUID) -> Iterator[None]:
     try:
         yield
     finally:
-        _current_parent_run.reset(token)
+        # Same cross-context tolerance as operation_usage_scope above.
+        try:
+            _current_parent_run.reset(token)
+        except ValueError:
+            pass

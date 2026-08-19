@@ -15,6 +15,12 @@ from typing import Optional
 
 ERROR_MESSAGE_MAX_LENGTH = 512
 
+# Regexes run over at most this window of the raw message (exceptions can
+# embed megabyte payloads). Larger than the final bound so redactions that
+# shrink the text (e.g. a long key collapsing to "[secret]") can't starve
+# the output below ERROR_MESSAGE_MAX_LENGTH.
+_SCRUB_WINDOW = ERROR_MESSAGE_MAX_LENGTH * 4
+
 # Order matters: secret-shaped tokens are redacted before digit runs so a
 # key is reported as one [secret], not a shredded mix of both markers.
 _SCRUB_PATTERNS = [
@@ -41,6 +47,7 @@ def scrub_error_message(message: Optional[object]) -> Optional[str]:
     text = str(message)
     if not text:
         return None
+    text = text[:_SCRUB_WINDOW]
     for pattern, replacement in _SCRUB_PATTERNS:
         text = pattern.sub(replacement, text)
     if len(text) > ERROR_MESSAGE_MAX_LENGTH:
