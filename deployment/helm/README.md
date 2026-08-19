@@ -22,7 +22,7 @@ helm upgrade --install cognee deployment/helm \
   --set cognee.llmModel="openai/gpt-4o-mini"
 ```
 
-> **Note:** Without `existingSecret`, the chart creates a Secret from `postgres.auth.password`.  
+> **Note:** Without `existingSecret`, the chart creates a Secret from `postgres.auth.password`.
 > `LLM_API_KEY` will be empty — patch it manually or use `existingSecret` instead.
 
 ### Production (recommended)
@@ -45,7 +45,7 @@ helm upgrade --install cognee deployment/helm \
   --set postgres.auth.password=""
 ```
 
-The Deployment and Postgres both read credentials from this Secret.  
+The Deployment and Postgres both read credentials from this Secret.
 Rotating the Secret triggers an automatic rolling restart via checksum annotations.
 
 ---
