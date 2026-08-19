@@ -31,6 +31,16 @@ async def update(
     An id that resolves to no document raises ``UpdateTargetNotFoundError``
     (404) — update() never creates documents; use add() for that.
 
+    DLT source manifests get a row-level update instead: when the resolved id
+    names a DLT manifest (system_metadata.source == "dlt_source"), the new
+    source is re-ingested and diffed against the stored manifest by
+    content-addressed row ids. Removed rows are deleted from the graph/vector
+    stores, new and edited rows are processed, unchanged rows are left
+    untouched (no re-embedding), and a later cognify() skips the manifest.
+    The new source must keep the same source name (the manifest identity); it
+    returns a summary dict (rows_added / rows_edited / rows_removed /
+    rows_unchanged / fk_edges_repaired) instead of PipelineRunInfo.
+
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
         - **File paths**: Local file paths as strings in these formats:
@@ -88,6 +98,7 @@ async def update(
     from cognee.modules.data.models import Data
     from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
 
     if isinstance(data, list):
         if len(data) != 1:
@@ -115,6 +126,28 @@ async def update(
         old_row = await session.get(Data, resolved_id)
         if old_row is not None:
             preserved_legacy_id = old_row.legacy_id
+
+    # DLT source manifests get a row-level update: the resolved id names the
+    # manifest, the new source is diffed against it by content-addressed row
+    # ids, and only the delta is processed — removed rows deleted, added rows
+    # embedded and wired, unchanged rows untouched. Everything else keeps the
+    # delete + pinned re-add + re-cognify path below. The check runs on the
+    # dataset-resolved row (not a context-free lookup) so forked ids keep the
+    # resolution contract above.
+    if old_row is not None and is_dlt_source_manifest(old_row):
+        from cognee.modules.data.methods.get_dataset import get_dataset
+        from cognee.tasks.ingestion.update_dlt_source import update_dlt_source_rows
+
+        dataset = await get_dataset(user.id, dataset_id)
+        if dataset is None:
+            raise ValueError(f"Dataset {dataset_id} not found for user {user.id}.")
+
+        return await update_dlt_source_rows(
+            data_record=old_row,
+            data=data,
+            dataset=dataset,
+            user=user,
+        )
 
     await datasets.delete_data(
         dataset_id=dataset_id,
