@@ -38,7 +38,10 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 # BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
 # those by message so the split/pool recovery below can handle them too. Kept
 # narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
-_EMBED_LENGTH_ERROR_RE = re.compile(r"maximum\s+input\s+length", re.IGNORECASE)
+_EMBED_LENGTH_ERROR_RE = re.compile(
+    r"maximum\s+input\s+length|instance\(s\)\s+is\s+allowed\s+per\s+prediction",
+    re.IGNORECASE,
+)
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
@@ -203,7 +206,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # ContextWindowExceededError subclasses BadRequestError. litellm raises
             # it for chat context-length errors, but the embeddings API returns a
             # plain BadRequestError for over-length input (OpenAI 400: "maximum input
-            # length is 8192 tokens"). Recover (split + pool) for both; re-raise any
+            # length is 8192 tokens"; Vertex AI 400: "2048 instance(s) is allowed per
+            # prediction"). Recover (split + pool) for both; re-raise any
             # other BadRequest unchanged so genuinely bad requests still fail fast.
             if not (
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
