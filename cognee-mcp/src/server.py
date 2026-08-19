@@ -1485,7 +1485,6 @@ async def improve(
         "a backgrounded call could not return inline."
     ),
 )
-@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status(
     dataset_name: str = None,
     pipelines: List[str] = None,
