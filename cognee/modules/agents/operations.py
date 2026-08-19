@@ -18,9 +18,17 @@ from cognee.modules.agents.registry import (
     list_registered_agent_connections,
     register_agent_connection,
 )
-from cognee.modules.users.methods import get_visible_user_ids
+
+# Import from the defining modules, not the package __init__: these packages
+# are mid-initialization on some import orders (their __init__ transitively
+# reaches back into agents.operations), and a from-import against a partially
+# initialized package silently binds the same-named SUBMODULE instead of the
+# function ("'module' object is not callable" at call time).
+from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods import get_readable_datasets
+from cognee.modules.users.permissions.methods.get_readable_datasets import (
+    get_readable_datasets,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("agents")

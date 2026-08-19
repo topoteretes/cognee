@@ -1939,9 +1939,21 @@ async def main():
 
     # Operations run in-process by this MCP server record origin="mcp" in
     # pipeline_runs. (In client mode the remote API records origin="api".)
-    from cognee.modules.operations import ORIGIN_MCP, set_operation_origin
+    # Guarded because cognee-mcp depends on cognee from PyPI (see
+    # pyproject.toml), which may predate cognee.modules.operations — origin
+    # stamping is optional, booting is not. Loud, not silent: the warning
+    # names exactly what is degraded and when the guard can be deleted.
+    try:
+        from cognee.modules.operations import ORIGIN_MCP, set_operation_origin
 
-    set_operation_origin(ORIGIN_MCP)
+        set_operation_origin(ORIGIN_MCP)
+    except ImportError:
+        logger.warning(
+            "Installed cognee has no cognee.modules.operations — pipeline_runs "
+            "records from this MCP server will show origin='sdk' instead of "
+            "'mcp'. Remove this guard once cognee-mcp requires a cognee release "
+            "that ships the operations module (SDK-399)."
+        )
 
     parser = argparse.ArgumentParser()
 

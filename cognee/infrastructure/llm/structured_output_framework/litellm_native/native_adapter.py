@@ -24,7 +24,7 @@ import logging
 from typing import Any, cast
 
 import litellm
-from litellm.exceptions import ContentPolicyViolationError
+from litellm.exceptions import BadRequestError, ContentPolicyViolationError
 from pydantic import BaseModel, ValidationError
 from tenacity import (
     before_sleep_log,
@@ -284,16 +284,32 @@ class NativeLiteLLMAdapter:
     ) -> BaseModel:
         """Route to the schema-native or json-object path based on the model."""
         if _supports_native_schema(model):
-            return await self._acreate_schema_native(
-                text_input,
-                system_prompt,
-                response_model,
-                model=model,
-                api_key=api_key,
-                endpoint=endpoint,
-                api_version=api_version,
-                **merged_kwargs,
-            )
+            try:
+                return await self._acreate_schema_native(
+                    text_input,
+                    system_prompt,
+                    response_model,
+                    model=model,
+                    api_key=api_key,
+                    endpoint=endpoint,
+                    api_version=api_version,
+                    **merged_kwargs,
+                )
+            except BadRequestError as error:
+                # Strict schema-native mode rejects Pydantic models whose JSON
+                # schema it cannot enforce — e.g. a free-form dict field, which
+                # OpenAI 400s with "'additionalProperties' is required to be
+                # supplied and to be false". Those models still work on the
+                # prompted-JSON path, so fall through instead of failing.
+                if "schema" not in str(error).lower():
+                    raise
+                logger.warning(
+                    "litellm_native: %s rejected the schema for %s; retrying via "
+                    "json fallback (%s)",
+                    model,
+                    response_model.__name__,
+                    error,
+                )
         return await self._acreate_json_fallback(
             text_input,
             system_prompt,
