@@ -20,6 +20,7 @@ tracebacks.
 
 from __future__ import annotations
 
+import re
 import time
 
 import requests
@@ -44,15 +45,22 @@ def test_golden_flow_api(api_ready):
 
 
 def test_mcp_health_and_tool_call(mcp_ready):
-    """MCP service is healthy and a real tool call returns structured content."""
+    """MCP service is healthy and a real tool call round-trips."""
     health = wait_for_http_ok(CONFIG.mcp_health_url, name="cognee-mcp /health")
     assert health.json().get("status") == "ok", health.text
 
     call = call_mcp_tool()
-    # `list_datasets_json` returns {"datasets": [...]} in structuredContent.
-    assert call.structured is not None, "MCP tool returned no structured content"
-    assert "datasets" in call.structured, call.structured
-    assert isinstance(call.structured["datasets"], list)
+    # `list_datasets_json` renders "No datasets found." or "N dataset(s):"
+    # followed by one "- name (id)" line per dataset.
+    assert re.match(r"(No datasets found\.|\d+ datasets?:)", call.result_text), (
+        f"unexpected list_datasets_json output: {call.result_text!r}"
+    )
+    # structuredContent ({"datasets": [...]}) is only forwarded for tools
+    # advertised in tools/list; this one is gated behind the tool-search
+    # transform, so treat it as a bonus and validate the shape when present.
+    if call.structured is not None:
+        assert "datasets" in call.structured, call.structured
+        assert isinstance(call.structured["datasets"], list)
 
 
 def test_service_logs_are_traceback_free(requires_compose):
