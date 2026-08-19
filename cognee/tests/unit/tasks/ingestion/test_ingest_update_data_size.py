@@ -72,6 +72,9 @@ async def _make_engine():
                 name="doc.txt",
                 content_hash="old-hash",
                 data_size=OLD_SIZE,
+                # Rows are dataset-scoped: the update branch refuses to mutate a
+                # row owned by a different dataset (foreign-pin guard).
+                dataset_id=DATASET_ID,
             )
         )
         await session.commit()
@@ -84,7 +87,12 @@ def _install_mocks(stack, engine):
     storage, loaders, or dataset/permission machinery — only the relational
     engine is real."""
     meta = _metadata()
-    classified = SimpleNamespace(get_metadata=lambda: meta)
+    # get_identifier feeds the pre-loop's batch dedup (batch_id_by_hash); the
+    # mocked `identify` already returns DATA_ID, so the value only has to exist.
+    classified = SimpleNamespace(
+        get_metadata=lambda: meta,
+        get_identifier=lambda: meta["content_hash"],
+    )
     # A real (transient) mapped Dataset: store_data_to_dataset does `dataset in
     # session` / session.add / session.merge, which require a mapped instance.
     dataset = Dataset(id=DATASET_ID, name="ds", owner_id=USER.id)
