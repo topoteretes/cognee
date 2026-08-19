@@ -89,13 +89,12 @@ async def ingest_data(
 
         db_engine = get_relational_engine()
 
-        # Pre-loop: resolve or mint data_id for every item and cache intermediate
-        # results to avoid repeating expensive I/O in the main loop. Dedup is a
-        # dataset-scoped LOOKUP (identify); a miss mints a random id — two
-        # identical items in one batch share the first mint.
-        data_point_ids = []
+        # Pre-loop: save files and compute content hashes (no DB calls).
+        # Dedup is a dataset-scoped LOOKUP batched into a single WHERE-IN query
+        # below — instead of one DB connection per file via ingestion.identify().
         precomputed_items = {}
-        batch_id_by_hash: dict = {}
+        content_hash_to_items: dict[str, list] = {}  # hash -> list of data_item keys
+
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
@@ -105,8 +104,45 @@ async def ingest_data(
 
             async with open_data_file(actual_file_path) as file:
                 classified_data = ingestion.classify(file)
-                item_content_hash = classified_data.get_identifier()
-                data_id = await ingestion.identify(classified_data, user, dataset.id)
+                item_content_hash = classified_data.get_identifier()  # pure CPU, no DB
+
+            precomputed_items[id(data_item)] = {
+                "original_file_path": original_file_path,
+                "actual_file_path": actual_file_path,
+                "item_content_hash": item_content_hash,
+                "item_data_id": item_data_id,
+                "data_id": None,  # resolved below
+            }
+            content_hash_to_items.setdefault(item_content_hash, []).append(id(data_item))
+
+        # Single batch query: find existing rows for all content hashes in this
+        # dataset+owner+tenant scope — replaces N per-file identify() calls.
+        tenant_filter = (
+            Data.tenant_id == user.tenant_id if user.tenant_id else Data.tenant_id.is_(None)
+        )
+        existing_by_hash: dict[str, UUID] = {}
+        if content_hash_to_items:
+            async with db_engine.get_async_session() as session:
+                rows = await session.execute(
+                    select(Data.id, Data.content_hash).filter(
+                        Data.dataset_id == dataset.id,
+                        Data.content_hash.in_(content_hash_to_items.keys()),
+                        Data.owner_id == user.id,
+                        tenant_filter,
+                    )
+                )
+                for row in rows.fetchall():
+                    existing_by_hash[row[1]] = row[0]
+
+        # Resolve pinned IDs (items with explicit data_id) — still needs DB for
+        # resolve_data_id, but only for the subset that actually has a pinned id.
+        # Unpinned items use the batch result above.
+        batch_id_by_hash: dict[str, UUID] = {}
+        data_point_ids = []
+        for data_item in data:
+            cached = precomputed_items[id(data_item)]
+            item_data_id = cached["item_data_id"]
+            item_content_hash = cached["item_content_hash"]
 
             if item_data_id is not None:
                 # A pinned id may be one the user held before a fork/update —
@@ -115,16 +151,15 @@ async def ingest_data(
                 # stable ids through this path deliberately).
                 resolved_pin = await resolve_data_id(dataset.id, item_data_id)
                 data_id = resolved_pin if resolved_pin is not None else item_data_id
-            elif data_id is None:
-                data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
+            else:
+                # Use batch result; fall back to dedup-within-batch or mint new id
+                data_id = existing_by_hash.get(item_content_hash)
+                if data_id is None:
+                    data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
             batch_id_by_hash.setdefault(item_content_hash, data_id)
 
+            cached["data_id"] = data_id
             data_point_ids.append(data_id)
-            precomputed_items[id(data_item)] = {
-                "original_file_path": original_file_path,
-                "actual_file_path": actual_file_path,
-                "data_id": data_id,
-            }
 
         existing_data_map: dict = {}
         if data_point_ids:
