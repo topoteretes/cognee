@@ -288,8 +288,9 @@ def get_active_token_sink() -> Optional[TokenSink]:
 async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[None]:
     """Promote the requested sink to active for this task only.
 
-    Wrap the answer-generating call and nothing else. This is also where the
-    feature switch is read — in one place, so a request cannot promote a sink
+    Wrap the answer-generating call and nothing else. This is also where both
+    preconditions are checked — the feature switch, and whether the configured
+    adapter can stream at all — in one place, so a request cannot promote a sink
     that the adapter below will then refuse to stream into.
 
     On the way out it ends the stream **when this lane actually streamed**:
@@ -299,9 +300,17 @@ async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[Non
     module docstring).
     """
     from cognee.infrastructure.llm.config import get_llm_context_config
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
     sink = requested_token_sink.get()
     if sink is None or not get_llm_context_config().llm_answer_streaming:
+        yield
+        return
+    if not LLMGateway.supports_answer_streaming():
+        # Bedrock, Ollama, llama.cpp, MCP-sampling and the BAML framework answer
+        # without ever reaching the streaming path. Promoting for them announces
+        # a stream that produces no tokens — a `stage` event and then silence —
+        # so the request stays exactly as it is with the flag off.
         yield
         return
     if sink.is_closed:
