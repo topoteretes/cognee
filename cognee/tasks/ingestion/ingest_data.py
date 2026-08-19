@@ -1,6 +1,6 @@
 import json
 import inspect
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_OID
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
@@ -85,8 +85,13 @@ async def ingest_data(
 
         # Pre-loop: compute data_id for every item and cache intermediate results
         # to avoid repeating expensive I/O in the main loop.
-        data_point_ids = []
+        #
+        # Legacy-ID resolution is batched: instead of opening one DB connection per
+        # file (via ingestion.identify), we compute both UUID variants in memory and
+        # check which legacy IDs exist in a single WHERE-IN query below.
         precomputed_items = {}
+        legacy_id_map: dict[UUID, UUID] = {}  # legacy_id -> modern_id
+
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
@@ -96,17 +101,46 @@ async def ingest_data(
 
             async with open_data_file(actual_file_path) as file:
                 classified_data = ingestion.classify(file)
-                data_id = await ingestion.identify(classified_data, user)
+                content_hash = classified_data.get_identifier()
 
-            if item_data_id is not None:
-                data_id = item_data_id
+            # Compute both UUID variants in memory (no DB call)
+            legacy_id = uuid5(NAMESPACE_OID, f"{content_hash}{str(user.id)}")
+            modern_id = uuid5(NAMESPACE_OID, f"{content_hash}{str(user.id)}{str(user.tenant_id)}")
 
-            data_point_ids.append(data_id)
+            # If caller supplied an explicit data_id, use it directly
+            resolved_id = item_data_id if item_data_id is not None else None
+
             precomputed_items[id(data_item)] = {
                 "original_file_path": original_file_path,
                 "actual_file_path": actual_file_path,
-                "data_id": data_id,
+                "legacy_id": legacy_id,
+                "modern_id": modern_id,
+                "resolved_id": resolved_id,  # None means "resolve from batch query"
             }
+            if resolved_id is None:
+                legacy_id_map[legacy_id] = modern_id
+
+        # Single batch query: find which legacy IDs already exist in the DB,
+        # then resolve each item's final ID from the result (no per-file connections).
+        existing_legacy_ids: set[UUID] = set()
+        if legacy_id_map:
+            async with db_engine.get_async_session() as session:
+                rows = await session.execute(
+                    select(Data.id).filter(Data.id.in_(legacy_id_map.keys()))
+                )
+                existing_legacy_ids = {row[0] for row in rows.fetchall()}
+
+        # Resolve final data_id for each item and build the flat list for the
+        # existing-data batch query that follows.
+        data_point_ids = []
+        for data_item in data:
+            cached = precomputed_items[id(data_item)]
+            if cached["resolved_id"] is None:
+                legacy_id = cached["legacy_id"]
+                cached["resolved_id"] = (
+                    legacy_id if legacy_id in existing_legacy_ids else cached["modern_id"]
+                )
+            data_point_ids.append(cached["resolved_id"])
 
         existing_data_map: dict = {}
         if data_point_ids:
@@ -142,8 +176,8 @@ async def ingest_data(
             if loader_engine is None:
                 raise IngestionError("Loader cannot be None")
 
-            # Use data_id computed in pre-loop
-            data_id = cached.get("data_id")
+            # Use data_id resolved in pre-loop
+            data_id = cached.get("resolved_id")
 
             # Find metadata from original file
             # Standard flow: extract metadata from both original and stored files
