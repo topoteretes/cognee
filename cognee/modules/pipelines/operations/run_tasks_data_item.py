@@ -63,8 +63,16 @@ async def run_tasks_data_item_incremental(
     db_engine = get_relational_engine()
 
     # If incremental_loading of data is set to True don't process documents already processed by pipeline
-    # If data is being added to Cognee for the first time resolve the id of the data
+    # If data is being added to Cognee for the first time resolve the id of the data.
+    #
+    # Every session below is a fresh connection on the cloud pods (NullPool
+    # over Neon: TCP + TLS + SCRAM per session, ~14 ms of CPU before any
+    # latency), and this wrapper runs once PER ITEM — so the pre-check resolves
+    # the row and reads its pipeline_status in ONE lookup instead of
+    # identify()-then-select-by-id, and the post-run status write below
+    # re-resolves fresh content inside the session that records the status.
     classified_data = None
+    data_point = None
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
         # over the content lookup so lookups stay consistent.
@@ -72,37 +80,43 @@ async def run_tasks_data_item_incremental(
 
         if isinstance(data_item, DataItemType) and data_item.data_id is not None:
             data_id = data_item.data_id
+            async with db_engine.get_async_session() as session:
+                data_point = (
+                    await session.execute(select(Data).filter(Data.id == data_id))
+                ).scalar_one_or_none()
         else:
             file_path = await save_data_item_to_storage(data_item)
             # Ingest data and add metadata
             async with open_data_file(file_path) as file:
                 classified_data = ingestion.classify(file)
-                # Dataset-scoped content lookup: an existing row's id, or None
-                # for content this dataset has not seen (ingestion mints the id).
-                data_id = await ingestion.identify(classified_data, user, dataset.id)
+                # Dataset-scoped content lookup: the existing row (its id and
+                # pipeline_status) or None for content this dataset has not
+                # seen (ingestion mints the id).
+                data_point = await ingestion.identify_data(classified_data, user, dataset.id)
+            data_id = data_point.id if data_point is not None else None
     else:
         # If data was already processed by Cognee get data id
         data_id = data_item.id
+        async with db_engine.get_async_session() as session:
+            data_point = (
+                await session.execute(select(Data).filter(Data.id == data_id))
+            ).scalar_one_or_none()
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
-    async with db_engine.get_async_session() as session:
-        data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
-        ).scalar_one_or_none()
-        if data_point:
-            if (
-                data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-                == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-            ):
-                yield {
-                    "run_info": PipelineRunAlreadyCompleted(
-                        pipeline_run_id=pipeline_run_id,
-                        dataset_id=dataset.id,
-                        dataset_name=dataset.name,
-                    ),
-                    "data_id": data_id,
-                }
-                return
+    if data_point:
+        if (
+            data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
+            == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+        ):
+            yield {
+                "run_info": PipelineRunAlreadyCompleted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                ),
+                "data_id": data_id,
+            }
+            return
 
     try:
         # Process data based on data_item and list of tasks
@@ -122,14 +136,19 @@ async def run_tasks_data_item_incremental(
 
         # Update pipeline status for Data element. Fresh content had no row at
         # the pre-check (data_id None); ingestion has created it since — resolve
-        # the id it was given.
-        if data_id is None and classified_data is not None:
-            data_id = await ingestion.identify(classified_data, user, dataset.id)
-
+        # the row it was given, in the same session that records the status.
         async with db_engine.get_async_session() as session:
-            data_point = (
-                await session.execute(select(Data).filter(Data.id == data_id))
-            ).scalar_one_or_none()
+            if data_id is not None:
+                data_point = (
+                    await session.execute(select(Data).filter(Data.id == data_id))
+                ).scalar_one_or_none()
+            elif classified_data is not None:
+                data_point = await ingestion.identify_data(
+                    classified_data, user, dataset.id, session=session
+                )
+                data_id = data_point.id if data_point is not None else None
+            else:
+                data_point = None
             if data_point is not None:
                 status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
                 status_for_pipeline[str(dataset.id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED

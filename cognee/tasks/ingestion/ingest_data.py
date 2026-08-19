@@ -2,7 +2,7 @@ import json
 import inspect
 import os
 from uuid import UUID, uuid4
-from typing import Union, BinaryIO, Any, List, Optional
+from typing import TYPE_CHECKING, Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
 from sqlalchemy import select
@@ -20,7 +20,6 @@ from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     resolve_data_id,
-    get_dataset_data,
     load_or_create_datasets,
 )
 
@@ -30,7 +29,34 @@ from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
 
+if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this package
+    from cognee.modules.pipelines.models import PipelineContext
+
 logger = get_logger(__name__)
+
+
+def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional[UUID], user: User):
+    """The run's dataset from ``ctx`` when it is the one this call targets, else None.
+
+    The pipeline sets ``ctx.dataset`` to the dataset it resolved (with write
+    permission) for the run. Reuse it only when it demonstrably matches the
+    caller's selector — by id, or by name for a dataset the caller owns — so a
+    custom pipeline that points ``ingest_data`` at another dataset still goes
+    through the full resolution + permission check.
+    """
+    pipeline_dataset = getattr(ctx, "dataset", None) if ctx is not None else None
+    if pipeline_dataset is None:
+        return None
+    if dataset_id is not None:
+        return pipeline_dataset if str(pipeline_dataset.id) == str(dataset_id) else None
+    if (
+        dataset_name is not None
+        and getattr(pipeline_dataset, "name", None) == dataset_name
+        and str(getattr(pipeline_dataset, "owner_id", None)) == str(user.id)
+        and getattr(pipeline_dataset, "tenant_id", None) == getattr(user, "tenant_id", None)
+    ):
+        return pipeline_dataset
+    return None
 
 
 async def ingest_data(
@@ -41,7 +67,16 @@ async def ingest_data(
     dataset_id: UUID = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
     importance_weight: float = 0.5,
+    ctx: "PipelineContext" = None,
 ):
+    """Store ``data`` in ``dataset`` as ``Data`` rows (files land in storage first).
+
+    ``ctx`` is injected by the pipeline machinery (any task with a ``ctx``
+    parameter gets the run's ``PipelineContext``). When it carries the dataset
+    this task writes to, that dataset was already resolved and write-checked by
+    ``run_pipeline`` — re-resolving it here would cost three more DB sessions
+    per call, and the incremental pipeline calls this task once per item.
+    """
     if not user:
         user = await get_default_user()
 
@@ -66,7 +101,12 @@ async def ingest_data(
             # Convert data to a list as we work with lists further down.
             data = [data]
 
-        if dataset_id:
+        pipeline_dataset = _pipeline_dataset_for(ctx, dataset_name, dataset_id, user)
+        if pipeline_dataset is not None:
+            # The pipeline resolved (and write-authorized) this dataset once for
+            # the whole run; reuse it instead of three lookups per item.
+            dataset = pipeline_dataset
+        elif dataset_id:
             # Retrieve existing dataset
             dataset = await get_specific_user_permission_datasets(user.id, "write", [dataset_id])
             # Convert from list to Dataset element
@@ -84,9 +124,6 @@ async def ingest_data(
             )
             if isinstance(dataset, list):
                 dataset = dataset[0]
-
-        dataset_data: list[Data] = await get_dataset_data(dataset.id)
-        dataset_data_map = {str(data.id): True for data in dataset_data}
 
         db_engine = get_relational_engine()
 
@@ -116,47 +153,62 @@ async def ingest_data(
             }
             unique_content_hashes.add(item_content_hash)
 
-        # Single batch query: find existing rows for all content hashes in this
-        # dataset+owner+tenant scope — replaces N per-file identify() calls.
-        # identify_many() shares the exact same filter as identify() and chunks
-        # large inputs to stay within SQLite's bind-parameter limit.
-        existing_by_hash: dict[str, UUID] = await identify_many(
-            list(unique_content_hashes), user, dataset.id
-        )
-
-        # Resolve pinned IDs (items with explicit data_id) — still needs DB for
-        # resolve_data_id, but only for the subset that actually has a pinned id.
-        # Unpinned items use the batch result above.
-        batch_id_by_hash: dict[str, UUID] = {}
-        data_point_ids = []
-        for data_item in data:
-            cached = precomputed_items[id(data_item)]
-            item_data_id = cached["item_data_id"]
-            item_content_hash = cached["item_content_hash"]
-
-            if item_data_id is not None:
-                # A pinned id may be one the user held before a fork/update —
-                # resolve it (exact, then legacy) instead of minting a new row
-                # under a legacy value. Unknown pins stay as-is (dlt mints
-                # stable ids through this path deliberately).
-                resolved_pin = await resolve_data_id(dataset.id, item_data_id)
-                data_id = resolved_pin if resolved_pin is not None else item_data_id
-            else:
-                # Use batch result; fall back to dedup-within-batch or mint new id
-                data_id = existing_by_hash.get(item_content_hash)
-                if data_id is None:
-                    data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
-            batch_id_by_hash.setdefault(item_content_hash, data_id)
-
-            cached["data_id"] = data_id
-            data_point_ids.append(data_id)
-
+        # All read-only lookups share ONE session: on the cloud pods every
+        # session is a fresh TLS+SCRAM connection (NullPool), and this runs
+        # once per item. The session is released before the loader/storage
+        # work below so no connection is held idle across S3 round trips.
         existing_data_map: dict = {}
-        if data_point_ids:
-            async with db_engine.get_async_session() as session:
+        async with db_engine.get_async_session() as session:
+            # Single batch query: find existing rows for all content hashes in this
+            # dataset+owner+tenant scope — replaces N per-file identify() calls.
+            # identify_many() shares the exact same filter as identify() and chunks
+            # large inputs to stay within SQLite's bind-parameter limit.
+            existing_by_hash: dict[str, UUID] = await identify_many(
+                list(unique_content_hashes), user, dataset.id, session=session
+            )
+
+            # Resolve pinned IDs (items with explicit data_id) — still needs DB for
+            # resolve_data_id, but only for the subset that actually has a pinned id.
+            # Unpinned items use the batch result above.
+            batch_id_by_hash: dict[str, UUID] = {}
+            data_point_ids = []
+            for data_item in data:
+                cached = precomputed_items[id(data_item)]
+                item_data_id = cached["item_data_id"]
+                item_content_hash = cached["item_content_hash"]
+
+                if item_data_id is not None:
+                    # A pinned id may be one the user held before a fork/update —
+                    # resolve it (exact, then legacy) instead of minting a new row
+                    # under a legacy value. Unknown pins stay as-is (dlt mints
+                    # stable ids through this path deliberately).
+                    resolved_pin = await resolve_data_id(dataset.id, item_data_id)
+                    data_id = resolved_pin if resolved_pin is not None else item_data_id
+                else:
+                    # Use batch result; fall back to dedup-within-batch or mint new id
+                    data_id = existing_by_hash.get(item_content_hash)
+                    if data_id is None:
+                        data_id = batch_id_by_hash.get(item_content_hash) or uuid4()
+                batch_id_by_hash.setdefault(item_content_hash, data_id)
+
+                cached["data_id"] = data_id
+                data_point_ids.append(data_id)
+
+            if data_point_ids:
                 result = await session.execute(select(Data).filter(Data.id.in_(data_point_ids)))
                 for dp in result.scalars().all():
                     existing_data_map[str(dp.id)] = dp
+
+        # Ids already present in THIS dataset. Only rows this batch resolved
+        # to can be in here (identify_many is dataset-scoped and pins are
+        # re-resolved against the dataset), so the targeted lookup above is
+        # enough — loading every Data row of the dataset per call, as before,
+        # made a 164-file add read O(N^2) rows for a membership check.
+        dataset_data_map = {
+            str(dp.id): True
+            for dp in existing_data_map.values()
+            if str(dp.dataset_id) == str(dataset.id)
+        }
 
         for data_item in data:
             # Support for DataItem (custom label + data + optional data_id / external_metadata)

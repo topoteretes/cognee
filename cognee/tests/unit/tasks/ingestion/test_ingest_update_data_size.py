@@ -123,20 +123,15 @@ def _install_mocks(stack, engine):
             AsyncMock(return_value={meta["content_hash"]: DATA_ID}),
         )
     )
-    # Dataset resolution: return the seeded dataset and report DATA_ID as already
-    # belonging to it, so the existing-record UPDATE branch (not CREATE) runs.
+    # Dataset resolution: return the seeded dataset. Dataset membership is no
+    # longer a separate full-table read (get_dataset_data); ingest_data derives
+    # it from the rows the batch resolved to, and the seeded row's dataset_id
+    # is DATASET_ID, so the existing-record UPDATE branch (not CREATE) runs.
     stack.enter_context(
         patch.object(ingest_module, "get_authorized_existing_datasets", AsyncMock(return_value=[]))
     )
     stack.enter_context(
         patch.object(ingest_module, "load_or_create_datasets", AsyncMock(return_value=dataset))
-    )
-    stack.enter_context(
-        patch.object(
-            ingest_module,
-            "get_dataset_data",
-            AsyncMock(return_value=[SimpleNamespace(id=DATA_ID)]),
-        )
     )
 
 
