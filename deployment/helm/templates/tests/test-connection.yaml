@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cognee.fullname" . }}-test-connection
+  labels:
+    {{- include "cognee.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: curlimages/curl:latest
+      command:
+        - curl
+        - --fail
+        - --silent
+        - --max-time
+        - "10"
+        - http://{{ include "cognee.fullname" . }}:{{ .Values.service.port }}/health
