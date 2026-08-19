@@ -68,9 +68,16 @@ def _capture_telemetry(monkeypatch) -> list[dict[str, Any]]:
 
         return noop()
 
+    class StubTask:
+        """send_telemetry tracks tasks in _TELEMETRY_TASKS via add_done_callback."""
+
+        def add_done_callback(self, callback) -> None:
+            callback(self)
+
     class CapturingLoop:
-        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> None:
+        def create_task(self, coroutine: Coroutine[Any, Any, None]) -> StubTask:
             coroutine.close()
+            return StubTask()
 
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.delenv("TELEMETRY_DISABLED", raising=False)
