@@ -188,6 +188,12 @@ def test_instructor_mode_table_and_adapter_wiring():
     # Table values match the historical per-adapter defaults.
     assert get_instructor_mode("openai") == "json_schema_mode"
     assert get_instructor_mode("anthropic") == "anthropic_tools"
+    # ollama DELIBERATELY diverges from its historical "json_mode" default.
+    # json_mode sends response_format=json_object, so the pydantic schema reaches
+    # the model as prompt text only and never as a decoder constraint. Measured
+    # against llama3.1:8b with max_retries=0: json_mode returned 2/5 valid
+    # KnowledgeGraph objects on the first attempt, json_schema_mode returned 5/5.
+    assert get_instructor_mode("ollama") == "json_schema_mode"
     # An unknown provider fails loudly rather than silently defaulting.
     with pytest.raises(KeyError):
         get_instructor_mode("totally-unknown-provider")
@@ -199,6 +205,60 @@ def test_instructor_mode_table_and_adapter_wiring():
     )
 
     assert OpenAIAdapter.default_instructor_mode == get_instructor_mode("openai")
+
+
+def _clear_sampling_env(monkeypatch):
+    for var in ("LLM_TEMPERATURE", "LLM_SEED", "LLM_ARGS", "LLM_PROVIDER", "LLM_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_unset_temperature_is_not_folded_into_llm_args(monkeypatch):
+    """
+    An unset llm_temperature must not be sent to the provider: the default
+    model family (gpt-5) rejects any temperature other than its own default.
+    """
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(_env_file=None)
+    assert config.llm_args is None
+
+
+def test_explicit_temperature_kwarg_folds_into_llm_args(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(llm_temperature=0.0, _env_file=None)
+    assert config.llm_args == {"temperature": 0.0}
+
+
+def test_env_temperature_folds_into_llm_args(monkeypatch):
+    """
+    LLM_TEMPERATURE set via env reaches llm_args (env-set fields land in
+    model_fields_set). This is the fix for the field being dead config: it was
+    documented as the determinism knob but never plumbed to any adapter.
+    """
+    _clear_sampling_env(monkeypatch)
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.0")
+
+    config = LLMConfig(_env_file=None)
+    assert config.llm_args == {"temperature": 0.0}
+
+
+def test_llm_args_temperature_wins_over_dedicated_field(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(
+        llm_temperature=0.0,
+        llm_args={"temperature": 0.7, "max_tokens": 1024},
+        _env_file=None,
+    )
+    assert config.llm_args == {"temperature": 0.7, "max_tokens": 1024}
+
+
+def test_seed_folds_into_llm_args_and_preserves_existing_keys(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+
+    config = LLMConfig(llm_seed=42, llm_args={"max_tokens": 1024}, _env_file=None)
+    assert config.llm_args == {"seed": 42, "max_tokens": 1024}
 
 
 def test_known_providers_match_enum():
