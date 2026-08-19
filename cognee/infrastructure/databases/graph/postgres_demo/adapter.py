@@ -98,6 +98,22 @@ def _edge_identities(edges: list[EdgeIdentity]) -> list[tuple[str, str, str]]:
     )
 
 
+# Every write in this adapter takes this one advisory lock first, so two write
+# transactions never overlap. Row locks alone are not enough: concurrent batches
+# inserting the same node wait on each other's unique index entry, and a cascading
+# delete waits on rows in a different order, which Postgres reports as a deadlock.
+# An xact-level advisory lock is released on commit and on rollback, so there is no
+# unlock path to forget. Reads never take it.
+_GRAPH_WRITE_LOCK_KEY = 5522063
+
+
+async def _lock_graph_writes(session: AsyncSession) -> None:
+    """Serialize graph writes for the rest of this transaction."""
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"), {"key": _GRAPH_WRITE_LOCK_KEY}
+    )
+
+
 def _decode_properties(value: Any) -> dict[str, Any]:
     """Return a new dictionary for a JSONB value."""
     if not value:
@@ -259,6 +275,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 updated_at = now()
         """)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await session.execute(upsert, rows)
             if source_ref_key is not None:
                 await self._update_node_provenance(
@@ -279,6 +296,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not node_ids:
             return
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await session.execute(
                 text("DELETE FROM graph_node WHERE id = ANY(:ids)"),
                 {"ids": [str(node_id) for node_id in node_ids]},
@@ -356,6 +374,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 updated_at = now()
         """)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await session.execute(upsert, rows)
             if source_ref_key is not None:
                 await self._update_edge_provenance(
@@ -764,6 +783,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         """Delete all nodes and edges from the graph."""
         await self.initialize()
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
 
@@ -866,6 +886,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             return
         keys_to_add = list(source_ref_keys)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await self._update_node_provenance(
                 session,
                 node_ids,
@@ -885,6 +906,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             return
         keys_to_add = list(source_ref_keys)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await self._update_edge_provenance(
                 session,
                 edges,
@@ -903,6 +925,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             return
         keys_to_remove = list(source_ref_keys)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await self._update_node_provenance(
                 session,
                 node_ids,
@@ -919,6 +942,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             return
         keys_to_remove = list(source_ref_keys)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await self._update_edge_provenance(
                 session,
                 edges,
@@ -937,6 +961,7 @@ class PostgresDemoAdapter(GraphDBInterface):
               AND relationship_name = :relationship_name
         """)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             for source_id, target_id, relationship_name in _edge_identities(edges):
                 await session.execute(
                     statement,
@@ -1175,6 +1200,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """)
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             await session.execute(upsert, rows)
             await session.commit()
 
@@ -1218,6 +1244,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         """)
 
         async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
             if node_ids is None:
                 result = await session.execute(select_all)
             else:
