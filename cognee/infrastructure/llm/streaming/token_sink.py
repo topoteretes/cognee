@@ -105,9 +105,13 @@ _active_producer: ContextVar[Optional[object]] = ContextVar("active_producer", d
 class TokenSink:
     """Fan-out channel for answer tokens. Never affects the returned value."""
 
-    def __init__(self, max_buffered_events: int = MAX_BUFFERED_EVENTS) -> None:
+    def __init__(self, max_buffered_events: Optional[int] = None) -> None:
         self._queue: asyncio.Queue = asyncio.Queue()
-        self._max_buffered = max_buffered_events
+        # Read at construction, not bound as a default, so the cap stays one
+        # knob rather than a value frozen at import.
+        self._max_buffered = (
+            MAX_BUFFERED_EVENTS if max_buffered_events is None else max_buffered_events
+        )
         self._owner: Optional[object] = None
         self._emitted = False
         self._detached = False
@@ -123,6 +127,20 @@ class TokenSink:
         return producer is not None and self._owner is producer
 
     @property
+    def is_closed(self) -> bool:
+        """Whether the stream has already been terminated."""
+        return self._closed
+
+    @property
+    def dropped_events(self) -> bool:
+        """Whether the buffer overflowed and preview frames were discarded.
+
+        A consumer that fell behind has silent gaps in what it rendered, so it
+        needs telling to stop trusting the preview and wait for the payload.
+        """
+        return self._dropped
+
+    @property
     def emitted_any(self) -> bool:
         """Whether any delta was produced (whether or not it was delivered)."""
         return self._emitted
@@ -133,8 +151,13 @@ class TokenSink:
         Tenacity retries the whole call, so a second attempt re-streams from the
         beginning. Emitting ``reset`` first is what stops the consumer
         concatenating two copies of the answer.
+
+        Only the owning lane may reset. Every promoted lane calls this on its way
+        into the adapter, so without the ownership check a second dataset's
+        answer call would tell the consumer to discard the first one's answer
+        mid-stream — and its own deltas are then dropped, so nothing replaces it.
         """
-        if self._emitted:
+        if self._emitted and self.owns(_active_producer.get()):
             self._put(StreamEvent(type="reset"))
 
     def put_delta(self, text: str) -> None:
@@ -146,10 +169,14 @@ class TokenSink:
         if not text:
             return
         producer = _active_producer.get()
-        if self._owner is None:
-            self._owner = producer
-        elif self._owner is not producer:
-            return
+        if producer is not None:
+            # None means the caller is not inside a promotion (a direct producer,
+            # or a test). Claiming for None would make `owns()` false for every
+            # lane, so nothing would ever terminate the stream.
+            if self._owner is None:
+                self._owner = producer
+            elif self._owner is not producer:
+                return
         # Set before the detached check: a consumer that left mid-answer does not
         # change the fact that this producer streamed, and treating it as "never
         # streamed" would hand ownership to another lane.
@@ -197,10 +224,16 @@ class TokenSink:
         """
         self._detached = True
 
+    # Dropping one of these is worse than the memory it costs: a lost `error`
+    # ends the stream cleanly on a failed request, and a lost `reset` lets the
+    # consumer concatenate two copies of a retried answer — the exact failures
+    # those events exist to prevent.
+    _UNDROPPABLE = frozenset({"error", "reset", "answer_done", "stage"})
+
     def _put(self, event: StreamEvent) -> None:
         if self._detached or self._closed:
             return
-        if self._queue.qsize() >= self._max_buffered:
+        if event.type not in self._UNDROPPABLE and self._queue.qsize() >= self._max_buffered:
             # Drop rather than block: a slow or absent consumer must never apply
             # backpressure to the LLM call it is watching. Dropping preview
             # frames is consistent with `final` being the authoritative answer.
@@ -269,6 +302,11 @@ async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[Non
 
     sink = requested_token_sink.get()
     if sink is None or not get_llm_context_config().llm_answer_streaming:
+        yield
+        return
+    if sink.is_closed:
+        # An earlier lane already finished the answer. Promoting anyway would
+        # send this call down the streaming path for output nobody can receive.
         yield
         return
 

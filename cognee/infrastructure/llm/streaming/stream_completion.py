@@ -40,19 +40,20 @@ async def stream_text_completion(
 ) -> str:
     """Stream a completion into ``sink`` and return the complete text.
 
-    ``stream_options`` is deliberately not requested. It is the parameter
-    OpenAI-compatible servers most often reject (llama.cpp, LM Studio, older
-    vLLM), and the usual workaround — ``drop_params=True`` — is global to the
-    call, so it would silently discard *any* unsupported parameter on the
-    streaming path only: same query, same config, but a `temperature` or `seed`
-    quietly dropped and a different answer, depending on whether a consumer
-    happened to be listening. Token usage is accounted from the returned string
-    upstream, so nothing here needs the usage chunk.
+    ``stream_options={"include_usage": True}`` is requested so a streamed call
+    reports the same usage a blocking one does. Without it an OpenAI-compatible
+    stream returns no usage block at all, and any accounting that reads it — the
+    cloud credit guard among them — sees streamed answers as free. It is not
+    paired with ``drop_params``: that flag is global to the call, so tolerating
+    one unsupported key would silently discard *any* other, and the same query
+    would answer differently depending on whether a consumer was listening. A
+    server that rejects ``stream_options`` therefore fails loudly rather than
+    quietly changing the sampling parameters.
     """
     # A caller-supplied value would collide with the keyword below and raise
     # TypeError on every completion.
     merged_kwargs.pop("stream", None)
-    merged_kwargs.pop("stream_options", None)
+    stream_options = merged_kwargs.pop("stream_options", None) or {"include_usage": True}
 
     parts: list[str] = []
     sink.begin_attempt()
@@ -72,6 +73,7 @@ async def stream_text_completion(
             api_base=endpoint,
             api_version=api_version,
             stream=True,
+            stream_options=stream_options,
             **merged_kwargs,
         )
         try:
@@ -81,8 +83,18 @@ async def stream_text_completion(
                 # break a streaming integration.
                 if not chunk.choices:
                     continue
-                piece = chunk.choices[0].delta.content
+                delta = getattr(chunk.choices[0], "delta", None)
+                if delta is None:
+                    # Some proxies emit a final chunk with a populated choices
+                    # list and no delta at all.
+                    continue
+                piece = getattr(delta, "content", None)
                 if not piece:  # role-only and finish chunks carry None
+                    continue
+                if not isinstance(piece, str):
+                    # Multimodal/content-block deltas arrive as a list; joining
+                    # those at the end would raise TypeError instead.
+                    logger.debug("Skipping non-text stream delta of type %s", type(piece))
                     continue
                 parts.append(piece)
                 sink.put_delta(piece)
@@ -98,15 +110,16 @@ async def stream_text_completion(
                 except Exception:  # noqa: BLE001 - cleanup must not mask the real error
                     logger.debug("Failed to close LLM stream", exc_info=True)
 
-    if not parts:
-        # The blocking path raises for the same provider responses — a
-        # content-filter refusal, a tool-call-only reply, an error envelope
-        # streamed as an immediate [DONE]. Returning "" here instead would hand
-        # back an empty answer that `commit_turn` then persists, and would skip
-        # the tenacity retry the blocking path gets.
-        raise ValueError(f"{adapter_name} streamed no content for a plain-text completion")
-
-    # Exceptions deliberately propagate: the tenacity retry on the caller must
-    # still fire, and begin_attempt() emits a `reset` on re-entry so the consumer
-    # discards the partial answer.
+    # An empty result is returned, never raised. The blocking path is
+    # `response.choices[0].message.content or ""`, which raises *only* when the
+    # choices list itself is empty — a content-filter refusal, a reasoning-only
+    # reply and a tool-call-only reply all come back as "" there. Raising here
+    # instead would not just break parity: ValueError is retryable, and the stop
+    # condition is `stop_after_attempt(2) & stop_after_delay(240)` — an `and`, so
+    # it keeps retrying until 240s have elapsed. The same query would answer
+    # instantly with the flag off and burn four minutes with it on.
+    #
+    # Exceptions from the stream itself still propagate: the tenacity retry must
+    # fire for those, and begin_attempt() emits a `reset` on re-entry so the
+    # consumer discards the partial answer.
     return "".join(parts)

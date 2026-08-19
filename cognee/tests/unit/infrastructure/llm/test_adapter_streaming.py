@@ -22,7 +22,12 @@ from unittest.mock import patch
 import pytest
 
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
-from cognee.infrastructure.llm.streaming.token_sink import TokenSink, active_token_sink
+from cognee.infrastructure.llm.streaming.token_sink import (
+    TokenSink,
+    active_token_sink,
+    requested_token_sink,
+    stream_answer_tokens,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
 )
@@ -74,6 +79,22 @@ def _streaming_completion(chunks, seen=None, streams=None):
         return stream
 
     return _acompletion
+
+
+def _flag(enabled: bool):
+    return patch(
+        "cognee.infrastructure.llm.config.get_llm_context_config",
+        return_value=SimpleNamespace(llm_answer_streaming=enabled),
+    )
+
+
+@contextmanager
+def _requested(sink: TokenSink):
+    token = requested_token_sink.set(sink)
+    try:
+        yield sink
+    finally:
+        requested_token_sink.reset(token)
 
 
 @contextmanager
@@ -142,16 +163,18 @@ async def test_role_only_and_empty_chunks_are_skipped():
 
 
 @pytest.mark.asyncio
-async def test_a_stream_with_no_content_raises_instead_of_answering_empty():
-    """A content-filter refusal, a tool-call-only reply, or an error envelope
-    streamed as an immediate [DONE]. The blocking path raises for these; if the
-    streaming path returned "" the empty answer would be persisted by
-    commit_turn and the caller's retry would never fire."""
+async def test_an_empty_stream_returns_the_same_empty_string_as_the_blocking_call():
+    """A content-filter refusal, a reasoning-only reply, or a tool-call-only
+    reply. The blocking path is `content or ""` — it raises only when the
+    *choices list* is empty — so raising here would break parity in the one
+    direction that costs real time: ValueError is retryable, and the stop
+    condition is `stop_after_attempt(2) & stop_after_delay(240)` (an `and`), so
+    the same query would burn four minutes with the flag on and answer instantly
+    with it off."""
     sink = TokenSink()
     chunks = [_chunk(None), _usage_chunk()]
     with patch(f"{STREAM_MODULE}.litellm.acompletion", new=_streaming_completion(chunks)):
-        with pytest.raises(ValueError, match="no content"):
-            await _stream(sink, chunks)
+        assert await _stream(sink, chunks) == ""
 
 
 @pytest.mark.asyncio
@@ -170,8 +193,12 @@ async def test_sampling_parameters_are_not_dropped():
         await _stream(sink, chunks, temperature=0.0, seed=7)
 
     assert seen.get("temperature") == 0.0 and seen.get("seed") == 7
+    # drop_params is global to the call, so tolerating one unsupported key would
+    # silently discard these two as well.
     assert seen.get("drop_params") is None
-    assert "stream_options" not in seen, "the parameter servers most often reject"
+    # Usage is requested so a streamed answer is not invisible to spend
+    # accounting — the cloud credit guard reads it.
+    assert seen.get("stream_options") == {"include_usage": True}
 
 
 @pytest.mark.asyncio
@@ -205,15 +232,25 @@ async def test_the_stream_is_closed_even_when_iteration_fails():
 
 @pytest.mark.asyncio
 async def test_a_retry_tells_the_consumer_to_discard_the_partial_answer():
+    """Driven through a promotion, because only the owning lane may reset."""
     sink = TokenSink()
     chunks = [_chunk("complete")]
-    sink.put_delta("partial from the first attempt")
 
-    with patch(f"{STREAM_MODULE}.litellm.acompletion", new=_streaming_completion(chunks)):
-        await _stream(sink, chunks)
+    with (
+        _flag(True),
+        _requested(sink),
+        patch(f"{STREAM_MODULE}.litellm.acompletion", new=_streaming_completion(chunks)),
+    ):
+        async with stream_answer_tokens():
+            sink.put_delta("partial from the first attempt")
+            await _stream(sink, chunks)
 
-    sink.close()
-    assert [e.type for e in await _drain(sink)] == ["delta", "reset", "delta"]
+    assert [e.type for e in await _drain(sink)] == [
+        "delta",
+        "reset",
+        "delta",
+        "answer_done",
+    ]
 
 
 # --------------------------- adapter routing ---------------------------

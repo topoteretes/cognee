@@ -67,14 +67,43 @@ async def test_deltas_reach_the_consumer_in_order():
 async def test_retry_emits_reset_so_the_answer_is_not_duplicated():
     """Tenacity retries the whole call, which re-streams from the start."""
     sink = TokenSink()
-    sink.begin_attempt()  # first attempt: nothing emitted yet, no reset
-    sink.put_delta("par")
-    sink.put_delta("tial")
-    sink.begin_attempt()  # retry: must tell the consumer to discard
-    sink.put_delta("complete")
-    sink.close()
+    with _flag(True), _requested(sink):
+        async with stream_answer_tokens():
+            sink.begin_attempt()  # first attempt: nothing emitted yet, no reset
+            sink.put_delta("par")
+            sink.put_delta("tial")
+            sink.begin_attempt()  # retry: must tell the consumer to discard
+            sink.put_delta("complete")
 
-    assert [e.type for e in await _drain(sink)] == ["delta", "delta", "reset", "delta"]
+    types = [e.type for e in await _drain(sink)]
+    assert types == ["delta", "delta", "reset", "delta", "answer_done"]
+
+
+@pytest.mark.asyncio
+async def test_only_the_owning_lane_may_reset_the_consumer():
+    """Every promoted lane calls begin_attempt on its way into the adapter. If a
+    non-owner could reset, a second dataset's answer call would tell the client
+    to discard the first one's answer — and its own deltas are then dropped, so
+    nothing replaces what was wiped."""
+    sink = TokenSink()
+
+    async def _owner():
+        async with stream_answer_tokens():
+            for _ in range(3):
+                sink.put_delta("A")
+                await asyncio.sleep(0)
+
+    async def _intruder():
+        async with stream_answer_tokens():
+            await asyncio.sleep(0)
+            sink.begin_attempt()
+
+    with _flag(True), _requested(sink):
+        await asyncio.gather(_owner(), _intruder())
+
+    events = await _drain(sink)
+    assert "reset" not in [e.type for e in events]
+    assert "".join(e.text for e in events if e.type == "delta") == "AAA"
 
 
 @pytest.mark.asyncio
@@ -104,7 +133,7 @@ async def test_a_detached_producer_still_counts_as_having_streamed():
 
 
 @pytest.mark.asyncio
-async def test_the_buffer_is_bounded_when_nobody_drains():
+async def test_the_delta_buffer_is_bounded_when_nobody_drains():
     """A sink whose consumer never arrives must not retain one object per token
     for the life of the request."""
     sink = TokenSink(max_buffered_events=8)
@@ -113,7 +142,22 @@ async def test_the_buffer_is_bounded_when_nobody_drains():
             for index in range(100):
                 sink.put_delta(f"token{index}")
 
-    assert sink._queue.qsize() <= 9  # bounded + the sentinel
+    events = await _drain(sink)
+    assert len([e for e in events if e.type == "delta"]) <= 8
+
+
+@pytest.mark.asyncio
+async def test_control_events_survive_a_full_buffer():
+    """Dropping one of these is worse than the memory it saves: a lost `error`
+    ends the stream cleanly on a failed request, so the client renders a
+    truncated partial answer as if it were complete."""
+    sink = TokenSink(max_buffered_events=3)
+    for index in range(20):
+        sink.put_delta(f"token{index}")
+    sink.fail("upstream exploded")
+
+    types = [e.type for e in await _drain(sink)]
+    assert "error" in types, types
 
 
 @pytest.mark.asyncio
