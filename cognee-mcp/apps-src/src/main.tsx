@@ -324,8 +324,8 @@ function DatasetRail({
     setStatus(`Deleting '${name}'...`);
     try {
       const result = await app.callServerTool({
-        name: "delete_dataset",
-        arguments: { dataset_name: name },
+        name: "forget",
+        arguments: { dataset: name },
       });
       if (result.isError) {
         setStatus(`Error: ${textOf(result) ?? "delete failed"}`);
@@ -347,7 +347,7 @@ function DatasetRail({
     setStatus("Deleting data item...");
     try {
       const result = await app.callServerTool({
-        name: "delete",
+        name: "forget",
         arguments: { data_id: dataId, dataset_id: datasetId },
       });
       if (result.isError) {
@@ -568,11 +568,11 @@ function Composer({
     });
     try {
       const args: Record<string, string> = {
-        search_query: q,
+        query: q,
         search_type: searchType,
       };
       if (selectedDataset) args.datasets = selectedDataset;
-      const result = await app.callServerTool({ name: "search", arguments: args });
+      const result = await app.callServerTool({ name: "recall", arguments: args });
       const msg = textOf(result) ?? JSON.stringify(result.content);
       onSearchResult({
         type: searchType,
@@ -598,9 +598,12 @@ function Composer({
     setBusy(true);
     setStatus("Adding text…");
     try {
-      const args: Record<string, string> = { data };
+      // background: ingestion runs add + cognify and routinely exceeds the
+      // host's per-request timeout. The tool queues the work and returns a
+      // status message instead of blocking until the pipeline finishes.
+      const args: Record<string, string | boolean> = { data, background: true };
       if (selectedDataset) args.dataset_name = selectedDataset;
-      const result = await app.callServerTool({ name: "cognify", arguments: args });
+      const result = await app.callServerTool({ name: "remember", arguments: args });
       const msg = textOf(result) ?? JSON.stringify(result.content);
       setStatus(result.isError ? `Error: ${msg}` : msg);
       if (!result.isError) {
@@ -626,7 +629,13 @@ function Composer({
     setStatus(`Uploading ${file.name}…`);
     try {
       const content_base64 = arrayBufferToBase64(await file.arrayBuffer());
-      const args: Record<string, string> = { filename: file.name, content_base64 };
+      // background: same timeout constraint as text ingest, and more acute —
+      // a multi-megabyte document takes far longer than the host will wait.
+      const args: Record<string, string | boolean> = {
+        filename: file.name,
+        content_base64,
+        background: true,
+      };
       if (selectedDataset) args.dataset_name = selectedDataset;
       const result = await app.callServerTool({
         name: "remember",

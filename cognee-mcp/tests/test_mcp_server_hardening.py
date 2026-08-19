@@ -133,6 +133,10 @@ WORKSPACE_INTERNAL_TOOLS = {
     "list_dataset_data_json",
     "create_dataset_json",
     "get_client_info_json",
+    # Ingestion is queued (remember(background=True)) because it outruns the
+    # host's request deadline, so progress and failures are only observable
+    # through a status call.
+    "cognify_status",
 }
 EXPECTED_TOOLS = MEMORY_API_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | WORKSPACE_INTERNAL_TOOLS
 
