@@ -99,6 +99,34 @@ async def test_cognee_link_dispatches_to_its_handler():
 
 
 @pytest.mark.asyncio
+async def test_cognee_remember_dispatches_to_its_handler():
+    credential = _credential(allowed_channel_ids=[])
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(
+            f"{MODULE}.handle_cognee_remember", new=AsyncMock(return_value={"remembered": True})
+        ) as remember,
+    ):
+        response = await handle_slack_command(
+            _body(command="/cognee-remember", text="we chose Neon for v2")
+        )
+    remember.assert_awaited_once()
+    assert response == {"remembered": True}
+
+
+@pytest.mark.asyncio
+async def test_cognee_remember_is_blocked_by_the_allowlist_like_every_command():
+    credential = _credential(allowed_channel_ids=["C1"])
+    with (
+        patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)),
+        patch(f"{MODULE}.handle_cognee_remember", new=AsyncMock()) as remember,
+    ):
+        response = await handle_slack_command(_body(command="/cognee-remember", channel_id="C999"))
+    remember.assert_not_awaited()
+    assert "isn't enabled in this channel" in response["text"]
+
+
+@pytest.mark.asyncio
 async def test_unimplemented_command_still_honors_allowlist():
     credential = _credential(allowed_channel_ids=["C1"])
     with patch(f"{MODULE}.get_by_team", new=AsyncMock(return_value=credential)):

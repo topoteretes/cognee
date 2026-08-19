@@ -34,7 +34,7 @@ pre-commit install
 - **neptune** - AWS Neptune support
 - **turso** - Turso vector database support
 - **docs** - Document processing (unstructured library)
-- **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright)
+- **scraping** - Web scraping (Tavily, BeautifulSoup, Playwright; Keenable needs no extra — it uses the built-in httpx)
 - **langchain** - LangChain integration
 - **llama-index** - LlamaIndex integration
 - **anthropic** - Anthropic Claude models
@@ -367,7 +367,36 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 CACHE_BACKEND=sqlite
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
+# Session-search execution mode: concurrent (default) or sequential
+SESSION_SEARCH_MODE=concurrent
 ```
+
+#### Session Search Modes
+
+A session search (a `search()` with an active session cache) runs in one of two modes,
+chosen deployment-wide by `SESSION_SEARCH_MODE`. There is no per-request override.
+
+Both modes make the same two LLM calls per turn — one to analyze the turn for session
+context, one to answer. They differ in how those calls are sequenced:
+
+- **`concurrent`** (default) — analysis runs **concurrently** with retrieval and
+  answering, so a turn costs one answer call of wall-clock time. Retrieval compensates
+  for not having the analysis's rewritten query by running two lanes: the raw question,
+  and a deterministic (LLM-free) rewrite built from the last two turns. Their results are
+  merged by the retriever before context is formatted.
+- **`sequential`** — analysis runs **first**, its rewritten query drives a single
+  retrieval, and its context updates are applied before the answer is generated.
+
+The practical difference: in sequential mode, guidance the user states this turn can
+influence this turn's answer. In concurrent mode it applies from the next turn onward.
+
+Concurrent mode applies only to `GraphCompletionRetriever`,
+`HybridRetriever`, `CompletionRetriever` (`RAG_COMPLETION`), and `TripletRetriever`
+(`TRIPLET_COMPLETION`), and only through `search()`. Calling a retriever's
+`get_completion()` directly always takes the sequential path. Subclasses, batch queries,
+`only_context`, `FEELING_LUCKY`, and sessionless calls fall back to sequential mode
+automatically. With `AUTO_FEEDBACK=false`
+neither mode analyzes the turn.
 
 ### Memory & Performance Tuning Flags
 
@@ -463,7 +492,11 @@ LLM_INSTRUCTOR_MODE="json_schema_mode"  # or "tool_call", "md_json", etc.
 
 ### Structured Output Framework
 ```bash
-# Use Instructor (default, via litellm)
+# litellm_native (default): plain litellm, schema-native response_format
+# with prompted-JSON fallback — no instructor in the call path
+STRUCTURED_OUTPUT_FRAMEWORK="litellm_native"
+
+# Or use Instructor (legacy, via litellm)
 STRUCTURED_OUTPUT_FRAMEWORK="instructor"
 
 # Or use BAML (requires baml extra: pip install cognee[baml])
@@ -667,6 +700,13 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Tuning** (env): `CONTRADICTION_CONFIDENCE_THRESHOLD` (default 0.5, minimum confidence to flag), `CONTRADICTION_MAX_FACTS` (default 500, cap on facts per LLM call).
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
+
+### Code Files (cognify CODE route)
+Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension list lives on `code_loader`) are recognized at add time through the loader system: the code loader claims the file, stores it under its real extension, and `ingest_data` tags the record with `system_metadata = {"source": "code"}`. Cognify then routes such items down the CODE route, which runs the deterministic enola code graph pipeline per file — typed `CodeSymbol`/`CodeModule`/… nodes with `calls`/`imports`/`has_method` edges, **no LLM calls**.
+
+- **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
+- **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
+- **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
 
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):

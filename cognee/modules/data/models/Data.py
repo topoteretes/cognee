@@ -1,16 +1,20 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer, Float
+from sqlalchemy import UUID, Column, DateTime, Index, String, JSON, Integer, Float
 from sqlalchemy.ext.mutable import MutableDict
-from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
-
-from .DatasetData import DatasetData
 
 
 class Data(Base):
     __tablename__ = "data"
+    # Dedup is a lookup, not an identity: adding content already present in a
+    # dataset (by the same owner/tenant) reuses that row via this index; the id
+    # itself carries no content information and stays stable when the
+    # document's content changes.
+    __table_args__ = (
+        Index("data_dataset_content_lookup", "dataset_id", "owner_id", "content_hash"),
+    )
 
     id = Column(UUID, primary_key=True, default=uuid4)
     label = Column(String, nullable=True)
@@ -24,9 +28,26 @@ class Data(Base):
     original_data_location = Column(String)
     owner_id = Column(UUID, index=True)
     tenant_id = Column(UUID, index=True, nullable=True)
+    # Dataset that owns this content row. Rows are dataset-scoped: the same
+    # content in two datasets is two rows with two ids, so updating one
+    # document can never touch another dataset's data. Nullable only for the
+    # upgrade window: the startup backfill (alembic d6e8f0a2b4c6) stamps every
+    # legacy row's dataset (splitting rows shared by several datasets), so no
+    # NULL rows exist after it runs.
+    dataset_id = Column(UUID, index=True, nullable=True)
+    # The pre-refactor data_id this row's identity descends from. Written by
+    # exactly one thing — the backfill split of a shared legacy row — and only
+    # preserved afterwards (update() re-ingests under the row's own id), so
+    # alias chains cannot form and every id ever issued keeps resolving.
+    # NULL for rows whose id never changed.
+    legacy_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
     raw_content_hash = Column(String)
     external_metadata = Column(JSON)
+    # System-derived metadata (DLT source stamps used for pipeline routing,
+    # purge scoping, and orphan cleanup). Owned by cognee and never
+    # user-writable — external_metadata is the user's free-form field.
+    system_metadata = Column(JSON, nullable=True)
     # Store NodeSet as JSON list of strings
     node_set = Column(JSON, nullable=True)
     # MutableDict allows SQLAlchemy to notice key-value pair changes, without it changing a value for a key
@@ -38,14 +59,6 @@ class Data(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
     last_accessed = Column(DateTime(timezone=True), nullable=True)
     importance_weight = Column(Float, nullable=True)
-
-    datasets = relationship(
-        "Dataset",
-        secondary=DatasetData.__tablename__,
-        back_populates="data",
-        lazy="selectin",
-        cascade="all, delete",
-    )
 
     def to_json(self) -> dict:
         return {

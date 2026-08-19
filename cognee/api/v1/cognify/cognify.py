@@ -5,6 +5,8 @@ from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.cognify.rollback import cognify_rollback_handler
+from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
@@ -22,11 +24,13 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
+from cognee.tasks.code_graph.code_files import get_code_file_tasks
+from cognee.tasks.code_graph.code_repo import get_code_repo_tasks
 from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
 from cognee.tasks.graph import detect_contradictions
+from cognee.tasks.provenance import record_provenance
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
@@ -300,17 +304,40 @@ async def cognify(
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-        # Run the run_pipeline in the background or blocking based on executor
+        # Per-item routing: each data item resolves to the task list its kind
+        # requires — DLT-source manifests run the deterministic DLT list, code
+        # files run the enola code graph list, everything else runs the
+        # standard (or temporal) list. The lists are built once up front and
+        # the resolver is a sync closure over them (the distributed runner
+        # materializes per-item task columns, so it needs concrete lists, not
+        # an async factory). One run_pipeline call, one cognify_pipeline run
+        # per dataset, mixed datasets included. Every route is wired
+        # EXPLICITLY, the standard route included — no implicit default. An
+        # unmapped route (a CognifyRoute member added without a task list
+        # here) raises KeyError instead of silently running the standard LLM
+        # list on data that was routed away from it.
+        tasks_by_route = {
+            CognifyRoute.STANDARD: tasks,
+            CognifyRoute.DLT_SOURCE: await get_dlt_tasks(
+                chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+            ),
+            CognifyRoute.CODE: get_code_file_tasks(),
+            CognifyRoute.CODE_REPO: get_code_repo_tasks(),
+        }
+
+        def resolve_cognify_tasks(data_item):
+            return tasks_by_route[cognify_route_for(data_item)]
+
         result = await pipeline_executor_func(
             pipeline=run_pipeline,
-            tasks=tasks,
-            user=user,
             datasets=datasets,
+            tasks=resolve_cognify_tasks,
+            pipeline_name="cognify_pipeline",
+            user=user,
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
             incremental_loading=incremental_loading,
             use_pipeline_cache=False,
-            pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
             rollback_handler=cognify_rollback_handler,
             llm_config=llm_config,
@@ -345,6 +372,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     check_contradictions = cognify_config.contradiction_detection
+    track_provenance = cognify_config.provenance_tracking
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -376,7 +404,16 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
         ),
-        Task(extract_dlt_fk_edges),
+        # COGNIFY (opt-in): append an audit-grade provenance ledger entry for every
+        # document/chunk/entity/relationship this ingestion produced. Runs right
+        # after add_data_points (node ids persisted and stable) and before the
+        # contradiction spread so the ledger never depends on contradiction edges.
+        # Default OFF.
+        *(
+            [Task(record_provenance, task_config={"batch_size": chunks_per_batch})]
+            if track_provenance
+            else []
+        ),
         # COGNIFY (opt-in): flag facts in this ingestion that contradict facts
         # already in the graph. Runs last so both new and existing facts are
         # persisted and comparable. Default OFF — when the flag is off this spread
@@ -401,6 +438,52 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     return default_tasks
+
+
+async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:
+    """Deterministic pipeline for DLT-source manifest datasets.
+
+    No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
+    by add_data_points) and the graph structure comes from the relational
+    schema via extract_dlt_source_edges. Deliberate omissions relative to
+    get_default_tasks: contradiction detection (an LLM pass; DLT rows are
+    deterministic relational data) and functional_relationships (a cognify()
+    parameter that only applies to LLM-extracted temporal facts).
+    """
+    from cognee.tasks.ingestion.extract_dlt_source_edges import extract_dlt_source_edges
+    from cognee.tasks.ingestion.purge_stale_dlt_source_artifacts import (
+        purge_stale_dlt_source_artifacts,
+    )
+
+    cognify_config = get_cognify_config()
+    if chunks_per_batch is None:
+        chunks_per_batch = (
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
+        )
+
+    return [
+        # EXTRACT: classify manifest Data items into DltSourceDocument objects
+        Task(classify_documents),
+        # PURGE: manifests have stable ids — drop the source's previously
+        # derived artifacts so re-emission replaces instead of accreting.
+        Task(purge_stale_dlt_source_artifacts),
+        # EXTRACT: one DocumentChunk per manifest row (no text chunking)
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
+            chunker=TextChunker,
+        ),
+        # LOAD: persist row chunks and embeddings to graph/vector DBs
+        Task(
+            add_data_points,
+            embed_triplets=cognify_config.triplet_embedding,
+            task_config={"batch_size": chunks_per_batch},
+        ),
+        # LOAD: schema nodes and deterministic FK edges from the manifest.
+        # Cross-batch dedup state lives in ctx.extras (per data item = per
+        # source), so these Task objects are safe to share across datasets.
+        Task(extract_dlt_source_edges),
+    ]
 
 
 async def get_temporal_tasks(

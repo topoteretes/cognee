@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Awaitable, Callable, List, Optional
+
+from typing import Any, Awaitable, Callable, List, Optional, Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -13,12 +14,14 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
+from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
     PipelineRunStarted,
 )
+from cognee.modules.operations.usage_accumulator import operation_usage_scope, parent_run_scope
 from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
     log_pipeline_run_complete,
@@ -32,7 +35,7 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
 async def run_tasks(
-    tasks: List[Task],
+    tasks: Union[List[Task], Callable[[Any], List[Task]]],
     dataset_id: UUID,
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
@@ -45,6 +48,16 @@ async def run_tasks(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = False,
 ):
+    """Run a pipeline over a dataset as ONE logical run.
+
+    ``tasks`` is either the task list every item runs, or a callable mapping
+    one data item to its task list (a task resolver — like
+    ``rollback_handler``, a caller-supplied policy that keeps the engine
+    domain-blind). A constant list is just the degenerate resolver; items
+    resolved to different lists still share this run's lifecycle — one run
+    record, one database context, one rollback, one terminal status.
+    """
+    task_resolver = tasks if callable(tasks) else None
     if not user:
         user = await get_default_user()
 
@@ -54,8 +67,13 @@ async def run_tasks(
         dataset = await session.get(Dataset, dataset_id)
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-    pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
+    pipeline_run = await log_pipeline_run_start(
+        pipeline_id, pipeline_name, dataset.id, data, user=user
+    )
     pipeline_run_id = pipeline_run.pipeline_run_id
+    # getattr (not attribute access) because unit tests stub
+    # log_pipeline_run_start with plain namespaces lacking the field.
+    run_started_at = getattr(pipeline_run, "started_at", None)
 
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,
@@ -66,130 +84,171 @@ async def run_tasks(
 
     # Note: Setting of global context has to be done after yielding PipelineRunStarted due to running in
     #       background mode requiring the pipeline run started yield.
-    async with set_database_global_context_variables(
-        dataset.id,
-        dataset.owner_id,
-        llm_config=llm_config,
-        embedding_config=embedding_config,
-    ):
-        try:
-            if not isinstance(data, list):
-                data = [data]
+    # parent_run_scope makes nested runs (a pipeline started by one of our
+    # tasks, or a recorded operation called mid-pipeline) parent to THIS run,
+    # mirroring how their tokens chain into run_usage.
+    with operation_usage_scope() as run_usage, parent_run_scope(pipeline_run_id):
+        async with set_database_global_context_variables(
+            dataset.id,
+            dataset.owner_id,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+        ):
+            try:
+                if not isinstance(data, list):
+                    data = [data]
 
-            if data_cache or incremental_loading:
-                data = await resolve_data_directories(data)
+                if data_cache or incremental_loading:
+                    data = await resolve_data_directories(data, user=user, dataset_id=dataset.id)
 
-            # Semaphore-based concurrency: all items are scheduled at once,
-            # but at most data_per_batch run concurrently at any time.
-            semaphore = asyncio.Semaphore(data_per_batch)
+                # Build (item, item_tasks) work pairs: a resolver picks each
+                # item's task list; a plain list applies uniformly. Validate each
+                # DISTINCT resolved list once (the eager check in run_pipeline
+                # covers only the plain-list case).
+                work_items = []
+                validated_list_ids = set()
+                for item in data:
+                    item_tasks = task_resolver(item) if task_resolver else tasks
+                    if task_resolver is not None and id(item_tasks) not in validated_list_ids:
+                        validate_pipeline_tasks(item_tasks)
+                        validated_list_ids.add(id(item_tasks))
+                    work_items.append((item, item_tasks))
 
-            async def _run_item(data_item):
-                async with semaphore:
-                    return await run_tasks_data_item(
-                        data_item,
-                        dataset,
-                        tasks,
-                        pipeline_name,
-                        pipeline_id,
-                        pipeline_run_id,
-                        PipelineContext(
-                            user=user,
-                            data_item=data_item,
-                            dataset=dataset,
-                            pipeline_run_id=pipeline_run_id,
-                            pipeline_name=pipeline_name,
-                            extras=extras if isinstance(extras, dict) else {},
-                        ),
-                        user,
-                        incremental_loading,
-                        data_cache,
-                    )
+                # Semaphore-based concurrency: all items are scheduled at once,
+                # but at most data_per_batch run concurrently at any time.
+                semaphore = asyncio.Semaphore(data_per_batch)
 
-            gathered = await asyncio.gather(
-                *[asyncio.create_task(_run_item(item)) for item in data],
-            )
-
-            # Separate successes from unhandled exceptions
-            results = []
-            for i, result in enumerate(gathered):
-                if isinstance(result, BaseException):
-                    logger.error(f"Item {i} failed: {result}", exc_info=result)
-                    results.append(
-                        {
-                            "run_info": PipelineRunErrored(
+                async def _run_item(data_item, item_tasks):
+                    async with semaphore:
+                        return await run_tasks_data_item(
+                            data_item,
+                            dataset,
+                            item_tasks,
+                            pipeline_name,
+                            pipeline_id,
+                            pipeline_run_id,
+                            PipelineContext(
+                                user=user,
+                                data_item=data_item,
+                                dataset=dataset,
                                 pipeline_run_id=pipeline_run_id,
-                                payload=repr(result),
-                                dataset_id=dataset.id,
-                                dataset_name=dataset.name,
+                                pipeline_name=pipeline_name,
+                                # Copy per item: a shared dict would let one item's
+                                # ctx.extras mutations leak into every other item.
+                                extras=dict(extras) if isinstance(extras, dict) else {},
                             ),
-                        }
-                    )
-                elif result:
-                    results.append(result)
+                            user,
+                            incremental_loading,
+                            data_cache,
+                        )
 
-            # If any data item could not be processed propagate error
-            errored_results = [
-                result for result in results if isinstance(result["run_info"], PipelineRunErrored)
-            ]
-            if errored_results:
-                raise PipelineRunFailedError(
-                    message="Pipeline run failed. Data item could not be processed."
+                gathered = await asyncio.gather(
+                    *[
+                        asyncio.create_task(_run_item(item, item_tasks))
+                        for item, item_tasks in work_items
+                    ],
                 )
 
-            # Flush durable storage BEFORE marking the run complete. If a push
-            # fails it must be treated as a failure of this run (rollback +
-            # PipelineRunErrored), not raised after the run has already been
-            # reported as completed — which would both roll back already-completed
-            # data and emit two contradictory terminal events for one run.
-            graph_engine = await get_graph_engine()
-            if hasattr(graph_engine, "push_to_s3"):
-                await graph_engine.push_to_s3()
+                # Separate successes from unhandled exceptions
+                results = []
+                for i, result in enumerate(gathered):
+                    if isinstance(result, BaseException):
+                        logger.error(f"Item {i} failed: {result}", exc_info=result)
+                        results.append(
+                            {
+                                "run_info": PipelineRunErrored(
+                                    pipeline_run_id=pipeline_run_id,
+                                    payload=repr(result),
+                                    dataset_id=dataset.id,
+                                    dataset_name=dataset.name,
+                                ),
+                            }
+                        )
+                    elif result:
+                        results.append(result)
 
-            relational_engine = get_relational_engine()
-            if hasattr(relational_engine, "push_to_s3"):
-                await relational_engine.push_to_s3()
-
-            await log_pipeline_run_complete(
-                pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data
-            )
-
-            yield PipelineRunCompleted(
-                pipeline_run_id=pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                data_ingestion_info=results,
-            )
-
-        except Exception as error:
-            if callable(rollback_handler):
-                try:
-                    await rollback_handler(
-                        pipeline_run_id=pipeline_run_id,
-                        pipeline_id=pipeline_id,
-                        pipeline_name=pipeline_name,
-                        dataset=dataset,
-                        user=user,
-                        data=data,
-                        data_ingestion_info=locals().get("results"),
-                        error=error,
+                # If any data item could not be processed propagate error
+                errored_results = [
+                    result
+                    for result in results
+                    if isinstance(result["run_info"], PipelineRunErrored)
+                ]
+                if errored_results:
+                    raise PipelineRunFailedError(
+                        message="Pipeline run failed. Data item could not be processed."
                     )
-                except Exception as rollback_error:
-                    logger.error("Rollback errored: %s", rollback_error, exc_info=True)
 
-            await log_pipeline_run_error(
-                pipeline_run_id, pipeline_id, pipeline_name, dataset.id, data, error
-            )
+                # Flush durable storage BEFORE marking the run complete. If a push
+                # fails it must be treated as a failure of this run (rollback +
+                # PipelineRunErrored), not raised after the run has already been
+                # reported as completed — which would both roll back already-completed
+                # data and emit two contradictory terminal events for one run.
+                graph_engine = await get_graph_engine()
+                if hasattr(graph_engine, "push_to_s3"):
+                    await graph_engine.push_to_s3()
 
-            yield PipelineRunErrored(
-                pipeline_run_id=pipeline_run_id,
-                payload=repr(error),
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                data_ingestion_info=locals().get(
-                    "results"
-                ),  # Returns results if they exist or returns None
-            )
+                relational_engine = get_relational_engine()
+                if hasattr(relational_engine, "push_to_s3"):
+                    await relational_engine.push_to_s3()
 
-            # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
-            if not isinstance(error, PipelineRunFailedError):
-                raise error
+                await log_pipeline_run_complete(
+                    pipeline_run_id,
+                    pipeline_id,
+                    pipeline_name,
+                    dataset.id,
+                    data,
+                    user=user,
+                    started_at=run_started_at,
+                    tokens_in=run_usage.tokens_in,
+                    tokens_out=run_usage.tokens_out,
+                )
+
+                yield PipelineRunCompleted(
+                    pipeline_run_id=pipeline_run_id,
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    data_ingestion_info=results,
+                )
+
+            except Exception as error:
+                if callable(rollback_handler):
+                    try:
+                        await rollback_handler(
+                            pipeline_run_id=pipeline_run_id,
+                            pipeline_id=pipeline_id,
+                            pipeline_name=pipeline_name,
+                            dataset=dataset,
+                            user=user,
+                            data=data,
+                            data_ingestion_info=locals().get("results"),
+                            error=error,
+                        )
+                    except Exception as rollback_error:
+                        logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+
+                await log_pipeline_run_error(
+                    pipeline_run_id,
+                    pipeline_id,
+                    pipeline_name,
+                    dataset.id,
+                    data,
+                    error,
+                    user=user,
+                    started_at=run_started_at,
+                    tokens_in=run_usage.tokens_in,
+                    tokens_out=run_usage.tokens_out,
+                )
+
+                yield PipelineRunErrored(
+                    pipeline_run_id=pipeline_run_id,
+                    payload=repr(error),
+                    dataset_id=dataset.id,
+                    dataset_name=dataset.name,
+                    data_ingestion_info=locals().get(
+                        "results"
+                    ),  # Returns results if they exist or returns None
+                )
+
+                # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
+                if not isinstance(error, PipelineRunFailedError):
+                    raise error

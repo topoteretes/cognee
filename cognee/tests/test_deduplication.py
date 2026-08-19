@@ -30,20 +30,19 @@ async def test_deduplication():
     await cognee.add([explanation_file_path2], dataset_name2, incremental_loading=False)
 
     result = await relational_engine.get_all_data_from_table("data")
-    assert len(result) == 1, "More than one data entity was found."
-    assert result[0]["name"] == "Natural_language_processing_copy", (
-        "Result name does not match expected value."
+    assert len(result) == 2, "Expected one dataset-scoped data row per dataset."
+    assert result[0]["content_hash"] == result[1]["content_hash"], (
+        "Identical content must share a content hash across datasets."
     )
+    assert result[0]["dataset_id"] != result[1]["dataset_id"], (
+        "Rows must be scoped to their own datasets."
+    )
+    assert result[0]["id"] != result[1]["id"], "Each dataset's document has its own identity."
 
     result = await relational_engine.get_all_data_from_table("datasets")
     assert len(result) == 2, "Unexpected number of datasets found."
     assert result[0]["name"] == dataset_name, "Result name does not match expected value."
     assert result[1]["name"] == dataset_name2, "Result name does not match expected value."
-
-    result = await relational_engine.get_all_data_from_table("dataset_data")
-    assert len(result) == 2, "Unexpected number of dataset data relationships found."
-    assert result[0]["data_id"] == result[1]["data_id"], "Data item is not reused between datasets."
-    assert result[0]["dataset_id"] != result[1]["dataset_id"], "Dataset items are not different."
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -60,9 +59,19 @@ async def test_deduplication():
     await cognee.add([text], dataset_name)
     await cognee.add([text], dataset_name2)
 
+    # Re-adding within the SAME dataset stays idempotent (lookup dedup).
+    await cognee.add([text], dataset_name)
+
     result = await relational_engine.get_all_data_from_table("data")
-    assert len(result) == 1, "More than one data entity was found."
-    assert hashlib.md5(text.encode("utf-8")).hexdigest() in result[0]["name"], (
+    assert len(result) == 2, "Expected one dataset-scoped data row per dataset."
+    assert result[0]["content_hash"] == result[1]["content_hash"], (
+        "Identical content must share a content hash across datasets."
+    )
+    assert result[0]["dataset_id"] != result[1]["dataset_id"], (
+        "Rows must be scoped to their own datasets."
+    )
+    assert result[0]["id"] != result[1]["id"], "Each dataset's document has its own identity."
+    assert all(hashlib.md5(text.encode("utf-8")).hexdigest() in row["name"] for row in result), (
         "Content hash is not a part of file name."
     )
 
@@ -79,7 +88,14 @@ async def test_deduplication():
     await cognee.add([explanation_file_path2], dataset_name2)
 
     result = await relational_engine.get_all_data_from_table("data")
-    assert len(result) == 1, "More than one data entity was found."
+    assert len(result) == 2, "Expected one dataset-scoped data row per dataset."
+    assert result[0]["content_hash"] == result[1]["content_hash"], (
+        "Identical content must share a content hash across datasets."
+    )
+    assert result[0]["dataset_id"] != result[1]["dataset_id"], (
+        "Rows must be scoped to their own datasets."
+    )
+    assert result[0]["id"] != result[1]["id"], "Each dataset's document has its own identity."
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -96,7 +112,14 @@ async def test_deduplication():
     await cognee.add([explanation_file_path2], dataset_name2)
 
     result = await relational_engine.get_all_data_from_table("data")
-    assert len(result) == 1, "More than one data entity was found."
+    assert len(result) == 2, "Expected one dataset-scoped data row per dataset."
+    assert result[0]["content_hash"] == result[1]["content_hash"], (
+        "Identical content must share a content hash across datasets."
+    )
+    assert result[0]["dataset_id"] != result[1]["dataset_id"], (
+        "Rows must be scoped to their own datasets."
+    )
+    assert result[0]["id"] != result[1]["id"], "Each dataset's document has its own identity."
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)

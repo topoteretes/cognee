@@ -109,6 +109,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def _stamp_operation_origin(request, call_next):
+    # Operations executed for this request record origin="api" in
+    # pipeline_runs. ContextVars set here propagate into the handler task.
+    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+
+    set_operation_origin(ORIGIN_API)
+    return await call_next(request)
+
+
 # Read allowed origins from environment variable (comma-separated)
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS")
 if CORS_ALLOWED_ORIGINS:

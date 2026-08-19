@@ -52,6 +52,8 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    label: Optional[str] = None
+    external_metadata: Optional[dict] = None
 
 
 class DatasetGraphSummaryDTO(OutDTO):
@@ -122,7 +124,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets",
                 "cognee_version": cognee_version,
@@ -170,7 +172,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/datasets",
                 "cognee_version": cognee_version,
@@ -235,7 +237,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
                 "dataset_id": str(dataset_id),
@@ -285,7 +287,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
                 "dataset_id": str(dataset_id),
@@ -360,6 +362,9 @@ def get_datasets_router() -> APIRouter:
         - **mime_type**: MIME type of the data
         - **raw_data_location**: Storage location of the raw data
         - **dataset_id**: ID of the containing dataset
+        - **label**: Label attached to the data item at upload, if any
+        - **external_metadata**: Stored metadata dict (upload-provided keys merged over
+          loader-derived ones), if any
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
@@ -367,7 +372,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
                 "dataset_id": str(dataset_id),
@@ -395,11 +400,15 @@ def get_datasets_router() -> APIRouter:
         if dataset_data is None:
             return []
 
+        # Dict literal, not dict(**data, dataset_id=...): Data now carries its
+        # own dataset_id column, and the kwarg form raises TypeError on the
+        # duplicate key. The requested dataset id still wins — the column is
+        # nullable, so the row's value cannot be relied on here.
         return [
-            dict(
+            {
                 **jsonable_encoder(data),
-                dataset_id=dataset_id,
-            )
+                "dataset_id": dataset_id,
+            }
             for data in dataset_data
         ]
 
@@ -465,7 +474,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/status",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
@@ -530,7 +539,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/graph-summary",
                 "dataset_ids": [str(dataset_id) for dataset_id in dataset_ids],
@@ -682,7 +691,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
                 "dataset_id": str(dataset_id),
@@ -691,36 +700,39 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_data
-        from cognee.modules.data.methods import get_dataset_data
+        from cognee.modules.data.methods import get_dataset_data, resolve_data_id
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
         if not dataset:
             return JSONResponse(
-                status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
+                status_code=404, content={"message": f"Dataset ({dataset_id}) not found."}
             )
 
-        dataset_data = await get_dataset_data(dataset[0].id)
+        # Dataset-scoped lookup: resolves the exact id or, for a row whose
+        # identity forked in the dataset-scoping upgrade, its recorded
+        # pre-fork legacy_id — every id ever issued keeps resolving.
+        resolved_id = await resolve_data_id(dataset[0].id, data_id)
 
-        if dataset_data is None:
-            raise DataNotFoundError(message=f"No data found in dataset ({dataset_id}).")
+        if resolved_id is None:
+            raise DataNotFoundError(
+                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
+            )
 
-        matching_data = [data for data in dataset_data if data.id == data_id]
+        matching_data = [
+            data for data in await get_dataset_data(dataset[0].id) if data.id == resolved_id
+        ]
 
-        # Check if matching_data contains an element
         if len(matching_data) == 0:
             raise DataNotFoundError(
                 message=f"Data ({data_id}) not found in dataset ({dataset_id})."
             )
 
-        data = await get_data(user.id, data_id)
-
-        if data is None:
-            raise DataNotFoundError(
-                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
-            )
+        # Use the data object already verified to belong to the authorized dataset,
+        # rather than calling get_data() which checks owner_id and would reject
+        # ACL-granted readers who are not the data owner.
+        data = matching_data[0]
 
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)

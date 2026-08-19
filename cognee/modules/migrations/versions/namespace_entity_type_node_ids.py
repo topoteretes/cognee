@@ -134,6 +134,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions._vector_rekey import (
     RekeyedPoint as _RekeyedPoint,
+    index_data_points_batched as _index_data_points_batched,
     lancedb_where as _lancedb_where,
     rekey_lancedb as _rekey_lancedb,
     rekey_native as _rekey_native,
@@ -369,7 +370,7 @@ async def _migrate_vector(vector_engine, id_map: dict, properties_by_id: dict) -
                 migrated_old_ids.append(old_id)
 
             if new_points:
-                await vector_engine.index_data_points(node_type, index_field, new_points)
+                await _index_data_points_batched(vector_engine, node_type, index_field, new_points)
                 await vector_engine.delete_data_points(collection, migrated_old_ids)
 
     return failed
@@ -442,7 +443,8 @@ async def _migrate_triplet_vector(vector_engine, triplet_map: dict) -> None:
         migrated_old_ids.append(old_id)
 
     if new_points:
-        await vector_engine.index_data_points("Triplet", "text", new_points)  # -> Triplet_text
+        # -> Triplet_text
+        await _index_data_points_batched(vector_engine, "Triplet", "text", new_points)
         await vector_engine.delete_data_points("Triplet_text", migrated_old_ids)
 
 
@@ -730,25 +732,81 @@ async def _restore_edge_provenance(graph_engine, edge: EdgeIdentity, snapshot) -
     )
 
 
+async def _restore_provenance_bulk(attach, items_with_snapshots) -> None:
+    """Batched provenance restore: one attach call per (provenance profile,
+    source key) instead of one per artifact.
+
+    A dataset's subgraph overwhelmingly carries one provenance profile (same
+    source_ref_keys and run refs on every artifact), so restoring a re-keyed
+    100k-edge subgraph collapses from 100k sequential read+write+checkpoint
+    round-trips — hours through the subprocess engine — to a handful of
+    batched calls. ``attach`` is ``attach_node_source_refs`` /
+    ``attach_edge_source_refs``; both take the artifact list first and apply
+    the transition per artifact, so the batched call is state-identical to
+    the per-artifact loop it replaces.
+    """
+    groups: dict = {}
+    for artifact, snapshot in items_with_snapshots:
+        if snapshot is None or not snapshot.source_ref_keys:
+            continue
+        profile = (tuple(snapshot.source_ref_keys), tuple(snapshot.source_run_refs))
+        groups.setdefault(profile, []).append(artifact)
+
+    for (source_ref_keys, source_run_refs), artifacts in groups.items():
+        run_refs_by_key: dict[str, str] = {}
+        for run_ref in source_run_refs:
+            source_ref_key = get_source_ref_key_from_source_run_ref(run_ref)
+            run_refs_by_key[source_ref_key] = str(get_pipeline_run_id_from_source_run_ref(run_ref))
+        for source_ref_key in source_ref_keys:
+            await attach(artifacts, [source_ref_key], run_refs_by_key.get(source_ref_key))
+
+
+async def _edges_needing_reassert(graph_engine, at_risk: list) -> list:
+    """Narrow the at-risk set to the edges the backend actually dropped.
+
+    ``at_risk`` is every survivor edge incident to a node whose neighbourhood
+    was rewritten — potentially the whole graph. Upserting all of them is
+    correct but pays ~102k writes on a 100k-node fork to repair drops that are
+    usually zero.
+
+    One scan of the edge table answers the question directly, and a scan is the
+    operation an embedded graph engine is fastest at. Backends that cannot
+    answer it (no Cypher, unsupported syntax) fall back to re-asserting
+    everything, so behaviour is unchanged where the shortcut does not apply.
+    """
+    try:
+        rows = await graph_engine.query(
+            "MATCH (a:Node)-[r:EDGE]->(b:Node) RETURN a.id, b.id, r.relationship_name"
+        )
+    except Exception as error:
+        logger.info(
+            "namespace migration: edge listing unavailable (%s), re-asserting all "
+            "%d at-risk edge(s)",
+            error,
+            len(at_risk),
+        )
+        return at_risk
+
+    present = {(str(row[0]), str(row[1]), str(row[2])) for row in rows}
+    dropped = [edge for edge in at_risk if (edge[0], edge[1], edge[2]) not in present]
+    logger.info(
+        "namespace migration: %d of %d at-risk edge(s) were dropped and need re-asserting",
+        len(dropped),
+        len(at_risk),
+    )
+    return dropped
+
+
 async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edges: list) -> int:
     """Remap old-scheme node ids (and their edges) in the graph database."""
-    node_snapshots, edge_snapshots = await _snapshot_graph_provenance(
-        graph_engine, list(id_map.keys()), edges
-    )
     inverse_id_map = {new_id: old_id for old_id, new_id in id_map.items()}
 
-    # 1) Create the remapped nodes (new IDs, all original properties preserved).
-    new_nodes = [
-        _make_node({**properties_by_id[old_id], "id": new_id}) for old_id, new_id in id_map.items()
-    ]
-    await graph_engine.add_nodes(new_nodes)
-    for old_id, new_id in id_map.items():
-        await _restore_node_provenance(graph_engine, new_id, node_snapshots.get(old_id))
-
-    # 2) Re-create every edge touching a remapped node onto the new endpoints.
-    #    Edges between two unchanged nodes are kept aside as survivors, and the
-    #    unchanged endpoint of a remapped edge is recorded as an "affected
-    #    neighbor" (its OTHER edges sit next to the detach-delete in step 3).
+    # Partition edges BEFORE snapshotting so the provenance snapshot covers
+    # only edges whose snapshot is ever consumed: remapped edges (looked up by
+    # their old identity) and survivors incident to an affected neighbor
+    # (re-asserted in step 4). Snapshotting every edge in the graph made the
+    # fork re-key quadratic on large graphs — a 295k-edge dataset never fit
+    # the subprocess deadline even though only its document subgraph moves.
     remapped_edges = []
     survivor_edges = []
     affected_neighbors = set()
@@ -776,8 +834,32 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
                 affected_neighbors.add(target_id)
         else:
             survivor_edges.append((source_id, target_id, relationship_name, edge_properties or {}))
+
+    snapshot_relevant = set(id_map.keys()) | affected_neighbors
+    snapshot_edges = [
+        edge for edge in edges if edge[0] in snapshot_relevant or edge[1] in snapshot_relevant
+    ]
+    node_snapshots, edge_snapshots = await _snapshot_graph_provenance(
+        graph_engine, list(id_map.keys()), snapshot_edges
+    )
+
+    # 1) Create the remapped nodes (new IDs, all original properties preserved).
+    new_nodes = [
+        _make_node({**properties_by_id[old_id], "id": new_id}) for old_id, new_id in id_map.items()
+    ]
+    await graph_engine.add_nodes(new_nodes)
+    await _restore_provenance_bulk(
+        graph_engine.attach_node_source_refs,
+        [(new_id, node_snapshots.get(old_id)) for old_id, new_id in id_map.items()],
+    )
+
+    # 2) Re-create every edge touching a remapped node onto the new endpoints.
+    #    Edges between two unchanged nodes are kept aside as survivors, and the
+    #    unchanged endpoint of a remapped edge is recorded as an "affected
+    #    neighbor" (its OTHER edges sit next to the detach-delete in step 3).
     if remapped_edges:
         await graph_engine.add_edges(remapped_edges)
+        remapped_restores = []
         for source_id, target_id, relationship_name, _properties in remapped_edges:
             old_edge = _edge_identity(
                 inverse_id_map.get(source_id, source_id),
@@ -785,7 +867,8 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
                 relationship_name,
             )
             new_edge = _edge_identity(source_id, target_id, relationship_name)
-            await _restore_edge_provenance(graph_engine, new_edge, edge_snapshots.get(old_edge))
+            remapped_restores.append((new_edge, edge_snapshots.get(old_edge)))
+        await _restore_provenance_bulk(graph_engine.attach_edge_source_refs, remapped_restores)
 
     # 3) Delete the old nodes. A detach-delete also drops their stale edges,
     #    which we already re-created against the new node IDs above.
@@ -798,16 +881,30 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
     #    incoming ``TextSummary -made_from-> DocumentChunk``. add_edges is an
     #    idempotent upsert, so re-asserting is a no-op where the edge survived and
     #    restores it where the backend dropped it.
+    #
+    #    Re-asserting blindly costs one upsert per at-risk edge — on a 100k-node
+    #    fork that is ~102k writes (~22 min measured) to repair a handful of
+    #    drops, or none at all. When the backend can list its edges in one scan,
+    #    ask it which ones actually vanished and rewrite only those.
     at_risk = [
         edge
         for edge in survivor_edges
         if edge[0] in affected_neighbors or edge[1] in affected_neighbors
     ]
     if at_risk:
-        await graph_engine.add_edges(at_risk)
-        for source_id, target_id, relationship_name, _properties in at_risk:
-            edge = _edge_identity(source_id, target_id, relationship_name)
-            await _restore_edge_provenance(graph_engine, edge, edge_snapshots.get(edge))
+        to_reassert = await _edges_needing_reassert(graph_engine, at_risk)
+        if to_reassert:
+            await graph_engine.add_edges(to_reassert)
+            await _restore_provenance_bulk(
+                graph_engine.attach_edge_source_refs,
+                [
+                    (edge, edge_snapshots.get(edge))
+                    for edge in (
+                        _edge_identity(source_id, target_id, relationship_name)
+                        for source_id, target_id, relationship_name, _properties in to_reassert
+                    )
+                ],
+            )
 
     return len(remapped_edges)
 

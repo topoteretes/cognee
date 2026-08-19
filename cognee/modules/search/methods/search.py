@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import Any, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
@@ -25,7 +24,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
     SearchResult,
     SearchType,
@@ -35,6 +34,20 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
+
+
+def _single_dataset_id(dataset_ids: Union[list[UUID], UUID, None]) -> Optional[UUID]:
+    """Return the dataset a search is scoped to, when it is exactly one.
+
+    Searches fan out across every dataset they are given, and ``None`` means
+    "every dataset the user can read". Neither case has a single dataset to
+    attribute the logged query to, so both record ``None``.
+    """
+    if dataset_ids is None:
+        return None
+    if isinstance(dataset_ids, UUID):
+        return dataset_ids
+    return dataset_ids[0] if len(dataset_ids) == 1 else None
 
 
 async def search(
@@ -76,10 +89,9 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    query = await log_query(query_text, query_type.value, user.id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
-        user.id,
+        user,
         additional_properties={
             "cognee_version": cognee_version,
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
@@ -124,28 +136,18 @@ async def search(
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
-        user.id,
+        user,
         additional_properties={
             "cognee_version": cognee_version,
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
         },
     )
 
-    # Log only the completion text (what the user sees), not the full
-    # serialized graph payload. The raw result_objects can be 50-100 KB
-    # each and cause unbounded DB growth in long-running deployments.
-    completions = []
-    for item in search_results:
-        payload = item[0] if isinstance(item, tuple) else item
-        if hasattr(payload, "completion") and payload.completion:
-            completions.append(payload.completion)
-        elif hasattr(payload, "context") and payload.context:
-            completions.append(payload.context)
-    await log_result(
-        query.id,
-        json.dumps(completions) if completions else "[]",
-        user.id,
-    )
+    # Logged after the search because only the results say which datasets were
+    # actually searched — dataset_ids=None means "every dataset the user can
+    # read". Only the completion text is stored, never the raw result_objects,
+    # which run 50-100 KB each and would grow the DB without bound.
+    await log_search_history(query_text, query_type.value, user.id, search_results)
 
     return _backwards_compatible_search_results(search_results, verbose)
 

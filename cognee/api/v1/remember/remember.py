@@ -25,6 +25,7 @@ from cognee.memory import (
 )
 from cognee.memory.entries import MEMORY_ENTRY_TYPES
 from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
@@ -39,6 +40,14 @@ from cognee.modules.observability import (
 )
 
 logger = get_logger("remember")
+
+# Strong refs for fire-and-forget background remember tasks. The event loop only
+# keeps a weak reference to a task, and the API router drops the RememberResult
+# (the sole other holder of the task) after serializing it — without anchoring
+# here the gc can collect an in-flight task before it completes, silently
+# aborting the background add+cognify run or session bridge (#4312). Tasks
+# remove themselves on done.
+_BACKGROUND_REMEMBER_TASKS: set[asyncio.Task] = set()
 
 
 class RememberKwargs(TypedDict, total=False):
@@ -1204,112 +1213,135 @@ async def _remember_inner(
 
     await setup()
 
-    # Resolve user early so we can use it for session init
-    user = shared_kwargs.get("user")
-    if user is None:
-        from cognee.modules.users.methods import get_default_user
+    async with record_operation("remember") as operation_context:
+        # Resolve user early so we can use it for session init
+        user = shared_kwargs.get("user")
+        if user is None:
+            from cognee.modules.users.methods import get_default_user
 
-        user = await get_default_user()
-        shared_kwargs["user"] = user
+            user = await get_default_user()
+            shared_kwargs["user"] = user
+        operation_context.set_user(user)
 
-    # Build the result object — starts as "running"
-    if not dataset_id and dataset_name:
-        # Create dataset if it doesn't exist
-        user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
-        dataset_id = dataset_id[0].id if dataset_id else None
+        # Build the result object — starts as "running"
+        if not dataset_id and dataset_name:
+            # Create dataset if it doesn't exist
+            user, dataset_id = await resolve_authorized_user_datasets(dataset_name, user)
+            dataset_id = dataset_id[0].id if dataset_id else None
 
-    # Session memory: store in session cache, then optionally bridge to graph
-    if session_id:
-        await _add_to_session(session_id, data, user)
+        if dataset_id:
+            operation_context.set_dataset(dataset_id)
+
+        # Session memory: store in session cache, then optionally bridge to graph
+        if session_id:
+            operation_context.set_session_id(session_id)
+            operation_context.set_background(bool(self_improvement))
+            await _add_to_session(session_id, data, user)
+            result = RememberResult(
+                status="session_stored",
+                dataset_name=dataset_name,
+                dataset_id=str(dataset_id) if dataset_id else None,
+                session_ids=[session_id],
+            )
+            result.elapsed_seconds = time.monotonic() - result._started_at
+
+            # Bridge session data to permanent graph in the background
+            if self_improvement:
+                from cognee.api.v1.improve import improve
+
+                async def _session_improve():
+                    from cognee.modules.operations import ORIGIN_BACKGROUND, operation_origin_scope
+
+                    try:
+                        # System-initiated continuation, not a direct user call:
+                        # its records carry origin="background".
+                        with operation_origin_scope(ORIGIN_BACKGROUND):
+                            await improve(
+                                dataset=dataset_id,
+                                session_ids=[session_id],
+                                user=user,
+                            )
+                        logger.info("remember: session '%s' bridged to permanent graph", session_id)
+                    except Exception as exc:
+                        logger.warning("remember: session improve failed (non-fatal): %s", exc)
+
+                result._task = asyncio.create_task(_session_improve())
+                _BACKGROUND_REMEMBER_TASKS.add(result._task)
+                result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+
+            return result
+
         result = RememberResult(
-            status="session_stored",
+            status="running",
             dataset_name=dataset_name,
             dataset_id=str(dataset_id) if dataset_id else None,
-            session_ids=[session_id],
+            session_ids=session_ids,
         )
-        result.elapsed_seconds = time.monotonic() - result._started_at
 
-        # Bridge session data to permanent graph in the background
-        if self_improvement:
-            from cognee.api.v1.improve import improve
+        # Permanent memory: add + cognify (+ optional improve)
+        async def _run():
+            await add(
+                data=data,
+                dataset_name=dataset_name,
+                dataset_id=dataset_id,
+                **shared_kwargs,
+                **add_kwargs,
+            )
 
-            async def _session_improve():
+            datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
+
+            cognify_result = await cognify(
+                datasets=datasets_arg,
+                chunker=chunker,
+                chunk_size=chunk_size,
+                custom_prompt=custom_prompt,
+                run_in_background=False,
+                **shared_kwargs,
+                **cognify_kwargs,
+            )
+
+            result._resolve(cognify_result)
+
+            if self_improvement:
+                from cognee.api.v1.improve import improve
+
+                logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
+                improve_kwargs = {"dataset": dataset_id or dataset_name, "user": user}
+                if session_ids:
+                    improve_kwargs["session_ids"] = session_ids
+                await improve(**improve_kwargs)
+
+        if session_ids:
+            operation_context.set_session_id(session_ids[0] if len(session_ids) == 1 else None)
+
+        if run_in_background:
+            # outcome="succeeded" on this row means "accepted and started"
+            # (SDK-399: background launches record the launch, not the work).
+            operation_context.set_background(True)
+            # Background runs must not depend on caller/request-scoped stream lifetimes.
+            # Materialize stream-like inputs into owned in-memory buffers up front.
+            from cognee.tasks.ingestion.utils import materialize_stream_for_background
+
+            data = await materialize_stream_for_background(data)
+
+            async def _remember_background():
                 try:
-                    await improve(
-                        dataset=dataset_id,
-                        session_ids=[session_id],
-                        user=user,
-                    )
-                    logger.info("remember: session '%s' bridged to permanent graph", session_id)
+                    await _run()
                 except Exception as exc:
-                    logger.warning("remember: session improve failed (non-fatal): %s", exc)
+                    result._fail(exc)
+                    logger.exception("Background remember failed")
 
-            result._task = asyncio.create_task(_session_improve())
+            result._task = asyncio.create_task(_remember_background())
+            _BACKGROUND_REMEMBER_TASKS.add(result._task)
+            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+            return result
+
+        # Blocking mode
+        operation_context.set_background(False)
+        try:
+            await _run()
+        except Exception as exc:
+            result._fail(exc)
+            raise
 
         return result
-
-    result = RememberResult(
-        status="running",
-        dataset_name=dataset_name,
-        dataset_id=str(dataset_id) if dataset_id else None,
-        session_ids=session_ids,
-    )
-
-    # Permanent memory: add + cognify (+ optional improve)
-    async def _run():
-        await add(
-            data=data,
-            dataset_name=dataset_name,
-            dataset_id=dataset_id,
-            **shared_kwargs,
-            **add_kwargs,
-        )
-
-        datasets_arg = [dataset_name] if dataset_id is None else [dataset_id]
-
-        cognify_result = await cognify(
-            datasets=datasets_arg,
-            chunker=chunker,
-            chunk_size=chunk_size,
-            custom_prompt=custom_prompt,
-            run_in_background=False,
-            **shared_kwargs,
-            **cognify_kwargs,
-        )
-
-        result._resolve(cognify_result)
-
-        if self_improvement:
-            from cognee.api.v1.improve import improve
-
-            logger.info("remember: running self-improvement on dataset '%s'", dataset_name)
-            improve_kwargs = {"dataset": dataset_id or dataset_name, "user": user}
-            if session_ids:
-                improve_kwargs["session_ids"] = session_ids
-            await improve(**improve_kwargs)
-
-    if run_in_background:
-        # Background runs must not depend on caller/request-scoped stream lifetimes.
-        # Materialize stream-like inputs into owned in-memory buffers up front.
-        from cognee.tasks.ingestion.utils import materialize_stream_for_background
-
-        data = await materialize_stream_for_background(data)
-
-        async def _remember_background():
-            try:
-                await _run()
-            except Exception as exc:
-                result._fail(exc)
-                logger.exception("Background remember failed")
-
-        result._task = asyncio.create_task(_remember_background())
-        return result
-
-    # Blocking mode
-    try:
-        await _run()
-    except Exception as exc:
-        result._fail(exc)
-        raise
-
-    return result

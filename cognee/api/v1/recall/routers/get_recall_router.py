@@ -131,13 +131,15 @@ def get_recall_router() -> APIRouter:
         text: str
         user: str
         created_at: datetime
+        # Null when the recall was not scoped to a single dataset.
+        dataset_id: Optional[UUID] = None
 
     @router.get("", response_model=list[RecallHistoryItem])
     async def get_recall_history(user: User = Depends(get_authenticated_user)):
         """Get search/recall history for the authenticated user."""
         send_telemetry(
             "Recall API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "GET /v1/recall", "cognee_version": cognee_version},
         )
 
@@ -195,7 +197,7 @@ def get_recall_router() -> APIRouter:
         """
         send_telemetry(
             "Recall API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/recall",
                 "search_type": str(payload.search_type),

@@ -123,7 +123,7 @@ jobs:
       - name: Publish ${{ github.ref_name }} release to PyPI
         # Trusted Publishing (OIDC) — no API token. The action generates and
         # uploads PEP 740 digital attestations by default (attestations: true).
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2 (twine 7.0.0: accepts Metadata-Version 2.5)
         with:
           packages-dir: dist/
 
@@ -183,6 +183,34 @@ jobs:
             flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
+
+      - name: Check MCP lockfile ships the released cognee version
+        # The MCP image installs cognee from PyPI via cognee-mcp/uv.lock, which
+        # can only be re-locked after the new version is published — a manual
+        # step that was missed for 1.4.1 and 1.5.0, shipping images whose tag
+        # did not match the cognee library inside (issue #4360). Fail here
+        # instead of pushing a silently skewed cognee-mcp image. Dev canaries
+        # are exempt: their .devN versions cannot be in the lock before they
+        # are published.
+        if: ${{ github.ref_name == 'main' }}
+        env:
+          RELEASE_VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          LOCKED_VERSION="$(python3 - <<'PY'
+          import tomllib
+
+          with open("cognee-mcp/uv.lock", "rb") as lock_file:
+              lock = tomllib.load(lock_file)
+
+          print(next(p["version"] for p in lock["package"] if p["name"] == "cognee"))
+          PY
+          )"
+          echo "Release version: ${RELEASE_VERSION}"
+          echo "cognee-mcp/uv.lock pins cognee: ${LOCKED_VERSION}"
+          if [ "${LOCKED_VERSION}" != "${RELEASE_VERSION}" ]; then
+            echo "::error file=cognee-mcp/uv.lock::cognee-mcp/uv.lock pins cognee ${LOCKED_VERSION}, but this release is ${RELEASE_VERSION} — the cognee-mcp:${RELEASE_VERSION} image would ship the wrong library (issue #4360). Once cognee ${RELEASE_VERSION} is on PyPI, run 'uv lock --upgrade-package cognee' in cognee-mcp/, merge the lock bump, then re-run this job."
+            exit 1
+          fi
 
       - name: Build and push Dev MCP Docker Image
         if: ${{ github.ref_name == 'dev' }}

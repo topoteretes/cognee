@@ -13,6 +13,10 @@ class Result(Base):
     query_id = Column(UUID)
     user_id = Column(UUID, index=True)
 
+    # Mirrors ``Query.dataset_id`` for the query this result answers, so
+    # history can be filtered by dataset without joining back to queries.
+    dataset_id = Column(UUID, index=True, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )

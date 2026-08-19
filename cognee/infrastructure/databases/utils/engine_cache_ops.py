@@ -1,8 +1,8 @@
 """Shared cache-management facade for the decorated engine factories.
 
-Graph and vector engines expose the same five cache operations — evict,
-touch, is-cached, evict-by-database, and its async variant — through one
-public instance per engine module: ``graph_engine_cache`` in
+Graph and vector engines expose the same cache operations — evict, touch,
+is-cached, evict-by-database, evict-by-url, and their async variants —
+through one public instance per engine module: ``graph_engine_cache`` in
 ``get_graph_engine`` and ``vector_engine_cache`` in ``create_vector_engine``
 (e.g. ``graph_engine_cache.evict(force_close=True, **cfg)``). Before this
 module each engine file carried its own copy of the plumbing. The split of
@@ -26,15 +26,21 @@ class EngineCacheOps:
     ``key_args`` maps a config dict to the factory's positional cache-key
     tuple. ``database_name_field`` is the cache-key field holding the
     per-dataset database name (a dataset UUID), used by the by-database
-    evictions.
+    evictions. ``database_url_field`` optionally names the cache-key field
+    holding the connection url, enabling the by-url evictions for handlers
+    whose per-dataset databases share one database name and differ only by
+    url.
     """
 
-    __slots__ = ("_factory", "_key_args", "_database_name_field")
+    __slots__ = ("_factory", "_key_args", "_database_name_field", "_database_url_field")
 
-    def __init__(self, factory, key_args, database_name_field: str) -> None:
+    def __init__(
+        self, factory, key_args, database_name_field: str, database_url_field: str = ""
+    ) -> None:
         self._factory = factory
         self._key_args = key_args
         self._database_name_field = database_name_field
+        self._database_url_field = database_url_field
 
     def evict(self, force_close: bool = False, **kwargs) -> bool:
         """Evict the cached engine entry for this config.
@@ -92,4 +98,30 @@ class EngineCacheOps:
         """
         evicted = self.evict_for_database(database_name)
         await self._factory.cache_await_closed(**{self._database_name_field: database_name})
+        return evicted
+
+    def evict_for_url(self, database_url: str) -> int:
+        """Evict every cached engine bound to *database_url*.
+
+        Counterpart of :meth:`evict_for_database` for handlers whose
+        per-dataset databases share one database name but differ by connection
+        url — with the ``neo4j_community`` handler every dataset's database is
+        named ``neo4j`` inside its own container, so the bolt url (unique host
+        port) is the only key field that identifies the dataset's engines.
+        Returns the number of evicted entries.
+        """
+        if not self._database_url_field:
+            raise RuntimeError("This engine cache was built without a database_url_field")
+        if not database_url:
+            raise ValueError(f"{self._database_url_field} must be a non-empty url")
+        return self._factory.cache_evict_matching(**{self._database_url_field: database_url})
+
+    async def aevict_for_url(self, database_url: str) -> int:
+        """Evict every cached engine bound to *database_url* and wait until
+        their in-flight closes have completed. Use before removing the
+        database's backing container so a teardown that is already running
+        cannot race the removal. Returns the number of evicted entries.
+        """
+        evicted = self.evict_for_url(database_url)
+        await self._factory.cache_await_closed(**{self._database_url_field: database_url})
         return evicted
