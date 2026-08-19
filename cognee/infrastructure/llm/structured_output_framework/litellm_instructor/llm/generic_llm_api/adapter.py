@@ -91,6 +91,11 @@ class GenericAPIAdapter(LLMInterface):
     Type[BaseModel]) -> BaseModel
     """
 
+    # Inherited by OpenAIAdapter (and through it AzureOpenAIAdapter), plus the
+    # Anthropic, Gemini and Mistral adapters — all of which reach the shared
+    # streaming path through this class's acreate_str_output.
+    supports_answer_streaming = True
+
     MAX_RETRIES = 2
     default_instructor_mode = get_instructor_mode("generic")
 

@@ -28,13 +28,26 @@ async def _drain(sink: TokenSink) -> list:
     return [event async for event in sink]
 
 
-def _flag(enabled: bool):
-    """Toggle LLM_ANSWER_STREAMING. It defaults to False, so every test that
-    expects promotion has to turn it on explicitly — which is the point."""
-    return patch(
-        "cognee.infrastructure.llm.config.get_llm_context_config",
-        return_value=SimpleNamespace(llm_answer_streaming=enabled),
-    )
+@contextmanager
+def _flag(enabled: bool, adapter_streams: bool = True):
+    """Set both preconditions for promotion.
+
+    The flag defaults to False, so every test that expects promotion has to turn
+    it on explicitly. The adapter capability is pinned too — otherwise these
+    tests would silently depend on whichever provider the ambient environment
+    happens to configure.
+    """
+    with (
+        patch(
+            "cognee.infrastructure.llm.config.get_llm_context_config",
+            return_value=SimpleNamespace(llm_answer_streaming=enabled),
+        ),
+        patch(
+            "cognee.infrastructure.llm.LLMGateway.LLMGateway.supports_answer_streaming",
+            return_value=adapter_streams,
+        ),
+    ):
+        yield
 
 
 @contextmanager
@@ -366,3 +379,28 @@ async def test_flag_off_emits_nothing_at_all():
 
     sink.close()
     assert await _drain(sink) == []
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_that_cannot_stream_is_never_promoted():
+    """Bedrock, Ollama, llama.cpp, MCP-sampling and the BAML framework answer
+    without ever reaching the streaming path. Promoting for them would announce
+    a stream that produces no tokens — a stage event and then silence — so the
+    request must look exactly as it does with the flag off."""
+    sink = TokenSink()
+    with _flag(True, adapter_streams=False), _requested(sink):
+        async with stream_answer_tokens(stage="generating"):
+            assert get_active_token_sink() is None
+
+    sink.close()
+    assert await _drain(sink) == []
+
+
+@pytest.mark.asyncio
+async def test_a_streaming_adapter_is_promoted():
+    """The other half of the same check, so a capability probe that always
+    returned False would not pass silently."""
+    sink = TokenSink()
+    with _flag(True, adapter_streams=True), _requested(sink):
+        async with stream_answer_tokens(stage="generating"):
+            assert get_active_token_sink() is sink
