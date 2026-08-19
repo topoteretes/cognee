@@ -94,7 +94,7 @@ async def ingest_data(
         # Dedup is a dataset-scoped LOOKUP batched into a single WHERE-IN query
         # below — instead of one DB connection per file via ingestion.identify().
         precomputed_items = {}
-        content_hash_to_items: dict[str, list] = {}  # hash -> list of data_item keys
+        unique_content_hashes: set[str] = set()
 
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
@@ -114,14 +114,14 @@ async def ingest_data(
                 "item_data_id": item_data_id,
                 "data_id": None,  # resolved below
             }
-            content_hash_to_items.setdefault(item_content_hash, []).append(id(data_item))
+            unique_content_hashes.add(item_content_hash)
 
         # Single batch query: find existing rows for all content hashes in this
         # dataset+owner+tenant scope — replaces N per-file identify() calls.
         # identify_many() shares the exact same filter as identify() and chunks
         # large inputs to stay within SQLite's bind-parameter limit.
         existing_by_hash: dict[str, UUID] = await identify_many(
-            list(content_hash_to_items.keys()), user, dataset.id
+            list(unique_content_hashes), user, dataset.id
         )
 
         # Resolve pinned IDs (items with explicit data_id) — still needs DB for
