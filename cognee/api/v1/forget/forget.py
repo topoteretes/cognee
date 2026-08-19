@@ -3,6 +3,7 @@ from typing import Optional, Union, Any
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.operations import record_operation
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability import (
     new_span,
@@ -128,55 +129,60 @@ async def forget(
             )
             return result
 
-        from cognee.modules.users.methods import get_default_user
+        async with record_operation("forget", user=user) as operation_context:
+            from cognee.modules.users.methods import get_default_user
 
-        # In case there is no database, forget will fail when getting a user
-        from cognee.low_level import setup
+            # In case there is no database, forget will fail when getting a user
+            from cognee.low_level import setup
 
-        await setup()
+            await setup()
 
-        if user is None:
-            user = await get_default_user()
+            if user is None:
+                user = await get_default_user()
+            operation_context.set_user(user)
 
-        # `everything` deletes across all datasets; the per-dataset DB context is
-        # established per-dataset inside datasets.delete_all -> empty_dataset, so we
-        # must NOT enter a single-dataset context here (dataset_ref is None, which
-        # would try to create a dataset_database row for a non-existent dataset).
-        if everything:
-            result = await _forget_everything(user)
-            _removed = result.get("datasets_removed", 0)
-            span.set_attribute(COGNEE_RESULT_COUNT, _removed)
-            _duration_ms = (_time.monotonic_ns() - _forget_start_ns) / 1_000_000
-            _attrs = {"memory.system": "cognee", "memory.operation": "delete"}
-            record_operation_duration(_duration_ms, _attrs)
-            increment_items_deleted(_removed, _attrs)
-            return result
+            # `everything` deletes across all datasets; the per-dataset DB context is
+            # established per-dataset inside datasets.delete_all -> empty_dataset, so we
+            # must NOT enter a single-dataset context here (dataset_ref is None, which
+            # would try to create a dataset_database row for a non-existent dataset).
+            if everything:
+                result = await _forget_everything(user)
+                _removed = result.get("datasets_removed", 0)
+                span.set_attribute(COGNEE_RESULT_COUNT, _removed)
+                _duration_ms = (_time.monotonic_ns() - _forget_start_ns) / 1_000_000
+                _attrs = {"memory.system": "cognee", "memory.operation": "delete"}
+                record_operation_duration(_duration_ms, _attrs)
+                increment_items_deleted(_removed, _attrs)
+                return result
 
-        # All remaining operations are scoped to a single dataset.
-        if dataset_ref is None:
-            if memory_only:
-                raise ValueError("memory_only requires dataset or dataset_id.")
-            if data_id is not None:
-                raise ValueError("data_id requires dataset or dataset_id.")
-            raise ValueError("Specify dataset, dataset_id, data_id+dataset, or everything=True.")
-
-        # Authorize before entering the dataset's database context: context
-        # entry provisions per-dataset database registry rows, a write that
-        # must never happen for a caller without delete permission (an
-        # unauthorized caller used to surface as a UniqueViolation 500 — or,
-        # for an unprovisioned dataset, actually created rows).
-        resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
-
-        async with set_database_global_context_variables(resolved_dataset_id, user.id):
-            if memory_only:
+            # All remaining operations are scoped to a single dataset.
+            if dataset_ref is None:
+                if memory_only:
+                    raise ValueError("memory_only requires dataset or dataset_id.")
                 if data_id is not None:
-                    return await _forget_data_memory(data_id, dataset_ref, user)
-                return await _forget_dataset_memory(dataset_ref, user)
+                    raise ValueError("data_id requires dataset or dataset_id.")
+                raise ValueError(
+                    "Specify dataset, dataset_id, data_id+dataset, or everything=True."
+                )
 
-            if data_id is not None:
-                return await _forget_data_item(data_id, dataset_ref, user)
+            # Authorize before entering the dataset's database context: context
+            # entry provisions per-dataset database registry rows, a write that
+            # must never happen for a caller without delete permission (an
+            # unauthorized caller used to surface as a UniqueViolation 500 — or,
+            # for an unprovisioned dataset, actually created rows).
+            resolved_dataset_id = await _resolve_dataset_id(dataset_ref, user)
+            operation_context.set_dataset(resolved_dataset_id)
 
-            return await _forget_dataset(dataset_ref, user)
+            async with set_database_global_context_variables(resolved_dataset_id, user.id):
+                if memory_only:
+                    if data_id is not None:
+                        return await _forget_data_memory(data_id, dataset_ref, user)
+                    return await _forget_dataset_memory(dataset_ref, user)
+
+                if data_id is not None:
+                    return await _forget_data_item(data_id, dataset_ref, user)
+
+                return await _forget_dataset(dataset_ref, user)
 
 
 async def _forget_everything(user: Any) -> dict:

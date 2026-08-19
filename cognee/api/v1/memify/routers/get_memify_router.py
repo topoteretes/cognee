@@ -92,7 +92,7 @@ def get_memify_router() -> APIRouter:
 
         send_telemetry(
             "Memify API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "POST /v1/memify", "cognee_version": cognee_version},
         )
 

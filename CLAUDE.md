@@ -492,7 +492,11 @@ LLM_INSTRUCTOR_MODE="json_schema_mode"  # or "tool_call", "md_json", etc.
 
 ### Structured Output Framework
 ```bash
-# Use Instructor (default, via litellm)
+# litellm_native (default): plain litellm, schema-native response_format
+# with prompted-JSON fallback — no instructor in the call path
+STRUCTURED_OUTPUT_FRAMEWORK="litellm_native"
+
+# Or use Instructor (legacy, via litellm)
 STRUCTURED_OUTPUT_FRAMEWORK="instructor"
 
 # Or use BAML (requires baml extra: pip install cognee[baml])

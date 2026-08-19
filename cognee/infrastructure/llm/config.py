@@ -81,7 +81,13 @@ class LLMConfig(BaseSettings):
     - stage_config
     """
 
-    structured_output_framework: str = "instructor"
+    # litellm_native (default): plain litellm two-path structured output —
+    # schema-native response_format when the model supports it, prompted-JSON
+    # fallback otherwise. No instructor in the call path, which is a
+    # prerequisite for removing the instructor dependency. Exact token capture
+    # works on this path via the adapter's explicit _raw_response attachment.
+    # Set STRUCTURED_OUTPUT_FRAMEWORK=instructor (or baml) to opt back.
+    structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
