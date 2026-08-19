@@ -120,25 +120,15 @@ def test_format_recall_results_handles_normalized_rows():
 # Tools that the MCP server is expected to expose. Kept as named groups so the
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
-# forget); the workspace UI adds entry tools (one per common user phrasing) and
-# a small set of internals called by the React workspace via app.callServerTool.
+# forget).
 MEMORY_API_TOOLS = {"remember", "recall", "forget"}
-WORKSPACE_UI_ENTRY_TOOLS = {
-    "visualize_graph_ui",
-    "upload_file_ui",
-    "open_cognee_workspace",
-}
-WORKSPACE_INTERNAL_TOOLS = {
-    "list_datasets_json",
-    "list_dataset_data_json",
-    "create_dataset_json",
-    "get_client_info_json",
+STATUS_TOOLS = {
     # Ingestion is queued (remember(background=True)) because it outruns the
     # host's request deadline, so progress and failures are only observable
     # through a status call.
     "cognify_status",
 }
-EXPECTED_TOOLS = MEMORY_API_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | WORKSPACE_INTERNAL_TOOLS
+EXPECTED_TOOLS = MEMORY_API_TOOLS | STATUS_TOOLS
 
 
 @pytest.mark.asyncio
@@ -1031,98 +1021,6 @@ async def test_document_retrieval_tools_format_json(monkeypatch):
     neighbor_payload = json.loads(neighbors_result[0].text)
     assert neighbor_payload["target_chunk_id"] == "chunk-1"
     assert neighbor_payload["direction"] == "forward"
-
-
-def test_format_named_items_lists_names_and_ids():
-    import src.server as server
-
-    assert server._format_named_items([], "dataset", "datasets") == "No datasets found."
-
-    rendered = server._format_named_items(
-        [{"id": "a1", "name": "docs"}, {"id": "", "name": ""}],
-        "dataset",
-        "datasets",
-    )
-    assert rendered.startswith("2 datasets:")
-    assert "- docs (a1)" in rendered
-    assert "- (unnamed)" in rendered
-
-    singular = server._format_named_items([{"id": "x", "name": "only"}], "data item", "data items")
-    assert singular.startswith("1 data item:")
-
-
-def test_format_named_items_caps_long_lists():
-    import src.server as server
-
-    items = [{"id": str(i), "name": f"n{i}"} for i in range(52)]
-    rendered = server._format_named_items(items, "dataset", "datasets", limit=3)
-
-    assert rendered.startswith("52 datasets:")
-    assert "- n0 (0)" in rendered
-    assert "- n3 (3)" not in rendered
-    assert "… and 49 more (see structuredContent)." in rendered
-
-
-@pytest.mark.asyncio
-async def test_list_datasets_json_puts_names_in_text_channel(monkeypatch):
-    import src.server as server
-
-    class FakeClient:
-        async def list_datasets(self):
-            return [
-                {"id": "id-1", "name": "alpha"},
-                {"id": "id-2", "name": "beta"},
-            ]
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
-
-    result = await server.list_datasets_json()
-
-    text = result.content[0].text
-    assert "2 datasets:" in text
-    assert "alpha (id-1)" in text
-    assert "beta (id-2)" in text
-    # Structured payload is preserved for the workspace UI.
-    assert result.structured_content == {
-        "datasets": [
-            {"id": "id-1", "name": "alpha"},
-            {"id": "id-2", "name": "beta"},
-        ]
-    }
-
-
-@pytest.mark.asyncio
-async def test_list_datasets_json_text_channel_over_mcp_protocol(monkeypatch):
-    """End-to-end over the real MCP protocol: a client that reads only the text
-    content blocks must still see dataset names (regression guard for CLO-319)."""
-    from mcp.shared.memory import create_connected_server_and_client_session
-
-    import src.server as server
-
-    class FakeClient:
-        async def list_datasets(self):
-            return [
-                {"id": "id-alpha", "name": "alpha"},
-                {"id": "id-beta", "name": "beta"},
-            ]
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
-
-    # FastMCP 3 keeps the low-level Server on _mcp_server; the SDK helper needs that,
-    # not the FastMCP wrapper.
-    async with create_connected_server_and_client_session(server.mcp._mcp_server) as client:
-        await client.initialize()
-
-        tool_names = {tool.name for tool in (await client.list_tools()).tools}
-        assert "list_datasets_json" in tool_names
-
-        result = await client.call_tool("list_datasets_json", {})
-
-    assert result.isError is False
-    text = "\n".join(block.text for block in result.content if block.type == "text")
-    assert "2 datasets:" in text
-    assert "alpha (id-alpha)" in text
-    assert "beta (id-beta)" in text
 
 
 def _recall_payload(requests: "list[httpx.Request]") -> dict:

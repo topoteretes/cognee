@@ -739,8 +739,7 @@ class CogneeClient:
 
         Mirrors cognee.forget()'s targeting options rather than a subset of
         them: whole-dataset (by name or id), a single data item, or
-        everything. The single-item path is what the workspace UI's per-item
-        delete needs; without it the UI has no way to remove one document.
+        everything.
         """
         if self.use_api:
             endpoint = f"{self.api_url}/api/v1/forget"
