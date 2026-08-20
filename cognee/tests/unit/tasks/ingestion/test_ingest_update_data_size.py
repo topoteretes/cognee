@@ -26,6 +26,7 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
     SQLAlchemyAdapter,
 )
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.ingestion import StoredFile
 
 # Import the module object explicitly: `cognee.tasks.ingestion.__init__` re-exports
 # `ingest_data` (the function), which shadows the submodule of the same name, so
@@ -87,11 +88,20 @@ def _install_mocks(stack, engine):
     storage, loaders, or dataset/permission machinery — only the relational
     engine is real."""
     meta = _metadata()
+
     # get_identifier feeds the batched dedup lookup; the mocked `identify_many`
     # maps this hash to DATA_ID, so the seeded row is the one that gets updated.
+    async def _aget_metadata():
+        return meta
+
+    async def _aget_identifier():
+        return meta["content_hash"]
+
     classified = SimpleNamespace(
         get_metadata=lambda: meta,
         get_identifier=lambda: meta["content_hash"],
+        aget_metadata=_aget_metadata,
+        aget_identifier=_aget_identifier,
     )
     # A real (transient) mapped Dataset: store_data_to_dataset does `dataset in
     # session` / session.add / session.merge, which require a mapped instance.
@@ -100,7 +110,9 @@ def _install_mocks(stack, engine):
     stack.enter_context(patch.object(ingest_module, "get_relational_engine", lambda: engine))
     stack.enter_context(
         patch.object(
-            ingest_module, "save_data_item_to_storage", AsyncMock(return_value="/tmp/doc.txt")
+            ingest_module,
+            "save_data_item_to_storage_detailed",
+            AsyncMock(return_value=StoredFile(file_path="/tmp/doc.txt")),
         )
     )
     stack.enter_context(patch.object(ingest_module, "get_data_file_path", lambda p: p))

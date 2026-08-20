@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 import cognee.modules.pipelines.operations.run_tasks_data_item as item_module
+from cognee.modules.ingestion import StoredFile
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
@@ -64,7 +65,9 @@ def _wire(monkeypatch, *, existing_row, identify_data_calls):
     monkeypatch.setattr(item_module, "get_relational_engine", lambda: engine)
 
     monkeypatch.setattr(
-        item_module, "save_data_item_to_storage", AsyncMock(return_value="file:///tmp/x.txt")
+        item_module,
+        "save_data_item_to_storage_detailed",
+        AsyncMock(return_value=StoredFile(file_path="file:///tmp/x.txt")),
     )
 
     class _Opened:
@@ -75,7 +78,11 @@ def _wire(monkeypatch, *, existing_row, identify_data_calls):
             return False
 
     monkeypatch.setattr(item_module, "open_data_file", lambda _path: _Opened())
-    classified = SimpleNamespace(get_identifier=lambda: "hash-1")
+
+    async def _aget_metadata():
+        return {"content_hash": "hash-1"}
+
+    classified = SimpleNamespace(get_identifier=lambda: "hash-1", aget_metadata=_aget_metadata)
     monkeypatch.setattr(item_module.ingestion, "classify", lambda _f: classified)
 
     async def _identify_data(classified_data, u, dataset_id, session=None):

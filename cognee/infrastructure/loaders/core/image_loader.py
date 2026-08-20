@@ -10,6 +10,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
 
@@ -166,7 +167,7 @@ class ImageLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, combined_content)
+        result = await store_derived_text(storage, storage_file_name, combined_content)
 
         # If dedup is enabled, store the hash for future comparison
         if (
@@ -175,7 +176,7 @@ class ImageLoader(LoaderInterface):
         ):
             self._store_hash(image_hash)
 
-        return full_file_path
+        return result
 
     def _ocr_enabled(self) -> bool:
         """Whether OCR extraction is enabled via the IMAGE_OCR_ENABLED env flag."""

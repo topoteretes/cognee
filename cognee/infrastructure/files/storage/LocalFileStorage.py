@@ -120,18 +120,29 @@ class LocalFileStorage(Storage):
         await self.ensure_directory_exists(file_dir_path)
 
         if overwrite or not full_file_path.exists():
-            if isinstance(data, str):
-                with open(full_file_path, mode="w", encoding="utf-8", newline="\n") as file:
-                    file.write(data)
-            else:
-                with open(full_file_path, mode="wb") as file:
-                    if hasattr(data, "read"):
-                        data.seek(0)
-                        file.write(data.read())
-                    else:
+            # Write-then-rename: an ``overwrite=True`` write to a key another
+            # reader may hold open (content-addressed keys are shared by
+            # design) must never be observable half-written, which an in-place
+            # truncating open is. ``os.replace`` swaps atomically on the same
+            # filesystem.
+            temp_file_path = full_file_path.with_name(f".{full_file_path.name}.{os.getpid()}.tmp")
+            try:
+                if isinstance(data, str):
+                    with open(temp_file_path, mode="w", encoding="utf-8", newline="\n") as file:
                         file.write(data)
-
-                file.close()
+                else:
+                    with open(temp_file_path, mode="wb") as file:
+                        if hasattr(data, "read"):
+                            data.seek(0)
+                            file.write(data.read())
+                        else:
+                            file.write(data)
+                os.replace(temp_file_path, full_file_path)
+            finally:
+                try:
+                    os.unlink(temp_file_path)
+                except OSError:
+                    pass
 
         return Path(full_file_path).as_uri()
 

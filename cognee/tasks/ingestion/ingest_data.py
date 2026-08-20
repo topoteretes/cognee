@@ -25,7 +25,7 @@ from cognee.modules.data.methods import (
 
 from cognee.shared.logging_utils import get_logger
 
-from .save_data_item_to_storage import save_data_item_to_storage
+from .save_data_item_to_storage import save_data_item_to_storage_detailed
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
 
@@ -33,6 +33,73 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this pac
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger(__name__)
+
+
+def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> str:
+    """The filename to show loaders for a payload, as the user would name it.
+
+    ``FileMetadata`` splits a name into an extension-less ``name`` plus a
+    separate ``extension``; loaders want them joined.
+    """
+    name = (file_metadata or {}).get("name")
+    if not name:
+        return os.path.basename(actual_file_path)
+
+    extension = (file_metadata or {}).get("extension")
+
+    return f"{name}.{extension}" if extension else name
+
+
+def _carried_source_for(ctx, data_item) -> Optional[dict]:
+    """The storage work the incremental wrapper already did for ``data_item``.
+
+    ``run_tasks_data_item_incremental`` saves each item to storage and hashes it
+    before this task runs, to resolve the item's dedup identity. Without this
+    handoff both stages pay the same upload and the same read-back: on the S3
+    backend that was a duplicate PUT plus a duplicate HEAD+GET per file.
+
+    Matched on the item's identity, so a task that received something other than
+    the item the wrapper inspected (``resolve_data_directories`` re-creates
+    string paths, for instance) falls back to doing the work itself.
+    """
+    from cognee.modules.pipelines.operations.run_tasks_data_item import (
+        INGEST_PRECOMPUTED_SOURCE,
+    )
+
+    extras = getattr(ctx, "extras", None) if ctx is not None else None
+    if not extras:
+        return None
+
+    carried = extras.get(INGEST_PRECOMPUTED_SOURCE)
+    if carried is None or carried.get("data_item_id") != id(data_item):
+        return None
+
+    return carried
+
+
+def _carried_metadata_for_path(ctx, file_path: str) -> Optional[dict]:
+    """Metadata the wrapper computed for the item that resolved to ``file_path``.
+
+    Path items (a local path, an ``s3://`` URL) miss the identity match above:
+    the in-chain ``resolve_data_directories`` re-creates their strings, so
+    ``id()`` differs. Their save is a pass-through (no I/O), and the stored
+    path it returns still identifies the item — ``ctx`` is per-item, so the
+    single published entry either matches this path or is for another shape of
+    item entirely.
+    """
+    from cognee.modules.pipelines.operations.run_tasks_data_item import (
+        INGEST_PRECOMPUTED_SOURCE,
+    )
+
+    extras = getattr(ctx, "extras", None) if ctx is not None else None
+    if not extras:
+        return None
+
+    carried = extras.get(INGEST_PRECOMPUTED_SOURCE)
+    if carried is None or carried.get("file_path") != file_path:
+        return None
+
+    return carried.get("metadata")
 
 
 def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional[UUID], user: User):
@@ -137,16 +204,34 @@ async def ingest_data(
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
 
-            original_file_path = await save_data_item_to_storage(underlying_data)
+            carried = _carried_source_for(ctx, data_item)
+            if carried is not None:
+                original_file_path = carried["file_path"]
+                original_file_metadata = carried["metadata"]
+            else:
+                stored = await save_data_item_to_storage_detailed(underlying_data)
+                original_file_path = stored.file_path
+                original_file_metadata = stored.metadata
+
+                if original_file_metadata is None:
+                    original_file_metadata = _carried_metadata_for_path(ctx, original_file_path)
+
             actual_file_path = get_data_file_path(original_file_path)
 
-            async with open_data_file(actual_file_path) as file:
-                classified_data = ingestion.classify(file)
-                item_content_hash = classified_data.get_identifier()  # pure CPU, no DB
+            if original_file_metadata is None:
+                # Only items cognee did not write reach here (an s3:// URL, a
+                # local path): their bytes were never in this process, so the
+                # object has to be read to be described.
+                async with open_data_file(actual_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    original_file_metadata = await classified_data.aget_metadata()
+
+            item_content_hash = original_file_metadata["content_hash"]
 
             precomputed_items[id(data_item)] = {
                 "original_file_path": original_file_path,
                 "actual_file_path": actual_file_path,
+                "original_file_metadata": original_file_metadata,
                 "item_content_hash": item_content_hash,
                 "item_data_id": item_data_id,
                 "data_id": None,  # resolved below
@@ -227,7 +312,6 @@ async def ingest_data(
 
             # Retrieve cached intermediate results from pre-loop to avoid re-processing
             cached = precomputed_items.get(id(data_item), {})
-            original_file_path = cached.get("original_file_path")
             actual_file_path = cached.get("actual_file_path")
 
             # Store all input data as text files in Cognee data storage.
@@ -239,10 +323,16 @@ async def ingest_data(
                 dataset_name=dataset.name,
                 dataset_id=dataset.id,
                 user=user,
-                # actual_file_path is the decoded form (file:// URIs carry
-                # percent-encoding, e.g. spaces as %20) — names derived from
-                # it match the user's real filename.
-                original_file_name=os.path.basename(actual_file_path),
+                # The name the user knows this payload by. Taken from the
+                # metadata rather than the storage key, which is content
+                # addressed for payloads cognee wrote — loaders surface this
+                # (dlt names its source from it), so it has to stay a real
+                # filename. Falls back to the key's basename for pass-through
+                # items, where the key IS the user's path (file:// URIs carry
+                # percent-encoding, e.g. spaces as %20, so decode first).
+                original_file_name=_display_file_name(
+                    cached.get("original_file_metadata"), actual_file_path
+                ),
             )
 
             if loader_engine is None:
@@ -256,9 +346,14 @@ async def ingest_data(
             # manifest's stable data_id + the system_metadata routing stamp).
             # The pinned id replaces the pre-loop mint, and existence is
             # re-resolved for it so re-adds hit the update branch.
+            storage_file_metadata = None
+
             if isinstance(cognee_storage_file_path, LoaderResult):
                 loader_result = cognee_storage_file_path
                 cognee_storage_file_path = loader_result.file_path
+                # The loader described the text it wrote, from the content it
+                # still had in hand.
+                storage_file_metadata = loader_result.file_metadata
                 if loader_result.system_metadata is not None and item_system_metadata is None:
                     item_system_metadata = loader_result.system_metadata
                 if loader_result.data_id is not None:
@@ -269,16 +364,17 @@ async def ingest_data(
                             if pinned_row is not None:
                                 existing_data_map[str(pinned_row.id)] = pinned_row
 
-            # Find metadata from original file
-            # Standard flow: extract metadata from both original and stored files
-            async with open_data_file(original_file_path) as file:
-                classified_data = ingestion.classify(file)
-                original_file_metadata = classified_data.get_metadata()
+            # The original was described in the pre-loop, from the payload's own
+            # bytes. Re-opening it here downloaded and re-hashed the whole object
+            # a second time per item for a byte-identical result.
+            original_file_metadata = cached["original_file_metadata"]
 
-            # Find metadata from Cognee data storage text file
-            async with open_data_file(cognee_storage_file_path) as file:
-                classified_data = ingestion.classify(file)
-                storage_file_metadata = classified_data.get_metadata()
+            if storage_file_metadata is None:
+                # A loader that returned a bare path did not describe its output,
+                # so the stored text has to be read back to be described.
+                async with open_data_file(cognee_storage_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    storage_file_metadata = await classified_data.aget_metadata()
 
             data_point = existing_data_map.get(str(data_id))
 

@@ -197,8 +197,13 @@ async def test_identify_many_agrees_with_identify():
 
     engine, db_path = await _make_engine([row])
     try:
-        # Build a minimal IngestionData whose get_identifier() returns our hash.
-        classified = SimpleNamespace(get_identifier=lambda: content_hash)
+        # Build a minimal IngestionData whose identifier accessors return our hash.
+        async def aget_identifier():
+            return content_hash
+
+        classified = SimpleNamespace(
+            get_identifier=lambda: content_hash, aget_identifier=aget_identifier
+        )
 
         with (
             patch(_ENGINE_PATCH, return_value=engine),

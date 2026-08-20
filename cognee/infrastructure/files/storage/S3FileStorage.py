@@ -16,6 +16,11 @@ logger = get_logger(__name__)
 # Threshold in seconds above which S3 operations are logged as slow
 S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 
+# Size of botocore's per-client connection pool. Sized above the pipeline's
+# default per-dataset item concurrency (20) so concurrent items are not
+# serialized by the pool rather than by the network.
+S3_MAX_POOL_CONNECTIONS = 32
+
 if TYPE_CHECKING:
     import s3fs  # ty:ignore[unresolved-import]
 
@@ -39,6 +44,12 @@ class S3FileStorage(Storage):
 
         self.storage_path = storage_path
         s3_config = get_s3_config()
+        # botocore pools 10 connections per client by default. Ingestion runs
+        # items concurrently (``data_per_batch``, default 20), so once the event
+        # loop is no longer the bottleneck that pool becomes one: requests past
+        # the tenth queue behind it.
+        client_kwargs = {"region_name": s3_config.aws_region}
+        config_kwargs = {"max_pool_connections": S3_MAX_POOL_CONNECTIONS}
         if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
             self.s3 = s3fs.S3FileSystem(
                 key=s3_config.aws_access_key_id,
@@ -46,14 +57,16 @@ class S3FileStorage(Storage):
                 token=s3_config.aws_session_token,
                 anon=False,
                 endpoint_url=s3_config.aws_endpoint_url,
-                client_kwargs={"region_name": s3_config.aws_region},
+                client_kwargs=client_kwargs,
+                config_kwargs=config_kwargs,
             )
         else:
             # No credentials provided, let s3fs discover them via the IAM Role/Chain
             self.s3 = s3fs.S3FileSystem(
                 anon=False,
                 endpoint_url=s3_config.aws_endpoint_url,
-                client_kwargs={"region_name": s3_config.aws_region},
+                client_kwargs=client_kwargs,
+                config_kwargs=config_kwargs,
             )
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:

@@ -8,6 +8,7 @@ from cognee.infrastructure.files.storage import get_file_storage, get_storage_co
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
 
@@ -156,4 +157,4 @@ class DoclingLoader(LoaderInterface):
             data_root_directory = storage_config["data_root_directory"]
             storage = get_file_storage(data_root_directory)
 
-            return await storage.store(storage_file_name, text)
+            return await store_derived_text(storage, storage_file_name, text)

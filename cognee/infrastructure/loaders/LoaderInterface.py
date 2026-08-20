@@ -8,16 +8,21 @@ from uuid import UUID
 class LoaderResult:
     """Rich loader output for loaders that own more than text extraction.
 
-    ``load()`` normally returns the stored derived-text path as a plain str.
-    A loader that also owns the record's identity and routing (dlt: the
-    manifest's stable data_id and the ``system_metadata`` route stamp) returns
-    this instead; ``ingest_data`` pins the record to ``data_id`` and stamps
-    ``system_metadata`` exactly as it does for pinned ``DataItem``s.
+    ``load()`` may return the stored derived-text path as a plain str, but
+        returning this instead lets a loader hand back what it already knows: the
+        metadata of the text it just wrote (``file_metadata``), and — for a loader
+        that owns the record's identity and routing, as dlt does — the manifest's
+        stable ``data_id`` and the ``system_metadata`` route stamp, which
+        ``ingest_data`` applies exactly as it does for pinned ``DataItem``s.
     """
 
     file_path: str
     data_id: Optional[UUID] = None
     system_metadata: Optional[dict] = None
+    # Metadata for the stored derived text, computed from the content while the
+    # loader still had it. Lets ingestion build the Data row without re-reading
+    # the file it just wrote. None means "read it back to find out".
+    file_metadata: Optional[dict] = None
 
 
 class LoaderInterface(ABC):

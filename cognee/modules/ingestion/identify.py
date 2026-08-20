@@ -39,7 +39,7 @@ async def identify(data: IngestionData, user: User, dataset_id: UUID) -> Optiona
     content is updated. Rows are dataset-scoped (the startup migration
     backfills pre-refactor rows), so one scoped probe is sufficient.
     """
-    content_hash: str = data.get_identifier()
+    content_hash: str = await data.aget_identifier()
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
@@ -67,7 +67,7 @@ async def identify_data(
     returns the same row. Pass ``session`` to run inside a session the
     caller already holds (e.g. the one that goes on to update the row).
     """
-    content_hash: str = data.get_identifier()
+    content_hash: str = await data.aget_identifier()
     predicates = content_hash_predicates(content_hash, user, dataset_id)
 
     async def _lookup(active_session: AsyncSession) -> Optional[Data]:
