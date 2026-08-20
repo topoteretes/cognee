@@ -170,12 +170,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Path setup
+      - name: Drop Git for Windows usr\bin from PATH
         if: ${{ matrix.os == 'windows-latest' }}
-        shell: bash
+        shell: pwsh
         run: |
-          PATH=$(printf '%s' "$PATH" | tr ':' $'\n' | grep -vi '/git/usr/bin' | paste -sd: -)
-          export PATH
+          # Git for Windows ships OpenSSL DLLs in usr\bin that shadow the ones
+          # ladybug loads. The previous version of this step edited PATH in bash
+          # and called `export`, which dies with the step and never reached the
+          # test below; $GITHUB_ENV is what carries an edited PATH forward.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
 
       - name: Run Soft Deletion Tests
         env:
@@ -207,6 +213,18 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Drop Git for Windows usr\bin from PATH
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Same guard as the Soft Delete job: Git for Windows ships OpenSSL
+          # DLLs in usr\bin that shadow the ones ladybug loads. This job runs
+          # the sibling delete test and never had the guard at all.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
 
       - name: Run Custom Graph Deletion Test
         env:
