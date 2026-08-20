@@ -101,6 +101,15 @@ def _stub_count(monkeypatch, graph_warmup_mod, value):
     return calls
 
 
+def test_shortcircuit_is_enabled_by_default():
+    # The guard must be on for fresh installs with no env vars set; every
+    # other test injects an explicit config, so only this pins the default.
+    config = RecallConfig(_env_file=None)
+    assert config.recall_warmup_shortcircuit is True
+    assert config.recall_warmup_threshold == 1
+    assert config.recall_warmup_cache_ttl == 60.0
+
+
 class TestResponseUnion:
     def test_marker_entry_round_trips_through_union(self):
         adapter = TypeAdapter(list[RecallResponse])
