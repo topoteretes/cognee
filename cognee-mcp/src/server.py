@@ -1934,6 +1934,46 @@ def load_class(model_file, model_name):
     return model_class
 
 
+async def _auto_seed_if_fresh() -> None:
+    """Day-one seeding: on a fresh local install, ingest what already exists.
+
+    Memory files (MEMORY.md, SOUL.md, ...), the workspace README, recent
+    session transcripts, and the codebase are ingested automatically so the
+    first recall has something to return — the default, not an accident.
+
+    Runs only when COGNEE_AUTO_SEED is not false and the user owns zero
+    datasets, which makes it once-per-fresh-install by construction. The
+    import is guarded because cognee-mcp depends on cognee from PyPI, which
+    may predate cognee.modules.seeding.
+    """
+    if os.getenv("COGNEE_AUTO_SEED", "true").strip().lower() in {"0", "false", "no", "off"}:
+        logger.info("Day-one auto-seed disabled via COGNEE_AUTO_SEED")
+        return
+
+    try:
+        from cognee.modules.seeding import seed
+    except ImportError:
+        logger.info("Installed cognee has no seeding module; skipping day-one auto-seed.")
+        return
+
+    try:
+        existing = await cognee_client.list_datasets()
+        if existing:
+            return  # not a fresh install — never re-seed behind the user's back
+
+        with redirect_stdout(sys.stderr):
+            result = await seed()
+
+        if result.plan.is_empty:
+            logger.info(
+                "Day-one auto-seed found nothing to ingest around %s", result.plan.workspace
+            )
+        else:
+            logger.info("Day-one auto-seed:\n%s", result.summary())
+    except Exception as error:
+        logger.warning(f"Day-one auto-seed failed (non-fatal): {error}")
+
+
 async def main():
     global cognee_client
 
@@ -2087,6 +2127,13 @@ async def main():
         logger.info("Database migrations done.")
     elif not is_remote:
         logger.info("Skipping DB migrations")
+
+    # Day-one seeding (local mode only): a fresh install immediately ingests
+    # what already exists around the workspace so the first recall has
+    # something to return. Backgrounded so startup never blocks on it; opt
+    # out with COGNEE_AUTO_SEED=false.
+    if not is_remote:
+        _track_background(_auto_seed_if_fresh())
 
     try:
         match args.transport.lower():
