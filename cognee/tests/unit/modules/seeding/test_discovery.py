@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from pathlib import Path
 
@@ -143,10 +144,11 @@ def test_claude_code_project_dir_slug(tmp_path):
     workspace.mkdir()
     project_dir = claude_code_project_dir(workspace, tmp_path / "home")
 
-    # Every non-alphanumeric character in the absolute path becomes '-'.
-    assert project_dir.name == str(workspace.resolve()).replace("/", "-").replace("_", "-").replace(
-        ".", "-"
-    )
+    # Every non-alphanumeric character in the absolute path becomes '-'
+    # (path separators included, so the rule holds on Windows too).
+    assert project_dir.parent == tmp_path / "home" / "projects"
+    assert re.fullmatch(r"[A-Za-z0-9-]+", project_dir.name)
+    assert project_dir.name.endswith("my-proj-x")
 
 
 def test_find_workspace_root_walks_up_to_project_marker(tmp_path):
