@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.memory.entries import normalize_scope
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.operations import get_current_operation, record_operation
 from cognee.modules.observability import (
     COGNEE_RECALL_SCOPE,
     COGNEE_RECALL_SOURCE,
@@ -31,6 +32,7 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseGraphEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
+    ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -59,6 +61,7 @@ class RecallKwargs(TypedDict, total=False):
     feedback_influence: float
     verbose: bool
     retriever_specific_config: dict
+    response_model: type
     user: object
 
 
@@ -71,6 +74,9 @@ async def _resolve_user_id(user: str | None) -> str | None:
     """Return the user id as a string, resolving default if needed."""
     if user is None:
         user = await get_default_user()
+    current_operation = get_current_operation()
+    if current_operation is not None:
+        current_operation.set_user(user)
     return str(user.id) if hasattr(user, "id") else None
 
 
@@ -105,20 +111,13 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
 
         from cognee.infrastructure.databases.relational import get_relational_engine
         from cognee.modules.session_lifecycle.models import SessionRecord
-        from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-            get_specific_user_permission_datasets,
-        )
+        from cognee.modules.users.permissions.methods import get_permitted_dataset_ids
 
         caller_uuid = UUID(caller_user_id) if caller_user_id else None
         if caller_uuid is None:
             return caller_user_id
 
-        permitted_ids: list[UUID] = []
-        try:
-            permitted = await get_specific_user_permission_datasets(caller_uuid, "read", None)
-            permitted_ids = [ds.id for ds in permitted] if permitted else []
-        except Exception:
-            permitted_ids = []
+        permitted_ids = await get_permitted_dataset_ids(caller_uuid)
 
         # Fetch ALL candidate rows the caller can see for this
         # session_id. Owner match OR permitted-dataset match.
@@ -354,9 +353,12 @@ async def recall(
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
+    response_model: type | None = None,
     neighborhood_depth: int | None = None,
     neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
+    tool_connections: list[str] | None = None,
+    tools_trigger: str = "always",
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -385,6 +387,25 @@ async def recall(
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
             automatically. If False, fall back to GRAPH_COMPLETION.
+        response_model: Pydantic model class for structured completion output.
+            Forwarded to the retriever, which validates the LLM answer against
+            it; each result then carries the validated payload as a dict in its
+            ``structured`` field. Shorthand for
+            ``retriever_specific_config={"response_model": ...}`` — pass it in
+            one place only. Supported by the completion-style search types
+            (GRAPH_COMPLETION and variants, RAG/TRIPLET/HYBRID/TEMPORAL/
+            AGENTIC completion). With a remote Cognee server the model's JSON
+            Schema is sent (``model_json_schema()``); the server validates
+            structure only — Python-side validators do not travel.
+        tool_connections: Names of authorized external database connections
+            for the ``"tools"`` scope. ``None`` uses every connection visible
+            to the user. Only consulted when ``scope`` includes ``"tools"``
+            (which is never implied by ``"auto"`` or ``"all"``) and
+            ``TOOL_CALLS_ENABLED=true``.
+        tools_trigger: When to run the ``"tools"`` scope: ``"always"``
+            (default) or ``"on_empty"`` — go back to the original data source
+            only when every other requested source returned nothing, i.e. when
+            cognee lacks the context to answer.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -393,7 +414,24 @@ async def recall(
     from cognee import __version__ as cognee_version
     from cognee.shared.utils import send_telemetry
 
-    telemetry_user = getattr(user, "id", user) or "sdk"
+    # Fold the first-class response_model param into retriever_specific_config,
+    # the channel the retriever registry already reads. Doing this up front means
+    # every downstream path (graph search, scope routing) sees one merged config.
+    if response_model is not None:
+        configured_model = (retriever_specific_config or {}).get("response_model")
+        if configured_model is not None and configured_model is not response_model:
+            raise CogneeValidationError(
+                message="response_model was passed both directly and in "
+                "retriever_specific_config with different values; pass it once."
+            )
+        retriever_specific_config = {
+            **(retriever_specific_config or {}),
+            "response_model": response_model,
+        }
+
+    # Pass the User through rather than pre-resolving its id: send_telemetry
+    # reads both id and tenant_id off it.
+    telemetry_user = user or "sdk"
 
     # Resolve scope → concrete source list. "auto" (the default) picks
     # sources based on what the caller supplied:
@@ -421,6 +459,16 @@ async def recall(
     else:
         sources = resolved_scope
         auto_fallthrough = False
+
+    if tools_trigger not in ("always", "on_empty"):
+        raise CogneeValidationError(
+            message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
+            name="InvalidToolsTriggerError",
+        )
+    # "on_empty" means: go back to the source database only when cognee lacks
+    # context — so tools must observe every other source's results first.
+    if tools_trigger == "on_empty" and "tools" in sources:
+        sources = [source for source in sources if source != "tools"] + ["tools"]
 
     span_scope = ",".join(sources)
 
@@ -454,6 +502,11 @@ async def recall(
 
         client = get_remote_client()
         if client is not None:
+            # A model class cannot cross the HTTP boundary — send its JSON
+            # Schema instead; the server rebuilds a validation model from it
+            # and results come back with the validated dict in `structured`.
+            # Read from the merged config so the dict form travels too.
+            remote_response_model = (retriever_specific_config or {}).get("response_model")
             results = await client.recall(
                 query_text,
                 query_type,
@@ -468,169 +521,257 @@ async def recall(
                 context_profile=context_profile,
                 verbose=verbose,
                 include_references=include_references,
+                response_schema=(
+                    remote_response_model.model_json_schema()
+                    if remote_response_model is not None
+                    else None
+                ),
+                tool_connections=tool_connections,
+                tools_trigger=tools_trigger,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
             return results
 
-        merged: list[RecallResponse] = []
+        async with record_operation("recall", user=user, session_id=session_id):
+            merged: list[RecallResponse] = []
 
-        async def _run_session() -> list[RecallResponse]:
-            if not session_id:
-                return []
-            return list(
-                await _search_session(
-                    query_text=query_text,
-                    session_id=session_id,
-                    top_k=top_k,
-                    user=user,
+            async def _run_session() -> list[RecallResponse]:
+                if not session_id:
+                    return []
+                return list(
+                    await _search_session(
+                        query_text=query_text,
+                        session_id=session_id,
+                        top_k=top_k,
+                        user=user,
+                    )
                 )
-            )
 
-        async def _run_trace() -> list[RecallResponse]:
-            if not session_id:
-                return []
-            return list(
-                await _search_trace(
-                    query_text=query_text,
-                    session_id=session_id,
-                    top_k=top_k,
-                    user=user,
+            async def _run_trace() -> list[RecallResponse]:
+                if not session_id:
+                    return []
+                return list(
+                    await _search_trace(
+                        query_text=query_text,
+                        session_id=session_id,
+                        top_k=top_k,
+                        user=user,
+                    )
                 )
-            )
 
-        async def _run_session_context() -> list[RecallResponse]:
-            if not session_id:
-                return []
-            return list(
-                await _fetch_session_context(
-                    query_text=query_text,
-                    session_id=session_id,
-                    context_profile=context_profile,
-                    user=user,
+            async def _run_session_context() -> list[RecallResponse]:
+                if not session_id:
+                    return []
+                return list(
+                    await _fetch_session_context(
+                        query_text=query_text,
+                        session_id=session_id,
+                        context_profile=context_profile,
+                        user=user,
+                    )
                 )
-            )
 
-        async def _run_graph() -> list[RecallResponse]:
-            nonlocal user, dataset_ids
+            async def _run_graph() -> list[RecallResponse]:
+                nonlocal user, dataset_ids
 
-            from cognee.modules.recall.methods.normalize_search_payload import (
-                normalize_search_payload,
-            )
-            from cognee.modules.search.methods.search import authorized_search
+                from cognee.modules.recall.methods.normalize_search_payload import (
+                    normalize_search_payload,
+                )
 
-            if user is None:
-                try:
-                    user = await get_default_user()
-                except (DatabaseNotCreatedError, UserNotFoundError) as error:
-                    raise CogneeValidationError(
-                        message=(
-                            "Recall prerequisites not met: no database/default user found. "
-                            "Initialize Cognee before recalling by:\n"
-                            "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
-                        ),
-                        name="RecallPreconditionError",
-                    ) from error
+                from cognee.modules.search.methods.search import authorized_search
+                from cognee.modules.search.operations import log_search_history
 
-            await set_session_user_context_variable(user)
+                if user is None:
+                    try:
+                        user = await get_default_user()
+                    except (DatabaseNotCreatedError, UserNotFoundError) as error:
+                        raise CogneeValidationError(
+                            message=(
+                                "Recall prerequisites not met: no database/default user found. "
+                                "Initialize Cognee before recalling by:\n"
+                                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                            ),
+                            name="RecallPreconditionError",
+                        ) from error
 
-            local_query_type = query_type
-            if local_query_type is not None:
-                if auto_route:
-                    from cognee.api.v1.recall.query_router import record_override, route_query
+                current_operation = get_current_operation()
+                if current_operation is not None:
+                    current_operation.set_user(user)
+
+                await set_session_user_context_variable(user)
+
+                local_query_type = query_type
+                if local_query_type is not None:
+                    if auto_route:
+                        from cognee.api.v1.recall.query_router import record_override, route_query
+
+                        result = route_query(query_text)
+                        routed_type = result.search_type
+                        record_override(routed_type, local_query_type)
+                elif auto_route:
+                    from cognee.api.v1.recall.query_router import route_query
 
                     result = route_query(query_text)
-                    routed_type = result.search_type
-                    record_override(routed_type, local_query_type)
-            elif auto_route:
-                from cognee.api.v1.recall.query_router import route_query
+                    local_query_type = result.search_type
+                else:
+                    local_query_type = SearchType.GRAPH_COMPLETION
 
-                result = route_query(query_text)
-                local_query_type = result.search_type
-            else:
-                local_query_type = SearchType.GRAPH_COMPLETION
-
-            span.set_attribute(
-                COGNEE_SEARCH_TYPE,
-                str(local_query_type.value) if local_query_type else "unknown",
-            )
-
-            # Dataset UUIDs take precedence over names, matching /api/v1/search.
-            # String dataset names can only resolve for the current user.
-            search_dataset_ids = dataset_ids or None
-            if search_dataset_ids is None and datasets is not None:
-                search_dataset_ids = [
-                    dataset.id
-                    for dataset in await get_authorized_existing_datasets(datasets, "read", user)
-                ]
-                if not search_dataset_ids:
-                    raise DatasetNotFoundError(message="No datasets found.")
-
-            graph_results = await authorized_search(
-                query_text=query_text,
-                query_type=local_query_type,
-                user=user,
-                dataset_ids=search_dataset_ids,
-                system_prompt_path=system_prompt_path,
-                system_prompt=system_prompt,
-                top_k=top_k,
-                node_name=node_name,
-                node_name_filter_operator=node_name_filter_operator,
-                only_context=only_context,
-                session_id=session_id,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-                feedback_influence=feedback_influence,
-                retriever_specific_config=retriever_specific_config,
-                neighborhood_depth=neighborhood_depth,
-                neighborhood_seed_top_k=neighborhood_seed_top_k,
-                include_references=include_references,
-                llm_config=llm_config,
-                embedding_config=embedding_config,
-            )
-
-            tagged = []
-            for r in graph_results:
-                items: list[SearchResultItem] = normalize_search_payload(r)
-                tagged.extend(
-                    [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
+                span.set_attribute(
+                    COGNEE_SEARCH_TYPE,
+                    str(local_query_type.value) if local_query_type else "unknown",
                 )
-            return tagged
 
-        runners = {
-            "session": _run_session,
-            "trace": _run_trace,
-            "session_context": _run_session_context,
-            "graph": _run_graph,
-        }
+                # Dataset UUIDs take precedence over names, matching /api/v1/search.
+                # String dataset names can only resolve for the current user.
+                search_dataset_ids = dataset_ids or None
+                if search_dataset_ids is None and datasets is not None:
+                    search_dataset_ids = [
+                        dataset.id
+                        for dataset in await get_authorized_existing_datasets(
+                            datasets, "read", user
+                        )
+                    ]
+                    if not search_dataset_ids:
+                        raise DatasetNotFoundError(message="No datasets found.")
 
-        session_result_count = 0
-        for src in sources:
-            runner = runners.get(src)
-            if runner is None:
-                continue
-            # Auto mode special case: session hit short-circuits graph.
-            if auto_fallthrough and src == "graph" and merged:
-                break
-            part = await runner()
-            if src == "session":
-                session_result_count = len(part)
-            merged.extend(part)
+                graph_results = await authorized_search(
+                    query_text=query_text,
+                    query_type=local_query_type,
+                    user=user,
+                    dataset_ids=search_dataset_ids,
+                    system_prompt_path=system_prompt_path,
+                    system_prompt=system_prompt,
+                    top_k=top_k,
+                    node_name=node_name,
+                    node_name_filter_operator=node_name_filter_operator,
+                    only_context=only_context,
+                    session_id=session_id,
+                    wide_search_top_k=wide_search_top_k,
+                    triplet_distance_penalty=triplet_distance_penalty,
+                    feedback_influence=feedback_influence,
+                    retriever_specific_config=retriever_specific_config,
+                    neighborhood_depth=neighborhood_depth,
+                    neighborhood_seed_top_k=neighborhood_seed_top_k,
+                    include_references=include_references,
+                    llm_config=llm_config,
+                    embedding_config=embedding_config,
+                )
 
-        if session_result_count:
-            span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, session_result_count)
+                # /v1/search records every question it answers; recall never did,
+                # because it calls authorized_search() directly and skips the
+                # logging that search() wraps around it. Agents recall through this
+                # endpoint, so their questions were absent from history entirely.
+                await log_search_history(query_text, local_query_type.value, user.id, graph_results)
 
-        # Choose a single-source label when only one source contributed,
-        # else "multi".
-        source_label = sources[0] if len(sources) == 1 else "multi"
-        span.set_attribute(COGNEE_RECALL_SOURCE, source_label)
-        span.set_attribute(COGNEE_RESULT_COUNT, len(merged))
+                tagged = []
+                for r in graph_results:
+                    items: list[SearchResultItem] = normalize_search_payload(r)
+                    tagged.extend(
+                        [ResponseGraphEntry(**item.model_dump(), source="graph") for item in items]
+                    )
+                return tagged
 
-        logger.info(
-            "recall: %d results across sources=%s (session=%s)",
-            len(merged),
-            sources,
-            session_id or "-",
-        )
+            async def _run_tools() -> list[RecallResponse]:
+                from uuid import UUID as _UUID
 
-        return merged
+                from cognee.modules.tools.config import get_tools_config
+                from cognee.modules.tools.connections import list_tool_connections
+                from cognee.modules.tools.text_to_sql import TOOL_NAME, run_text_to_sql
+
+                tools_config = get_tools_config()
+                if not tools_config.tool_calls_enabled:
+                    # The scope was requested explicitly ("tools" never comes from
+                    # "auto"/"all"), so a silent empty result would read as "no
+                    # data" — fail loudly instead.
+                    raise CogneeValidationError(
+                        message=(
+                            "Recall scope 'tools' requested but tool calls are disabled. "
+                            "Set TOOL_CALLS_ENABLED=true and register a connection with "
+                            "cognee.tools.register_sql_connection(...) to enable it."
+                        ),
+                        name="ToolCallsDisabledError",
+                    )
+
+                caller_user_id = await _resolve_user_id(user)
+                if not caller_user_id:
+                    return []
+                user_uuid = _UUID(caller_user_id)
+
+                connection_names = tool_connections or [
+                    connection["name"] for connection in await list_tool_connections(user_uuid)
+                ]
+                if not connection_names:
+                    return []
+
+                span.set_attribute("cognee.recall.tool_connections", len(connection_names))
+
+                entries: list[RecallResponse] = []
+                for connection_name in connection_names:
+                    # Authorization failures (unknown/non-owned name) raise;
+                    # generation/execution failures come back as success=False
+                    # entries so one dead database never aborts a multi-source
+                    # recall.
+                    result = await run_text_to_sql(user_uuid, connection_name, query_text)
+                    logger.info(
+                        "text_to_sql on '%s': success=%s rows=%d attempts=%d",
+                        connection_name,
+                        result.success,
+                        result.row_count,
+                        result.attempts,
+                    )
+                    entries.append(
+                        ResponseToolEntry(
+                            source="tools",
+                            tool_name=TOOL_NAME,
+                            question=query_text,
+                            text=result.render_text(),
+                            success=result.success,
+                            error=result.error,
+                            structured=result.structured(),
+                        )
+                    )
+                return entries
+
+            runners = {
+                "session": _run_session,
+                "trace": _run_trace,
+                "session_context": _run_session_context,
+                "graph": _run_graph,
+                "tools": _run_tools,
+            }
+
+            session_result_count = 0
+            for src in sources:
+                runner = runners.get(src)
+                if runner is None:
+                    continue
+                # Auto mode special case: session hit short-circuits graph.
+                if auto_fallthrough and src == "graph" and merged:
+                    break
+                # on_empty: the other sources gave cognee enough context — don't
+                # go back to the external database.
+                if src == "tools" and tools_trigger == "on_empty" and merged:
+                    continue
+                part = await runner()
+                if src == "session":
+                    session_result_count = len(part)
+                merged.extend(part)
+
+            if session_result_count:
+                span.set_attribute(COGNEE_SESSION_ENTRY_COUNT, session_result_count)
+
+            # Choose a single-source label when only one source contributed,
+            # else "multi".
+            source_label = sources[0] if len(sources) == 1 else "multi"
+            span.set_attribute(COGNEE_RECALL_SOURCE, source_label)
+            span.set_attribute(COGNEE_RESULT_COUNT, len(merged))
+
+            logger.info(
+                "recall: %d results across sources=%s (session=%s)",
+                len(merged),
+                sources,
+                session_id or "-",
+            )
+
+            return merged

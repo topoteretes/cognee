@@ -12,6 +12,18 @@ from typing import Any, Optional
 from cognee.modules.retrieval.hybrid.results import display_value, result_id
 
 
+def conversational_reserve(limit: Optional[int]) -> int:
+    """Slots held for results only the conversational lane found.
+
+    Reserves roughly a third of the budget. Nothing is reserved below three slots: one
+    reserved slot out of two would hand half the budget to the rewrite and leave a
+    single hit for the question actually asked.
+    """
+    if not limit or limit <= 2:
+        return 0
+    return max(1, limit // 3)
+
+
 def edge_identity(edge: Any) -> Hashable:
     """Identify a graph edge by its object id, else by the relationship it expresses."""
     if isinstance(edge, dict):
@@ -59,6 +71,7 @@ def merge_ranked(
     *,
     identity: Callable[[Any], Optional[Hashable]] = result_id,
     limit: Optional[int] = None,
+    secondary_reserve: int = 0,
 ) -> list:
     """Merge two ranked lists, strongest agreement first.
 
@@ -67,6 +80,10 @@ def merge_ranked(
     in their original order, then ``secondary`` items not already present. An item in
     both lists is represented by its ``primary`` object. Results without an identity are
     never merged away. A single list therefore comes back in its original order.
+
+    When ``limit`` is set, up to ``secondary_reserve`` slots are held for items found
+    only by the secondary lane. Unused reserve goes back to the primary side so
+    single-lane and short-lane behaviour is unchanged. The total never exceeds ``limit``.
     """
     # identity -> [rank in primary, rank in secondary, representative object]
     records: dict[Hashable, list] = {}
@@ -82,5 +99,20 @@ def merge_ranked(
             if lane == 0:
                 record[2] = item
 
-    merged = [record[2] for record in sorted(records.values(), key=_rank_key)]
-    return merged if limit is None else merged[: max(0, limit)]
+    ranked = sorted(records.values(), key=_rank_key)
+    if limit is None:
+        return [record[2] for record in ranked]
+    limit = max(0, limit)
+    reserve = min(max(0, secondary_reserve), limit)
+
+    # A record with no primary rank was found only by the secondary lane.
+    secondary_indices = [i for i, record in enumerate(ranked) if record[0] is None]
+    primary_indices = [i for i, record in enumerate(ranked) if record[0] is not None]
+
+    take_secondary = secondary_indices[:reserve]
+    take_primary = primary_indices[: limit - len(take_secondary)]
+    # Unused reserve returns to the primary side above; unused primary slots here.
+    shortfall = limit - len(take_primary) - len(take_secondary)
+    if shortfall > 0:
+        take_secondary += secondary_indices[len(take_secondary) : len(take_secondary) + shortfall]
+    return [ranked[i][2] for i in sorted(set(take_primary + take_secondary))]

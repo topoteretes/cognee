@@ -8,8 +8,9 @@ class BaseRetriever(ABC):
 
     The retrieval workflow follows a three-step pipeline:
     1. get_retrieved_objects: Fetch raw data (e.g., Graph Edges, Vector chunks).
-    2. get_context: Process raw data into a format suitable for an LLM (e.g., text string).
-    3. get_completion: Generate a final response with the help of an LLM using the context and original query.
+    2. get_context_from_objects: Process raw data into a format suitable for an LLM.
+    3. get_completion_from_context: Generate a final response with the help of an LLM
+       using the context and original query.
     """
 
     # Deterministic retrievers can opt out of conversational session analysis.
@@ -89,12 +90,14 @@ class BaseRetriever(ABC):
 
         Called when one turn retrieves twice — a session turn runs the raw question and a
         conversational rewrite of it — so the retriever formats context from both at once.
-        Only the retriever knows its object shape, so only it can merge them. The default
-        keeps the primary retrieval, which is always a valid result of the right shape.
-        """
-        return primary
+        Only the retriever knows its object shape, so only it can merge them.
 
-    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
+        The default keeps whichever retrieval it has: either lane may be None when the
+        other one failed, and dropping the surviving lane would discard a good result.
+        """
+        return primary if primary is not None else secondary
+
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
         return completions
 
@@ -127,12 +130,6 @@ class BaseRetriever(ABC):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
-        from cognee.modules.retrieval.session_search import try_concurrent_turn
-
-        turn_result = await try_concurrent_turn(self, raw_query=query)
-        if turn_result is not None:
-            return turn_result.completion
-
         retrieved_objects = await self.get_retrieved_objects(query=query)
         context = await self.get_context_from_objects(
             query=query, retrieved_objects=retrieved_objects

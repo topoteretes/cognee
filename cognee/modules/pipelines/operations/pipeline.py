@@ -59,7 +59,7 @@ async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> A
 
 
 async def run_pipeline(
-    tasks: list[Task],
+    tasks: Optional[Union[list[Task], Callable[[Any], list[Task]]]] = None,
     data=None,
     datasets: Optional[Union[str, list[str], list[UUID]]] = None,
     user: Optional[User] = None,
@@ -75,7 +75,15 @@ async def run_pipeline(
     data_cache: bool = False,
     skip_connection_test: bool = False,
 ):
-    validate_pipeline_tasks(tasks)
+    """``tasks`` is either the task list every data item runs, or a callable
+    mapping one item to its task list (a task resolver — see ``run_tasks``);
+    items resolved to different lists still share one run per dataset."""
+    if tasks is None:
+        raise ValueError(
+            "run_pipeline requires tasks: a task list or a per-item task resolver callable"
+        )
+    if not callable(tasks):
+        validate_pipeline_tasks(tasks)
     await setup_and_check_environment(
         vector_db_config, graph_db_config, skip_connection_test=skip_connection_test
     )
@@ -105,7 +113,7 @@ async def run_pipeline(
 async def run_pipeline_per_dataset(
     dataset: Dataset,
     user: User,
-    tasks: list[Task],
+    tasks: Optional[Union[list[Task], Callable[[Any], list[Task]]]] = None,
     data: Optional[list[Data]] = None,
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache=False,

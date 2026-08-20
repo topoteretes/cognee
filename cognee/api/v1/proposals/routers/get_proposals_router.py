@@ -86,7 +86,7 @@ def get_proposals_router() -> APIRouter:
         """Return one skill-improvement proposal with its before/after procedures."""
         send_telemetry(
             "Skill Proposal Get API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/proposals/{proposal_id}",
                 "dataset_id": str(dataset_id),

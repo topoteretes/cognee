@@ -1,5 +1,5 @@
 from os import path
-from io import BufferedReader
+from io import BufferedReader, BytesIO
 from typing import Union, BinaryIO
 from tempfile import SpooledTemporaryFile
 
@@ -13,12 +13,18 @@ def classify(
     if isinstance(data, str):
         return TextData(data)
 
-    if isinstance(data, BufferedReader) or isinstance(data, SpooledTemporaryFile):
+    if isinstance(data, (BufferedReader, SpooledTemporaryFile, BytesIO)):
+        # In-memory uploads (BytesIO) carry no .name — the caller-supplied
+        # filename is the only identity there, so its absence is an error,
+        # never a made-up name.
+        source_name = filename if filename else getattr(data, "name", None)
+        if source_name is None:
+            raise IngestionError(message="Binary stream has no name: pass filename= to classify().")
         # Normalize both POSIX ("/") and Windows ("\") separators before taking the
         # basename. On Windows, data.name is a backslash path (e.g. C:\dir\file.pdf),
         # so splitting on "/" alone would keep the whole path as the file's name.
-        derived_name = str(data.name).replace("\\", "/").split("/")[-1]
-        return BinaryData(data, filename if filename else derived_name)
+        derived_name = str(source_name).replace("\\", "/").split("/")[-1]
+        return BinaryData(data, derived_name)
 
     try:
         from s3fs import S3File

@@ -43,7 +43,7 @@ def get_delete_router() -> APIRouter:
         """
         send_telemetry(
             "Delete API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "DELETE /v1/delete",
                 "dataset_id": str(dataset_id),
@@ -65,7 +65,7 @@ def get_delete_router() -> APIRouter:
             return result
 
         except Exception as error:
-            logger.error(f"Error during deletion by data_id: {str(error)}")
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Error during deletion by data_id: %s", error)
+            return JSONResponse(status_code=409, content={"error": "Unable to delete data."})
 
     return router

@@ -179,6 +179,11 @@ async def add(
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
 
+        # Add a single url and keenable extract ingestion method
+        Make sure to set KEENABLE_API_KEY = YOUR_KEENABLE_API_KEY as a environment variable
+        (Tavily takes precedence if both keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
@@ -195,6 +200,7 @@ async def add(
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
+        - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
 
     """
     # Route to remote instance if connected via serve()
@@ -232,6 +238,13 @@ async def add(
 
     await setup()
 
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
+
     import time as _time
 
     _add_start_ns = _time.monotonic_ns()
@@ -255,6 +268,7 @@ async def add(
         data,
         dataset_name=dataset_name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
 
@@ -270,7 +284,9 @@ async def add(
         data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)

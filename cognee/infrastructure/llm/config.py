@@ -81,7 +81,13 @@ class LLMConfig(BaseSettings):
     - stage_config
     """
 
-    structured_output_framework: str = "instructor"
+    # litellm_native (default): plain litellm two-path structured output —
+    # schema-native response_format when the model supports it, prompted-JSON
+    # fallback otherwise. No instructor in the call path, which is a
+    # prerequisite for removing the instructor dependency. Exact token capture
+    # works on this path via the adapter's explicit _raw_response attachment.
+    # Set STRUCTURED_OUTPUT_FRAMEWORK=instructor (or baml) to opt back.
+    structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
@@ -109,6 +115,7 @@ class LLMConfig(BaseSettings):
     llm_query_api_version: str | None = None
 
     llm_temperature: float = 0.0
+    llm_seed: int | None = None
     llm_streaming: bool = False
     llm_max_completion_tokens: int = 16384
 
@@ -123,6 +130,9 @@ class LLMConfig(BaseSettings):
     graph_prompt_path: str = "generate_graph_prompt.txt"
     temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
     event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
+    image_transcription_prompt_path: str = "transcribe_image_prompt.txt"
+    image_transcription_max_completion_tokens: int = 1024
+    image_transcription_reasoning_effort: str = "low"
     llm_rate_limit_enabled: bool = False
     # Default 60 requests per interval; local inference servers get
     # LOCAL_DEFAULT_RATE_LIMIT_REQUESTS instead (see default_local_rate_limit_budget).
@@ -137,6 +147,7 @@ class LLMConfig(BaseSettings):
     llama_cpp_n_ctx: int = 2048
     llama_cpp_n_gpu_layers: int = 0
     llama_cpp_chat_format: str = "chatml"
+    ollama_num_ctx: int = 2048
 
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
@@ -149,6 +160,26 @@ class LLMConfig(BaseSettings):
     baml_registry: Any | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def blank_llm_args_is_unset(cls, values: Any) -> Any:
+        """
+        Treat a blank ``LLM_ARGS`` as unset rather than a validation error.
+
+        A ``.env`` written from an empty variable — ``LLM_ARGS=`` — reaches this
+        dict field as ``""`` and raises ``ValidationError`` while
+        ``cognee/__init__`` is still importing, so the process dies before it can
+        report anything useful. An empty value cannot express any arguments, so
+        read it as "none given".
+        """
+        if isinstance(values, dict):
+            for key in ("llm_args", "LLM_ARGS"):
+                value = values.get(key)
+                if isinstance(value, str) and not value.strip():
+                    values[key] = None
+
+        return values
 
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
@@ -194,6 +225,29 @@ class LLMConfig(BaseSettings):
                 from cognee.infrastructure.llm.exceptions import ProviderNotDeducibleError
 
                 raise ProviderNotDeducibleError(model)
+
+        return self
+
+    @model_validator(mode="after")
+    def fold_sampling_params_into_llm_args(self) -> "LLMConfig":
+        """
+        Fold ``llm_temperature`` / ``llm_seed`` into ``llm_args``, the dict every
+        adapter merges into each completion call — without this fold the two
+        fields are read by nothing and never reach the provider.
+
+        ``llm_temperature`` is folded only when set explicitly (env var or
+        kwarg): the default model family (gpt-5) rejects any temperature other
+        than the provider default, so an unset field must not silently send
+        ``0.0``. Keys given directly in ``LLM_ARGS`` win over the dedicated
+        fields.
+        """
+        folded: dict[str, Any] = {}
+        if "llm_temperature" in self.model_fields_set:
+            folded["temperature"] = self.llm_temperature
+        if self.llm_seed is not None:
+            folded["seed"] = self.llm_seed
+        if folded:
+            self.llm_args = {**folded, **(self.llm_args or {})}
 
         return self
 
@@ -320,6 +374,7 @@ class LLMConfig(BaseSettings):
             "api_key": self.llm_api_key,
             "api_version": self.llm_api_version,
             "temperature": self.llm_temperature,
+            "seed": self.llm_seed,
             "streaming": self.llm_streaming,
             "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
@@ -334,6 +389,7 @@ class LLMConfig(BaseSettings):
             "llama_cpp_n_ctx": self.llama_cpp_n_ctx,
             "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
             "llama_cpp_chat_format": self.llama_cpp_chat_format,
+            "ollama_num_ctx": self.ollama_num_ctx,
             "llm_args": self.llm_args,
         }
 

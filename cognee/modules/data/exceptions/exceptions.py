@@ -25,6 +25,36 @@ class UnauthorizedDataAccessError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class AmbiguousDataIdError(CogneeValidationError):
+    """A context-free data_id matches several documents across datasets.
+
+    Raised when a pre-refactor id forked into per-dataset documents and the
+    caller supplied no dataset. ``candidates`` lists every match as
+    ``{"dataset_id", "dataset_name", "data_id"}`` — repeat the call with a
+    dataset_id, or use the list to migrate the external mapping once.
+    """
+
+    def __init__(
+        self,
+        data_id,
+        candidates,
+        name: str = "AmbiguousDataIdError",
+        status_code=status.HTTP_409_CONFLICT,
+    ):
+        self.candidates = candidates
+        rendered = ", ".join(
+            f"(dataset={c['dataset_name'] or c['dataset_id']}, data_id={c['data_id']})"
+            for c in candidates
+        )
+        super().__init__(
+            f"data_id {data_id} is ambiguous across datasets — it forked during the "
+            f"dataset-scoping upgrade. Provide dataset_id, or update your mapping. "
+            f"Candidates: {rendered}",
+            name,
+            status_code,
+        )
+
+
 class DatasetNotFoundError(CogneeValidationError):
     def __init__(
         self,

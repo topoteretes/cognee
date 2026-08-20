@@ -1,14 +1,20 @@
 """Merge two hybrid retrievals into one result of the same shape.
 
-Each channel merges on its own terms, and everything derived from the chunk channel —
+Each channel merges under its own budget, and everything derived from the chunk channel —
 summaries, attribution, per-channel status — is rebuilt for the chunks that survived.
-``global_context`` is deliberately not merged: it is built once from the raw query.
+``global_context`` is taken from the primary result unchanged: it is built once from the
+raw query. Keys the retriever carries but this module does not own are also kept from
+the primary result.
 """
 
 from typing import Any, Optional
 
 from cognee.modules.retrieval.hybrid.results import result_id
-from cognee.modules.retrieval.utils.merge_results import edge_identity, merge_ranked
+from cognee.modules.retrieval.utils.merge_results import (
+    conversational_reserve,
+    edge_identity,
+    merge_ranked,
+)
 
 
 def merge_channel_status(
@@ -63,17 +69,30 @@ def merge_hybrid_results(
     chunks_limit: int,
     entities_limit: int,
     facts_limit: int,
-    graph_limit: int,
+    graph_limit: Optional[int] = None,
 ) -> dict:
     """Merge each hybrid channel while preserving the result shape and its budgets."""
     primary = primary or {}
     secondary = secondary or {}
     channels: dict[str, list] = {
-        "chunks": merge_ranked(primary.get("chunks"), secondary.get("chunks"), limit=chunks_limit),
-        "entities": merge_ranked(
-            primary.get("entities"), secondary.get("entities"), limit=entities_limit
+        "chunks": merge_ranked(
+            primary.get("chunks"),
+            secondary.get("chunks"),
+            limit=chunks_limit,
+            secondary_reserve=conversational_reserve(chunks_limit),
         ),
-        "facts": merge_ranked(primary.get("facts"), secondary.get("facts"), limit=facts_limit),
+        "entities": merge_ranked(
+            primary.get("entities"),
+            secondary.get("entities"),
+            limit=entities_limit,
+            secondary_reserve=conversational_reserve(entities_limit),
+        ),
+        "facts": merge_ranked(
+            primary.get("facts"),
+            secondary.get("facts"),
+            limit=facts_limit,
+            secondary_reserve=conversational_reserve(facts_limit),
+        ),
     }
     if "graph_fallback" in primary or "graph_fallback" in secondary:
         channels["graph_fallback"] = merge_ranked(
@@ -81,13 +100,15 @@ def merge_hybrid_results(
             secondary.get("graph_fallback"),
             identity=edge_identity,
             limit=graph_limit,
+            secondary_reserve=conversational_reserve(graph_limit),
         )
 
-    merged = {key: value for key, value in primary.items() if key not in _DERIVED_KEYS}
+    merged: dict[str, Any] = {
+        key: value for key, value in primary.items() if key not in _DERIVED_KEYS
+    }
     merged.update(channels)
 
     chunk_ids = [chunk_id for chunk in channels["chunks"] if (chunk_id := result_id(chunk))]
-
     primary_summaries = primary.get("chunk_summaries", {})
     secondary_summaries = secondary.get("chunk_summaries", {})
     merged["chunk_summaries"] = {
@@ -106,18 +127,22 @@ def merge_hybrid_results(
     if attribution:
         merged["chunk_attribution"] = attribution
 
-    merged_status = {
-        channel: merge_channel_status(
-            _channel_status(primary, channel),
-            _channel_status(secondary, channel),
-            item_count=len(items),
-        )
-        for channel, items in channels.items()
-    }
-    global_status = _channel_status(primary, "global_context") or _channel_status(
-        secondary, "global_context"
+    has_status = any(
+        isinstance(result.get("retrieval_status"), dict) for result in (primary, secondary)
     )
-    if global_status is not None:
-        merged_status["global_context"] = dict(global_status)
-    merged["retrieval_status"] = merged_status
+    if has_status:
+        merged_status = {
+            channel: merge_channel_status(
+                _channel_status(primary, channel),
+                _channel_status(secondary, channel),
+                item_count=len(items),
+            )
+            for channel, items in channels.items()
+        }
+        global_status = _channel_status(primary, "global_context") or _channel_status(
+            secondary, "global_context"
+        )
+        if global_status is not None:
+            merged_status["global_context"] = dict(global_status)
+        merged["retrieval_status"] = merged_status
     return merged

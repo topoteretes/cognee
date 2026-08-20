@@ -9,7 +9,11 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.utils.merge_results import edge_identity, merge_ranked
+from cognee.modules.retrieval.utils.merge_results import (
+    conversational_reserve,
+    edge_identity,
+    merge_ranked,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -277,7 +281,13 @@ class GraphCompletionRetriever(BaseRetriever):
         return format_global_context_prelude(root_text, top_summaries)
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
-        return merge_ranked(primary, secondary, identity=edge_identity, limit=self.top_k)
+        return merge_ranked(
+            primary,
+            secondary,
+            identity=edge_identity,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
 
     def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
@@ -326,6 +336,8 @@ class GraphCompletionRetriever(BaseRetriever):
         )
 
     async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        # Graph evidence is grounded in the answer text, not the retrieved edges, so
+        # retrieved_objects is deliberately unused here.
         return await self._append_graph_evidence(completions)
 
     async def get_completion_from_context(
@@ -399,16 +411,6 @@ class GraphCompletionRetriever(BaseRetriever):
             List[Any]: A list containing the generated completions or response objects.
         """
         validate_retriever_input(query, query_batch)
-
-        from cognee.modules.retrieval.session_search import try_concurrent_turn
-
-        turn_result = await try_concurrent_turn(
-            self,
-            raw_query=query or "",
-            is_batch=query_batch is not None,
-        )
-        if turn_result is not None:
-            return turn_result.completion
 
         effective_query = query
         turn_preparation = None

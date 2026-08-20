@@ -162,7 +162,7 @@ async def handle_task(
     logger.info(f"{task_type} task started: `{running_task.executable.__name__}`")
     send_telemetry(
         f"{task_type} Task Started",
-        user_id=user.id,
+        user,
         additional_properties={
             "task_name": running_task.executable.__name__,
             "cognee_version": cognee_version,
@@ -233,7 +233,7 @@ async def handle_task(
             logger.info(f"{task_type} task completed: `{task_name}`")
             send_telemetry(
                 f"{task_type} Task Completed",
-                user_id=user.id,
+                user,
                 additional_properties={
                     "task_name": task_name,
                     "cognee_version": cognee_version,
@@ -251,7 +251,7 @@ async def handle_task(
             )
             send_telemetry(
                 f"{task_type} Task Errored",
-                user_id=user.id,
+                user,
                 additional_properties={
                     "task_name": task_name,
                     "cognee_version": cognee_version,

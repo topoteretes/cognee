@@ -115,6 +115,8 @@ def get_search_router() -> APIRouter:
         text: str
         user: str
         created_at: datetime
+        # Null when the search was not scoped to a single dataset.
+        dataset_id: Optional[UUID] = None
 
     @router.get(
         "",
@@ -144,7 +146,7 @@ def get_search_router() -> APIRouter:
         """
         send_telemetry(
             "Search API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "GET /v1/search", "cognee_version": cognee_version},
         )
 
@@ -211,15 +213,17 @@ def get_search_router() -> APIRouter:
         """
         send_telemetry(
             "Search API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/search",
                 "search_type": str(payload.search_type),
                 "datasets": payload.datasets,
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
-                "query": payload.query,
-                "system_prompt": payload.system_prompt,
-                "node_name": payload.node_name,
+                # Request fields are recorded by size, matching the recall
+                # endpoint's convention (see recall.py telemetry).
+                "query": len(payload.query or ""),
+                "system_prompt": len(payload.system_prompt or ""),
+                "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
                 "verbose": payload.verbose,
@@ -227,7 +231,7 @@ def get_search_router() -> APIRouter:
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
-                "code_query": payload.code_query,
+                "code_query": len(str(payload.code_query)) if payload.code_query else 0,
                 "cognee_version": cognee_version,
             },
         )

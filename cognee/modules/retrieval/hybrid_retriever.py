@@ -14,12 +14,12 @@ from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
 )
 from cognee.modules.retrieval.hybrid.entities import build_entities
-from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.facts import (
     edge_rank_by_id,
     graph_evidence_by_edge_type_id,
     select_facts,
 )
+from cognee.modules.retrieval.hybrid.merge import merge_hybrid_results
 from cognee.modules.retrieval.hybrid.results import result_id
 from cognee.modules.retrieval.utils.completion import generate_completion, generate_completion_batch
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
@@ -519,16 +519,6 @@ class HybridRetriever(BaseRetriever):
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> List[Any]:
         validate_retriever_input(query, query_batch, self._use_session_cache())
-
-        from cognee.modules.retrieval.session_search import try_concurrent_turn
-
-        turn_result = await try_concurrent_turn(
-            self,
-            raw_query=query or "",
-            is_batch=query_batch is not None,
-        )
-        if turn_result is not None:
-            return turn_result.completion
 
         retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
         context = await self.get_context_from_objects(

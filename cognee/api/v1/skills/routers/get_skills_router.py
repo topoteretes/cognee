@@ -108,7 +108,7 @@ def get_skills_router() -> APIRouter:
 
         send_telemetry(
             "Skill Ingest API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/skills",
                 "cognee_version": cognee_version,
@@ -156,7 +156,7 @@ def get_skills_router() -> APIRouter:
         """Return the skills available in an authorized dataset, with publisher metadata."""
         send_telemetry(
             "Skills List API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/skills",
                 "dataset_id": str(dataset_id),
@@ -212,5 +212,36 @@ def get_skills_router() -> APIRouter:
         except Exception as exc:
             logger.error("get skill failed: %s", exc, exc_info=True)
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
+
+    @router.delete(
+        "/{skill_id}",
+        response_model=dict,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+        },
+    )
+    async def delete_dataset_skill(
+        skill_id: str,
+        dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Delete one skill (graph node + embeddings) from an authorized dataset."""
+        from cognee.api.v1.skills.list_skills import delete_skill
+
+        try:
+            dataset = await _authorized_dataset(dataset_id, user, "delete")
+            deleted = await delete_skill(skill_id, dataset.id)
+            if not deleted:
+                return JSONResponse(status_code=404, content={"error": "Skill not found"})
+            return {"status": "deleted", "id": skill_id, "dataset_id": str(dataset_id)}
+        except PermissionDeniedError:
+            return JSONResponse(
+                status_code=403, content={"error": "Not authorized for this dataset"}
+            )
+        except Exception as exc:
+            logger.error("delete skill failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})
 
     return router

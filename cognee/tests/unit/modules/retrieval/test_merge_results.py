@@ -2,7 +2,11 @@
 
 from unittest.mock import MagicMock
 
-from cognee.modules.retrieval.utils.merge_results import edge_identity, merge_ranked
+from cognee.modules.retrieval.utils.merge_results import (
+    conversational_reserve,
+    edge_identity,
+    merge_ranked,
+)
 
 
 def result(identifier, text, *, truthy=True):
@@ -81,3 +85,39 @@ def test_unrelated_edges_are_both_kept():
     merged = merge_ranked([primary], [secondary], identity=edge_identity)
 
     assert merged == [primary, secondary]
+
+
+def test_full_lanes_reserve_slots_for_conversational_only_items():
+    """Both lanes return exactly top_k with one shared item; reserve keeps ctx-only hits."""
+    limit = 5
+    primary = [result(f"raw{index}", "raw") for index in range(limit)]
+    secondary = [
+        result("ctx0", "ctx"),
+        result("ctx1", "ctx"),
+        result("raw3", "shared"),
+        result("ctx2", "ctx"),
+        result("ctx3", "ctx"),
+    ]
+
+    merged = merge_ranked(
+        primary,
+        secondary,
+        limit=limit,
+        secondary_reserve=conversational_reserve(limit),
+    )
+
+    # One reserved slot at limit=5, so the lowest-ranked raw item yields to "ctx0".
+    assert [item.id for item in merged] == ["raw3", "raw0", "raw1", "raw2", "ctx0"]
+
+
+def test_empty_secondary_and_zero_reserve_keep_primary_cap():
+    primary = [result(f"raw{index}", "raw") for index in range(5)]
+    secondary = [result(f"ctx{index}", "ctx") for index in range(5)]
+
+    assert (
+        merge_ranked(primary, None, limit=5, secondary_reserve=conversational_reserve(5)) == primary
+    )
+    assert (
+        merge_ranked(primary, [], limit=5, secondary_reserve=conversational_reserve(5)) == primary
+    )
+    assert merge_ranked(primary, secondary, limit=5, secondary_reserve=0) == primary

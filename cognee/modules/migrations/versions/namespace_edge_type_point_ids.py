@@ -27,6 +27,7 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.modules.migrations.migration import MigrationContext
 from cognee.modules.migrations.versions._vector_rekey import (
     RekeyedPoint,
+    index_data_points_batched,
     rekey_native,
 )
 
@@ -141,7 +142,9 @@ async def _apply_map(context: MigrationContext, id_map: dict, text_by_old: dict)
         migrated_old_ids.append(old_id)
 
     if new_points:
-        await context.vector_engine.index_data_points(_COLLECTION_KIND, _INDEX_FIELD, new_points)
+        await index_data_points_batched(
+            context.vector_engine, _COLLECTION_KIND, _INDEX_FIELD, new_points
+        )
         await context.vector_engine.delete_data_points(_COLLECTION, migrated_old_ids)
 
 

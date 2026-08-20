@@ -6,12 +6,13 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_concurrent_turn import (
-    analyze_turn_concurrently,
+    SessionTurnContext,
+    TurnPrompts,
+    analyze_turn,
     commit_turn,
     complete_turn,
-    load_turn_snapshot,
+    load_turn_context,
 )
-from cognee.infrastructure.session.session_search_models import SessionTurnSnapshot
 
 
 @pytest.mark.asyncio
@@ -51,7 +52,7 @@ async def test_snapshot_loads_history_guidance_and_previous_served_context():
             return_value=[{"id": "ctx-1", "content": "previous guidance"}],
         ) as load_served,
     ):
-        snapshot = await load_turn_snapshot(
+        snapshot = await load_turn_context(
             manager,
             user_id="u1",
             session_id="s1",
@@ -105,7 +106,7 @@ async def test_snapshot_skips_context_reads_when_auto_feedback_is_disabled():
             new_callable=AsyncMock,
         ) as load_served,
     ):
-        snapshot = await load_turn_snapshot(
+        snapshot = await load_turn_context(
             manager,
             user_id="u1",
             session_id="s1",
@@ -120,8 +121,24 @@ async def test_snapshot_skips_context_reads_when_auto_feedback_is_disabled():
 
 
 @pytest.mark.asyncio
+async def test_load_turn_context_fails_open_to_raw_message_only():
+    manager = MagicMock()
+    manager.is_auto_feedback_enabled.return_value = True
+    manager.get_session = AsyncMock(side_effect=RuntimeError("cache down"))
+
+    turn_context = await load_turn_context(
+        manager,
+        user_id="u1",
+        session_id="s1",
+        raw_message="question",
+    )
+
+    assert turn_context == SessionTurnContext(raw_message="question")
+
+
+@pytest.mark.asyncio
 async def test_analysis_reads_the_user_turn_and_the_context_it_may_rate():
-    snapshot = SessionTurnSnapshot(
+    snapshot = SessionTurnContext(
         raw_message="that was wrong",
         previous_question="what is the limit?",
         previous_answer="ten",
@@ -134,7 +151,7 @@ async def test_analysis_reads_the_user_turn_and_the_context_it_may_rate():
         new_callable=AsyncMock,
         return_value=analysis,
     ) as analyze:
-        assert await analyze_turn_concurrently(snapshot) is analysis
+        assert await analyze_turn(snapshot) is analysis
 
     analyze.assert_awaited_once_with(
         "that was wrong",
@@ -152,7 +169,7 @@ async def test_analysis_fails_open_to_no_context_updates(failure):
         new_callable=AsyncMock,
         side_effect=failure,
     ):
-        analysis = await analyze_turn_concurrently(SessionTurnSnapshot(raw_message="question"))
+        analysis = await analyze_turn(SessionTurnContext(raw_message="question"))
 
     assert analysis.candidate_context_updates == []
     assert analysis.served_context_ratings == []
@@ -163,7 +180,7 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
     class Answer(BaseModel):
         text: str
 
-    snapshot = SessionTurnSnapshot(
+    snapshot = SessionTurnContext(
         raw_message="question",
         active_context="active guidance",
         completion_history="history",
@@ -179,48 +196,25 @@ async def test_answer_uses_the_callers_own_prompts_and_response_model():
             context="context",
             user_id="not-a-uuid",
             session_id="s1",
-            user_prompt_path="user.txt",
-            system_prompt_path="system.txt",
-            system_prompt="caller system prompt",
-            response_model=Answer,
+            prompts=TurnPrompts(
+                user_prompt_path="user.txt",
+                system_prompt_path="system.txt",
+                system_prompt="caller system prompt",
+                response_model=Answer,
+            ),
         )
 
     assert answer == Answer(text="structured")
     call = generate.await_args.kwargs
     # No wrapper model: the caller's own response contract, unchanged.
     assert call["response_model"] is Answer
-    assert call["system_prompt"].startswith("caller system prompt")
+    assert call["system_prompt"] == "caller system prompt"
     assert call["conversation_history"] == "active guidance\n\nhistory"
 
 
 @pytest.mark.asyncio
-async def test_answer_prompt_carries_the_conversational_turn_rule():
-    """Concurrent mode answers acknowledgements itself, so the rule must reach the model."""
-    with patch(
-        "cognee.infrastructure.session.session_concurrent_turn.generate_completion",
-        new_callable=AsyncMock,
-        return_value="Got it.",
-    ) as generate:
-        await complete_turn(
-            snapshot=SessionTurnSnapshot(raw_message="ok thanks"),
-            context="unrelated context",
-            user_id="not-a-uuid",
-            session_id="s1",
-            user_prompt_path="context_for_question.txt",
-            system_prompt_path="hybrid_answer_guarded.txt",
-            system_prompt=None,
-            response_model=str,
-        )
-
-    system_prompt = generate.await_args.kwargs["system_prompt"]
-    # The caller's guarded prompt is kept whole, with the rule appended after it.
-    assert system_prompt.startswith("Answer only from the retrieved evidence")
-    assert "reply briefly in kind" in system_prompt
-
-
-@pytest.mark.asyncio
 async def test_answer_tracks_usage_only_for_uuid_users():
-    snapshot = SessionTurnSnapshot(raw_message="question")
+    snapshot = SessionTurnContext(raw_message="question")
     user_id = uuid4()
 
     with (
@@ -238,10 +232,12 @@ async def test_answer_tracks_usage_only_for_uuid_users():
             context="context",
             user_id=user_id,
             session_id="s1",
-            user_prompt_path="user.txt",
-            system_prompt_path="system.txt",
-            system_prompt=None,
-            response_model=str,
+            prompts=TurnPrompts(
+                user_prompt_path="user.txt",
+                system_prompt_path="system.txt",
+                system_prompt=None,
+                response_model=str,
+            ),
         )
 
     track_usage.assert_called_once_with("s1", user_id)
@@ -252,7 +248,7 @@ async def test_commit_applies_the_analysis_then_stores_the_qa():
     order = []
     manager = MagicMock()
     manager.add_qa = AsyncMock(side_effect=lambda **kwargs: order.append("qa"))
-    snapshot = SessionTurnSnapshot(
+    snapshot = SessionTurnContext(
         raw_message="question",
         active_context_ids=("ctx-served-now",),
         previous_qa_id="qa-1",
@@ -286,9 +282,33 @@ async def test_commit_applies_the_analysis_then_stores_the_qa():
     stored = manager.add_qa.await_args.kwargs
     assert stored["question"] == "question"
     assert stored["answer"] == "the answer"
+    assert stored["context"] == ""
     # The QA records the context served to *this* answer.
     assert stored["used_session_context_ids"] == ["ctx-served-now"]
     assert stored["used_graph_element_ids"] == {"node_ids": ["n1"]}
+
+
+@pytest.mark.asyncio
+async def test_commit_fails_open_when_the_qa_write_raises():
+    """The answer already exists by commit time, so a broken cache must not surface."""
+    manager = MagicMock()
+    manager.add_qa = AsyncMock(side_effect=RuntimeError("cache down"))
+
+    with patch(
+        "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
+        new_callable=AsyncMock,
+    ):
+        await commit_turn(
+            manager,
+            snapshot=SessionTurnContext(raw_message="question"),
+            analysis=SessionTurnAnalysis(),
+            answer="the answer",
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids=None,
+        )
+
+    manager.add_qa.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -305,7 +325,7 @@ async def test_commit_serializes_a_custom_response_model_for_storage():
     ):
         await commit_turn(
             manager,
-            snapshot=SessionTurnSnapshot(raw_message="question"),
+            snapshot=SessionTurnContext(raw_message="question"),
             analysis=SessionTurnAnalysis(),
             answer=Answer(text="structured"),
             user_id="u1",

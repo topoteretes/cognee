@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.utils.merge_results import merge_ranked
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
@@ -92,7 +92,12 @@ class TripletRetriever(BaseRetriever):
             raise NoDataError("No data found in the system, please add data first.") from error
 
     def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
-        return merge_ranked(primary, secondary, limit=self.top_k)
+        return merge_ranked(
+            primary,
+            secondary,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
 
     def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Triplets are non-elementary graph objects; do not report IDs for session QA - object ids cannot be resolved"""

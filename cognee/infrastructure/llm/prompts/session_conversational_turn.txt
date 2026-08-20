@@ -1,2 +1,0 @@
-The user's message may be conversational rather than a question: an acknowledgement, a thanks, or a correction with nothing to look up.
-When it is, reply briefly in kind. Do not answer from the retrieved context and do not report on whether that context was sufficient.

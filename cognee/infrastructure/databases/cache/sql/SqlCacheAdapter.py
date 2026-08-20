@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from pydantic import ValidationError
 from sqlalchemy import (
+    NullPool,
     create_engine,
     delete,
     event,
@@ -53,6 +54,16 @@ _DEADLOCK_ATTEMPTS = 3
 
 # Advisory-lock id guarding the throttled global TTL sweep on Postgres.
 _PURGE_LOCK_ID = int.from_bytes(sha256(b"cognee_cache_ttl_sweep").digest()[:8], "big", signed=True)
+
+# Fraction of the TTL window a row's expiry may lag behind the freshest write
+# before a sliding-TTL UPDATE re-stamps it. The slide is Redis EXPIRE parity,
+# but Redis EXPIRE is O(1) metadata on one key while the naive SQL translation
+# rewrites every session row per write — quadratic total write cost, and on the
+# SQLite WAL ~15,400x write amplification in a long agent session (issue #4393).
+# Skipping rows that are less than (fraction * ttl) stale bounds each row to at
+# most one re-stamp per slack window; rows then expire between (1 - fraction)
+# and 1.0 of the TTL after the session's last write.
+_TTL_REFRESH_FRACTION = 0.05
 
 
 def _is_deadlock_error(error: Exception) -> bool:
@@ -137,6 +148,11 @@ class SqlCacheAdapter(CacheDBInterface):
             pool_args: dict = (
                 dict(relational_config.pool_args) if relational_config.pool_args else {}
             )
+            # POOL_ARGS is shared configuration: the relational adapter accepts
+            # "nullpool" as a string and normalizes it to the pool class, so the
+            # same value must work here — SQLAlchemy itself needs the class.
+            if pool_args.get("poolclass", "").lower() == "nullpool":
+                pool_args["poolclass"] = NullPool
             if is_sqlite:
                 # Concurrency tuning: wait out writer locks instead of failing
                 # with SQLITE_BUSY when several processes share one cache.db.
@@ -237,13 +253,26 @@ class SqlCacheAdapter(CacheDBInterface):
         await session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
 
     async def _refresh_session_ttl(self, session, table, user_id: str, session_id: str) -> None:
-        """Slide the whole session's expiry forward (Redis EXPIRE-on-write parity)."""
+        """Slide the session's expiry forward (Redis EXPIRE-on-write parity), lazily.
+
+        Only rows whose expiry lags the new target by more than the slack
+        window (_TTL_REFRESH_FRACTION of the TTL) are re-stamped, so a write
+        costs roughly its own bytes instead of rewriting the whole session
+        (see _TTL_REFRESH_FRACTION for the amplification math). NULL-expiry
+        rows (written while TTL was disabled) are stamped too, matching the
+        eager slide's behavior.
+        """
         if not self._ttl_enabled():
             return
+        new_expiry = self._session_expiry()
+        cutoff = new_expiry - timedelta(seconds=self.session_ttl_seconds * _TTL_REFRESH_FRACTION)
         await session.execute(
             update(table)
-            .where(self._session_filter(table, user_id, session_id))
-            .values(expires_at=self._session_expiry())
+            .where(
+                self._session_filter(table, user_id, session_id),
+                or_(table.c.expires_at.is_(None), table.c.expires_at < cutoff),
+            )
+            .values(expires_at=new_expiry)
         )
 
     async def _purge_session_expired(self, session, table, user_id: str, session_id: str) -> None:
@@ -314,7 +343,7 @@ class SqlCacheAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
@@ -1025,11 +1054,21 @@ class SqlCacheAdapter(CacheDBInterface):
                     )
                 )
                 if expires_at is not None:
+                    # Same lazy slide as _refresh_session_ttl: Redis EXPIREs the
+                    # whole per-user list per logged call, but re-stamping every
+                    # row here turns each decorated API call into an
+                    # O(user's-log-history) write (issue #4393). Skip rows less
+                    # than the slack window stale.
+                    cutoff = expires_at - timedelta(seconds=ttl * _TTL_REFRESH_FRACTION)
                     await session.execute(
                         update(cache_usage_logs)
                         .where(
                             cache_usage_logs.c.log_key == self.log_key,
                             cache_usage_logs.c.user_id == user_id,
+                            or_(
+                                cache_usage_logs.c.expires_at.is_(None),
+                                cache_usage_logs.c.expires_at < cutoff,
+                            ),
                         )
                         .values(expires_at=expires_at)
                     )

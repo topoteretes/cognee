@@ -201,7 +201,7 @@ async def test_api_delete_data_uses_graph_provenance_when_ledger_has_no_nodes():
     dataset_id, data_id, user_id, owner_id = uuid4(), uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=user_id)
     dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
-    data = SimpleNamespace(id=data_id, datasets=[SimpleNamespace(id=dataset_id)])
+    data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
@@ -235,7 +235,7 @@ async def test_api_delete_data_uses_legacy_when_no_ledger_nodes_and_unmarked_gra
     dataset_id, data_id, user_id, owner_id = uuid4(), uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=user_id)
     dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
-    data = SimpleNamespace(id=data_id, datasets=[SimpleNamespace(id=dataset_id)])
+    data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),
@@ -269,7 +269,7 @@ async def test_api_delete_data_uses_ledger_delete_when_ledger_has_nodes():
     dataset_id, data_id, user_id, owner_id = uuid4(), uuid4(), uuid4(), uuid4()
     user = SimpleNamespace(id=user_id)
     dataset = SimpleNamespace(id=dataset_id, owner_id=owner_id)
-    data = SimpleNamespace(id=data_id, datasets=[SimpleNamespace(id=dataset_id)])
+    data = SimpleNamespace(id=data_id, dataset_id=dataset_id)
 
     with (
         patch.object(datasets_module, "get_authorized_dataset", AsyncMock(return_value=dataset)),

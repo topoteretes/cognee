@@ -9,7 +9,7 @@ from cognee.modules.retrieval.hybrid.results import first_display_value, payload
 
 MIN_FACT_WORD_COUNT = 3
 
-# Fixed template used for chunk->entity "contains" edges in expand_with_nodes_and_edges.
+# Prefix emitted in the text for chunk-to-entity "contains" edges.
 CONTAINS_FACT_PREFIX = "Document chunk mentions "
 
 

@@ -1,11 +1,15 @@
 """Per-session lock primitives — in-process asyncio registry.
 
-Two primitives:
+Three primitives:
 
 * ``session_lock(session_id, op)`` — async context manager that
   serializes concurrent tasks on the same ``(session_id, op)`` key.
   Used for short read-modify-write flows (``update_qa``,
   ``add_feedback``, ``delete_qa``).
+
+* ``session_turn_lock(user_id, session_id)`` — async context manager
+  that serializes whole session turns for one cache identity, so two
+  quick turns cannot read the same state and overwrite each other.
 
 * ``try_acquire_improve_lock(session_id)`` /
   ``release_improve_lock(session_id)`` — non-blocking claim for
@@ -20,10 +24,9 @@ are factored so that's a local change.
 """
 
 import asyncio
-import threading
-import weakref
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -62,21 +65,20 @@ async def session_lock(session_id: str, op: str = "write") -> AsyncGenerator[Non
         yield
 
 
-_turn_lock_registries: weakref.WeakKeyDictionary[
-    asyncio.AbstractEventLoop,
-    weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock],
-] = weakref.WeakKeyDictionary()
-_turn_registry_guard = threading.Lock()
+# Turn locks are registered per event loop, unlike ``_locks`` above: an ``asyncio.Lock``
+# is bound to the loop that awaited it, so reusing one from a different loop raises
+# RuntimeError. Keying by loop means a fresh loop always gets its own empty table, so a
+# lock is never reused across loops. Like ``_locks``, entries are never expired — that's
+# the same trade-off the registry above already makes.
+_turn_lock_registries: dict[asyncio.AbstractEventLoop, dict[tuple[str, str], asyncio.Lock]] = {}
+_turn_registry_guard = asyncio.Lock()
 
 
-def _get_turn_lock(user_id: str, session_id: str) -> asyncio.Lock:
+async def _get_turn_lock(user_id: Any, session_id: Any) -> asyncio.Lock:
     loop = asyncio.get_running_loop()
     key = (str(user_id), str(session_id))
-    with _turn_registry_guard:
-        registry = _turn_lock_registries.get(loop)
-        if registry is None:
-            registry = weakref.WeakValueDictionary()
-            _turn_lock_registries[loop] = registry
+    async with _turn_registry_guard:
+        registry = _turn_lock_registries.setdefault(loop, {})
         lock = registry.get(key)
         if lock is None:
             lock = asyncio.Lock()
@@ -85,13 +87,14 @@ def _get_turn_lock(user_id: str, session_id: str) -> asyncio.Lock:
 
 
 @asynccontextmanager
-async def session_turn_lock(user_id: str, session_id: str) -> AsyncGenerator[None, None]:
+async def session_turn_lock(user_id: Any, session_id: Any) -> AsyncGenerator[None, None]:
     """Serialize full concurrent turns for one cache user/session identity."""
     if not user_id or not session_id:
         yield
         return
 
-    async with _get_turn_lock(user_id, session_id):
+    lock = await _get_turn_lock(user_id, session_id)
+    async with lock:
         yield
 
 

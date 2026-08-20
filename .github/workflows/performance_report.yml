@@ -42,13 +42,13 @@ on:
         default: ''
     outputs:
       file_based_metrics:
-        description: "File-based run: success + add/cognify/search/total p50/p90/p99."
+        description: "File-based run: success + add/cognify/search (GRAPH_COMPLETION + HYBRID_COMPLETION)/total p50/p90/p99."
         value: ${{ jobs.file_based.outputs.metrics }}
       file_based_html_key:
         description: "File-based run: S3 object key of the HTML report."
         value: ${{ jobs.file_based.outputs.html_key }}
       postgres_metrics:
-        description: "Postgres run: success + add/cognify/search/total p50/p90/p99."
+        description: "Postgres run: success + add/cognify/search (GRAPH_COMPLETION + HYBRID_COMPLETION)/total p50/p90/p99."
         value: ${{ jobs.postgres.outputs.metrics }}
       postgres_html_key:
         description: "Postgres run: S3 object key of the HTML report."
@@ -161,7 +161,8 @@ jobs:
             success: "\(.succeeded)/\(.num_runs)",
             add:     {p50: .stats.add_time_s.p50,          p90: .stats.add_time_s.p90,          p99: .stats.add_time_s.p99},
             cognify: {p50: .stats.cognify_time_s.p50,      p90: .stats.cognify_time_s.p90,      p99: .stats.cognify_time_s.p99},
-            search:  {p50: .stats.search_time.p50,         p90: .stats.search_time.p90,         p99: .stats.search_time.p99},
+            search_graph:  {p50: .stats.search_time_graph_completion.p50,  p90: .stats.search_time_graph_completion.p90,  p99: .stats.search_time_graph_completion.p99},
+            search_hybrid: {p50: .stats.search_time_hybrid_completion.p50, p90: .stats.search_time_hybrid_completion.p90, p99: .stats.search_time_hybrid_completion.p99},
             total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
           }' "$JSON_PATH")"
           echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
@@ -312,7 +313,8 @@ jobs:
             success: "\(.succeeded)/\(.num_runs)",
             add:     {p50: .stats.add_time_s.p50,          p90: .stats.add_time_s.p90,          p99: .stats.add_time_s.p99},
             cognify: {p50: .stats.cognify_time_s.p50,      p90: .stats.cognify_time_s.p90,      p99: .stats.cognify_time_s.p99},
-            search:  {p50: .stats.search_time.p50,         p90: .stats.search_time.p90,         p99: .stats.search_time.p99},
+            search_graph:  {p50: .stats.search_time_graph_completion.p50,  p90: .stats.search_time_graph_completion.p90,  p99: .stats.search_time_graph_completion.p99},
+            search_hybrid: {p50: .stats.search_time_hybrid_completion.p50, p90: .stats.search_time_hybrid_completion.p90, p99: .stats.search_time_hybrid_completion.p99},
             total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
           }' "$JSON_PATH")"
           echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
