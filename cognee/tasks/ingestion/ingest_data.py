@@ -94,6 +94,11 @@ async def ingest_data(
         dataset_id: UUID = None,
         preferred_loaders: dict[str, dict[str, Any]] = None,
     ):
+        import time as _time
+
+        _store_start = _time.monotonic()
+        logger.info("cognee-core store_to_dataset starting")
+
         new_datapoints = []
         existing_data_points = []
 
@@ -133,6 +138,11 @@ async def ingest_data(
         precomputed_items = {}
         unique_content_hashes: set[str] = set()
 
+        logger.info(
+            "cognee-core store_to_dataset [loop 1/4] starting: save files and compute content hashes (%d items)",
+            len(data),
+        )
+        _loop1_start = _time.monotonic()
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
@@ -152,11 +162,20 @@ async def ingest_data(
                 "data_id": None,  # resolved below
             }
             unique_content_hashes.add(item_content_hash)
+        logger.info(
+            "cognee-core store_to_dataset [loop 1/4] finished in %.3f seconds",
+            _time.monotonic() - _loop1_start,
+        )
 
         # All read-only lookups share ONE session: on the cloud pods every
         # session is a fresh TLS+SCRAM connection (NullPool), and this runs
         # once per item. The session is released before the loader/storage
         # work below so no connection is held idle across S3 round trips.
+        logger.info(
+            "cognee-core store_to_dataset [loop 2/4] starting: resolve data IDs (%d items)",
+            len(data),
+        )
+        _loop2_start = _time.monotonic()
         existing_data_map: dict = {}
         async with db_engine.get_async_session() as session:
             # Single batch query: find existing rows for all content hashes in this
@@ -199,6 +218,11 @@ async def ingest_data(
                 for dp in result.scalars().all():
                     existing_data_map[str(dp.id)] = dp
 
+        logger.info(
+            "cognee-core store_to_dataset [loop 2/4] finished in %.3f seconds",
+            _time.monotonic() - _loop2_start,
+        )
+
         # Ids already present in THIS dataset. Only rows this batch resolved
         # to can be in here (identify_many is dataset-scoped and pins are
         # re-resolved against the dataset), so the targeted lookup above is
@@ -210,6 +234,11 @@ async def ingest_data(
             if str(dp.dataset_id) == str(dataset.id)
         }
 
+        logger.info(
+            "cognee-core store_to_dataset [loop 3/4] starting: process files and build data records (%d items)",
+            len(data),
+        )
+        _loop3_start = _time.monotonic()
         for data_item in data:
             # Support for DataItem (custom label + data + optional data_id / external_metadata)
             current_label = None
@@ -372,13 +401,29 @@ async def ingest_data(
 
                 new_datapoints.append(data_point)
                 dataset_data_map[str(data_point.id)] = True
+        logger.info(
+            "cognee-core store_to_dataset [loop 3/4] finished in %.3f seconds",
+            _time.monotonic() - _loop3_start,
+        )
 
+        logger.info(
+            "cognee-core store_to_dataset [loop 4/4] starting: DB commit (%d new, %d updated)",
+            len(new_datapoints),
+            len(existing_data_points),
+        )
+        _loop4_start = _time.monotonic()
         async with db_engine.get_async_session() as session:
             for data_point in existing_data_points:
                 await session.merge(data_point)
             session.add_all(new_datapoints)
             await session.commit()
+        logger.info(
+            "cognee-core store_to_dataset [loop 4/4] finished in %.3f seconds",
+            _time.monotonic() - _loop4_start,
+        )
 
+        _elapsed = _time.monotonic() - _store_start
+        logger.info("cognee-core store_to_dataset finished in %.3f seconds", _elapsed)
         return existing_data_points + new_datapoints
 
     # Concurrent ingests PINNED to the same data_id (dlt derives stable ids;
