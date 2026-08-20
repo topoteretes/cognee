@@ -11,6 +11,7 @@ from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadat
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
@@ -115,7 +116,7 @@ class VideoLoader(LoaderInterface):
             return True
         return False
 
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
         Load and process the video file.
 

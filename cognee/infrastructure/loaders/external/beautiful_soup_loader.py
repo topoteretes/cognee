@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
@@ -157,7 +158,7 @@ class BeautifulSoupLoader(LoaderInterface):
         extraction_rules: dict[str, Any] | None = None,
         join_all_matches: bool = False,
         **kwargs: Any,
-    ) -> str:
+    ) -> "str | LoaderResult":
         """Load an HTML file, extract content, and save to storage.
 
         Args:

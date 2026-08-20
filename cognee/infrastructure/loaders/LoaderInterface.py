@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from cognee.infrastructure.files.utils.get_file_metadata import FileMetadata
 
 
 @dataclass
@@ -22,7 +25,7 @@ class LoaderResult:
     # Metadata for the stored derived text, computed from the content while the
     # loader still had it. Lets ingestion build the Data row without re-reading
     # the file it just wrote. None means "read it back to find out".
-    file_metadata: Optional[dict] = None
+    file_metadata: Optional["FileMetadata"] = None
 
 
 class LoaderInterface(ABC):
