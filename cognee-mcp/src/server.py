@@ -1960,6 +1960,10 @@ async def _auto_seed_if_fresh() -> None:
         existing = await cognee_client.list_datasets()
         if existing:
             return  # not a fresh install — never re-seed behind the user's back
+        # This check races with concurrent server instances, but the race is
+        # benign: seed() re-checks dataset existence itself, every instance
+        # seeds the same dataset name, and add()'s content-hash dedup makes
+        # concurrent seeds converge to one copy.
 
         with redirect_stdout(sys.stderr):
             result = await seed()

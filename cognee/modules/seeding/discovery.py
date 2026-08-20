@@ -200,14 +200,10 @@ def discover_seed_plan(
         for transcript in transcripts[:max_session_logs]:
             if _file_within_cap(transcript, max_session_log_bytes, plan.skipped, "session log"):
                 plan.session_logs.append(transcript)
-
-        extra_glob = os.getenv("COGNEE_SEED_SESSION_LOG_GLOB")
-        if extra_glob:
-            for path in sorted(Path("/").glob(extra_glob.lstrip("/"))):
-                if path.is_file() and _file_within_cap(
-                    path, max_session_log_bytes, plan.skipped, "session log"
-                ):
-                    plan.session_logs.append(path)
+        # No free-form glob override on purpose: cognee loads .env from the
+        # working directory, so an env-driven glob would let a hostile repo
+        # point the seeder at arbitrary files. Additional agents get explicit
+        # discovery adapters instead.
     else:
         plan.skipped.append("session logs: disabled")
 

@@ -64,6 +64,8 @@ content-hash dedup makes --force cheap on unchanged files.
             from cognee.modules.seeding import DEFAULT_SEED_DATASET, seed
 
             workspace = Path(args.workspace).expanduser() if args.workspace else None
+            if workspace and not workspace.is_dir():
+                raise CliCommandInnerException(f"Workspace is not a directory: {workspace}")
             dataset_name = args.dataset_name or DEFAULT_SEED_DATASET
 
             async def run_seed():

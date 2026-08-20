@@ -20,6 +20,7 @@ disk. Identical content hashes to the same record, so staging does not defeat
 
 from __future__ import annotations
 
+import filecmp
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,7 +114,7 @@ def _prepare_paths(paths: List[Path], category: str, skipped: List[str]) -> List
             staging_root.mkdir(parents=True, exist_ok=True)
         target = staging_root / path.name
         counter = 1
-        while target.exists() and target.read_bytes() != path.read_bytes():
+        while target.exists() and not filecmp.cmp(path, target, shallow=False):
             target = staging_root / f"{path.stem}-{counter}{path.suffix}"
             counter += 1
         try:

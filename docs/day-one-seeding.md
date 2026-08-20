@@ -59,7 +59,11 @@ print(result.summary())
 | `COGNEE_SEED_MAX_SESSION_LOGS` | `3` | Newest N transcripts to ingest |
 | `COGNEE_SEED_MAX_SESSION_LOG_BYTES` | `5242880` | Per-transcript size cap |
 | `COGNEE_SEED_MAX_FILE_BYTES` | `10485760` | Per-file size cap for memory/docs |
-| `COGNEE_SEED_SESSION_LOG_GLOB` | unset | Extra transcript glob for other agents |
+
+There is intentionally no free-form path/glob override: cognee loads `.env`
+from the working directory, so an env-driven glob would let a hostile repo
+point the seeder at arbitrary files. Support for more agents' transcript
+locations lands as explicit discovery adapters.
 
 ## Safety
 
