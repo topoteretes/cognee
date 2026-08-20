@@ -30,6 +30,7 @@ from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
     ResponseGraphEntry,
+    ResponseMarkerEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
     ResponseToolEntry,
@@ -634,6 +635,86 @@ async def recall(
                     ]
                     if not search_dataset_ids:
                         raise DatasetNotFoundError(message="No datasets found.")
+
+                from cognee.modules.recall.config import get_recall_config
+
+                # Warm-up short-circuit. Config errors fail open (skip the
+                # guard) so a malformed RECALL_WARMUP_* value can never take
+                # recall down; only_context callers skip it too because they
+                # expect context, not a marker.
+                recall_config = None
+                try:
+                    recall_config = get_recall_config()
+                except Exception as error:
+                    logger.warning(
+                        "Recall warm-up config failed to load; skipping guard: %s", error
+                    )
+                guard_active = (
+                    recall_config is not None
+                    and recall_config.recall_warmup_shortcircuit
+                    and not only_context
+                )
+                probe_dataset_ids = search_dataset_ids
+                if guard_active and dataset_ids:
+                    from cognee.modules.users.exceptions import PermissionDeniedError
+                    from cognee.modules.users.permissions.methods import (
+                        get_specific_user_permission_datasets,
+                    )
+
+                    # Authorize caller-supplied dataset ids *before* probing —
+                    # the same check authorized_search performs — so the guard
+                    # can neither leak other tenants' processing state nor
+                    # mask the PermissionDeniedError authorized_search would
+                    # raise for unpermitted or nonexistent ids. Infrastructure
+                    # errors fail open (skip the guard): authorized_search
+                    # then performs the authoritative check as before.
+                    try:
+                        probe_dataset_ids = [
+                            dataset.id
+                            for dataset in await get_specific_user_permission_datasets(
+                                user.id, "read", dataset_ids
+                            )
+                        ]
+                    except PermissionDeniedError:
+                        raise
+                    except Exception as error:
+                        logger.warning(
+                            "Recall warm-up pre-probe authorization failed; skipping guard: %s",
+                            error,
+                        )
+                        guard_active = False
+
+                if guard_active:
+                    from cognee.modules.recall.methods.graph_warmup import is_memory_warm
+
+                    warm, datapoint_count = await is_memory_warm(user, probe_dataset_ids)
+                    if not warm:
+                        logger.info(
+                            "Recall warm-up short-circuit: graph has %d datapoints "
+                            "(threshold %d); skipping search.",
+                            datapoint_count,
+                            recall_config.recall_warmup_threshold,
+                        )
+                        span.set_attribute("cognee.recall.warmup_shortcircuit", True)
+                        if sources != ["graph"]:
+                            # Multi-source recall: a cold graph contributes
+                            # nothing, so other lanes — and the tools
+                            # "on_empty" fallback, which fires only when the
+                            # merged result is empty — behave exactly as if
+                            # the graph lane returned no results.
+                            return []
+                        return [
+                            ResponseMarkerEntry(
+                                source="system",
+                                status="memory_warming_up",
+                                text=(
+                                    "Memory is still warming up: no knowledge graph data "
+                                    "exists yet for the requested datasets."
+                                ),
+                                datapoint_count=datapoint_count,
+                                threshold=recall_config.recall_warmup_threshold,
+                            )
+                        ]
 
                 graph_results = await authorized_search(
                     query_text=query_text,
