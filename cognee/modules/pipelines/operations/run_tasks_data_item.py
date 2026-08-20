@@ -18,7 +18,7 @@ from cognee.modules.data.models import Data, Dataset
 from cognee.tasks.ingestion.save_data_item_to_storage import (
     save_data_item_to_storage_detailed,
 )
-from cognee.modules.ingestion.data_types import PrecomputedData
+from cognee.tasks.ingestion.carried_source import publish_carried_source
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -31,12 +31,6 @@ from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tas
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_data_item")
-
-# ``ctx.extras`` key under which the incremental wrapper publishes the storage
-# work it already did for an item (where the payload landed, and the metadata
-# computed from its bytes) so ``ingest_data`` can consume it instead of
-# repeating the upload and the hash.
-INGEST_PRECOMPUTED_SOURCE = "ingest_precomputed_source"
 
 
 async def run_tasks_data_item_incremental(
@@ -80,7 +74,7 @@ async def run_tasks_data_item_incremental(
     # the row and reads its pipeline_status in ONE lookup instead of
     # identify()-then-select-by-id, and the post-run status write below
     # re-resolves fresh content inside the session that records the status.
-    classified_data = None
+    content_hash = None
     data_point = None
     if not isinstance(data_item, Data):
         # If the DataItem carries a stable data_id (e.g. from DLT), prefer it
@@ -95,43 +89,29 @@ async def run_tasks_data_item_incremental(
                 ).scalar_one_or_none()
         else:
             stored = await save_data_item_to_storage_detailed(data_item)
-            file_path = stored.file_path
-            resolved_metadata = stored.metadata
 
-            if stored.metadata is not None:
-                # The payload was hashed while its bytes were in hand, so the
-                # dedup identifier is already known. Opening the object just
-                # written and streaming it back — over S3 a HEAD plus a full GET
-                # — to recompute a byte-identical hash was the most expensive
-                # thing this wrapper did, and it did it on the event loop: the
-                # sync ``get_identifier`` bridge parks the loop for the whole
-                # read.
-                classified_data = PrecomputedData(stored.metadata)
-            else:
-                # Items cognee did not write (an s3:// URL, a local path): the
-                # bytes were never here, so they must be read to be hashed —
-                # while the file is still open, since the metadata read is what
-                # consumes the stream.
-                async with open_data_file(file_path) as file:
-                    resolved_metadata = await ingestion.classify(file).aget_metadata()
-                classified_data = PrecomputedData(resolved_metadata)
+            # For payloads whose bytes passed through this process the hash was
+            # computed at save time — re-reading the object just written (over
+            # S3 a HEAD plus a full GET) to recompute a byte-identical hash was
+            # the most expensive thing this wrapper did, and it did it on the
+            # event loop via the sync run_sync bridge. Items cognee did not
+            # write (an s3:// URL, a local path) must still be read — while the
+            # file is open, since the metadata read consumes the stream.
+            if stored.metadata is None:
+                async with open_data_file(stored.file_path) as file:
+                    stored.metadata = await ingestion.classify(file).aget_metadata()
+
+            content_hash = stored.metadata["content_hash"]
 
             # Dataset-scoped content lookup: the existing row (its id and
             # pipeline_status) or None for content this dataset has not
             # seen (ingestion mints the id).
-            data_point = await ingestion.identify_data(classified_data, user, dataset.id)
+            data_point = await ingestion.identify_data_by_hash(content_hash, user, dataset.id)
             data_id = data_point.id if data_point is not None else None
 
             # Hand the storage work already paid for to ``ingest_data``, which
-            # otherwise re-uploads and re-hashes the very same item. ``ctx`` is
-            # copied per item by ``run_tasks``, and this wrapper runs once per
-            # item, so the entry can only describe this item.
-            if ctx is not None:
-                ctx.extras[INGEST_PRECOMPUTED_SOURCE] = {
-                    "data_item_id": id(data_item),
-                    "file_path": file_path,
-                    "metadata": resolved_metadata,
-                }
+            # otherwise re-uploads and re-hashes the very same item.
+            publish_carried_source(ctx, data_item, stored)
     else:
         # If data was already processed by Cognee get data id
         data_id = data_item.id
@@ -180,9 +160,9 @@ async def run_tasks_data_item_incremental(
                 data_point = (
                     await session.execute(select(Data).filter(Data.id == data_id))
                 ).scalar_one_or_none()
-            elif classified_data is not None:
-                data_point = await ingestion.identify_data(
-                    classified_data, user, dataset.id, session=session
+            elif content_hash is not None:
+                data_point = await ingestion.identify_data_by_hash(
+                    content_hash, user, dataset.id, session=session
                 )
                 data_id = data_point.id if data_point is not None else None
             else:

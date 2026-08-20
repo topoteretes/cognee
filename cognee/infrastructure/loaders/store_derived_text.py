@@ -1,38 +1,39 @@
 """Storing a loader's extracted text, described without reading it back."""
 
-import hashlib
 import io
-import os
 
-from cognee.infrastructure.files.utils.get_file_metadata import FileMetadata, _derive_basename
-from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
+from cognee.infrastructure.files.utils.get_file_metadata import (
+    FileMetadata,
+    _derive_basename,
+    get_file_metadata,
+)
 
 from .LoaderInterface import LoaderResult
 
 
-def describe_derived_text(content: str, file_path: str) -> FileMetadata:
+async def describe_derived_text(content: str, file_path: str) -> FileMetadata:
     """Describe extracted text exactly as reading the stored file back would.
 
     Both storage backends write a ``str`` payload as UTF-8 with ``newline="\\n"``
-    (no translation), so the bytes hashed here are the bytes on disk. The type
-    guess gets the stored file's name, exactly as the read-back path passed it
-    (the opened file's name) — the ``.txt`` name is what routes derived text to
-    ``text/plain``. Guessing from bytes alone misroutes any text that happens to
-    start with another format's magic ("BM…", "%PDF…", "ID3…").
+    (no translation), so the bytes described here are the bytes on disk — which
+    is why this goes through :func:`get_file_metadata`, the same implementation
+    the read-back path uses, over an in-memory view of those bytes. One source
+    of truth for hashing, type detection, and size; only the name and path are
+    filled in here, because a ``BytesIO`` carries neither.
+
+    The name matters: the ``.txt`` name is what routes derived text to
+    ``text/plain`` — guessing from bytes alone misroutes any text that happens
+    to start with another format's magic ("BM…", "%PDF…", "ID3…").
     """
     data_contents = content.encode("utf-8")
-    file_type = guess_file_type(io.BytesIO(data_contents), os.path.basename(file_path))
 
-    return FileMetadata(
-        name=_derive_basename(file_path),
-        file_path=file_path,
-        mime_type=file_type.mime,
-        extension=file_type.extension,
-        # md5 hexdigest: the same digest get_file_content_hash produces, so
-        # hashes already persisted on Data rows stay comparable.
-        content_hash=hashlib.md5(data_contents).hexdigest(),
-        file_size=len(data_contents),
-    )
+    # ``name`` reaches guess_file_type exactly as the opened file's name would
+    # on the read-back path.
+    metadata = await get_file_metadata(io.BytesIO(data_contents), name=file_path)
+    metadata["name"] = _derive_basename(file_path)
+    metadata["file_path"] = file_path
+
+    return metadata
 
 
 async def store_derived_text(
@@ -50,6 +51,6 @@ async def store_derived_text(
 
     return LoaderResult(
         file_path=file_path,
-        file_metadata=describe_derived_text(content, file_path),
+        file_metadata=await describe_derived_text(content, file_path),
         **kwargs,
     )

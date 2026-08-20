@@ -57,6 +57,11 @@ def get_parsed_path(file_path: str) -> str:
         return os.path.normpath(file_path)
 
 
+# Bytes read from a source stream per write iteration — the peak RAM one
+# store adds, independent of file size.
+WRITE_CHUNK_SIZE = 4 * 1024 * 1024
+
+
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
@@ -133,8 +138,11 @@ class LocalFileStorage(Storage):
                 else:
                     with open(temp_file_path, mode="wb") as file:
                         if hasattr(data, "read"):
+                            # Chunked copy — peak memory is one chunk, not the
+                            # file (parity with S3FileStorage.store).
                             data.seek(0)
-                            file.write(data.read())
+                            while chunk := data.read(WRITE_CHUNK_SIZE):
+                                file.write(chunk)
                         else:
                             file.write(data)
                 os.replace(temp_file_path, full_file_path)

@@ -294,3 +294,48 @@ async def test_local_path_add_records_the_source_location(add_env):
     import os
 
     assert row.original_data_location == Path(os.path.realpath(source)).as_uri()
+
+
+async def _stored_original_files():
+    import os as _os
+
+    from cognee.base_config import get_base_config
+
+    data_root = Path(get_base_config().data_root_directory)
+    return sorted(str(p.relative_to(data_root)) for p in data_root.rglob("*") if p.is_file())
+
+
+async def test_delete_reclaims_both_stored_files(add_env):
+    # Deleting the last row referencing a stored object removes the object —
+    # BOTH the derived text and the content-addressed original. Under
+    # content-addressed keys nothing overwrites the original, so without this
+    # every delete stranded it forever.
+    import cognee
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    await cognee.add([_upload(b"reclaim me on delete", "reclaim.txt")], "reg_reclaim")
+    (row,) = await _rows("reg_reclaim")
+    before = await _stored_original_files()
+    assert any("reclaim.txt" in f for f in before)
+
+    await get_relational_engine().delete_data_entity(row.id, row.dataset_id)
+
+    after = await _stored_original_files()
+    assert not any("reclaim.txt" in f for f in after)
+    assert not any(str(row.raw_data_location).endswith(f) for f in after)
+
+
+async def test_delete_keeps_files_another_row_still_references(add_env):
+    # Identical payloads share one content-addressed original. Deleting one
+    # row must not take the other's file with it.
+    import cognee
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    await cognee.add([_upload(b"shared reclaim body", "shared_reclaim.txt")], "reg_share_a")
+    await cognee.add([_upload(b"shared reclaim body", "shared_reclaim.txt")], "reg_share_b")
+    (row_a,), (row_b,) = await _rows("reg_share_a"), await _rows("reg_share_b")
+    assert row_a.original_data_location == row_b.original_data_location
+
+    await get_relational_engine().delete_data_entity(row_a.id, row_a.dataset_id)
+
+    assert await _read_raw(row_b) == b"shared reclaim body"

@@ -26,6 +26,7 @@ from cognee.modules.data.methods import (
 from cognee.shared.logging_utils import get_logger
 
 from .save_data_item_to_storage import save_data_item_to_storage_detailed
+from .carried_source import find_carried_source
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
 
@@ -48,58 +49,6 @@ def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> 
     extension = (file_metadata or {}).get("extension")
 
     return f"{name}.{extension}" if extension else name
-
-
-def _carried_source_for(ctx, data_item) -> Optional[dict]:
-    """The storage work the incremental wrapper already did for ``data_item``.
-
-    ``run_tasks_data_item_incremental`` saves each item to storage and hashes it
-    before this task runs, to resolve the item's dedup identity. Without this
-    handoff both stages pay the same upload and the same read-back: on the S3
-    backend that was a duplicate PUT plus a duplicate HEAD+GET per file.
-
-    Matched on the item's identity, so a task that received something other than
-    the item the wrapper inspected (``resolve_data_directories`` re-creates
-    string paths, for instance) falls back to doing the work itself.
-    """
-    from cognee.modules.pipelines.operations.run_tasks_data_item import (
-        INGEST_PRECOMPUTED_SOURCE,
-    )
-
-    extras = getattr(ctx, "extras", None) if ctx is not None else None
-    if not extras:
-        return None
-
-    carried = extras.get(INGEST_PRECOMPUTED_SOURCE)
-    if carried is None or carried.get("data_item_id") != id(data_item):
-        return None
-
-    return carried
-
-
-def _carried_metadata_for_path(ctx, file_path: str) -> Optional[dict]:
-    """Metadata the wrapper computed for the item that resolved to ``file_path``.
-
-    Path items (a local path, an ``s3://`` URL) miss the identity match above:
-    the in-chain ``resolve_data_directories`` re-creates their strings, so
-    ``id()`` differs. Their save is a pass-through (no I/O), and the stored
-    path it returns still identifies the item — ``ctx`` is per-item, so the
-    single published entry either matches this path or is for another shape of
-    item entirely.
-    """
-    from cognee.modules.pipelines.operations.run_tasks_data_item import (
-        INGEST_PRECOMPUTED_SOURCE,
-    )
-
-    extras = getattr(ctx, "extras", None) if ctx is not None else None
-    if not extras:
-        return None
-
-    carried = extras.get(INGEST_PRECOMPUTED_SOURCE)
-    if carried is None or carried.get("file_path") != file_path:
-        return None
-
-    return carried.get("metadata")
 
 
 def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional[UUID], user: User):
@@ -163,6 +112,10 @@ async def ingest_data(
     ):
         new_datapoints = []
         existing_data_points = []
+        # Originals replaced by a content-changed update: under content-
+        # addressed keys the old object is not overwritten, so it is reclaimed
+        # after the commit once nothing references it.
+        replaced_original_locations = []
 
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -204,17 +157,17 @@ async def ingest_data(
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
 
-            carried = _carried_source_for(ctx, data_item)
-            if carried is not None:
-                original_file_path = carried["file_path"]
-                original_file_metadata = carried["metadata"]
-            else:
+            # The incremental wrapper already saved and hashed this item —
+            # match by identity first; a path item whose string the in-chain
+            # resolve_data_directories re-created matches by the stored path
+            # its (I/O-free) save resolves to.
+            carried = find_carried_source(ctx, data_item=data_item)
+            if carried is None:
                 stored = await save_data_item_to_storage_detailed(underlying_data)
-                original_file_path = stored.file_path
-                original_file_metadata = stored.metadata
+                carried = find_carried_source(ctx, file_path=stored.file_path) or stored
 
-                if original_file_metadata is None:
-                    original_file_metadata = _carried_metadata_for_path(ctx, original_file_path)
+            original_file_path = carried.file_path
+            original_file_metadata = carried.metadata
 
             actual_file_path = get_data_file_path(original_file_path)
 
@@ -393,6 +346,10 @@ async def ingest_data(
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
 
+                new_original_location = original_file_metadata["file_path"]
+                if content_changed and data_point.original_data_location != new_original_location:
+                    replaced_original_locations.append(data_point.original_data_location)
+
                 # Rows are dataset-scoped (the startup migration backfills
                 # legacy rows). A row of another dataset can only reach this
                 # branch through a mispinned data_id — never mutate it.
@@ -474,6 +431,11 @@ async def ingest_data(
                 await session.merge(data_point)
             session.add_all(new_datapoints)
             await session.commit()
+
+        # After the commit, the updated rows point at their new originals; the
+        # replaced objects are removed unless another row still shares them.
+        for replaced_location in replaced_original_locations:
+            await db_engine.remove_data_file_if_unreferenced(replaced_location)
 
         return existing_data_points + new_datapoints
 

@@ -18,7 +18,7 @@ import pytest
 
 import cognee.modules.pipelines.operations.run_tasks_data_item as item_module
 from cognee.modules.ingestion import StoredFile
-from cognee.modules.ingestion.data_types import PrecomputedData
+from cognee.tasks.ingestion.carried_source import CARRIED_SOURCE_KEY
 from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 
 CONTENT = b"pass-through payload, hashed while open"
@@ -38,11 +38,11 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
 
     seen = {}
 
-    async def capture_identify(classified_data, user, dataset_id):
-        seen["classified"] = classified_data
+    async def capture_identify(content_hash, user, dataset_id):
+        seen["content_hash"] = content_hash
         return None
 
-    monkeypatch.setattr(item_module.ingestion, "identify_data", capture_identify)
+    monkeypatch.setattr(item_module.ingestion, "identify_data_by_hash", capture_identify)
     # local_path_safety allowlists cognee's own roots; tmp_path is not one.
     monkeypatch.setattr(
         item_module,
@@ -80,11 +80,9 @@ async def test_passthrough_item_is_hashed_while_its_file_is_open(tmp_path, monke
 
     # The dedup identity was really read from the file — a read attempted after
     # the ``open_data_file`` block closes raises instead of producing this hash.
-    classified = seen["classified"]
-    assert isinstance(classified, PrecomputedData)
-    assert classified.get_identifier() == hashlib.md5(CONTENT).hexdigest()
+    assert seen["content_hash"] == hashlib.md5(CONTENT).hexdigest()
 
     # And the work is handed to ingest_data, so it does not re-read the file.
-    carried = ctx.extras[item_module.INGEST_PRECOMPUTED_SOURCE]
-    assert carried["metadata"]["content_hash"] == hashlib.md5(CONTENT).hexdigest()
-    assert carried["metadata"]["file_size"] == len(CONTENT)
+    carried = ctx.extras[CARRIED_SOURCE_KEY]
+    assert carried.stored.metadata["content_hash"] == hashlib.md5(CONTENT).hexdigest()
+    assert carried.stored.metadata["file_size"] == len(CONTENT)

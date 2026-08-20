@@ -21,6 +21,10 @@ S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 # serialized by the pool rather than by the network.
 S3_MAX_POOL_CONNECTIONS = 32
 
+# Bytes read from a source stream per write iteration — the peak RAM one
+# upload adds, independent of file size.
+WRITE_CHUNK_SIZE = 4 * 1024 * 1024
+
 if TYPE_CHECKING:
     import s3fs  # ty:ignore[unresolved-import]
 
@@ -103,8 +107,15 @@ class S3FileStorage(Storage):
                 else:
                     with self.s3.open(full_file_path, mode="wb") as file:
                         if hasattr(data, "read"):
+                            # Chunked copy: large uploads arrive as spooled
+                            # temp files on disk, and a single read() would
+                            # materialize the whole payload in RAM. s3fs
+                            # flushes a multipart part whenever its buffer
+                            # crosses the block size, so peak memory is
+                            # max(chunk, s3fs block), not the file.
                             data.seek(0)
-                            file.write(data.read())
+                            while chunk := data.read(WRITE_CHUNK_SIZE):
+                                file.write(chunk)
                         else:
                             file.write(data)
 

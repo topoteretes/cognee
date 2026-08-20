@@ -85,11 +85,11 @@ def _wire(monkeypatch, *, existing_row, identify_data_calls):
     classified = SimpleNamespace(get_identifier=lambda: "hash-1", aget_metadata=_aget_metadata)
     monkeypatch.setattr(item_module.ingestion, "classify", lambda _f: classified)
 
-    async def _identify_data(classified_data, u, dataset_id, session=None):
+    async def _identify_data(content_hash, u, dataset_id, session=None):
         identify_data_calls.append(session)
         return existing_row
 
-    monkeypatch.setattr(item_module.ingestion, "identify_data", _identify_data)
+    monkeypatch.setattr(item_module.ingestion, "identify_data_by_hash", _identify_data)
 
     async def _empty_pipeline(**kwargs):
         return
@@ -125,11 +125,11 @@ async def test_fresh_content_uses_two_sessions_and_resolves_in_the_status_sessio
 
     factory, run, dataset = _wire(monkeypatch, existing_row=None, identify_data_calls=calls)
 
-    async def _identify_data(classified_data, u, dataset_id, session=None):
+    async def _identify_data(content_hash, u, dataset_id, session=None):
         calls.append(session)
         return state["row"]
 
-    monkeypatch.setattr(item_module.ingestion, "identify_data", _identify_data)
+    monkeypatch.setattr(item_module.ingestion, "identify_data_by_hash", _identify_data)
 
     original_pipeline = item_module.run_tasks_with_telemetry
 
@@ -174,11 +174,11 @@ async def test_completed_content_is_skipped_without_a_second_lookup(monkeypatch)
     row = _row_for(dataset)
     dataset_id_holder["row"] = row
 
-    async def _identify_data(classified_data, u, dataset_id, session=None):
+    async def _identify_data(content_hash, u, dataset_id, session=None):
         calls.append(session)
         return row
 
-    monkeypatch.setattr(item_module.ingestion, "identify_data", _identify_data)
+    monkeypatch.setattr(item_module.ingestion, "identify_data_by_hash", _identify_data)
 
     run_infos = await run()
 

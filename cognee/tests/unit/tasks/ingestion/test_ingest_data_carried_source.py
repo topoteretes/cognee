@@ -25,7 +25,7 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
 from cognee.modules.data.models import Data, Dataset
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.modules.ingestion import StoredFile
-from cognee.modules.pipelines.operations.run_tasks_data_item import INGEST_PRECOMPUTED_SOURCE
+from cognee.tasks.ingestion.carried_source import CarriedSource, CARRIED_SOURCE_KEY
 
 ingest_module = importlib.import_module("cognee.tasks.ingestion.ingest_data")
 
@@ -103,11 +103,10 @@ async def test_carried_item_is_not_saved_or_read_again():
     data_item = object.__new__(object)  # identity is what the handoff keys on
     ctx = SimpleNamespace(
         extras={
-            INGEST_PRECOMPUTED_SOURCE: {
-                "data_item_id": id(data_item),
-                "file_path": "/tmp/doc.txt",
-                "metadata": _metadata(),
-            }
+            CARRIED_SOURCE_KEY: CarriedSource(
+                data_item_id=id(data_item),
+                stored=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata()),
+            )
         }
     )
     save_mock = AsyncMock(side_effect=AssertionError("item was uploaded a second time"))
@@ -135,11 +134,10 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
 
     ctx = SimpleNamespace(
         extras={
-            INGEST_PRECOMPUTED_SOURCE: {
-                "data_item_id": id(wrapper_saw),
-                "file_path": "/tmp/doc.txt",
-                "metadata": _metadata(),
-            }
+            CARRIED_SOURCE_KEY: CarriedSource(
+                data_item_id=id(wrapper_saw),
+                stored=StoredFile(file_path="/tmp/doc.txt", metadata=_metadata()),
+            )
         }
     )
     # The pass-through save is I/O-free and returns the path with no metadata.
