@@ -164,3 +164,118 @@ def test_find_workspace_root_falls_back_to_start(tmp_path):
     plain.mkdir()
 
     assert find_workspace_root(plain) == plain
+
+
+def make_codex_home(tmp_path: Path, workspace: Path) -> Path:
+    """Fake ~/.codex with rollouts for this workspace, another one, and junk."""
+    import json
+
+    codex_home = tmp_path / "codex-home"
+
+    def rollout(day: str, name: str, first_line: str) -> None:
+        day_dir = codex_home / "sessions" / "2026" / "08" / day
+        day_dir.mkdir(parents=True, exist_ok=True)
+        (day_dir / f"rollout-2026-08-{day}T10-00-00-{name}.jsonl").write_text(first_line + "\n")
+
+    meta = {"timestamp": "t", "type": "session_meta", "payload": {"cwd": str(workspace)}}
+    other = {"timestamp": "t", "type": "session_meta", "payload": {"cwd": "/elsewhere"}}
+    legacy = {"timestamp": "t", "cwd": str(workspace)}  # cwd at top level (older layout)
+    rollout("18", "old-match", json.dumps(meta))
+    rollout("19", "other-ws", json.dumps(other))
+    rollout("19", "legacy-match", json.dumps(legacy))
+    rollout("20", "malformed", "{not json")
+    rollout("20", "new-match", json.dumps(meta))
+    return codex_home
+
+
+def test_codex_adapter_filters_by_cwd_newest_first(tmp_path):
+    from cognee.modules.seeding.discovery import _codex_transcripts
+
+    workspace = make_workspace(tmp_path)
+    codex_home = make_codex_home(tmp_path, workspace)
+
+    matches = _codex_transcripts(workspace, 10, codex_home)
+
+    names = [path.name for path in matches]
+    assert [name.split("-")[-1].replace(".jsonl", "") for name in names] == [
+        "match",
+        "match",
+        "match",
+    ]
+    # Newest day first; the other-workspace and malformed rollouts are excluded.
+    assert "new-match" in names[0]
+    assert "legacy-match" in names[1]
+    assert "old-match" in names[2]
+
+    assert [path.name for path in _codex_transcripts(workspace, 1, codex_home)] == names[:1]
+
+
+def test_gemini_adapter_uses_project_hash(tmp_path):
+    import hashlib
+
+    from cognee.modules.seeding.discovery import _gemini_session_files
+
+    workspace = make_workspace(tmp_path)
+    gemini_home = tmp_path / "gemini-home"
+    project_hash = hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()
+    project_dir = gemini_home / "tmp" / project_hash
+    (project_dir / "chats").mkdir(parents=True)
+    (project_dir / "logs.json").write_text("[]")
+    (project_dir / "chats" / "session.json").write_text("{}")
+    # A different project's directory must not be picked up.
+    other_dir = gemini_home / "tmp" / ("0" * 64)
+    other_dir.mkdir(parents=True)
+    (other_dir / "logs.json").write_text("[]")
+
+    files = _gemini_session_files(workspace, 5, gemini_home)
+
+    assert {path.name for path in files} == {"logs.json", "session.json"}
+    assert all(project_hash in str(path) for path in files)
+
+
+def test_pi_and_aider_adapters(tmp_path):
+    from cognee.modules.seeding.discovery import _aider_history, _pi_transcripts
+
+    workspace = make_workspace(tmp_path)
+    slug = "--" + str(workspace.resolve()).strip("/").replace("/", "-") + "--"
+    pi_home = tmp_path / "pi-home"
+    session_dir = pi_home / "agent" / "sessions" / slug
+    session_dir.mkdir(parents=True)
+    (session_dir / "0001_abc.jsonl").write_text("{}\n")
+    (workspace / ".aider.chat.history.md").write_text("# aider chat\n")
+
+    assert [path.name for path in _pi_transcripts(workspace, 3, pi_home)] == ["0001_abc.jsonl"]
+    assert [path.name for path in _aider_history(workspace)] == [".aider.chat.history.md"]
+    assert _pi_transcripts(workspace, 3, tmp_path / "missing") == []
+
+
+def test_discover_plan_collects_all_agent_sessions(tmp_path):
+    import hashlib
+
+    workspace = make_workspace(tmp_path)
+    claude_home = make_claude_home(tmp_path, workspace, transcripts=1)
+    codex_home = make_codex_home(tmp_path, workspace)
+    gemini_home = tmp_path / "gemini-home"
+    project_dir = (
+        gemini_home / "tmp" / hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()
+    )
+    project_dir.mkdir(parents=True)
+    (project_dir / "logs.json").write_text("[]")
+    (workspace / ".aider.chat.history.md").write_text("# aider chat\n")
+
+    plan = discover_seed_plan(
+        workspace,
+        claude_home=claude_home,
+        codex_home=codex_home,
+        gemini_home=gemini_home,
+        pi_home=tmp_path / "pi-home",
+        max_session_logs=2,
+    )
+
+    names = {path.name for path in plan.session_logs}
+    assert "session-0.jsonl" in names  # Claude Code
+    assert any("rollout-" in name for name in names)  # Codex
+    assert "logs.json" in names  # Gemini CLI
+    assert ".aider.chat.history.md" in names  # Aider
+    # Codex respects the per-agent newest-N cap.
+    assert sum(1 for name in names if "rollout-" in name) == 2

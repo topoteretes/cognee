@@ -3,9 +3,11 @@
 Pure discovery: walk the workspace and known coding-agent homes and return a
 :class:`SeedPlan` describing what a seed run *would* ingest — agent memory
 files (``MEMORY.md``, ``SOUL.md``, …), the workspace README, recent session
-transcripts, and the workspace codebase. Nothing here reads file contents or
-touches cognee storage; the runner in :mod:`cognee.modules.seeding.seed`
-decides what to do with the plan.
+transcripts (Claude Code, Codex, Gemini CLI, pi, Aider), and the workspace
+codebase. Nothing here ingests or touches cognee storage — the only content
+read is each Codex rollout's first metadata line, needed to match sessions to
+this workspace; the runner in :mod:`cognee.modules.seeding.seed` decides what
+to do with the plan.
 
 Safety posture: only explicitly allowlisted dot-paths are ever picked up
 (``.claude/CLAUDE.md`` and the Claude Code project home for *this* workspace),
@@ -121,6 +123,120 @@ def claude_code_project_dir(workspace: Path, claude_home: Optional[Path] = None)
     return claude_home / "projects" / slug
 
 
+def _newest_first(paths: List[Path]) -> List[Path]:
+    def mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return sorted(paths, key=mtime, reverse=True)
+
+
+def _claude_code_transcripts(
+    workspace: Path, limit: int, claude_home: Optional[Path] = None
+) -> List[Path]:
+    """Claude Code: ``~/.claude/projects/<slug>/*.jsonl`` (slug = the
+    workspace path with every non-alphanumeric character replaced by ``-``)."""
+    project_dir = claude_code_project_dir(workspace, claude_home)
+    transcripts = [path for path in project_dir.glob("*.jsonl") if path.is_file()]
+    return _newest_first(transcripts)[:limit]
+
+
+# Rollout meta lines are small; a sane first line fits well under this.
+_CODEX_META_READ_BYTES = 64 * 1024
+# Rollouts for every workspace share one tree, so bound how many meta lines
+# one discovery pass will read.
+_CODEX_MAX_SCANNED = 500
+
+
+def _codex_transcripts(
+    workspace: Path, limit: int, codex_home: Optional[Path] = None
+) -> List[Path]:
+    """Codex CLI: ``~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl``.
+
+    Rollouts for every workspace live in one date-partitioned tree; the first
+    line of each file is a session-meta record whose ``payload.cwd`` (``cwd``
+    at the top level in older layouts) names the working directory, so each
+    candidate's meta line is read to keep only this workspace's sessions.
+    """
+    import json
+
+    codex_home = codex_home or (Path.home() / ".codex")
+    sessions_dir = codex_home / "sessions"
+    if not sessions_dir.is_dir():
+        return []
+
+    # The YYYY/MM/DD partitioning plus the timestamped filename make the
+    # lexicographic path order chronological — reversed() is newest-first
+    # without a stat() per file.
+    candidates = sorted(sessions_dir.glob("*/*/*/rollout-*.jsonl"), reverse=True)
+    workspace_str = str(workspace.resolve())
+
+    matches: List[Path] = []
+    for rollout in candidates[:_CODEX_MAX_SCANNED]:
+        try:
+            with rollout.open("r", encoding="utf-8", errors="replace") as stream:
+                meta = json.loads(stream.readline(_CODEX_META_READ_BYTES))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(meta, dict):
+            continue
+        payload = meta.get("payload")
+        if not isinstance(payload, dict):
+            payload = meta
+        if payload.get("cwd") == workspace_str:
+            matches.append(rollout)
+            if len(matches) >= limit:
+                break
+    return matches
+
+
+def _gemini_session_files(
+    workspace: Path, limit: int, gemini_home: Optional[Path] = None
+) -> List[Path]:
+    """Gemini CLI: ``~/.gemini/tmp/<sha256(project_root)>/`` holds ``logs.json``
+    and saved chats under ``chats/``."""
+    import hashlib
+
+    gemini_home = gemini_home or (Path.home() / ".gemini")
+    project_hash = hashlib.sha256(str(workspace.resolve()).encode("utf-8")).hexdigest()
+    project_dir = gemini_home / "tmp" / project_hash
+    if not project_dir.is_dir():
+        return []
+
+    files: List[Path] = []
+    logs = project_dir / "logs.json"
+    if logs.is_file():
+        files.append(logs)
+    chats_dir = project_dir / "chats"
+    if chats_dir.is_dir():
+        files.extend(_newest_first([p for p in chats_dir.glob("*.json") if p.is_file()])[:limit])
+    return files
+
+
+def _pi_transcripts(workspace: Path, limit: int, pi_home: Optional[Path] = None) -> List[Path]:
+    """pi: ``~/.pi/agent/sessions/--<cwd with / -> ->--/*.jsonl``.
+
+    Directory naming observed in the wild (not officially documented): the
+    workspace path with ``/`` replaced by ``-``, wrapped in ``--``. When the
+    derived directory does not exist, nothing is discovered — harmless.
+    """
+    pi_home = pi_home or (Path.home() / ".pi")
+    slug = "--" + str(workspace.resolve()).strip("/").replace("/", "-") + "--"
+    session_dir = pi_home / "agent" / "sessions" / slug
+    if not session_dir.is_dir():
+        return []
+    return _newest_first([p for p in session_dir.glob("*.jsonl") if p.is_file()])[:limit]
+
+
+def _aider_history(workspace: Path) -> List[Path]:
+    """Aider: ``.aider.chat.history.md`` at the workspace root (an explicitly
+    allowlisted dotfile — markdown chat history, no secrets by design)."""
+    history = workspace / ".aider.chat.history.md"
+    return [history] if history.is_file() else []
+
+
 def _file_within_cap(path: Path, cap: int, skipped: List[str], label: str) -> bool:
     try:
         size = path.stat().st_size
@@ -142,6 +258,9 @@ def discover_seed_plan(
     include_codebase: bool = True,
     include_session_logs: bool = True,
     claude_home: Optional[Path] = None,
+    codex_home: Optional[Path] = None,
+    gemini_home: Optional[Path] = None,
+    pi_home: Optional[Path] = None,
     max_session_logs: Optional[int] = None,
     max_session_log_bytes: Optional[int] = None,
     max_file_bytes: Optional[int] = None,
@@ -190,20 +309,27 @@ def discover_seed_plan(
             plan.readmes.append(candidate)
 
     # --- Session logs -------------------------------------------------------
+    # One adapter per coding agent, each scoped to this workspace and capped
+    # to the newest max_session_logs entries. Adapters over free-form globs on
+    # purpose: cognee loads .env from the working directory, so an env-driven
+    # glob would let a hostile repo point the seeder at arbitrary files.
     if include_session_logs:
-        transcripts = [path for path in project_dir.glob("*.jsonl") if path.is_file()]
-        transcripts.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-        if len(transcripts) > max_session_logs:
-            plan.skipped.append(
-                f"session logs: keeping newest {max_session_logs} of {len(transcripts)}"
-            )
-        for transcript in transcripts[:max_session_logs]:
-            if _file_within_cap(transcript, max_session_log_bytes, plan.skipped, "session log"):
-                plan.session_logs.append(transcript)
-        # No free-form glob override on purpose: cognee loads .env from the
-        # working directory, so an env-driven glob would let a hostile repo
-        # point the seeder at arbitrary files. Additional agents get explicit
-        # discovery adapters instead.
+        adapters = (
+            ("Claude Code", _claude_code_transcripts(workspace, max_session_logs, claude_home)),
+            ("Codex", _codex_transcripts(workspace, max_session_logs, codex_home)),
+            ("Gemini CLI", _gemini_session_files(workspace, max_session_logs, gemini_home)),
+            ("pi", _pi_transcripts(workspace, max_session_logs, pi_home)),
+            ("Aider", _aider_history(workspace)),
+        )
+        for agent_name, session_files in adapters:
+            for session_file in session_files:
+                if _file_within_cap(
+                    session_file,
+                    max_session_log_bytes,
+                    plan.skipped,
+                    f"{agent_name} session log",
+                ):
+                    plan.session_logs.append(session_file)
     else:
         plan.skipped.append("session logs: disabled")
 

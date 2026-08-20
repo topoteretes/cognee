@@ -8,7 +8,7 @@ return** instead of an empty result:
 | --- | --- | --- |
 | Agent memory | `agent_memory` | `MEMORY.md`, `SOUL.md`, `AGENTS.md`, `CLAUDE.md`, `USER.md`, `IDENTITY.md`, `TOOLS.md` at the workspace root; `memory/*.md`; `.claude/CLAUDE.md`; Claude Code auto-memory for this workspace |
 | Workspace docs | `workspace_docs` | `README.*` at the workspace root |
-| Session logs | `session_logs` | The newest Claude Code transcripts for this workspace (default 3, ≤5 MB each) |
+| Session logs | `session_logs` | Recent sessions for this workspace from known coding agents (newest 3 per agent by default, ≤5 MB each) — see the adapter table below |
 | Codebase | `codebase` | The workspace itself, when it is a code project — resolved through the repo-manifest ingestion path |
 
 Everything lands in one dataset (default `workspace`), and a default
@@ -64,6 +64,24 @@ There is intentionally no free-form path/glob override: cognee loads `.env`
 from the working directory, so an env-driven glob would let a hostile repo
 point the seeder at arbitrary files. Support for more agents' transcript
 locations lands as explicit discovery adapters.
+
+## Session-log adapters
+
+Each adapter is scoped to *this* workspace and capped to the newest
+`COGNEE_SEED_MAX_SESSION_LOGS` entries:
+
+| Agent | Location | Workspace mapping |
+| --- | --- | --- |
+| Claude Code | `~/.claude/projects/<slug>/*.jsonl` | slug = absolute path, non-alphanumerics → `-` |
+| Codex CLI | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | first-line session meta `payload.cwd` (top-level `cwd` in older layouts); newest 500 rollouts scanned |
+| Gemini CLI | `~/.gemini/tmp/<hash>/logs.json` + `chats/*.json` | hash = SHA-256 hex of the absolute project root |
+| pi | `~/.pi/agent/sessions/--<slug>--/*.jsonl` | slug = path with `/` → `-`, wrapped in `--` (observed, not officially documented) |
+| Aider | `.aider.chat.history.md` | lives at the workspace root (explicitly allowlisted dotfile) |
+
+Not yet supported (session stores are binary/SQLite rather than files):
+Cursor CLI (`~/.cursor/chats/**/store.db`), opencode ≥1.2
+(`~/.local/share/opencode/opencode.db`), Amp (server-synced
+`~/.local/share/amp/threads/*.json`, mapping undocumented).
 
 ## Safety
 
