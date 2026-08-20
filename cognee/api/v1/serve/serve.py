@@ -23,6 +23,7 @@ async def serve(
     auth0_client_id: Optional[str] = None,
     auth0_audience: Optional[str] = None,
     bootstrap_auth: Optional[bool] = None,
+    persist_credentials: bool = True,
 ) -> CloudClient:
     """Connect the local Cognee SDK to a remote or local Cognee instance.
 
@@ -63,6 +64,12 @@ async def serve(
             to allow it for a remote instance you control (or set
             ``COGNEE_AUTH_BOOTSTRAP=true``); ``False`` disables it
             entirely.
+        persist_credentials: Direct mode only — whether this call may
+            write to ``~/.cognee/cloud_credentials.json``. Default
+            ``True`` (unchanged behavior: keys are saved so later
+            ``serve()`` calls reconnect without arguments). Integrations
+            that manage their own keys pass ``False`` so serve stays a
+            pure pass-through and never duplicates their credentials.
 
     Returns:
         CloudClient connected to the instance.
@@ -74,7 +81,12 @@ async def serve(
     resolved_api_key = api_key or os.getenv("COGNEE_API_KEY", "")
 
     if service_url:
-        return await _serve_direct(service_url, resolved_api_key, bootstrap_auth=bootstrap_auth)
+        return await _serve_direct(
+            service_url,
+            resolved_api_key,
+            bootstrap_auth=bootstrap_auth,
+            persist_credentials=persist_credentials,
+        )
 
     return await _serve_cloud(
         management_url=management_url,
@@ -88,6 +100,7 @@ async def _serve_direct(
     service_url: str,
     api_key: str = "",
     bootstrap_auth: Optional[bool] = None,
+    persist_credentials: bool = True,
 ) -> CloudClient:
     """Connect directly to a Cognee instance — no Auth0, no Management API.
 
@@ -146,14 +159,15 @@ async def _serve_direct(
 
         async def _refresh_api_key() -> str:
             new_key = await login_and_mint_api_key(service_url)
-            save_credentials(
-                CloudCredentials(
-                    access_token="",
-                    service_url=service_url,
-                    api_key=new_key,
-                    email="local",
+            if persist_credentials:
+                save_credentials(
+                    CloudCredentials(
+                        access_token="",
+                        service_url=service_url,
+                        api_key=new_key,
+                        email="local",
+                    )
                 )
-            )
             logger.info("Replaced rejected API key for %s", service_url)
             return new_key
 
@@ -163,15 +177,18 @@ async def _serve_direct(
     if not health_ok:
         logger.warning("Instance at %s did not respond to health check", service_url)
 
-    # Save so subsequent serve() calls reconnect without args
-    save_credentials(
-        CloudCredentials(
-            access_token="",
-            service_url=service_url,
-            api_key=api_key,
-            email="local",
+    # Save so subsequent serve() calls reconnect without args. Callers that
+    # manage their own keys (the agent integrations) disable this so serve
+    # never duplicates credentials into its store.
+    if persist_credentials:
+        save_credentials(
+            CloudCredentials(
+                access_token="",
+                service_url=service_url,
+                api_key=api_key,
+                email="local",
+            )
         )
-    )
 
     set_remote_client(client)
     mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"

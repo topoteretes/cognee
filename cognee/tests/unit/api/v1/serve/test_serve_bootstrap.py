@@ -405,6 +405,40 @@ def test_cached_key_gets_no_refresh_hook_on_remote_host(
     assert client.refresh_api_key is None
 
 
+def test_persist_disabled_keeps_explicit_key_out_of_the_store(
+    isolated_credentials, quiet_client, monkeypatch
+):
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    client = asyncio.run(
+        _serve_direct("http://localhost:8011", "ck_owned_by_integration", persist_credentials=False)
+    )
+    assert client.api_key == "ck_owned_by_integration"
+    # The integration owns this key; serve must not duplicate it.
+    assert not isolated_credentials.exists()
+
+
+def test_persist_disabled_skips_saving_even_minted_keys(
+    isolated_credentials, quiet_client, monkeypatch
+):
+    from cognee.api.v1.serve import local_auth as local_auth_module
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.setattr(
+        local_auth_module, "login_and_mint_api_key", AsyncMock(return_value="ck_minted")
+    )
+    client = asyncio.run(_serve_direct("http://localhost:8011", persist_credentials=False))
+    assert client.api_key == "ck_minted"
+    assert not isolated_credentials.exists()
+
+
+def test_persist_default_still_saves_for_reconnect(isolated_credentials, quiet_client, monkeypatch):
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    asyncio.run(_serve_direct("http://localhost:8011", "ck_explicit"))
+    assert '"api_key": "ck_explicit"' in isolated_credentials.read_text()
+
+
 def test_freshly_minted_key_gets_no_refresh_hook(isolated_credentials, quiet_client, monkeypatch):
     from cognee.api.v1.serve import local_auth as local_auth_module
     from cognee.api.v1.serve.serve import _serve_direct

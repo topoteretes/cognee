@@ -95,10 +95,17 @@ def _read_store() -> dict:
 
 
 def _write_store(store: dict) -> None:
+    """Write the store atomically (temp file + rename).
+
+    The file now holds every connection's profile and may be touched by
+    concurrent processes; a partial write must never destroy it.
+    """
     path = get_credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(store, indent=2))
-    os.chmod(path, 0o600)
+    temp_path = path.with_name(f".{path.name}.tmp{os.getpid()}")
+    temp_path.write_text(json.dumps(store, indent=2))
+    os.chmod(temp_path, 0o600)
+    os.replace(temp_path, path)
 
 
 def load_credentials(

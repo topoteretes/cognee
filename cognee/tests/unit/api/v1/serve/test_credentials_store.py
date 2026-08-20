@@ -127,6 +127,16 @@ def test_clear_all_removes_the_store(isolated_store):
     assert load_credentials() is None
 
 
+def test_writes_are_atomic_and_leave_no_temp_files(isolated_store):
+    save_credentials(CLOUD)
+    save_credentials(LOCAL)
+    leftovers = [p for p in isolated_store.parent.iterdir() if p != isolated_store]
+    assert leftovers == []
+    # The store is valid JSON and keeps restrictive permissions.
+    assert json.loads(isolated_store.read_text())["profiles"]
+    assert (isolated_store.stat().st_mode & 0o777) == 0o600
+
+
 def test_urls_are_normalized_on_save_and_load():
     save_credentials(
         CloudCredentials(access_token="", service_url="http://localhost:8011/", api_key="ck_x")
