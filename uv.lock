@@ -23,7 +23,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-18T08:04:49.11901Z"
+exclude-newer = "2026-08-18T15:06:13.033392Z"
 exclude-newer-span = "P2D"
 
 [manifest]
@@ -1214,7 +1214,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "1.5.0.dev4"
+version = "1.5.0.dev5"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
