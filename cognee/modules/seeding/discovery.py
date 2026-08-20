@@ -215,6 +215,16 @@ def _gemini_session_files(
     return files
 
 
+def _pi_session_dir(workspace: Path, pi_home: Optional[Path] = None) -> Path:
+    """pi's per-workspace session directory: ``--<slug>--`` under
+    ``~/.pi/agent/sessions``, slug = the path with separators replaced by
+    ``-`` (drive colons dropped so the name stays valid on Windows)."""
+    pi_home = pi_home or (Path.home() / ".pi")
+    normalized = str(workspace.resolve()).replace("\\", "/").replace(":", "")
+    slug = "--" + normalized.strip("/").replace("/", "-") + "--"
+    return pi_home / "agent" / "sessions" / slug
+
+
 def _pi_transcripts(workspace: Path, limit: int, pi_home: Optional[Path] = None) -> List[Path]:
     """pi: ``~/.pi/agent/sessions/--<cwd with / -> ->--/*.jsonl``.
 
@@ -222,9 +232,7 @@ def _pi_transcripts(workspace: Path, limit: int, pi_home: Optional[Path] = None)
     workspace path with ``/`` replaced by ``-``, wrapped in ``--``. When the
     derived directory does not exist, nothing is discovered — harmless.
     """
-    pi_home = pi_home or (Path.home() / ".pi")
-    slug = "--" + str(workspace.resolve()).strip("/").replace("/", "-") + "--"
-    session_dir = pi_home / "agent" / "sessions" / slug
+    session_dir = _pi_session_dir(workspace, pi_home)
     if not session_dir.is_dir():
         return []
     return _newest_first([p for p in session_dir.glob("*.jsonl") if p.is_file()])[:limit]

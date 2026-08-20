@@ -234,12 +234,15 @@ def test_gemini_adapter_uses_project_hash(tmp_path):
 
 
 def test_pi_and_aider_adapters(tmp_path):
-    from cognee.modules.seeding.discovery import _aider_history, _pi_transcripts
+    from cognee.modules.seeding.discovery import (
+        _aider_history,
+        _pi_session_dir,
+        _pi_transcripts,
+    )
 
     workspace = make_workspace(tmp_path)
-    slug = "--" + str(workspace.resolve()).strip("/").replace("/", "-") + "--"
     pi_home = tmp_path / "pi-home"
-    session_dir = pi_home / "agent" / "sessions" / slug
+    session_dir = _pi_session_dir(workspace, pi_home)
     session_dir.mkdir(parents=True)
     (session_dir / "0001_abc.jsonl").write_text("{}\n")
     (workspace / ".aider.chat.history.md").write_text("# aider chat\n")
