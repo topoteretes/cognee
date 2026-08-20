@@ -18,6 +18,12 @@ from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 CONTENTS = [
     pytest.param("plain ascii text\nsecond line\n", id="ascii"),
+    # Text that begins with another format's magic bytes. The stored .txt name
+    # must drive the type guess — sniffing bytes alone labels these gif/pdf/mp3,
+    # and cognify then routes the derived text to the wrong document class.
+    pytest.param("GIF89a is the header this note discusses\n", id="magic-gif"),
+    pytest.param("%PDF-1.4 appears verbatim in this extract\n", id="magic-pdf"),
+    pytest.param("ID3 tags label mp3 files, says this doc\n", id="magic-mp3"),
     pytest.param("unicode: naïve café — 日本語 🎉\n", id="unicode"),
     pytest.param("carriage\r\nreturns\r\nkept\r\n", id="crlf"),
     pytest.param("", id="empty"),
@@ -40,6 +46,9 @@ async def test_description_matches_reading_the_file_back(tmp_path, content):
 
     assert isinstance(result, LoaderResult)
     assert result.file_metadata == await _read_back_metadata(result.file_path)
+    # Derived text is text, whatever bytes it starts with.
+    assert result.file_metadata["extension"] == "txt"
+    assert result.file_metadata["mime_type"] == "text/plain"
 
 
 @pytest.mark.asyncio
