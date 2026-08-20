@@ -1,6 +1,6 @@
 # Cognee Examples
 
-Runnable example scripts demonstrating cognee end-to-end — 64 scripts across three folders.
+Runnable example scripts demonstrating cognee end-to-end — 65 scripts across three folders.
 They double as the smoke-test corpus the team uses to verify behaviour across the SDK.
 
 > **New here?** Start with [`guides/simple_cognee_example.py`](guides/simple_cognee_example.py)
@@ -20,7 +20,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 
 | Folder | What lives there | Count |
 |---|---|---|
-| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 31 |
+| [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 32 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
 | [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
 
@@ -70,6 +70,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | Script | Demonstrates |
 |---|---|
 | [`web_url_content_ingestion_example.py`](guides/web_url_content_ingestion_example.py) | Ingesting a URL with `preferred_loaders` (needs network) |
+| [`nested_json_chunking.py`](guides/nested_json_chunking.py) | Selecting repeated nested arrays with `JsonListChunker.with_json_path()` |
 | [`multimedia_audio_image_processing_example.py`](guides/multimedia_audio_image_processing_example.py) | Audio + image ingestion (bundled assets) |
 | [`image_ocr_extraction.py`](guides/image_ocr_extraction.py) | Vision transcription + OCR text for an image |
 | [`code_graph_example.py`](guides/code_graph_example.py) | Code-graph pipeline + `SearchType.CODE` |
