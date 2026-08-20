@@ -11,7 +11,10 @@ from uuid import uuid4
 
 from cognee.modules.data.models import Data
 from cognee.modules.pipelines.utils import summarize_run_info_data
-from cognee.modules.pipelines.utils.summarize_run_info_data import MAX_RUN_INFO_DATA_CHARS
+from cognee.modules.pipelines.utils.summarize_run_info_data import (
+    MAX_RUN_INFO_DATA_CHARS,
+    MAX_RUN_INFO_IDS,
+)
 
 
 def test_empty_data_is_summarized_as_none():
@@ -24,6 +27,16 @@ def test_list_of_data_records_is_reduced_to_ids():
     records = [Data(id=uuid4(), name="a"), Data(id=uuid4(), name="b")]
     result = summarize_run_info_data(records)
     assert result == [str(records[0].id), str(records[1].id)]
+
+
+def test_long_list_of_data_records_is_bounded():
+    records = [Data(id=uuid4(), name=f"doc-{index}") for index in range(MAX_RUN_INFO_IDS * 10)]
+    result = summarize_run_info_data(records)
+
+    # The stored value must stay close to the cap, not scale with the corpus.
+    assert len(result) == MAX_RUN_INFO_IDS + 1
+    assert result[:MAX_RUN_INFO_IDS] == [str(record.id) for record in records[:MAX_RUN_INFO_IDS]]
+    assert result[-1] == f"... [truncated, {len(records)} ids total]"
 
 
 def test_small_payload_is_preserved_verbatim():
