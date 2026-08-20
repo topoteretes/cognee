@@ -35,6 +35,14 @@ class S3BinaryData(IngestionData):
         run_sync(self.ensure_metadata())
         return self.metadata
 
+    async def aget_identifier(self) -> str:
+        metadata = await self.aget_metadata()
+        return metadata["content_hash"]
+
+    async def aget_metadata(self) -> Optional[FileMetadata]:
+        await self.ensure_metadata()
+        return self.metadata
+
     async def ensure_metadata(self) -> None:
         if self.metadata is not None:
             return

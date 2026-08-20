@@ -25,7 +25,8 @@ from cognee.modules.data.methods import (
 
 from cognee.shared.logging_utils import get_logger
 
-from .save_data_item_to_storage import save_data_item_to_storage
+from .save_data_item_to_storage import save_data_item_to_storage_detailed
+from .carried_source import find_carried_source
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
 
@@ -33,6 +34,21 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this pac
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger(__name__)
+
+
+def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> str:
+    """The filename to show loaders for a payload, as the user would name it.
+
+    ``FileMetadata`` splits a name into an extension-less ``name`` plus a
+    separate ``extension``; loaders want them joined.
+    """
+    name = (file_metadata or {}).get("name")
+    if not name:
+        return os.path.basename(actual_file_path)
+
+    extension = (file_metadata or {}).get("extension")
+
+    return f"{name}.{extension}" if extension else name
 
 
 def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional[UUID], user: User):
@@ -101,6 +117,10 @@ async def ingest_data(
 
         new_datapoints = []
         existing_data_points = []
+        # Originals replaced by a content-changed update: under content-
+        # addressed keys the old object is not overwritten, so it is reclaimed
+        # after the commit once nothing references it.
+        replaced_original_locations = []
 
         if not isinstance(data, list):
             # Convert data to a list as we work with lists further down.
@@ -147,16 +167,34 @@ async def ingest_data(
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
 
-            original_file_path = await save_data_item_to_storage(underlying_data)
+            # The incremental wrapper already saved and hashed this item —
+            # match by identity first; a path item whose string the in-chain
+            # resolve_data_directories re-created matches by the stored path
+            # its (I/O-free) save resolves to.
+            carried = find_carried_source(ctx, data_item=data_item)
+            if carried is None:
+                stored = await save_data_item_to_storage_detailed(underlying_data)
+                carried = find_carried_source(ctx, file_path=stored.file_path) or stored
+
+            original_file_path = carried.file_path
+            original_file_metadata = carried.metadata
+
             actual_file_path = get_data_file_path(original_file_path)
 
-            async with open_data_file(actual_file_path) as file:
-                classified_data = ingestion.classify(file)
-                item_content_hash = classified_data.get_identifier()  # pure CPU, no DB
+            if original_file_metadata is None:
+                # Only items cognee did not write reach here (an s3:// URL, a
+                # local path): their bytes were never in this process, so the
+                # object has to be read to be described.
+                async with open_data_file(actual_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    original_file_metadata = await classified_data.aget_metadata()
+
+            item_content_hash = original_file_metadata["content_hash"]
 
             precomputed_items[id(data_item)] = {
                 "original_file_path": original_file_path,
                 "actual_file_path": actual_file_path,
+                "original_file_metadata": original_file_metadata,
                 "item_content_hash": item_content_hash,
                 "item_data_id": item_data_id,
                 "data_id": None,  # resolved below
@@ -256,7 +294,6 @@ async def ingest_data(
 
             # Retrieve cached intermediate results from pre-loop to avoid re-processing
             cached = precomputed_items.get(id(data_item), {})
-            original_file_path = cached.get("original_file_path")
             actual_file_path = cached.get("actual_file_path")
 
             # Store all input data as text files in Cognee data storage.
@@ -268,10 +305,16 @@ async def ingest_data(
                 dataset_name=dataset.name,
                 dataset_id=dataset.id,
                 user=user,
-                # actual_file_path is the decoded form (file:// URIs carry
-                # percent-encoding, e.g. spaces as %20) — names derived from
-                # it match the user's real filename.
-                original_file_name=os.path.basename(actual_file_path),
+                # The name the user knows this payload by. Taken from the
+                # metadata rather than the storage key, which is content
+                # addressed for payloads cognee wrote — loaders surface this
+                # (dlt names its source from it), so it has to stay a real
+                # filename. Falls back to the key's basename for pass-through
+                # items, where the key IS the user's path (file:// URIs carry
+                # percent-encoding, e.g. spaces as %20, so decode first).
+                original_file_name=_display_file_name(
+                    cached.get("original_file_metadata"), actual_file_path
+                ),
             )
 
             if loader_engine is None:
@@ -285,9 +328,14 @@ async def ingest_data(
             # manifest's stable data_id + the system_metadata routing stamp).
             # The pinned id replaces the pre-loop mint, and existence is
             # re-resolved for it so re-adds hit the update branch.
+            storage_file_metadata = None
+
             if isinstance(cognee_storage_file_path, LoaderResult):
                 loader_result = cognee_storage_file_path
                 cognee_storage_file_path = loader_result.file_path
+                # The loader described the text it wrote, from the content it
+                # still had in hand.
+                storage_file_metadata = loader_result.file_metadata
                 if loader_result.system_metadata is not None and item_system_metadata is None:
                     item_system_metadata = loader_result.system_metadata
                 if loader_result.data_id is not None:
@@ -298,16 +346,17 @@ async def ingest_data(
                             if pinned_row is not None:
                                 existing_data_map[str(pinned_row.id)] = pinned_row
 
-            # Find metadata from original file
-            # Standard flow: extract metadata from both original and stored files
-            async with open_data_file(original_file_path) as file:
-                classified_data = ingestion.classify(file)
-                original_file_metadata = classified_data.get_metadata()
+            # The original was described in the pre-loop, from the payload's own
+            # bytes. Re-opening it here downloaded and re-hashed the whole object
+            # a second time per item for a byte-identical result.
+            original_file_metadata = cached["original_file_metadata"]
 
-            # Find metadata from Cognee data storage text file
-            async with open_data_file(cognee_storage_file_path) as file:
-                classified_data = ingestion.classify(file)
-                storage_file_metadata = classified_data.get_metadata()
+            if storage_file_metadata is None:
+                # A loader that returned a bare path did not describe its output,
+                # so the stored text has to be read back to be described.
+                async with open_data_file(cognee_storage_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    storage_file_metadata = await classified_data.aget_metadata()
 
             data_point = existing_data_map.get(str(data_id))
 
@@ -325,6 +374,10 @@ async def ingest_data(
                 # Content-change detection: reset pipeline_status when content changed
                 new_content_hash = original_file_metadata["content_hash"]
                 content_changed = str(data_point.content_hash) != str(new_content_hash)
+
+                new_original_location = original_file_metadata["file_path"]
+                if content_changed and data_point.original_data_location != new_original_location:
+                    replaced_original_locations.append(data_point.original_data_location)
 
                 # Rows are dataset-scoped (the startup migration backfills
                 # legacy rows). A row of another dataset can only reach this
@@ -421,6 +474,11 @@ async def ingest_data(
             "cognee-core store_to_dataset [loop 4/4] finished in %.3f seconds",
             _time.monotonic() - _loop4_start,
         )
+
+        # After the commit, the updated rows point at their new originals; the
+        # replaced objects are removed unless another row still shares them.
+        for replaced_location in replaced_original_locations:
+            await db_engine.remove_data_file_if_unreferenced(replaced_location)
 
         _elapsed = _time.monotonic() - _store_start
         logger.info("cognee-core store_to_dataset finished in %.3f seconds", _elapsed)

@@ -39,7 +39,7 @@ async def identify(data: IngestionData, user: User, dataset_id: UUID) -> Optiona
     content is updated. Rows are dataset-scoped (the startup migration
     backfills pre-refactor rows), so one scoped probe is sufficient.
     """
-    content_hash: str = data.get_identifier()
+    content_hash: str = await data.aget_identifier()
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
@@ -67,7 +67,23 @@ async def identify_data(
     returns the same row. Pass ``session`` to run inside a session the
     caller already holds (e.g. the one that goes on to update the row).
     """
-    content_hash: str = data.get_identifier()
+    return await identify_data_by_hash(
+        await data.aget_identifier(), user, dataset_id, session=session
+    )
+
+
+async def identify_data_by_hash(
+    content_hash: str,
+    user: User,
+    dataset_id: UUID,
+    session: Optional[AsyncSession] = None,
+) -> Optional[Data]:
+    """:func:`identify_data` for callers that already hold the content hash.
+
+    Ingestion computes the hash while the payload's bytes are in hand, so the
+    dedup lookup does not need an ``IngestionData`` adapter around it — the
+    hash IS the identity, scoped by the shared predicates.
+    """
     predicates = content_hash_predicates(content_hash, user, dataset_id)
 
     async def _lookup(active_session: AsyncSession) -> Optional[Data]:

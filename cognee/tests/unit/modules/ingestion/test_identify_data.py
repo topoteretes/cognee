@@ -55,7 +55,10 @@ def _row(*, dataset_id, owner_id, content_hash, tenant_id=None, pipeline_status=
 
 
 def _classified(content_hash: str):
-    return SimpleNamespace(get_identifier=lambda: content_hash)
+    async def aget_identifier():
+        return content_hash
+
+    return SimpleNamespace(get_identifier=lambda: content_hash, aget_identifier=aget_identifier)
 
 
 @pytest.mark.asyncio

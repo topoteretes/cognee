@@ -23,6 +23,7 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
     SQLAlchemyAdapter,
 )
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.ingestion import StoredFile
 
 # The package re-exports the FUNCTION under the module's name, so
 # `import ... as ingest_module` would bind the function and break patch.object.
@@ -77,13 +78,25 @@ async def _make_engine():
 
 def _install_mocks(stack, engine):
     meta = _metadata()
+
+    async def _aget_metadata():
+        return meta
+
+    async def _aget_identifier():
+        return meta["content_hash"]
+
     classified = SimpleNamespace(
-        get_metadata=lambda: meta, get_identifier=lambda: meta["content_hash"]
+        get_metadata=lambda: meta,
+        get_identifier=lambda: meta["content_hash"],
+        aget_metadata=_aget_metadata,
+        aget_identifier=_aget_identifier,
     )
     stack.enter_context(patch.object(ingest_module, "get_relational_engine", lambda: engine))
     stack.enter_context(
         patch.object(
-            ingest_module, "save_data_item_to_storage", AsyncMock(return_value="/tmp/doc.txt")
+            ingest_module,
+            "save_data_item_to_storage_detailed",
+            AsyncMock(return_value=StoredFile(file_path="/tmp/doc.txt")),
         )
     )
     stack.enter_context(patch.object(ingest_module, "get_data_file_path", lambda p: p))
