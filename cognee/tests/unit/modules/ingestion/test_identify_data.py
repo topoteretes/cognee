@@ -7,6 +7,7 @@ Contract under test:
   - identify_data and identify agree on the winning row
 """
 
+import importlib
 import os
 import tempfile
 from types import SimpleNamespace
@@ -21,7 +22,17 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.identify import identify, identify_data
 
-_ENGINE_PATCH = "cognee.modules.ingestion.identify.get_relational_engine"
+# ``cognee.modules.ingestion.__init__`` rebinds the name ``identify`` from the
+# submodule to the function it exports. Python 3.10's ``mock.patch`` resolves a
+# dotted string target with ``getattr``, so it lands on the function and raises
+# AttributeError; 3.11+ resolves it with ``pkgutil.resolve_name`` and finds the
+# module. Import the module explicitly and patch the object, so the target is
+# the module on every supported version. (Same recipe as test_identify_many.)
+_identify_module = importlib.import_module("cognee.modules.ingestion.identify")
+
+
+def _patch_engine(engine):
+    return patch.object(_identify_module, "get_relational_engine", return_value=engine)
 
 
 async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
@@ -71,7 +82,7 @@ async def test_hit_returns_the_row_identify_points_at():
     )
     engine, db_path = await _make_engine([seeded])
     try:
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with _patch_engine(engine):
             row = await identify_data(_classified("h1"), user, dataset_id)
             same_id = await identify(_classified("h1"), user, dataset_id)
         assert row is not None
@@ -92,7 +103,7 @@ async def test_miss_scopes_like_identify():
         [_row(dataset_id=dataset_id, owner_id=user.id, content_hash="h1")]
     )
     try:
-        with patch(_ENGINE_PATCH, return_value=engine):
+        with _patch_engine(engine):
             assert await identify_data(_classified("h1"), stranger, dataset_id) is None
             assert await identify_data(_classified("h1"), user, uuid4()) is None
             assert await identify_data(_classified("unknown"), user, dataset_id) is None
@@ -112,7 +123,11 @@ async def test_explicit_session_is_used_without_opening_another():
     try:
         # Any attempt to open a session through the module's engine accessor
         # would be a regression: the caller's session must be the only one.
-        with patch(_ENGINE_PATCH, side_effect=AssertionError("must not open a session")):
+        with patch.object(
+            _identify_module,
+            "get_relational_engine",
+            side_effect=AssertionError("must not open a session"),
+        ):
             async with engine.get_async_session() as session:
                 row = await identify_data(_classified("h1"), user, dataset_id, session=session)
                 assert row is not None and row.id == seeded["id"]

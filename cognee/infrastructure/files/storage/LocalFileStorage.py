@@ -145,7 +145,21 @@ class LocalFileStorage(Storage):
                                 file.write(chunk)
                         else:
                             file.write(data)
-                os.replace(temp_file_path, full_file_path)
+                try:
+                    os.replace(temp_file_path, full_file_path)
+                except PermissionError:
+                    # Windows: replacing a file another handle holds open needs
+                    # DELETE sharing on that handle, which ordinary open()s do
+                    # not grant. Fall back to the pre-atomic in-place write —
+                    # non-atomic for that reader, but a succeeding store beats
+                    # failing it (and matches the old behavior there). POSIX
+                    # never takes this path.
+                    with (
+                        open(temp_file_path, mode="rb") as written,
+                        open(full_file_path, mode="wb") as target,
+                    ):
+                        while chunk := written.read(WRITE_CHUNK_SIZE):
+                            target.write(chunk)
             finally:
                 try:
                     os.unlink(temp_file_path)

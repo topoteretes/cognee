@@ -7,6 +7,8 @@ must never observe a truncated/half-written object, and no temp files may
 survive, success or failure.
 """
 
+import os
+
 import pytest
 
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
@@ -28,15 +30,21 @@ async def test_overwrite_leaves_only_the_final_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reader_with_old_handle_sees_a_complete_version(tmp_path):
-    # os.replace keeps an already-open handle on the OLD inode intact: the
-    # reader finishes with a complete old version, never a truncated file.
+async def test_store_succeeds_while_a_reader_holds_the_file(tmp_path):
+    # An overwrite must never FAIL because someone is reading the target. On
+    # POSIX os.replace swaps under the reader; on Windows the rename is blocked
+    # by the open handle and store falls back to an in-place write.
     storage = LocalFileStorage(str(tmp_path))
     await storage.store("doc.txt", "old-complete-content", overwrite=True)
 
     with open(tmp_path / "doc.txt", encoding="utf-8") as reader:
         await storage.store("doc.txt", "new", overwrite=True)
-        assert reader.read() == "old-complete-content"
+        if os.name != "nt":
+            # POSIX only: the reader's handle stays on the old inode, so it
+            # sees a complete old version, never a truncated file. On Windows
+            # the fallback writes in place, so the old handle observes the new
+            # bytes — the pre-atomic behavior there.
+            assert reader.read() == "old-complete-content"
 
     assert (tmp_path / "doc.txt").read_text() == "new"
 
