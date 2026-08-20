@@ -469,3 +469,63 @@ async def test_probe_failure_verdict_is_not_cached(
     assert warm is True
     assert count >= 1
     assert len(probe_calls) == 1
+
+
+class TestGlobalConfigWiring:
+    """cognee.config exposes the warm-up settings as runtime setters that
+    mutate the same cached RecallConfig instance the guard reads."""
+
+    def test_set_recall_config_updates_cached_instance(self):
+        from cognee.api.v1.config.config import config as global_config
+        from cognee.modules.recall.config import get_recall_config
+
+        cfg = get_recall_config()
+        original = cfg.to_dict()
+        try:
+            # String payloads (the CLI contract) must coerce to real types.
+            global_config.set_recall_config(
+                {
+                    "recall_warmup_shortcircuit": "false",
+                    "recall_warmup_threshold": "5",
+                    "recall_warmup_cache_ttl": "1.5",
+                }
+            )
+            assert cfg.recall_warmup_shortcircuit is False
+            assert cfg.recall_warmup_threshold == 5
+            assert cfg.recall_warmup_cache_ttl == 1.5
+            # The guard reads the same lru_cached instance the setter mutated.
+            assert get_recall_config() is cfg
+        finally:
+            global_config.set_recall_config(original)
+
+    def test_generic_set_and_get_cover_warmup_keys(self):
+        from cognee.api.v1.config.config import config as global_config
+        from cognee.modules.recall.config import get_recall_config
+
+        original = get_recall_config().to_dict()
+        try:
+            global_config.set("recall_warmup_shortcircuit", "true")
+            global_config.set("recall_warmup_threshold", 3)
+            global_config.set("recall_warmup_cache_ttl", "30")
+            assert global_config.get("recall_warmup_shortcircuit") is True
+            assert global_config.get("recall_warmup_threshold") == 3
+            assert global_config.get("recall_warmup_cache_ttl") == 30.0
+            assert global_config.get_all()["recall_warmup_shortcircuit"] is True
+        finally:
+            global_config.set_recall_config(original)
+
+    def test_invalid_values_are_rejected(self):
+        from cognee.api.v1.config.config import config as global_config
+        from cognee.modules.recall.config import get_recall_config
+
+        original = get_recall_config().to_dict()
+        try:
+            with pytest.raises(ValueError):
+                global_config.set_recall_warmup_shortcircuit("not-a-bool")
+            with pytest.raises(ValueError):
+                global_config.set_recall_warmup_threshold(0)
+            with pytest.raises(ValueError):
+                global_config.set_recall_warmup_cache_ttl(-1)
+            assert get_recall_config().to_dict() == original
+        finally:
+            global_config.set_recall_config(original)
