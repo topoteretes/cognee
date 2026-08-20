@@ -123,6 +123,24 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_library.py
 
+  run-incremental-update-stress-test:
+    name: Incremental Update Stress Test
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run incremental update stress test
+        env:
+          ENV: 'dev'
+        run: uv run python ./cognee/tests/test_incremental_update_stress.py
+
   run-pipeline-error-propagation-test:
     name: Pipeline Error Propagation Test
     runs-on: ubuntu-22.04

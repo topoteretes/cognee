@@ -154,6 +154,9 @@ class Neo4jAdapter(GraphDBInterface):
     managing sessions and projecting graphs.
     """
 
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
+
     def __init__(
         self,
         graph_database_url: str,
@@ -530,6 +533,25 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, params)
 
         return [_strip_provenance(result["node"]) for result in results]
+
+    async def update_chunk_index(self, chunk_indexes: dict) -> None:
+        """Set ONLY the chunk_index property on the given chunk nodes.
+
+        Neo4j stores real node properties, so the move is a genuine
+        single-property SET — nothing else on the node is touched.
+        """
+        if not chunk_indexes:
+            return
+        query = f"""
+        UNWIND $rows AS row
+        MATCH (n: `{BASE_LABEL}`{{id: row.id}})
+        SET n.chunk_index = row.chunk_index, n.updated_at = timestamp()
+        """
+        rows = [
+            {"id": node_id, "chunk_index": chunk_index}
+            for node_id, chunk_index in chunk_indexes.items()
+        ]
+        await self.query(query, {"rows": rows})
 
     async def delete_node(self, node_id: str):
         """

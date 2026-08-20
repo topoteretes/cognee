@@ -82,7 +82,7 @@ PROVENANCE_COLUMNS = (
 )
 
 
-def _provenance_fold_clause(alias: str) -> str:
+def _provenance_fold_clause(alias: str, row: Optional[str] = None) -> str:
     """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
 
     Appended to the ``MERGE`` in ``add_nodes`` / ``add_edges`` so a node/edge is
@@ -94,29 +94,33 @@ def _provenance_fold_clause(alias: str) -> str:
     the pre-SET row, so it sees ownership as it was before this write.
 
     ``alias`` is the bound variable for the artifact (``n`` for nodes, ``r`` for
-    edges). The provenance ``$``-params are scalars shared across the UNWIND
-    batch because a single source ref key is attached per call.
+    edges). With ``row=None`` the provenance inputs are scalar ``$``-params
+    shared across the UNWIND batch (one source ref key per call). With ``row``
+    set to the UNWIND variable, each row carries its OWN provenance fields —
+    chunk-scoped ownership stamps every artifact with its owning chunk's ref in
+    a single statement instead of one call per owner group.
     """
+    src = f"{row}." if row else "$"
     return f"""
             SET {alias}.source_run_refs = CASE
-                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS {src}sr_token
                     THEN coalesce({alias}.source_run_refs, '|')
-                    ELSE concat(coalesce({alias}.source_run_refs, '|'), $run_ref_tail)
+                    ELSE concat(coalesce({alias}.source_run_refs, '|'), {src}run_ref_tail)
                 END,
                 {alias}.source_run_ids = CASE
-                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS {src}sr_token
                     THEN coalesce({alias}.source_run_ids, '|')
-                    ELSE concat(coalesce({alias}.source_run_ids, '|'), $run_id_tail)
+                    ELSE concat(coalesce({alias}.source_run_ids, '|'), {src}run_id_tail)
                 END,
                 {alias}.source_ref_keys = CASE
-                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS {src}sr_token
                     THEN coalesce({alias}.source_ref_keys, '|')
-                    ELSE concat(coalesce({alias}.source_ref_keys, '|'), $sr_tail)
+                    ELSE concat(coalesce({alias}.source_ref_keys, '|'), {src}sr_tail)
                 END,
                 {alias}.source_dataset_ids = CASE
-                    WHEN coalesce({alias}.source_dataset_ids, '|') CONTAINS $ds_token
+                    WHEN coalesce({alias}.source_dataset_ids, '|') CONTAINS {src}ds_token
                     THEN coalesce({alias}.source_dataset_ids, '|')
-                    ELSE concat(coalesce({alias}.source_dataset_ids, '|'), $ds_tail)
+                    ELSE concat(coalesce({alias}.source_dataset_ids, '|'), {src}ds_tail)
                 END
             """
 
@@ -136,6 +140,24 @@ def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str])
 
 def _provenance_token(value: str) -> str:
     return f"|{value}|"
+
+
+def _per_row_fold_fields(pipeline_run_id: Optional[str]):
+    """Per-unique-key cache of fold fields for per-row provenance stamping.
+
+    Grouped chunk-ownership writes share few unique ref keys across many rows;
+    computing the six fold fields once per key keeps payload prep linear.
+    """
+    cache: Dict[str, dict] = {}
+
+    def fields_for(source_ref_key: str) -> dict:
+        fields = cache.get(source_ref_key)
+        if fields is None:
+            fields = _provenance_fold_params(source_ref_key, pipeline_run_id)
+            cache[source_ref_key] = fields
+        return fields
+
+    return fields_for
 
 
 def _encode_refs(items: List[str]) -> str:
@@ -189,6 +211,13 @@ class LadybugAdapter(GraphDBInterface):
     management. It contains methods for querying, adding, and deleting nodes and edges as
     well as for graph metrics and data extraction.
     """
+
+    # add_nodes/add_edges accept a per-row source-ref mapping, so chunk-scoped
+    # ownership stamps in ONE statement instead of one call per owner group.
+    supports_per_row_source_refs = True
+
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
 
     @classmethod
     def create_subprocess(
@@ -1103,7 +1132,7 @@ class LadybugAdapter(GraphDBInterface):
     async def add_nodes(
         self,
         nodes: List[DataPoint],
-        source_ref_key: Optional[str] = None,
+        source_ref_key: Optional[Union[str, Dict[str, str]]] = None,
         pipeline_run_id: Optional[str] = None,
     ) -> None:
         """
@@ -1118,9 +1147,12 @@ class LadybugAdapter(GraphDBInterface):
 
             - nodes (List[DataPoint]): A list of nodes to be added to the graph, each
               represented as a DataPoint.
-            - source_ref_key (Optional[str]): When set, graph provenance for this
-              source ref is stamped atomically in the same statement that writes the nodes
-              (no separate attach pass). Omit for non-graph-provenance writes.
+            - source_ref_key (Optional[Union[str, Dict[str, str]]]): When set, graph
+              provenance is stamped atomically in the same statement that writes the nodes
+              (no separate attach pass). A str stamps every node with that one ref; a dict
+              maps node id -> ref key so each row carries its own (chunk-scoped) ref, still
+              in a single statement. Every node must have an entry. Omit for
+              non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
@@ -1129,6 +1161,8 @@ class LadybugAdapter(GraphDBInterface):
 
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            per_row_refs = isinstance(source_ref_key, dict)
+            fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
             # Prepare all nodes data
             node_params = []
@@ -1155,6 +1189,15 @@ class LadybugAdapter(GraphDBInterface):
                         "properties": json.dumps(properties, cls=JSONEncoder),
                         "created_at": now,
                         "updated_at": now,
+                        # KeyError on a missing id is deliberate: a partial
+                        # mapping means the caller's ownership bookkeeping is
+                        # broken, and silently unstamped rows would leak on
+                        # deletion.
+                        **(
+                            fold_fields(source_ref_key[core_properties["id"]])
+                            if per_row_refs
+                            else {}
+                        ),
                     }
                 )
 
@@ -1176,7 +1219,9 @@ class LadybugAdapter(GraphDBInterface):
                     n.updated_at = TIMESTAMP(node.updated_at)
                 """
                 extra_params = {}
-                if source_ref_key is not None:
+                if per_row_refs:
+                    merge_query += _provenance_fold_clause("n", row="node")
+                elif source_ref_key is not None:
                     merge_query += _provenance_fold_clause("n")
                     extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
@@ -1718,6 +1763,44 @@ class LadybugAdapter(GraphDBInterface):
             await self.checkpoint()
         return None
 
+    async def update_chunk_index(self, chunk_indexes: Dict[str, int]) -> None:
+        """Patch ONLY chunk_index inside the stored properties blobs.
+
+        The stored blob is the source of truth: every other key is carried
+        verbatim, so nothing a model forgets to declare can be erased (the
+        failure mode of rewriting nodes from rehydrated models).
+        """
+        if not chunk_indexes:
+            return
+        rows = await self.query(
+            """
+            MATCH (n:Node) WHERE n.id IN $ids
+            RETURN n.id, n.properties
+            """,
+            {"ids": list(chunk_indexes.keys())},
+        )
+        updates = []
+        for row in rows:
+            raw_props = row[1]
+            if not raw_props:
+                continue
+            try:
+                properties = json.loads(raw_props)
+            except json.JSONDecodeError:
+                continue
+            properties["chunk_index"] = chunk_indexes[str(row[0])]
+            updates.append({"id": row[0], "properties": json.dumps(properties, cls=JSONEncoder)})
+        if updates:
+            await self.query(
+                """
+                UNWIND $rows AS row
+                MATCH (n:Node) WHERE n.id = row.id
+                SET n.properties = row.properties
+                """,
+                {"rows": updates},
+            )
+            await self.checkpoint()
+
     async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
         Extract a node by its ID.
@@ -1925,7 +2008,7 @@ class LadybugAdapter(GraphDBInterface):
     async def add_edges(
         self,
         edges: List[Tuple[str, str, str, Dict[str, Any]]],
-        source_ref_key: Optional[str] = None,
+        source_ref_key: Optional[Union[str, Dict[Tuple[str, str, str], str]]] = None,
         pipeline_run_id: Optional[str] = None,
     ) -> None:
         """
@@ -1940,9 +2023,12 @@ class LadybugAdapter(GraphDBInterface):
 
             - edges (List[Tuple[str, str, str, Dict[str, Any]]]): A list of edges represented as
               tuples of (from_node, to_node, relationship_name, edge_properties).
-            - source_ref_key (Optional[str]): When set, graph provenance for this
-              source ref is stamped atomically in the same statement that writes the edges
-              (no separate attach pass). Omit for non-graph-provenance writes.
+            - source_ref_key (Optional[Union[str, Dict[Tuple[str, str, str], str]]]): When
+              set, graph provenance is stamped atomically in the same statement that writes
+              the edges (no separate attach pass). A str stamps every edge with that one ref;
+              a dict maps (source_id, target_id, relationship_name) -> ref key so each row
+              carries its own (chunk-scoped) ref, still in a single statement. Every edge
+              must have an entry. Omit for non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
@@ -1951,6 +2037,8 @@ class LadybugAdapter(GraphDBInterface):
 
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            per_row_refs = isinstance(source_ref_key, dict)
+            fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
             edge_params = [
                 {
@@ -1960,6 +2048,14 @@ class LadybugAdapter(GraphDBInterface):
                     "properties": json.dumps(properties, cls=JSONEncoder),
                     "created_at": now,
                     "updated_at": now,
+                    # KeyError on a missing identity is deliberate — see add_nodes.
+                    **(
+                        fold_fields(
+                            source_ref_key[(str(from_node), str(to_node), str(relationship_name))]
+                        )
+                        if per_row_refs
+                        else {}
+                    ),
                 }
                 for from_node, to_node, relationship_name, properties in edges
             ]
@@ -1991,7 +2087,9 @@ class LadybugAdapter(GraphDBInterface):
                 r.properties = edge.properties
             """
             extra_params = {}
-            if source_ref_key is not None:
+            if per_row_refs:
+                query += _provenance_fold_clause("r", row="edge")
+            elif source_ref_key is not None:
                 query += _provenance_fold_clause("r")
                 extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 

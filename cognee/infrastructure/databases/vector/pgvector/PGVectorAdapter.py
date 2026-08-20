@@ -501,6 +501,40 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             f"Collection '{collection_name}' not found!",
         )
 
+    supports_payload_update = True
+
+    async def update_payload(
+        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+    ) -> None:
+        """Update payload fields on existing rows WITHOUT re-embedding.
+
+        Read-modify-write on the JSON payload column only — the vector column
+        is never touched, so no embedding call happens. Missing ids skip.
+        """
+        if not payload_updates:
+            return
+        try:
+            PGVectorDataPoint = await self.get_table(collection_name)
+        except CollectionNotFoundError:
+            return
+
+        ids = list(payload_updates.keys())
+        async with self.get_async_session() as session:
+            rows = (
+                await session.execute(
+                    select(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(ids))
+                )
+            ).all()
+            for row in rows:
+                payload = dict(row.payload or {})
+                payload.update(payload_updates[str(row.id)])
+                await session.execute(
+                    PGVectorDataPoint.update()
+                    .where(PGVectorDataPoint.c.id == row.id)
+                    .values(payload=payload)
+                )
+            await session.commit()
+
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         """Return rows from `collection_name` matching any of `data_point_ids`."""
         # Get PGVectorDataPoint Table from database

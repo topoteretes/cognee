@@ -51,6 +51,19 @@ class GraphDBInterface(ABC):
     # importing optional backend packages that slim images do not ship.
     supports_cypher_queries: bool = True
 
+    # Whether ``add_nodes`` / ``add_edges`` accept a per-row source-ref mapping
+    # (node id / edge identity -> ref key) instead of one scalar key per call.
+    # Backends that support it stamp chunk-scoped ownership in a single batch
+    # statement; others get one grouped call per owner key from the caller.
+    supports_per_row_source_refs: bool = False
+
+    # Whether chunk-level incremental updates can run against this backend.
+    # The adapter must provide compatible connection shapes, graph provenance,
+    # and a narrow ``update_chunk_index`` implementation. Declared on the
+    # adapter so a runtime-registered backend can participate by satisfying the
+    # full contract.
+    supports_incremental_chunk_updates: bool = False
+
     @abstractmethod
     async def is_empty(self) -> bool:
         """Return True when the graph contains no nodes."""
@@ -152,6 +165,27 @@ class GraphDBInterface(ABC):
         list-property-storing adapters are free to implement it later.
         """
         return None
+
+    async def update_chunk_index(self, chunk_indexes: "dict[str, int]") -> None:
+        """
+        Update ONLY the ``chunk_index`` property of the given chunk nodes.
+
+        A narrow positional move: a retained chunk shifts after text is
+        inserted or removed before it. Implementations must change nothing
+        but ``chunk_index`` (and bookkeeping timestamps) — full node rewrites
+        rebuilt from models erase any property the model forgets to carry.
+
+        Parameters:
+        -----------
+
+            - chunk_indexes (dict[str, int]): node id -> new chunk_index.
+
+        Default implementation raises UnsupportedGraphOperation. Adapters that
+        do not override it must not declare incremental chunk-update support.
+        """
+        from cognee.infrastructure.databases.exceptions import UnsupportedGraphOperation
+
+        raise UnsupportedGraphOperation("update_chunk_index is not implemented by this adapter")
 
     async def attach_node_source_refs(
         self,

@@ -28,6 +28,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.models import Entity
@@ -178,7 +179,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         external_metadata="",
     )
     bmw_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(bmw_data_id)}-0"),
+        id=content_chunk_id(str(bmw_data_id), chunk_content_hash(bmw_text), 0),
         text=bmw_text,
         chunk_size=14,
         chunk_index=0,
@@ -194,7 +195,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         external_metadata="",
     )
     netherlands_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(netherlands_data_id)}-0"),
+        id=content_chunk_id(str(netherlands_data_id), chunk_content_hash(netherlands_text), 0),
         text=netherlands_text,
         chunk_size=14,
         chunk_index=0,
