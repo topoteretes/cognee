@@ -81,8 +81,7 @@ async def setup_demo_data():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     progress(f"Ingesting {len(DOCUMENTS)} Aurora Robotics facts.")
-    await cognee.add(DOCUMENTS, dataset_name=DATASET_NAME)
-    await cognee.cognify(datasets=[DATASET_NAME])
+    await cognee.remember(DOCUMENTS, dataset_name=DATASET_NAME, self_improvement=False)
     progress("Ingestion complete.")
 
 

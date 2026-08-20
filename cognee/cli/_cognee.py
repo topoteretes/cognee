@@ -241,6 +241,12 @@ def _silence_teardown_warnings() -> None:
 
 def main() -> int:
     """Main CLI entry point"""
+    # Operations run from this process record origin="cli" in pipeline_runs.
+    # ContextVars set here propagate into every asyncio.run() a command makes.
+    from cognee.modules.operations import ORIGIN_CLI, set_operation_origin
+
+    set_operation_origin(ORIGIN_CLI)
+
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
 

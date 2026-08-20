@@ -461,10 +461,20 @@ class SQLAlchemyAdapter:
         """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # Load the schema information into the MetaData object
-                await connection.run_sync(Base.metadata.reflect)
+                # Prefer the declarative table: it carries the models' Python-side
+                # type converters (a raw reflected sqlite table would return e.g.
+                # datetimes as strings).
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
+                # Unknown to the imported models — reflect into a throwaway
+                # MetaData, never into Base.metadata: registering an on-disk
+                # table whose model module has not been imported yet makes that
+                # model's later declarative definition fail with "Table ... is
+                # already defined for this MetaData instance".
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect)
+                if table_name in metadata.tables:
+                    return metadata.tables[table_name]
                 else:
                     raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:

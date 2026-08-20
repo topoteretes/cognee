@@ -139,7 +139,7 @@ def get_recall_router() -> APIRouter:
         """Get search/recall history for the authenticated user."""
         send_telemetry(
             "Recall API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "GET /v1/recall", "cognee_version": cognee_version},
         )
 
@@ -197,7 +197,7 @@ def get_recall_router() -> APIRouter:
         """
         send_telemetry(
             "Recall API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/recall",
                 "search_type": str(payload.search_type),

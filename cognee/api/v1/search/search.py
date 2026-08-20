@@ -9,6 +9,7 @@ from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.base_config import get_base_config
+from cognee.modules.operations import record_operation
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
@@ -265,121 +266,135 @@ async def search(
             **{key: value for key, value in agentic_overrides.items() if value is not None},
         )
 
-    with new_span("memory.retrieve") as span:
-        span.set_attribute(MEMORY_SYSTEM, "cognee")
-        span.set_attribute(MEMORY_OPERATION, "retrieve")
-        span.set_attribute(MEMORY_QUERY_TEXT, query_text[:500])
-        span.set_attribute(MEMORY_QUERY_TYPE, str(query_type.value))
-        # legacy cognee attributes for backward compat
-        span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
-        span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
-        span.set_attribute("cognee.search.top_k", top_k)
-        _search_start_ns = __import__("time").monotonic_ns()
+    async with record_operation("search") as operation_context:
+        with new_span("memory.retrieve") as span:
+            span.set_attribute(MEMORY_SYSTEM, "cognee")
+            span.set_attribute(MEMORY_OPERATION, "retrieve")
+            span.set_attribute(MEMORY_QUERY_TEXT, query_text[:500])
+            span.set_attribute(MEMORY_QUERY_TYPE, str(query_type.value))
+            # legacy cognee attributes for backward compat
+            span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+            span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
+            span.set_attribute("cognee.search.top_k", top_k)
+            _search_start_ns = __import__("time").monotonic_ns()
 
-        # We use lists from now on for datasets
-        if isinstance(datasets, UUID) or isinstance(datasets, str):
-            datasets = [datasets]
+            # We use lists from now on for datasets
+            if isinstance(datasets, UUID) or isinstance(datasets, str):
+                datasets = [datasets]
 
-        if (
-            skills is not None or tools is not None
-        ) and query_type is not SearchType.AGENTIC_COMPLETION:
-            raise CogneeValidationError(
-                message="skills/tools require query_type=SearchType.AGENTIC_COMPLETION.",
-                name="InvalidAgenticSearchConfig",
-            )
-
-        allowed_node_name_operators = {"AND", "OR"}
-        normalized_node_name_filter_operator = (node_name_filter_operator or "").strip().upper()
-
-        if normalized_node_name_filter_operator not in allowed_node_name_operators:
-            raise CogneeValidationError(
-                f"Invalid node_name_filter_operator: {node_name_filter_operator!r}. Must be one of {sorted(allowed_node_name_operators)}."
-            )
-
-        if user is None:
-            try:
-                user = await get_default_user()
-            except (DatabaseNotCreatedError, UserNotFoundError) as error:
-                # Provide a clear, actionable message instead of surfacing low-level stacktraces
+            if (
+                skills is not None or tools is not None
+            ) and query_type is not SearchType.AGENTIC_COMPLETION:
                 raise CogneeValidationError(
-                    message=(
-                        "Search prerequisites not met: no database/default user found. "
-                        "Initialize Cognee before searching by:\n"
-                        "• running `await cognee.add(...)` followed by `await cognee.cognify()`."
-                    ),
-                    name="SearchPreconditionError",
-                ) from error
-
-        await set_session_user_context_variable(user)
-
-        # Transform string based datasets to UUID - String based datasets can only be found for current user
-        if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
-            datasets = await get_authorized_existing_datasets(datasets, "read", user)
-            datasets = [dataset.id for dataset in datasets]
-            if not datasets:
-                raise DatasetNotFoundError(message="No datasets found.")
-
-        if query_type is SearchType.AGENTIC_COMPLETION:
-            active_dataset_refs = dataset_ids if dataset_ids else datasets
-            if isinstance(active_dataset_refs, UUID):
-                active_dataset_refs = [active_dataset_refs]
-            if not active_dataset_refs or len(active_dataset_refs) != 1:
-                raise CogneeValidationError(
-                    message="Agentic skill search requires exactly one explicit dataset.",
-                    name="InvalidAgenticDatasetScope",
+                    message="skills/tools require query_type=SearchType.AGENTIC_COMPLETION.",
+                    name="InvalidAgenticSearchConfig",
                 )
 
-        if any(v is not None for v in agentic_overrides.values()):
-            retriever_specific_config = dict(retriever_specific_config or {})
-            for key, value in agentic_overrides.items():
-                if value is not None:
-                    retriever_specific_config[key] = value
+            allowed_node_name_operators = {"AND", "OR"}
+            normalized_node_name_filter_operator = (node_name_filter_operator or "").strip().upper()
 
-        if code_query is not None:
-            retriever_specific_config = dict(retriever_specific_config or {})
-            retriever_specific_config.update(code_query)
+            if normalized_node_name_filter_operator not in allowed_node_name_operators:
+                raise CogneeValidationError(
+                    f"Invalid node_name_filter_operator: {node_name_filter_operator!r}. Must be one of {sorted(allowed_node_name_operators)}."
+                )
 
-        filtered_search_results = await search_function(
-            query_text=query_text,
-            query_type=query_type,
-            dataset_ids=dataset_ids if dataset_ids else datasets,
-            user=user,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=normalized_node_name_filter_operator,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            verbose=verbose,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-            include_references=include_references,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-        )
+            if user is None:
+                try:
+                    user = await get_default_user()
+                except (DatabaseNotCreatedError, UserNotFoundError) as error:
+                    # Provide a clear, actionable message instead of surfacing low-level stacktraces
+                    raise CogneeValidationError(
+                        message=(
+                            "Search prerequisites not met: no database/default user found. "
+                            "Initialize Cognee before searching by:\n"
+                            "• running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                        ),
+                        name="SearchPreconditionError",
+                    ) from error
 
-        n = len(filtered_search_results) if filtered_search_results else 0
-        span.set_attribute(COGNEE_RESULT_COUNT, n)
-        span.set_attribute(MEMORY_RESULT_COUNT, n)
-        span.set_attribute(
-            COGNEE_RESULT_SUMMARY,
-            f"Found {n} result(s) via {query_type.value}",
-        )
-        _duration_ms = (__import__("time").monotonic_ns() - _search_start_ns) / 1_000_000
-        _attrs = {
-            "memory.system": "cognee",
-            "memory.operation": "retrieve",
-            "memory.query.type": str(query_type.value),
-        }
-        record_operation_duration(_duration_ms, _attrs)
-        record_query_results(n, _attrs)
-        increment_items_retrieved(n, _attrs)
-        increment_vector_searches(_attrs)
+            operation_context.set_user(user)
+            operation_context.set_session_id(session_id)
 
-        return filtered_search_results
+            await set_session_user_context_variable(user)
+
+            # Transform string based datasets to UUID - String based datasets can only be found for current user
+            if datasets is not None and all(isinstance(dataset, str) for dataset in datasets):
+                datasets = await get_authorized_existing_datasets(datasets, "read", user)
+                datasets = [dataset.id for dataset in datasets]
+                if not datasets:
+                    raise DatasetNotFoundError(message="No datasets found.")
+
+            target_dataset_ids = dataset_ids if dataset_ids else datasets
+            if isinstance(target_dataset_ids, UUID):
+                target_dataset_ids = [target_dataset_ids]
+            if (
+                target_dataset_ids
+                and len(target_dataset_ids) == 1
+                and isinstance(target_dataset_ids[0], UUID)
+            ):
+                operation_context.set_dataset(target_dataset_ids[0])
+
+            if query_type is SearchType.AGENTIC_COMPLETION:
+                active_dataset_refs = dataset_ids if dataset_ids else datasets
+                if isinstance(active_dataset_refs, UUID):
+                    active_dataset_refs = [active_dataset_refs]
+                if not active_dataset_refs or len(active_dataset_refs) != 1:
+                    raise CogneeValidationError(
+                        message="Agentic skill search requires exactly one explicit dataset.",
+                        name="InvalidAgenticDatasetScope",
+                    )
+
+            if any(v is not None for v in agentic_overrides.values()):
+                retriever_specific_config = dict(retriever_specific_config or {})
+                for key, value in agentic_overrides.items():
+                    if value is not None:
+                        retriever_specific_config[key] = value
+
+            if code_query is not None:
+                retriever_specific_config = dict(retriever_specific_config or {})
+                retriever_specific_config.update(code_query)
+
+            filtered_search_results = await search_function(
+                query_text=query_text,
+                query_type=query_type,
+                dataset_ids=dataset_ids if dataset_ids else datasets,
+                user=user,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                node_name_filter_operator=normalized_node_name_filter_operator,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                feedback_influence=feedback_influence,
+                verbose=verbose,
+                retriever_specific_config=retriever_specific_config,
+                neighborhood_depth=neighborhood_depth,
+                neighborhood_seed_top_k=neighborhood_seed_top_k,
+                include_references=include_references,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+            )
+
+            n = len(filtered_search_results) if filtered_search_results else 0
+            span.set_attribute(COGNEE_RESULT_COUNT, n)
+            span.set_attribute(MEMORY_RESULT_COUNT, n)
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                f"Found {n} result(s) via {query_type.value}",
+            )
+            _duration_ms = (__import__("time").monotonic_ns() - _search_start_ns) / 1_000_000
+            _attrs = {
+                "memory.system": "cognee",
+                "memory.operation": "retrieve",
+                "memory.query.type": str(query_type.value),
+            }
+            record_operation_duration(_duration_ms, _attrs)
+            record_query_results(n, _attrs)
+            increment_items_retrieved(n, _attrs)
+            increment_vector_searches(_attrs)
+
+            return filtered_search_results
