@@ -514,7 +514,10 @@ class CogneeGraph(CogneeAbstractGraph):
                 distances = element.attributes.get("vector_distance")
                 importance_weight = element.attributes.get("importance_weight")
                 try:
+                    import math
                     importance_weight = float(importance_weight)
+                    if math.isnan(importance_weight) or math.isinf(importance_weight) or not (0.0 <= importance_weight <= 2.0):
+                        importance_weight = 0.5
                 except (TypeError, ValueError):
                     importance_weight = 0.5
                 if not isinstance(distances, list) or query_index >= len(distances):

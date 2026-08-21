@@ -1136,3 +1136,79 @@ def test_normalize_query_distance_lists_empty_list(setup_graph):
     result = graph._normalize_query_distance_lists([], query_list_length=None, name="test")
 
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_importance_weight_out_of_range_does_not_corrupt_ranking():
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+    from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+    graph = CogneeGraph()
+
+    n1, n2 = Node("1"), Node("2")
+    n3, n4 = Node("3"), Node("4")
+    for n in (n1, n2, n3, n4):
+        graph.add_node(n)
+
+    edge_best  = Edge(n1, n2, attributes={"importance_weight": 0.5})
+    edge_worst = Edge(n3, n4, attributes={"importance_weight": 3.0})
+    graph.add_edge(edge_best)
+    graph.add_edge(edge_worst)
+
+    for node, dist in [(n1, 0.1), (n2, 0.1), (n3, 1.5), (n4, 1.5)]:
+        node.add_attribute("vector_distance", [dist])
+    edge_best.add_attribute("vector_distance",  [0.1])
+    edge_worst.add_attribute("vector_distance", [1.5])
+
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+    assert ranked[0] == edge_best
+
+
+@pytest.mark.asyncio
+async def test_importance_weight_nan_falls_back_to_neutral():
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+    from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+    import math
+    graph = CogneeGraph()
+
+    n1, n2 = Node("1"), Node("2")
+    n3, n4 = Node("3"), Node("4")
+    for n in (n1, n2, n3, n4):
+        graph.add_node(n)
+
+    edge_best  = Edge(n1, n2, attributes={"importance_weight": 0.5})
+    edge_worst = Edge(n3, n4, attributes={"importance_weight": float('nan')})
+    graph.add_edge(edge_best)
+    graph.add_edge(edge_worst)
+
+    for node, dist in [(n1, 0.1), (n2, 0.1), (n3, 1.5), (n4, 1.5)]:
+        node.add_attribute("vector_distance", [dist])
+    edge_best.add_attribute("vector_distance",  [0.1])
+    edge_worst.add_attribute("vector_distance", [1.5])
+
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+    assert ranked[0] == edge_best
+
+
+@pytest.mark.asyncio
+async def test_importance_weight_within_range_preserves_ordering():
+    from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
+    from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+    graph = CogneeGraph()
+
+    n1, n2 = Node("1"), Node("2")
+    n3, n4 = Node("3"), Node("4")
+    for n in (n1, n2, n3, n4):
+        graph.add_node(n)
+
+    edge_best  = Edge(n1, n2, attributes={"importance_weight": 0.5})
+    edge_worst = Edge(n3, n4, attributes={"importance_weight": 1.5})
+    graph.add_edge(edge_best)
+    graph.add_edge(edge_worst)
+
+    for node, dist in [(n1, 0.1), (n2, 0.1), (n3, 1.5), (n4, 1.5)]:
+        node.add_attribute("vector_distance", [dist])
+    edge_best.add_attribute("vector_distance",  [0.1])
+    edge_worst.add_attribute("vector_distance", [1.5])
+
+    ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+    assert ranked[0] == edge_best
