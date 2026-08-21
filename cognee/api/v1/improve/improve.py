@@ -219,11 +219,12 @@ async def improve(
                 # calling user's preference subgraph (weighted `prefers` edges
                 # plus the preference node's text). One call for all sessions —
                 # preferences aggregate across a user's sessions.
-                if await _update_user_preferences(
+                preference_result = await _update_user_preferences(
                     dataset=write_dataset_ref,
                     session_ids=session_ids,
                     user=user,
-                ):
+                )
+                if preference_result is not None and preference_result.status == "completed":
                     stages_run.append("user_preferences")
 
                 # Stage 2d: build the truth subspace from distilled session
@@ -452,7 +453,7 @@ async def _update_user_preferences(
     dataset: Union[str, UUID],
     session_ids: List[str],
     user,
-) -> bool:
+):
     """Update the caller's per-dataset preference node and ``prefers`` weights.
 
     Delegates to ``user_preferences.update_user_preferences`` once for all
@@ -462,16 +463,21 @@ async def _update_user_preferences(
     into the preference node's text behind a watermark.
 
     Best-effort and fail-open like its neighbours: an error here never blocks
-    the rest of ``improve()``. Returns True when the stage ran.
+    the rest of ``improve()``. Returns the ``PreferenceUpdateResult`` (or None
+    on error) so the caller can decide whether the stage actually changed
+    anything.
     """
     try:
-        from cognee.modules.user_preferences import update_user_preferences
+        from cognee.modules.user_preferences.update import update_user_preferences
 
         result = await update_user_preferences(
             session_ids=session_ids,
             dataset=dataset,
             user=user,
         )
+        if result.status == "personalization_disabled":
+            logger.debug("improve: user preference stage skipped (PERSONALIZATION_ENABLED is off)")
+            return result
         logger.info(
             "improve: user preferences updated -> status=%s turns=%d edges=%d "
             "pruned=%d text_lines=%d",
@@ -481,10 +487,10 @@ async def _update_user_preferences(
             result.edges_pruned,
             result.text_lines_added,
         )
-        return True
+        return result
     except Exception as e:
         logger.warning("improve: user preference update failed (non-fatal): %s", e)
-        return False
+        return None
 
 
 async def _persist_session_traces(

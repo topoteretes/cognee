@@ -3,52 +3,27 @@
 One ``UserPreference`` node per (user, dataset) plus weighted ``prefers``
 edges to content nodes. Written straight through the graph engine, never
 embedded, and invisible to retrieval via the ``InternalDataPoint`` marker.
-Every import the feature's callers need comes from this package, so it has
-one home.
+The write path (``update.py``) is deliberately not re-exported here: it pulls
+in ``tasks.memify``, which imports graph modules that import this package —
+callers reach it directly via ``cognee.modules.user_preferences.update``.
 """
 
-from .constants import (
-    MAX_PREFERENCE_TEXT_CHARS,
-    NEUTRAL_WEIGHT,
-    PREFERENCE_DELETE_THRESHOLD,
-    PREFERENCE_NODE_SET,
-    PREFERENCE_OVERFETCH,
-    PREFERENCE_RENDER_HEADER,
-    PREFERENCE_TURN_COUNTED_KEY,
-    PREFERENCE_WEIGHTS_APPLIED_KEY,
-    PREFERS_RELATIONSHIP,
+from .lookup import (
+    load_active_preference_lines,
+    load_preference_text,
+    load_preference_weights,
+    warm_preference_cache,
 )
-from .lookup import load_active_preferences
 from .models import UserPreference
-from .store import (
-    delete_prefers_edges,
-    load_preference_state,
-    preference_node_id,
-    upsert_preference_node,
-    write_prefers_edges,
-)
-from .update import PreferenceUpdateResult, update_user_preferences
-from .weights import effective_weight, personal_factor
+from .store import preference_node_id
+from .weights import personal_factor
 
 __all__ = [
-    "MAX_PREFERENCE_TEXT_CHARS",
-    "NEUTRAL_WEIGHT",
-    "PREFERENCE_DELETE_THRESHOLD",
-    "PREFERENCE_NODE_SET",
-    "PREFERENCE_OVERFETCH",
-    "PREFERENCE_RENDER_HEADER",
-    "PREFERENCE_TURN_COUNTED_KEY",
-    "PREFERENCE_WEIGHTS_APPLIED_KEY",
-    "PREFERS_RELATIONSHIP",
-    "PreferenceUpdateResult",
     "UserPreference",
-    "delete_prefers_edges",
-    "effective_weight",
-    "load_active_preferences",
-    "load_preference_state",
+    "load_active_preference_lines",
+    "load_preference_text",
+    "load_preference_weights",
     "personal_factor",
     "preference_node_id",
-    "update_user_preferences",
-    "upsert_preference_node",
-    "write_prefers_edges",
+    "warm_preference_cache",
 ]

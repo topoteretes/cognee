@@ -6,7 +6,7 @@ Covers the deterministic pieces only — no graph database, no LLM, no cache:
 - ``effective_weight`` against the plan's decay table (idle 34 halves the
   distance from neutral; idle 173 falls under the delete threshold).
 - ``_run_preference_update`` with a fake session manager and mocked store:
-  rating-3 skip, memify_metadata merge-not-replace, explicit-feedback
+  rating-3 skip, memify_metadata own-keys-only updates, explicit-feedback
   precedence, clock/prune behavior, and the empty no-op case.
 - ``refresh_preference_text`` watermark, cap, and section-filter logic.
 """
@@ -23,6 +23,7 @@ from cognee.infrastructure.session.session_context_models import (
 )
 from cognee.modules.user_preferences.constants import (
     MAX_PREFERENCE_TEXT_CHARS,
+    NEUTRAL_WEIGHT,
     PREFERENCE_DELETE_THRESHOLD,
     PREFERENCE_TURN_COUNTED_KEY,
     PREFERENCE_WEIGHTS_APPLIED_KEY,
@@ -30,6 +31,7 @@ from cognee.modules.user_preferences.constants import (
 from cognee.modules.user_preferences.update import (
     PreferenceUpdateScope,
     _run_preference_update,
+    _truncate_to_whole_lines,
     build_rating_map,
     refresh_preference_text,
     resolve_turn_rating,
@@ -189,6 +191,37 @@ class StoreRecorder:
         self.deletes.append(sorted(target_ids))
 
 
+class FallbackStoreRecorder(StoreRecorder):
+    """StoreRecorder that persists writes across runs and, like backends
+    without ``delete_edge_triples`` (Turso, Neptune), neutralizes pruned
+    edges in place instead of deleting them."""
+
+    async def upsert_preference_node(
+        self, user_id, dataset_id, *, text, turn_counter, text_watermark
+    ):
+        self.node = {"text": text, "turn_counter": turn_counter, "text_watermark": text_watermark}
+        return await super().upsert_preference_node(
+            user_id,
+            dataset_id,
+            text=text,
+            turn_counter=turn_counter,
+            text_watermark=text_watermark,
+        )
+
+    async def write_prefers_edges(self, user_id, dataset_id, weights_by_target, updated_at_turn):
+        for target_id, weight in weights_by_target.items():
+            self.stored[str(target_id)] = {
+                "weight": float(weight),
+                "updated_at_turn": int(updated_at_turn),
+            }
+        await super().write_prefers_edges(user_id, dataset_id, weights_by_target, updated_at_turn)
+
+    async def delete_prefers_edges(self, user_id, dataset_id, target_ids):
+        for target_id in target_ids:
+            self.stored[str(target_id)] = {"weight": NEUTRAL_WEIGHT, "updated_at_turn": 0}
+        await super().delete_prefers_edges(user_id, dataset_id, target_ids)
+
+
 def _scope():
     return PreferenceUpdateScope(
         user=SimpleNamespace(id="user-1"),
@@ -270,7 +303,7 @@ class TestRunPreferenceUpdate:
         assert result.status == "completed"
 
     @pytest.mark.asyncio
-    async def test_memify_metadata_merges_and_keeps_real_bools(self, monkeypatch):
+    async def test_memify_metadata_passes_only_own_keys_as_real_bools(self, monkeypatch):
         session_manager = FakeSessionManager(
             qas_by_session={
                 "s1": [
@@ -291,10 +324,14 @@ class TestRunPreferenceUpdate:
 
         [call] = session_manager.update_qa_calls
         metadata = call["memify_metadata"]
-        # Merge, not replace: the global feedback marker survives.
-        assert metadata["feedback_weights_applied"] is True
-        assert metadata[PREFERENCE_TURN_COUNTED_KEY] is True
-        assert metadata[PREFERENCE_WEIGHTS_APPLIED_KEY] is True
+        # Only this stage's keys are sent: update_qa merges into the stored
+        # dict, and copying the feedback stage's key from a snapshot could
+        # write a stale value over a fresher one written concurrently.
+        assert "feedback_weights_applied" not in metadata
+        assert metadata == {
+            PREFERENCE_TURN_COUNTED_KEY: True,
+            PREFERENCE_WEIGHTS_APPLIED_KEY: True,
+        }
         assert all(isinstance(value, bool) for value in metadata.values())
 
     @pytest.mark.asyncio
@@ -367,6 +404,37 @@ class TestRunPreferenceUpdate:
         assert result.edges_pruned == 1
         assert result.edges_written == 0
         assert len(session_manager.update_qa_calls) == 10
+
+    @pytest.mark.asyncio
+    async def test_neutralized_edge_is_not_re_pruned_on_the_next_run(self, monkeypatch):
+        # On backends without delete_edge_triples a pruned edge is rewritten
+        # as exactly neutral. That tombstone must not be collected again: a
+        # second run over new turns writes nothing and counts nothing.
+        store = FallbackStoreRecorder(
+            node={"turn_counter": 5, "text": "", "text_watermark": ""},
+            stored={"n-old": {"weight": 0.505, "updated_at_turn": 0}},
+        )
+
+        first_manager = FakeSessionManager(
+            qas_by_session={"s1": [_qa(f"qa-{i}", f"t{i}") for i in range(10)]}
+        )
+        _wire(monkeypatch, first_manager, store)
+        first = await _run_preference_update(_scope(), ["s1"])
+
+        assert first.edges_pruned == 1
+        assert store.deletes == [["n-old"]]
+        # The fallback left the row behind, rewritten as exactly neutral.
+        assert store.stored["n-old"] == {"weight": NEUTRAL_WEIGHT, "updated_at_turn": 0}
+
+        second_manager = FakeSessionManager(qas_by_session={"s2": [_qa("qa-new", "t99")]})
+        _wire(monkeypatch, second_manager, store)
+        second = await _run_preference_update(_scope(), ["s2"])
+
+        # The clock moved again, but the tombstone is skipped: no new delete
+        # (which the fallback would turn into another rewrite) and no edges.
+        assert second.edges_pruned == 0
+        assert store.deletes == [["n-old"]]
+        assert store.edge_writes == []
 
     @pytest.mark.asyncio
     async def test_strong_edge_survives_the_prune_pass(self, monkeypatch):
@@ -493,9 +561,26 @@ class TestRefreshPreferenceText:
         assert (text2, watermark2, added2) == (text, watermark, 0)
 
     def test_cap_drops_the_oldest_lines(self):
-        old_text = "z" * MAX_PREFERENCE_TEXT_CHARS
+        # Enough old whole lines to overflow the cap once a new line lands.
+        old_lines = ["old line %03d" % index for index in range(200)]
+        old_text = "\n".join(old_lines)
+        assert len(old_text) > MAX_PREFERENCE_TEXT_CHARS - len("newest line\n")
         entries = [_context_entry("e1", "newest line", "2026-01-05T00:00:00")]
         text, watermark, added = refresh_preference_text(old_text, "", entries)
-        assert len(text) == MAX_PREFERENCE_TEXT_CHARS
+        assert len(text) <= MAX_PREFERENCE_TEXT_CHARS
         assert text.startswith("newest line\n")
         assert added == 1
+        # Whole lines only: the cut never leaves half an instruction behind.
+        kept_lines = text.splitlines()
+        assert kept_lines[0] == "newest line"
+        assert all(line in old_lines for line in kept_lines[1:])
+        # The oldest lines are the ones that faded.
+        assert kept_lines[1:] == old_lines[: len(kept_lines) - 1]
+
+    def test_single_over_length_line_still_yields_text(self):
+        # Entry content is capped upstream (MAX_CONTEXT_CONTENT_CHARS), so the
+        # degenerate case is driven on the helper directly: one line longer
+        # than the cap must fall back to a plain slice, not blank the node.
+        long_line = "x" * (MAX_PREFERENCE_TEXT_CHARS + 100)
+        truncated = _truncate_to_whole_lines(long_line, MAX_PREFERENCE_TEXT_CHARS)
+        assert truncated == "x" * MAX_PREFERENCE_TEXT_CHARS

@@ -35,10 +35,10 @@ from cognee.infrastructure.session.session_context_builder import coerce_active_
 from cognee.infrastructure.session.session_context_models import (
     ContextSection,
     SessionContextEntry,
+    is_context_entry_usable,
 )
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.models import Dataset
-from cognee.modules.session_distillation.models import MIN_GATE_CONFIDENCE
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -159,6 +159,20 @@ def extract_node_ids(used_graph_element_ids: Any) -> List[str]:
     return sorted({value for value in values if isinstance(value, str) and value})
 
 
+def _truncate_to_whole_lines(text: str, max_chars: int) -> str:
+    """Cap ``text`` at ``max_chars`` without ever cutting a line mid-sentence.
+
+    Drops whole trailing lines until the text fits; a half instruction is worse
+    than a missing one. Falls back to a plain slice only in the degenerate case
+    of a single line longer than the cap.
+    """
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    cut = truncated.rfind("\n")
+    return truncated[:cut] if cut != -1 else truncated
+
+
 def refresh_preference_text(
     existing_text: str,
     text_watermark: str,
@@ -170,7 +184,8 @@ def refresh_preference_text(
     user states three times is three pieces of evidence. Idempotency comes from
     the watermark (row identity, not content): only entries strictly newer than
     it are folded, newest first, and the whole string is then truncated to
-    ``MAX_PREFERENCE_TEXT_CHARS`` so the oldest lines are the ones that fade.
+    ``MAX_PREFERENCE_TEXT_CHARS`` on line boundaries so the oldest lines are
+    the ones that fade, and never as half a sentence.
 
     Only the ``preferences`` section is used: ``goals`` is session-scoped,
     ``lessons_learned`` is promoted into the graph by distillation, and
@@ -180,8 +195,7 @@ def refresh_preference_text(
         entry
         for entry in context_entries
         if entry.section == ContextSection.PREFERENCES.value
-        and entry.harmful_count == 0
-        and entry.confidence >= MIN_GATE_CONFIDENCE
+        and is_context_entry_usable(entry)
         and (entry.created_at or "") > text_watermark
     ]
     if not gated:
@@ -193,7 +207,7 @@ def refresh_preference_text(
     combined = "\n".join(new_lines)
     if existing_text:
         combined = combined + "\n" + existing_text
-    combined = combined[:MAX_PREFERENCE_TEXT_CHARS]
+    combined = _truncate_to_whole_lines(combined, MAX_PREFERENCE_TEXT_CHARS)
 
     new_watermark = max(entry.created_at for entry in gated)
     return combined, new_watermark, len(new_lines)
@@ -349,10 +363,15 @@ async def _run_preference_update(
             if write_ok
             else {target_id: dict(props) for target_id, props in stored.items()}
         )
+        # Rows already at exactly neutral are skipped: on backends without
+        # delete_edge_triples the prune fallback rewrites an edge as neutral
+        # instead of deleting it, and re-collecting that tombstone here would
+        # rewrite it (and count it in edges_pruned) on every later run.
         prune_ids = [
             target_id
             for target_id, state in state_for_prune.items()
-            if abs(
+            if state.get("weight", NEUTRAL_WEIGHT) != NEUTRAL_WEIGHT
+            and abs(
                 effective_weight(
                     state.get("weight", NEUTRAL_WEIGHT),
                     state.get("updated_at_turn", 0),
@@ -367,24 +386,21 @@ async def _run_preference_update(
             await delete_prefers_edges(scope.user_id, scope.dataset_id, prune_ids)
             edges_pruned = len(prune_ids)
 
-    # Step 5: mark processed. update_qa REPLACES the metadata dict, so merge
-    # into the existing one; both values are real bools (the field validates as
-    # Dict[str, bool]); and the applied key records the actual outcome, not a
-    # hard True — the skip guard is `is True`, so False gives a free retry.
+    # Step 5: mark processed. update_qa MERGES the metadata dict into the
+    # stored one (the cache adapters overlay keys), so pass ONLY this stage's
+    # keys — copying the whole row snapshot could write another stage's stale
+    # value over a fresher one. Both values are real bools (the field validates
+    # as Dict[str, bool]); and the applied key records the actual outcome, not
+    # a hard True — the skip guard is `is True`, so False gives a free retry.
     metadata_updates: Dict[Tuple[str, str], dict] = {}
     for session_id, row in new_turns:
-        key = (session_id, row["qa_id"])
-        metadata_updates[key] = {**_qa_metadata(row), PREFERENCE_TURN_COUNTED_KEY: True}
+        metadata_updates[(session_id, row["qa_id"])] = {PREFERENCE_TURN_COUNTED_KEY: True}
     for session_id, row in applied_turns:
-        key = (session_id, row["qa_id"])
-        metadata = metadata_updates.get(key, dict(_qa_metadata(row)))
+        metadata = metadata_updates.setdefault((session_id, row["qa_id"]), {})
         metadata[PREFERENCE_WEIGHTS_APPLIED_KEY] = bool(write_ok)
-        metadata_updates[key] = metadata
     for session_id, row in unapplied_turns:
-        key = (session_id, row["qa_id"])
-        metadata = metadata_updates.get(key, dict(_qa_metadata(row)))
+        metadata = metadata_updates.setdefault((session_id, row["qa_id"]), {})
         metadata[PREFERENCE_WEIGHTS_APPLIED_KEY] = False
-        metadata_updates[key] = metadata
 
     for (session_id, qa_id), metadata in metadata_updates.items():
         await session_manager.update_qa(
@@ -414,7 +430,16 @@ async def update_user_preferences(
 
     Re-running is safe: each turn is counted once and its rating spent once
     (``memify_metadata`` markers), and each text row is folded once (watermark).
+
+    Gated on ``PERSONALIZATION_ENABLED`` here — the top of the writing path —
+    so every caller is covered: with the flag off (the default) nothing is
+    written anywhere (no preference node, no ``prefers`` edges, no
+    ``memify_metadata`` keys) and a default deployment stays byte-identical
+    to today.
     """
+    if not get_base_config().personalization_enabled:
+        return PreferenceUpdateResult(status="personalization_disabled")
+
     if not session_ids:
         return PreferenceUpdateResult(status="no_changes")
 

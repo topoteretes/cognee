@@ -14,8 +14,8 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
 from cognee.base_config import get_base_config
 from cognee.modules.user_preferences import (
-    PREFERENCE_OVERFETCH,
-    load_active_preferences,
+    load_preference_text,
+    load_preference_weights,
     personal_factor,
 )
 
@@ -51,6 +51,35 @@ def _stable_sort_by_personal_distance(
     return sorted(found_chunks, key=personalized_distance)
 
 
+async def _weights_matching_collection(
+    vector_engine: Any, weights: Dict[str, float], collection_name: str = "DocumentChunk_text"
+) -> Dict[str, float]:
+    """Keep only the prefers weights whose key is a row in this collection.
+
+    Weight keys span every rated node — graph entities included — but only
+    chunk ids can ever match a ``DocumentChunk_text`` result, so weights that
+    point elsewhere must not trigger the wide fetch: the extra work would be
+    guaranteed to change nothing. One id-lookup ``retrieve`` answers the
+    question; on any error it fails open by returning the weights unfiltered,
+    so a broken lookup costs a wider search, never a lost personalization.
+    """
+    try:
+        rows = await vector_engine.retrieve(collection_name, list(weights))
+    except Exception as error:
+        logger.debug("Preference weight collection check failed open: %s", error)
+        return weights
+
+    present = set()
+    for row in rows:
+        payload = getattr(row, "payload", None)
+        if isinstance(payload, dict) and payload.get("id") is not None:
+            present.add(str(payload["id"]))
+        row_id = getattr(row, "id", None)
+        if row_id is not None:
+            present.add(str(row_id))
+    return {key: weight for key, weight in weights.items() if key in present}
+
+
 class CompletionRetriever(BaseRetriever):
     """
     Retriever for handling LLM-based completion searches.
@@ -67,11 +96,13 @@ class CompletionRetriever(BaseRetriever):
         include_references: bool = False,
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
+        wide_search_top_k: Optional[int] = 100,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
+        self.wide_search_top_k = wide_search_top_k
         self.system_prompt = system_prompt
         self.session_id = session_id
         self.response_model = response_model
@@ -83,12 +114,16 @@ class CompletionRetriever(BaseRetriever):
         vector_engine = await get_vector_engine_async()
 
         # Loaded before the search because it decides the limit: with prefers
-        # weights present we over-fetch so personalization can change which
-        # chunks make the cut, not just their order. Flag off or no node
-        # returns ("", {}), keeping limit=top_k and no re-sort — byte-identical
-        # to the un-personalized path.
-        _preference_text, weights = await load_active_preferences()
-        limit = self.top_k * PREFERENCE_OVERFETCH if weights else self.top_k
+        # weights that can match this collection we widen the fetch to
+        # wide_search_top_k — the one knob the search path already owns for
+        # "how many candidates before trimming" — so personalization can change
+        # which chunks make the cut, not just their order. Flag off, no node,
+        # or weights that only point at graph entities keep limit=top_k and no
+        # re-sort — byte-identical to the un-personalized path.
+        weights = await load_preference_weights()
+        if weights:
+            weights = await _weights_matching_collection(vector_engine, weights)
+        limit = max(self.top_k, self.wide_search_top_k or 0) if weights else self.top_k
 
         try:
             found_chunks = await vector_engine.search(
@@ -168,11 +203,15 @@ class CompletionRetriever(BaseRetriever):
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
         # Sessionless guidance site: preference text rides the guidance channel
-        # (conversation_history), never context. The lookup is memoized, so this
-        # shares the get_retrieved_objects read. Empty text is falsy and leaves
-        # the system prompt untouched. The session path never reaches this
-        # method, so it cannot collide with compose_session_prompt's layer.
-        preference_text, _weights = await load_active_preferences()
+        # (conversation_history), never context. The lookup is memoized per
+        # context; this sessionless path runs retrieval and completion in one
+        # context, so this reuses the get_retrieved_objects read. (Across a
+        # task fan-out that sharing needs warm_preference_cache in the parent
+        # — the ContextVar does not propagate out of gather lanes.) Empty text
+        # is falsy and leaves the system prompt untouched. The session path
+        # never reaches this method, so it cannot collide with the session
+        # guidance block, which owns preference rendering on that path.
+        preference_text = await load_preference_text()
         completion = await generate_completion(
             query=query, conversation_history=preference_text, **kwargs
         )

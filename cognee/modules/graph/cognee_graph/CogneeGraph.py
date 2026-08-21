@@ -11,6 +11,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 from cognee.infrastructure.engine import is_internal_node
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.modules.user_preferences.weights import personal_factor
 from cognee.base_config import get_base_config
 import heapq
 
@@ -420,10 +421,6 @@ class CogneeGraph(CogneeAbstractGraph):
         feedback_influence: Optional[float] = None,
     ) -> List[Edge]:
         """Calculate top k triplet importances for a specific query index."""
-        # Imported lazily: the user_preferences package pulls in tasks/memify,
-        # which imports this module back — a top-level import would be circular.
-        from cognee.modules.user_preferences.weights import personal_factor
-
         active_feedback_influence = (
             self.feedback_influence if feedback_influence is None else feedback_influence
         )

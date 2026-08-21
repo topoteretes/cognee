@@ -46,6 +46,24 @@ class BaseConfig(BaseSettings):
     personalization_influence: float = float(os.getenv("PERSONALIZATION_INFLUENCE", "0.3"))
 
     @pydantic.model_validator(mode="after")
+    def validate_personalization_knobs(self):
+        # A startup error beats a silent runtime no-op. An out-of-range alpha
+        # would raise inside the preference stage's fail-open catch-all and
+        # silently stop learning; an influence above 1 turns the ranking
+        # factor negative (inverting order among liked items); a beta at 1 or
+        # above flips or kills the decay and a negative one grows weights
+        # without limit.
+        if not 0.0 < self.preference_alpha <= 1.0:
+            raise ValueError(f"PREFERENCE_ALPHA must be in (0, 1], got {self.preference_alpha}")
+        if not 0.0 <= self.preference_beta < 1.0:
+            raise ValueError(f"PREFERENCE_BETA must be in [0, 1), got {self.preference_beta}")
+        if not 0.0 <= self.personalization_influence <= 1.0:
+            raise ValueError(
+                f"PERSONALIZATION_INFLUENCE must be in [0, 1], got {self.personalization_influence}"
+            )
+        return self
+
+    @pydantic.model_validator(mode="after")
     def validate_paths(self):
         # Adding this here temporarily to ensure that the cache root directory is set correctly for S3 storage automatically
         # I'll remove this after we update documentation for S3 storage

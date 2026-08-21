@@ -4,6 +4,7 @@ from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
     CandidateContextUpdateVariant,
     ServedContextRating,
+    coerce_rating_or_none,
 )
 
 
@@ -44,15 +45,7 @@ class SessionTurnAnalysis(BaseModel):
     def rating_in_range_or_none(cls, value):
         """Coerce anything outside 1-5 to None, so a malformed value degrades to
         "no signal" rather than raising (non-blocking contract)."""
-        if value is None or isinstance(value, bool):
-            return None
-        if isinstance(value, float) and not value.is_integer():
-            return None
-        try:
-            rating = int(value)
-        except (TypeError, ValueError):
-            return None
-        return rating if 1 <= rating <= 5 else None
+        return coerce_rating_or_none(value)
 
     @field_validator("response_to_user", "query_to_answer")
     @classmethod

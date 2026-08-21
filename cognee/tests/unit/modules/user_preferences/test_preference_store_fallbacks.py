@@ -9,6 +9,9 @@ lack them:
 - ``delete_prefers_edges`` neutralizes the edges via ``add_edges`` when
   ``delete_edge_triples`` raises ``UnsupportedProvenanceCapability`` (or
   ``NotImplementedError``).
+
+Plus the read side: ``load_preference_state`` traverses only ``prefers``
+edges (cheap read) and still returns a node that has no such edges.
 """
 
 import pytest
@@ -21,6 +24,7 @@ from cognee.modules.user_preferences.constants import (
 )
 from cognee.modules.user_preferences.store import (
     delete_prefers_edges,
+    load_preference_state,
     preference_node_id,
     upsert_preference_node,
 )
@@ -58,6 +62,65 @@ def _wire(monkeypatch, engine):
         return engine
 
     monkeypatch.setattr(store_module, "get_graph_engine", fake_get_graph_engine)
+
+
+class TestLoadPreferenceState:
+    class _NeighborhoodEngine:
+        def __init__(self, nodes, edges):
+            self.nodes = nodes
+            self.edges = edges
+            self.calls = []
+
+        async def get_neighborhood(self, node_ids, depth=1, edge_types=None):
+            self.calls.append({"node_ids": node_ids, "depth": depth, "edge_types": edge_types})
+            return self.nodes, self.edges
+
+    @pytest.mark.asyncio
+    async def test_read_traverses_only_prefers_edges(self, monkeypatch):
+        # The read must stay cheap: an unfiltered depth-1 neighborhood drags in
+        # every neighbour with all its properties (full liked-chunk texts, the
+        # NodeSet and through it every other preference node) just to pull two
+        # numbers off each edge.
+        pref_id = str(preference_node_id("user-1", "ds-1"))
+        engine = self._NeighborhoodEngine(
+            nodes=[(pref_id, {"text": "likes graphs", "turn_counter": 2})],
+            edges=[
+                (
+                    pref_id,
+                    "chunk-1",
+                    PREFERS_RELATIONSHIP,
+                    {"weight": 0.8, "updated_at_turn": 2},
+                ),
+                # Edges between collected nodes still come back unfiltered;
+                # only prefers edges out of the seed may land in the result.
+                ("chunk-1", "chunk-2", "related_to", {"weight": 0.9}),
+            ],
+        )
+        _wire(monkeypatch, engine)
+
+        node, stored = await load_preference_state("user-1", "ds-1")
+
+        assert engine.calls == [
+            {"node_ids": [pref_id], "depth": 1, "edge_types": [PREFERS_RELATIONSHIP]}
+        ]
+        assert node == {"text": "likes graphs", "turn_counter": 2}
+        assert stored == {"chunk-1": {"weight": 0.8, "updated_at_turn": 2}}
+
+    @pytest.mark.asyncio
+    async def test_node_with_no_prefers_edges_still_reads_back(self, monkeypatch):
+        # Adapters return seed nodes even when the edge filter matches nothing,
+        # so a preference node holding only stated text must not read as absent.
+        pref_id = str(preference_node_id("user-1", "ds-1"))
+        engine = self._NeighborhoodEngine(
+            nodes=[(pref_id, {"text": "prefers concise answers", "turn_counter": 0})],
+            edges=[],
+        )
+        _wire(monkeypatch, engine)
+
+        node, stored = await load_preference_state("user-1", "ds-1")
+
+        assert node == {"text": "prefers concise answers", "turn_counter": 0}
+        assert stored == {}
 
 
 class TestUpsertPreferenceNodeFallback:

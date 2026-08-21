@@ -624,7 +624,10 @@ class SessionManager:
 
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
-        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and bool values.
+        memify_metadata: Optional dict with status keys (e.g. "feedback_weights_applied") and
+            bool values. Merged key-by-key into the stored metadata (cache adapters overlay
+            ``{**existing, **incoming}``), so callers must pass ONLY the keys they own —
+            copying another writer's keys from a snapshot can overwrite a fresher value.
         used_graph_element_ids: Optional dict with "node_ids" and "edge_ids" lists for frequency weights.
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
         """

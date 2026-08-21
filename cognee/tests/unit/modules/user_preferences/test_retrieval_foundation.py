@@ -3,13 +3,17 @@
 Covers the deterministic pieces only — no graph database, no LLM, no cache:
 - ``personal_factor``: exact no-op at neutral weight and at zero influence in
   both spaces, and opposite movement across the two spaces.
-- ``load_active_preferences``: flag-off short-circuit without touching the
-  graph, fail-open on errors, render-header handling, decay applied on read
-  (callers never see the stored weight), and ContextVar memoization.
-- ``compose_session_prompt``: layer ordering with preference text, and
-  byte-identical output when the preference text is empty.
+- ``load_preference_text`` / ``load_preference_weights``: flag-off
+  short-circuit without touching the graph, fail-open on errors,
+  render-header handling, decay applied on read (callers never see the
+  stored weight), and ContextVar memoization shared across both views.
+- ``load_active_preference_lines``: raw newest-first lines for the session
+  guidance block, with no render header.
+- ``compose_session_prompt``: the guidance block is the only guidance layer —
+  preference lines have no separate layer of their own.
 """
 
+import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -19,7 +23,12 @@ import cognee.modules.user_preferences.lookup as lookup_module
 from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.session.session_turn import compose_session_prompt
 from cognee.modules.user_preferences.constants import PREFERENCE_RENDER_HEADER
-from cognee.modules.user_preferences.lookup import load_active_preferences
+from cognee.modules.user_preferences.lookup import (
+    load_active_preference_lines,
+    load_preference_text,
+    load_preference_weights,
+    warm_preference_cache,
+)
 from cognee.modules.user_preferences.weights import effective_weight, personal_factor
 
 BETA = 0.02
@@ -91,7 +100,7 @@ def _patch_state(monkeypatch, node, stored):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("clear_lookup_cache")
-class TestLoadActivePreferences:
+class TestPreferenceLookup:
     async def test_flag_off_returns_empty_without_touching_the_graph(
         self, monkeypatch, identity_in_context
     ):
@@ -102,7 +111,8 @@ class TestLoadActivePreferences:
 
         monkeypatch.setattr(lookup_module, "load_preference_state", must_not_be_called)
 
-        assert await load_active_preferences() == ("", {})
+        assert await load_preference_text() == ""
+        assert await load_preference_weights() == {}
 
     async def test_missing_identity_returns_empty(self, monkeypatch):
         _patch_config(monkeypatch, enabled=True)
@@ -110,7 +120,8 @@ class TestLoadActivePreferences:
         user_token = session_user.set(None)
         dataset_token = current_dataset_id.set(None)
         try:
-            assert await load_active_preferences() == ("", {})
+            assert await load_preference_text() == ""
+            assert await load_preference_weights() == {}
             assert calls == []
         finally:
             session_user.reset(user_token)
@@ -119,7 +130,8 @@ class TestLoadActivePreferences:
     async def test_no_node_returns_empty(self, monkeypatch, identity_in_context):
         _patch_config(monkeypatch, enabled=True)
         _patch_state(monkeypatch, None, {})
-        assert await load_active_preferences() == ("", {})
+        assert await load_preference_text() == ""
+        assert await load_preference_weights() == {}
 
     async def test_fails_open_when_the_read_raises(self, monkeypatch, identity_in_context):
         _patch_config(monkeypatch, enabled=True)
@@ -128,7 +140,8 @@ class TestLoadActivePreferences:
             raise RuntimeError("graph is down")
 
         monkeypatch.setattr(lookup_module, "load_preference_state", broken)
-        assert await load_active_preferences() == ("", {})
+        assert await load_preference_text() == ""
+        assert await load_preference_weights() == {}
 
     async def test_header_prepended_only_when_text_is_non_empty(
         self, monkeypatch, identity_in_context
@@ -139,17 +152,17 @@ class TestLoadActivePreferences:
             {"text": "prefers concise answers", "turn_counter": 0},
             {},
         )
-        text, weights = await load_active_preferences()
-        assert text == PREFERENCE_RENDER_HEADER + "\nprefers concise answers"
-        assert weights == {}
+        assert await load_preference_text() == (
+            PREFERENCE_RENDER_HEADER + "\nprefers concise answers"
+        )
+        assert await load_preference_weights() == {}
 
     async def test_empty_text_returns_empty_string_with_no_stray_header(
         self, monkeypatch, identity_in_context
     ):
         _patch_config(monkeypatch, enabled=True)
         _patch_state(monkeypatch, {"text": "", "turn_counter": 3}, {"n1": {"weight": 0.9}})
-        text, _weights = await load_active_preferences()
-        assert text == ""
+        assert await load_preference_text() == ""
 
     async def test_weights_are_decayed_never_stored(self, monkeypatch, identity_in_context):
         # Demo 7: a stored weight of 0.9 with updated_at_turn well behind the
@@ -160,7 +173,7 @@ class TestLoadActivePreferences:
             {"text": "", "turn_counter": 40},
             {"node-1": {"weight": 0.9, "updated_at_turn": 6}},
         )
-        _text, weights = await load_active_preferences()
+        weights = await load_preference_weights()
         expected = effective_weight(0.9, 6, 40, BETA)
         assert weights == {"node-1": expected}
         assert weights["node-1"] != 0.9
@@ -173,46 +186,103 @@ class TestLoadActivePreferences:
             {"text": "", "turn_counter": 7},
             {"node-1": {"weight": 0.8, "updated_at_turn": 7}},
         )
-        _text, weights = await load_active_preferences()
+        weights = await load_preference_weights()
         assert weights == {"node-1": 0.8}
 
-    async def test_memoized_per_user_and_dataset(self, monkeypatch, identity_in_context):
+    async def test_memoized_across_both_views(self, monkeypatch, identity_in_context):
+        # The text and weight views share one cached graph read.
         _patch_config(monkeypatch, enabled=True)
         calls = _patch_state(
             monkeypatch,
             {"text": "prefers X", "turn_counter": 1},
             {"node-1": {"weight": 0.7, "updated_at_turn": 1}},
         )
-        first = await load_active_preferences()
-        second = await load_active_preferences()
+        first = (await load_preference_text(), await load_preference_weights())
+        second = (await load_preference_text(), await load_preference_weights())
         assert first == second
         assert len(calls) == 1
+
+    async def test_gather_lanes_do_not_share_an_unwarmed_cache(
+        self, monkeypatch, identity_in_context
+    ):
+        # The ContextVar caveat the warm call exists for: each gather lane
+        # runs in a task with a *copy* of the parent context, so a read
+        # memoized inside one lane is invisible to its sibling and parent.
+        _patch_config(monkeypatch, enabled=True)
+        calls = _patch_state(monkeypatch, {"text": "prefers X", "turn_counter": 1}, {})
+
+        await asyncio.gather(load_preference_weights(), load_preference_weights())
+        await load_preference_text()
+
+        assert len(calls) == 3
+
+    async def test_warming_before_the_gather_shares_one_read(
+        self, monkeypatch, identity_in_context
+    ):
+        # warm_preference_cache in the parent context is inherited by every
+        # lane copy and stays visible for the completion-side read after.
+        _patch_config(monkeypatch, enabled=True)
+        calls = _patch_state(monkeypatch, {"text": "prefers X", "turn_counter": 1}, {})
+
+        await warm_preference_cache()
+        await asyncio.gather(load_preference_weights(), load_preference_weights())
+        await load_preference_text()
+
+        assert len(calls) == 1
+
+    async def test_warm_is_a_noop_with_the_flag_off(self, monkeypatch, identity_in_context):
+        _patch_config(monkeypatch, enabled=False)
+
+        async def must_not_be_called(user_id, dataset_id):
+            raise AssertionError("graph read must not happen with the flag off")
+
+        monkeypatch.setattr(lookup_module, "load_preference_state", must_not_be_called)
+
+        await warm_preference_cache()
 
     async def test_cache_misses_on_a_different_dataset(self, monkeypatch, identity_in_context):
         _patch_config(monkeypatch, enabled=True)
         calls = _patch_state(monkeypatch, {"text": "", "turn_counter": 0}, {})
-        await load_active_preferences()
+        await load_preference_weights()
         dataset_token = current_dataset_id.set(uuid4())
         try:
-            await load_active_preferences()
+            await load_preference_weights()
         finally:
             current_dataset_id.reset(dataset_token)
         assert len(calls) == 2
 
 
-class TestComposeSessionPromptPreferenceLayer:
-    def test_preference_text_layers_ahead_of_active_context(self):
-        result = compose_session_prompt("BLOCK", "HISTORY", "PREFS")
-        assert result == "PREFS\n\nBLOCK\n\nHISTORY"
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("clear_lookup_cache")
+class TestLoadActivePreferenceLines:
+    async def test_lines_are_raw_newest_first_without_the_render_header(
+        self, monkeypatch, identity_in_context
+    ):
+        _patch_config(monkeypatch, enabled=True)
+        _patch_state(
+            monkeypatch,
+            {"text": "newest line\n\nolder line", "turn_counter": 0},
+            {},
+        )
+        lines = await load_active_preference_lines()
+        assert lines == ["newest line", "older line"]
+        assert PREFERENCE_RENDER_HEADER not in "\n".join(lines)
 
-    def test_preference_text_without_active_context(self):
-        assert compose_session_prompt("", "HISTORY", "PREFS") == "PREFS\n\nHISTORY"
+    async def test_flag_off_returns_no_lines(self, monkeypatch, identity_in_context):
+        _patch_config(monkeypatch, enabled=False)
+        assert await load_active_preference_lines() == []
 
-    def test_empty_preference_text_is_byte_identical_to_two_arg_call(self):
-        for block, history in [("BLOCK", "HISTORY"), ("", "HISTORY"), ("BLOCK", ""), ("", "")]:
-            assert compose_session_prompt(block, history, "") == compose_session_prompt(
-                block, history
-            )
+    async def test_no_node_returns_no_lines(self, monkeypatch, identity_in_context):
+        _patch_config(monkeypatch, enabled=True)
+        _patch_state(monkeypatch, None, {})
+        assert await load_active_preference_lines() == []
 
-    def test_default_is_empty(self):
+
+class TestComposeSessionPromptHasNoPreferenceLayer:
+    def test_guidance_block_is_the_only_guidance_layer(self):
+        # Preference lines live inside the guidance block (the builder owns
+        # rendering and sizing); compose only layers block ahead of history.
         assert compose_session_prompt("BLOCK", "HISTORY") == "BLOCK\n\nHISTORY"
+
+    def test_empty_block_leaves_history_untouched(self):
+        assert compose_session_prompt("", "HISTORY") == "HISTORY"

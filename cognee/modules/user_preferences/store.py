@@ -51,7 +51,14 @@ async def load_preference_state(
     graph_engine = await get_graph_engine()
 
     pref_id = str(preference_node_id(user_id, dataset_id))
-    nodes, edges = await graph_engine.get_neighborhood([pref_id], depth=1)
+    # edge_types keeps the read cheap: only ``prefers`` edges are traversed, so
+    # the result carries the preferred targets instead of every neighbour (the
+    # NodeSet, and via it every other preference node) with all its properties.
+    # Seed nodes are returned by every in-tree adapter even when no edge
+    # matches, so a node with text but no prefers edges still reads back.
+    nodes, edges = await graph_engine.get_neighborhood(
+        [pref_id], depth=1, edge_types=[PREFERS_RELATIONSHIP]
+    )
 
     node = next((props for nid, props in nodes if str(nid) == pref_id), None)
     if node is None:
@@ -62,9 +69,10 @@ async def load_preference_state(
             "weight": props.get("weight", NEUTRAL_WEIGHT),
             "updated_at_turn": props.get("updated_at_turn", 0),
         }
-        # get_neighborhood returns every edge *between collected nodes*, not only
-        # edges touching the seed — two preferred chunks linked to each other
-        # land here too.
+        # edge_types constrains *traversal*, not the returned edge list:
+        # get_neighborhood still returns every edge *between collected nodes*,
+        # so two preferred chunks linked to each other land here too — hence
+        # the source/relationship filter below stays.
         for source_id, target_id, rel, props in edges or []
         if str(source_id) == pref_id and rel == PREFERS_RELATIONSHIP
     }
@@ -186,7 +194,8 @@ async def delete_prefers_edges(user_id: str, dataset_id: str, target_ids: Iterab
     ``updated_at_turn == 0``. A neutral edge carries no ranking signal (its
     personal factor is 1.0) and decay keeps it at neutral forever, so the
     fallback preserves every observable behavior except the bounded-edge-count
-    guarantee — the row itself lingers.
+    guarantee — the row itself lingers. The prune pass skips rows already at
+    exactly neutral, so this tombstone is written once, not on every run.
     """
     targets = [str(target_id) for target_id in target_ids]
     if not targets:

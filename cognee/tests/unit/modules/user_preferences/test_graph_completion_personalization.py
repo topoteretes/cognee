@@ -23,10 +23,16 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 
 
 def _patch_lookup(monkeypatch, result: Tuple[str, Dict[str, float]]):
-    async def fake_load_active_preferences():
-        return result
+    text, weights = result
 
-    monkeypatch.setattr(retriever_module, "load_active_preferences", fake_load_active_preferences)
+    async def fake_load_preference_text():
+        return text
+
+    async def fake_load_preference_weights():
+        return weights
+
+    monkeypatch.setattr(retriever_module, "load_preference_text", fake_load_preference_text)
+    monkeypatch.setattr(retriever_module, "load_preference_weights", fake_load_preference_weights)
 
 
 @pytest.mark.asyncio
