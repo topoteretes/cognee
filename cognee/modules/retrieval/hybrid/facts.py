@@ -34,6 +34,47 @@ def edge_rank_by_id(edge_hits: list[Any]) -> dict[str, int]:
     return ranks
 
 
+def resolve_facts_top_k(
+    entities: list,
+    *,
+    node_scoped: bool,
+    facts_top_k: int,
+    entity_edge_budget: int,
+) -> int:
+    """When the entity lane is empty and unscoped, spend its edge budget on facts.
+
+    NodeSet-scoped searches stay at ``facts_top_k`` so unscoped EdgeType hits
+    cannot leak in when there are no scoped entities to pin them to.
+    """
+    if entities or node_scoped:
+        return facts_top_k
+    return entity_edge_budget
+
+
+def select_facts_for_entities(
+    edge_hits: list,
+    entities: list[dict],
+    reachable_edge_type_ids: set[str],
+    facts_top_k: int,
+    node_scoped: bool,
+) -> list[dict]:
+    if facts_top_k <= 0:
+        return []
+
+    bullet_ids = {
+        edge["edge_type_id"]
+        for entity in entities
+        for edge in entity.get("edges", [])
+        if edge.get("edge_type_id")
+    }
+    candidates = edge_hits
+    if node_scoped:
+        # EdgeType rows carry no node-set membership, so a scoped search keeps only the
+        # facts whose text is actually expressed by an edge on a scoped entity.
+        candidates = [hit for hit in edge_hits if result_id(hit) in reachable_edge_type_ids]
+    return select_facts(candidates, bullet_ids, facts_top_k)
+
+
 def select_facts(edge_hits: list[Any], exclude_ids: set[str], facts_top_k: int) -> list[dict]:
     facts = []
     used_ids = set(exclude_ids)

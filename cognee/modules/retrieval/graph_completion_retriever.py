@@ -71,11 +71,13 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
         self.top_k = top_k if top_k is not None else 5
-        self.wide_search_top_k = wide_search_top_k
+        self.wide_search_top_k = 100 if wide_search_top_k is None else wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
-        self.triplet_distance_penalty = triplet_distance_penalty
+        self.triplet_distance_penalty = (
+            6.5 if triplet_distance_penalty is None else triplet_distance_penalty
+        )
         self.feedback_influence = feedback_influence
         # session_id (Optional[str]): Identifier for managing conversation history.
         self.session_id = session_id

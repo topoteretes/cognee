@@ -21,13 +21,12 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default preserved as GRAPH_COMPLETION for backward compatibility
-    # with existing HTTP clients. Pass ``search_type: null`` explicitly
+    # Default is HYBRID_COMPLETION. Pass ``search_type: null`` explicitly
     # to opt into auto-routing (the new ``cognee.recall`` default).
     search_type: Optional[SearchType] = Field(
-        default=SearchType.GRAPH_COMPLETION,
+        default=SearchType.HYBRID_COMPLETION,
         description=(
-            "Search strategy, e.g. GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS, SUMMARIES. "
+            "Search strategy, e.g. HYBRID_COMPLETION, GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS. "
             "Pass null to let cognee auto-route the query to the best strategy."
         ),
     )
@@ -168,7 +167,7 @@ def get_recall_router() -> APIRouter:
         topK); both camelCase and snake_case are accepted.
 
         - **search_type** (Optional[SearchType]): Type of search to perform
-          (default: GRAPH_COMPLETION). Pass null to enable automatic query routing.
+          (default: HYBRID_COMPLETION). Pass null to enable automatic query routing.
         - **datasets** (Optional[List[str]]): Dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
           take precedence over dataset names when both are provided

@@ -346,11 +346,14 @@ async def recall(
     system_prompt_path: str = "answer_simple_question.txt",
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
+    # only_context / verbose inspect retriever-specific shapes. Pin query_type:
+    # unspecified hybrid may defer to GRAPH_COMPLETION, and search history
+    # still records the type recall chose, not the deferred one.
     only_context: bool = False,
     session_id: str | None = None,
     context_profile: str = "qa",
-    wide_search_top_k: int | None = 100,
-    triplet_distance_penalty: float | None = 6.5,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
@@ -378,7 +381,7 @@ async def recall(
     When ``query_type`` is omitted and ``auto_route`` is True (default),
     a lightweight rule-based classifier picks the best search strategy.
     Set ``auto_route=False`` to skip the classifier and use
-    GRAPH_COMPLETION as the default, or pass ``query_type`` explicitly.
+    HYBRID_COMPLETION as the default, or pass ``query_type`` explicitly.
 
     Args:
         query_text: Natural-language query.
@@ -616,7 +619,7 @@ async def recall(
                     result = route_query(query_text)
                     local_query_type = result.search_type
                 else:
-                    local_query_type = SearchType.GRAPH_COMPLETION
+                    local_query_type = SearchType.HYBRID_COMPLETION
 
                 span.set_attribute(
                     COGNEE_SEARCH_TYPE,
