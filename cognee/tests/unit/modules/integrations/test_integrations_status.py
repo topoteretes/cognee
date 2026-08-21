@@ -587,6 +587,8 @@ async def test_legacy_status_skips_identity_provisioned_plugins():
 
 @pytest.mark.asyncio
 async def test_registry_status_buckets_by_metadata_and_connection_type():
+    """Connections in the caller's OWN blob: claims are trusted as-is (only
+    the caller can write that blob)."""
     seen_at = datetime(2026, 8, 16, 10, 0, tzinfo=timezone.utc)
     connections = [
         # Provisioned connection: metadata plugin_key wins over type.
@@ -632,18 +634,85 @@ async def test_registry_status_buckets_by_metadata_and_connection_type():
             metadata={"plugin_key": "not-a-plugin"},
         ),
     ]
-    with patch.object(
-        _status_module,
-        "list_persisted_agent_connections",
-        new=AsyncMock(return_value=connections),
+    with (
+        patch.object(
+            _status_module,
+            "list_persisted_agent_connections",
+            new=AsyncMock(return_value=connections),
+        ),
+        patch.object(_status_module, "child_agent_emails", new=AsyncMock(return_value={})),
     ):
-        statuses = await registry_plugin_statuses([uuid4()])
+        statuses = await registry_plugin_statuses(uuid4())
 
     # The workflow and bogus-metadata connections produce no rows at all.
     assert set(statuses) == {"claude-code", "mcp", "api"}
     assert all(row.connected for row in statuses.values())
     assert statuses["mcp"].last_active_at == seen_at + timedelta(hours=1)
     assert all(row.source == SOURCE_REGISTRY for row in statuses.values())
+
+
+@pytest.mark.asyncio
+async def test_registry_status_pins_child_blob_connections_to_email_identity():
+    """A child agent's connection blob is agent-writable (public configuration
+    endpoint), so its claimed plugin_key / connection type must not be able to
+    mark ANOTHER plugin connected. Every connection found in a child blob is
+    pinned to the plugin key derived from the agent's server-assigned email;
+    non-plugin child agents contribute nothing."""
+    parent_id = uuid4()
+    claude_agent_id = uuid4()
+    custom_agent_id = uuid4()
+    seen_at = datetime(2026, 8, 16, 10, 0, tzinfo=timezone.utc)
+
+    connections_by_owner = {
+        parent_id: [],
+        # claude-code agent's blob, tampered to claim codex on both signals.
+        claude_agent_id: [
+            AgentConnection(
+                id="spoof",
+                agent_session_name="plugin:codex",
+                type="codex",
+                status="active",
+                last_active_at=seen_at,
+                metadata={"plugin_key": "codex"},
+            )
+        ],
+        # Manually created non-plugin agent claiming an MCP connection.
+        custom_agent_id: [
+            AgentConnection(
+                id="custom",
+                agent_session_name="my-bot",
+                type="mcp",
+                status="active",
+                last_active_at=seen_at,
+            )
+        ],
+    }
+
+    async def _by_owner(user_ids, active_only=True):
+        (owner,) = user_ids
+        return connections_by_owner[owner]
+
+    child_emails = {
+        claude_agent_id: f"claude-code+{parent_id}@cognee.agent",
+        custom_agent_id: f"my-bot+{parent_id}@cognee.agent",
+    }
+    with (
+        patch.object(
+            _status_module,
+            "list_persisted_agent_connections",
+            new=AsyncMock(side_effect=_by_owner),
+        ),
+        patch.object(
+            _status_module, "child_agent_emails", new=AsyncMock(return_value=child_emails)
+        ),
+    ):
+        statuses = await registry_plugin_statuses(parent_id)
+
+    # The spoofed connection lands on the email-derived key, never on codex;
+    # the non-plugin agent's mcp claim produces no row at all.
+    assert set(statuses) == {"claude-code"}
+    assert statuses["claude-code"].connected is True
+    assert statuses["claude-code"].last_active_at == seen_at
 
 
 # --------------------------------------------------------------------------- #

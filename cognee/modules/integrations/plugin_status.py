@@ -14,7 +14,8 @@ of authority:
 * **registry** — the agent-connection registry
   (:func:`list_persisted_agent_connections`), bucketed onto plugin keys by
   connection type, so e.g. MCP clients registered before first traffic
-  show up.
+  show up. Connections stored in child-agent blobs (agent-writable) are
+  pinned to the agent's email-derived identity rather than trusted.
 
 Same key from several sources merges: ``connected`` is the OR — unless the
 base row is identity-sourced, whose key-existence check is authoritative —
@@ -107,6 +108,21 @@ def coerce_provisioned_at(value) -> Optional[datetime]:
     return None
 
 
+def _plugin_key_from_agent_email(email: Optional[str], parent_id: UUID) -> Optional[str]:
+    """Plugin key encoded in a child agent's server-assigned email, if any.
+
+    ``create_agent`` mints ``<plugin_key>+<parent_id>@cognee.agent``
+    deterministically, so the email is the one identity signal a child
+    agent cannot rewrite — unlike its principal-configuration blob.
+    Returns ``None`` for agents that aren't a known plugin identity.
+    """
+    suffix = f"+{parent_id}@cognee.agent"
+    if not (email or "").endswith(suffix):
+        return None
+    plugin_key = email[: -len(suffix)]
+    return plugin_key if plugin_key in KNOWN_PLUGINS else None
+
+
 def _escape_like_prefix(prefix: str) -> str:
     r"""Build a LIKE pattern matching ids that start with ``prefix`` literally.
 
@@ -135,13 +151,10 @@ async def identity_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     latest session activity, so pure-recall plugins that never open
     sessions still report "last seen".
     """
-    email_suffix = f"+{user_id}@cognee.agent"
     plugin_agents: dict[UUID, tuple[str, Optional[datetime]]] = {}
     for agent_id, email in (await child_agent_emails(user_id)).items():
-        if not (email or "").endswith(email_suffix):
-            continue
-        plugin_key = email[: -len(email_suffix)]
-        if plugin_key not in KNOWN_PLUGINS:
+        plugin_key = _plugin_key_from_agent_email(email, user_id)
+        if plugin_key is None:
             continue
         for config in await get_principal_all_configuration(agent_id):
             if config.get("name") != AGENT_CONFIG_NAME:
@@ -262,24 +275,50 @@ async def legacy_plugin_statuses(
     }
 
 
-async def registry_plugin_statuses(user_ids: list[UUID]) -> dict[str, PluginStatusRow]:
+async def registry_plugin_statuses(user_id: UUID) -> dict[str, PluginStatusRow]:
     """Statuses from the agent-connection registry.
 
-    Connections registered by the provision endpoint carry the plugin key
-    in their metadata; everything else buckets by connection type. Only
-    active connections are consulted, so a row here means connected.
+    Persisted connections live in principal-configuration blobs, which
+    gives them two trust tiers:
+
+    * The caller's own blob is written only by the caller, so a
+      connection's claimed ``metadata.plugin_key`` (set by the provision
+      endpoint) or its connection type is trusted as-is — this is what
+      lets e.g. shared-key MCP clients registered before first traffic
+      show up.
+    * A child agent's blob is agent-writable (the public configuration
+      endpoint), so every connection found there is pinned to the plugin
+      key derived from that agent's server-assigned email. A blob claiming
+      another plugin's key must not mark that plugin connected; child
+      agents that aren't a plugin identity contribute nothing here (their
+      connections still appear on ``/agents/connections``).
+
+    Only active connections are consulted, so a row here means connected.
     """
     statuses: dict[str, PluginStatusRow] = {}
-    for connection in await list_persisted_agent_connections(user_ids, active_only=True):
-        plugin_key = (connection.metadata or {}).get("plugin_key") or (
-            _CONNECTION_TYPE_PLUGIN_KEYS.get(connection.type)
-        )
+
+    def _add(plugin_key: Optional[str], connection) -> None:
         if plugin_key not in KNOWN_PLUGINS:
-            continue
+            return
         row = statuses.setdefault(
             plugin_key, PluginStatusRow(key=plugin_key, connected=True, source=SOURCE_REGISTRY)
         )
         row.last_active_at = _max_datetime(row.last_active_at, connection.last_active_at)
+
+    for connection in await list_persisted_agent_connections([user_id], active_only=True):
+        _add(
+            (connection.metadata or {}).get("plugin_key")
+            or _CONNECTION_TYPE_PLUGIN_KEYS.get(connection.type),
+            connection,
+        )
+
+    for agent_id, email in (await child_agent_emails(user_id)).items():
+        email_key = _plugin_key_from_agent_email(email, user_id)
+        if email_key is None:
+            continue
+        for connection in await list_persisted_agent_connections([agent_id], active_only=True):
+            _add(email_key, connection)
+
     return statuses
 
 

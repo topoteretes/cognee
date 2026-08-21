@@ -310,7 +310,10 @@ def get_integrations_router():
                 )
 
             try:
-                registry_rows = await registry_plugin_statuses(visible_ids)
+                # Takes the caller's id, not visible_ids: the registry source
+                # resolves child agents itself so it can distrust their
+                # agent-writable connection blobs (see registry_plugin_statuses).
+                registry_rows = await registry_plugin_statuses(user.id)
                 plugin_rows = merge_plugin_statuses(plugin_rows, registry_rows)
             except Exception:
                 logger.exception(
