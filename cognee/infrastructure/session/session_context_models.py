@@ -316,11 +316,11 @@ AgentCandidateContextUpdateVariant = Annotated[
 class AgentContextExtraction(BaseModel):
     """LLM output for the batch pass: agent-profile lessons drawn from trace evidence."""
 
-    lessons: List[AgentCandidateContextUpdateVariant] = Field(
+    lessons: List[AgentCandidateContextUpdate] = Field(
         default_factory=list,
         description=(
-            "Reusable agent/tool lessons drawn from the traces. Each item must be one of the "
-            "section-specific agent candidate types."
+            "Reusable agent/tool lessons drawn from the traces. Each item has a section "
+            f"({', '.join(sorted(AGENT_VALID_SECTIONS))}), content, and confidence."
         ),
     )
 
