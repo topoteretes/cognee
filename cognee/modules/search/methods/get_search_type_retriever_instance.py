@@ -105,6 +105,7 @@ async def get_search_type_retriever_instance(
                 "include_references": include_references,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
+                "wide_search_top_k": wide_search_top_k,
             },
         ),
         SearchType.HYBRID_COMPLETION: (

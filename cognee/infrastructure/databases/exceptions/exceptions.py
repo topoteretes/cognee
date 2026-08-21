@@ -250,3 +250,25 @@ class DatabaseCredentialsError(CogneeConfigurationError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
+
+
+class Neo4jMultiDatabaseSupportError(CogneeConfigurationError):
+    """
+    Raised when per-dataset Neo4j databases cannot be provisioned because the
+    connected server does not support multi-database management.
+
+    ``CREATE DATABASE`` is available on Neo4j Enterprise and AuraDB only;
+    Community edition serves exactly one database per server.
+    """
+
+    def __init__(
+        self,
+        message: str = (
+            "The configured Neo4j server cannot provision per-dataset databases: "
+            "multi-database management (CREATE DATABASE) is available on Neo4j "
+            "Enterprise and AuraDB only."
+        ),
+        name: str = "Neo4jMultiDatabaseSupportError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
