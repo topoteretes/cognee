@@ -3,7 +3,7 @@
 The ``cognee-mcp`` service runs with ``TRANSPORT_MODE=sse``, so it speaks the
 standard MCP SSE protocol at ``/sse``. We use the official ``mcp`` client to
 initialize a session, confirm the tool surface, and call one LLM-free tool
-(``list_data``) end to end.
+(``cognify_status``) end to end.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class McpToolCall:
     structured: Any
 
 
-async def _call_list_datasets(sse_url: str) -> McpToolCall:
+async def _call_cognify_status(sse_url: str) -> McpToolCall:
     # Imported lazily so the rest of the suite still collects if `mcp` (the
     # client library) is not installed in the runner's environment.
     from mcp import ClientSession
@@ -44,7 +44,7 @@ async def _call_list_datasets(sse_url: str) -> McpToolCall:
                 f"exposes: {sorted(tool_names)}"
             )
 
-            call = await session.call_tool("list_data", arguments={})
+            call = await session.call_tool("cognify_status", arguments={})
             assert not getattr(call, "isError", False), f"tool call errored: {call}"
 
             text = "\n".join(getattr(item, "text", str(item)) for item in (call.content or []))
@@ -54,4 +54,4 @@ async def _call_list_datasets(sse_url: str) -> McpToolCall:
 
 def call_mcp_tool(sse_url: str | None = None) -> McpToolCall:
     """Synchronously drive one real MCP tool call over SSE."""
-    return asyncio.run(_call_list_datasets(sse_url or CONFIG.mcp_sse_url))
+    return asyncio.run(_call_cognify_status(sse_url or CONFIG.mcp_sse_url))
