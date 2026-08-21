@@ -50,17 +50,11 @@ def test_mcp_health_and_tool_call(mcp_ready):
     assert health.json().get("status") == "ok", health.text
 
     call = call_mcp_tool()
-    # `list_datasets_json` renders "No datasets found." or "N dataset(s):"
-    # followed by one "- name (id)" line per dataset.
-    assert re.match(r"(No datasets found\.|\d+ datasets?:)", call.result_text), (
-        f"unexpected list_datasets_json output: {call.result_text!r}"
+    # `list_data` (no dataset_id) renders "📂 No datasets found." or
+    # "📂 Available Datasets:" followed by one "N. 📁 name" block per dataset.
+    assert re.search(r"📂 (No datasets found\.|Available Datasets:)", call.result_text), (
+        f"unexpected list_data output: {call.result_text!r}"
     )
-    # structuredContent ({"datasets": [...]}) is only forwarded for tools
-    # advertised in tools/list; this one is gated behind the tool-search
-    # transform, so treat it as a bonus and validate the shape when present.
-    if call.structured is not None:
-        assert "datasets" in call.structured, call.structured
-        assert isinstance(call.structured["datasets"], list)
 
 
 def test_service_logs_are_traceback_free(requires_compose):
