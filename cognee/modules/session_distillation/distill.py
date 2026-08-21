@@ -24,7 +24,10 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_context_builder import coerce_active_context_entries
-from cognee.infrastructure.session.session_context_models import SessionContextEntry
+from cognee.infrastructure.session.session_context_models import (
+    SessionContextEntry,
+    is_context_entry_usable,
+)
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.truth_subspace.constants import truth_session_node_set
@@ -40,7 +43,6 @@ from .models import (
     MAX_CANDIDATE_CHARS,
     MAX_QA_ANSWER_CHARS,
     MAX_QA_QUESTION_CHARS,
-    MIN_GATE_CONFIDENCE,
     NOVELTY_LESSONS_PER_LESSON,
     WRITER_CONCURRENCY,
     CuratorBatchOutput,
@@ -140,7 +142,7 @@ async def load_distillable_session_inputs(
     context_entries = [
         entry
         for entry in coerce_active_context_entries(context_rows)
-        if entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
+        if is_context_entry_usable(entry)
     ]
     return qa_rows, context_entries
 

@@ -433,8 +433,9 @@ def get_datasets_router() -> APIRouter:
             Query(
                 alias="pipeline",
                 description=(
-                    "Pipeline names to check: 'add_pipeline' or 'cognify_pipeline'."
-                    " Omit to default to cognify_pipeline."
+                    "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
+                    " 'code_graph_pipeline' (code ingestion via remember"
+                    " content_type='code'). Omit to default to cognify_pipeline."
                 ),
                 examples=[["cognify_pipeline"]],
             ),
@@ -455,7 +456,10 @@ def get_datasets_router() -> APIRouter:
           - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
           - If one pipeline is provided, response is a flat map
           - If multiple pipelines are provided, response is nested per dataset and pipeline
-          - **Available options: add_pipeline, cognify_pipeline**
+          - **Available options: add_pipeline, cognify_pipeline, code_graph_pipeline**
+          - Note: a background code ingest creates its pipeline run only once the
+            repository is cloned — a dataset missing from the response means the run
+            has not started yet, not that it failed
 
         ## Response
         Returns status information in one of two shapes:

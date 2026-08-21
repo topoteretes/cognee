@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional, Type
 
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.unified import get_unified_engine
@@ -29,6 +30,7 @@ from cognee.modules.retrieval.utils.global_context import (
     search_top_global_context_summaries,
 )
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("HybridRetriever")
@@ -111,6 +113,15 @@ class HybridRetriever(BaseRetriever):
             node_name_filter_operator=self.node_name_filter_operator,
         )
 
+        # Personal prefers weights ride into the chunk-lane ranking only —
+        # the entity lane selects by vector top-k with no re-rankable score
+        # list. The lookup is memoized per context — on a concurrent session
+        # turn each gather lane inherits the read warmed by
+        # warm_preference_cache; without that warm a lane's read is its own —
+        # and fails open: flag off, no node, or any error yields {}, keeping
+        # ranking byte-identical to an un-personalized run.
+        personal_weights = await load_preference_weights()
+
         chunk_objects, (entities, facts) = await asyncio.gather(
             retrieve_hybrid_chunks(
                 vector_engine=self._unified_engine.vector,
@@ -125,6 +136,8 @@ class HybridRetriever(BaseRetriever):
                 q_coords=truth.q_coords,
                 truth_state_by_id=truth.truth_state_by_id,
                 current_truth_epoch=truth.current_truth_epoch,
+                personal_weights=personal_weights,
+                personal_influence=get_base_config().personalization_influence,
             ),
             self._retrieve_entities_and_facts(query, query_vector),
         )
@@ -241,11 +254,23 @@ class HybridRetriever(BaseRetriever):
             )
             completions = [completion]
         elif query_batch:
+            preference_text = await load_preference_text()
             completions = await generate_completion_batch(
-                query_batch=query_batch, context=context, **prompts
+                query_batch=query_batch,
+                context=context,
+                conversation_history=preference_text,
+                **prompts,
             )
         else:
-            completions = [await generate_completion(query=query, context=context, **prompts)]
+            preference_text = await load_preference_text()
+            completions = [
+                await generate_completion(
+                    query=query,
+                    context=context,
+                    conversation_history=preference_text,
+                    **prompts,
+                )
+            ]
         return await self.append_references(completions, retrieved_objects)
 
     async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:

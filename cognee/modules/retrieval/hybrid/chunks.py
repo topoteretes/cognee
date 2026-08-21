@@ -34,6 +34,8 @@ async def retrieve_hybrid_chunks(
     q_coords: Optional[list[float]] = None,
     truth_state_by_id: Optional[dict] = None,
     current_truth_epoch: Optional[int] = None,
+    personal_weights: Optional[dict] = None,
+    personal_influence: float = 0.0,
 ) -> dict[str, Any]:
     candidate_limit = chunk_candidate_limit(chunks_top_k)
     summary_limit = summary_candidate_limit(chunks_top_k, text_summaries_top_k)
@@ -82,6 +84,8 @@ async def retrieve_hybrid_chunks(
         q_coords=q_coords,
         truth_state_by_id=truth_state_by_id,
         current_truth_epoch=current_truth_epoch,
+        personal_weights=personal_weights,
+        personal_influence=personal_influence,
     )
     if summary_limit > 0:
         await load_summary_text_for_ranked_pairs(

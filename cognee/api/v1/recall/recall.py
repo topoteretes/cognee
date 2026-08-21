@@ -29,6 +29,7 @@ from cognee.modules.observability import (
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
+    ResponseCodeEntry,
     ResponseGraphEntry,
     ResponseMarkerEntry,
     ResponseQAEntry,
@@ -363,6 +364,7 @@ async def recall(
     include_references: bool = False,
     tool_connections: list[str] | None = None,
     tools_trigger: str = "always",
+    code_query: dict | None = None,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -410,6 +412,14 @@ async def recall(
             (default) or ``"on_empty"`` — go back to the original data source
             only when every other requested source returned nothing, i.e. when
             cognee lacks the context to answer.
+        code_query: Structured operation and arguments for the ``"code"``
+            scope (same dict format as ``search(code_query=...)``, e.g.
+            ``{"operation": "impact_analysis", "seeds": ["UserService"]}``).
+            ``None`` runs the default ``explore`` operation with the query
+            text as seed. Only valid when ``scope`` includes ``"code"``
+            (which is never implied by ``"auto"`` or ``"all"``); results are
+            tagged ``_source="code"``. A seed the code graph cannot resolve
+            contributes nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -468,6 +478,14 @@ async def recall(
         raise CogneeValidationError(
             message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
             name="InvalidToolsTriggerError",
+        )
+    if code_query is not None and "code" not in sources:
+        raise CogneeValidationError(
+            message=(
+                "code_query requires the 'code' scope — pass scope=['code'] or "
+                "scope=['graph', 'code'] ('code' is never implied by 'auto' or 'all')."
+            ),
+            name="InvalidCodeQueryError",
         )
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.
@@ -532,6 +550,7 @@ async def recall(
                 ),
                 tool_connections=tool_connections,
                 tools_trigger=tools_trigger,
+                code_query=code_query,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -817,12 +836,77 @@ async def recall(
                     )
                 return entries
 
+            async def _run_code() -> list[RecallResponse]:
+                nonlocal user
+
+                from cognee.modules.recall.methods.normalize_search_payload import (
+                    normalize_search_payload,
+                )
+                from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+                from cognee.modules.search.methods.search import authorized_search
+
+                if user is None:
+                    try:
+                        user = await get_default_user()
+                    except (DatabaseNotCreatedError, UserNotFoundError) as error:
+                        raise CogneeValidationError(
+                            message=(
+                                "Recall prerequisites not met: no database/default user found. "
+                                "Initialize Cognee before recalling by:\n"
+                                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                            ),
+                            name="RecallPreconditionError",
+                        ) from error
+
+                # Dataset UUIDs take precedence over names, matching the graph lane.
+                search_dataset_ids = dataset_ids or None
+                if search_dataset_ids is None and datasets is not None:
+                    search_dataset_ids = [
+                        dataset.id
+                        for dataset in await get_authorized_existing_datasets(
+                            datasets, "read", user
+                        )
+                    ]
+                    if not search_dataset_ids:
+                        raise DatasetNotFoundError(message="No datasets found.")
+
+                try:
+                    code_results = await authorized_search(
+                        query_text=query_text,
+                        query_type=SearchType.CODE,
+                        user=user,
+                        dataset_ids=search_dataset_ids,
+                        top_k=top_k,
+                        retriever_specific_config=code_query,
+                    )
+                except CodeSeedNotFoundError:
+                    # A seed the code graph cannot resolve means "no code facts
+                    # for this prompt", not an error — the lane contributes
+                    # nothing, like an empty session lane. Invalid operations or
+                    # arguments still raise: those are caller bugs.
+                    return []
+
+                tagged: list[RecallResponse] = []
+                for payload in code_results:
+                    completion = getattr(payload, "completion", None)
+                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                        # Multi-dataset searches soften per-dataset seed misses
+                        # into marker payloads; they carry no facts, so drop
+                        # them here for the same reason as the except above.
+                        continue
+                    items: list[SearchResultItem] = normalize_search_payload(payload)
+                    tagged.extend(
+                        ResponseCodeEntry(**item.model_dump(), source="code") for item in items
+                    )
+                return tagged
+
             runners = {
                 "session": _run_session,
                 "trace": _run_trace,
                 "session_context": _run_session_context,
                 "graph": _run_graph,
                 "tools": _run_tools,
+                "code": _run_code,
             }
 
             session_result_count = 0

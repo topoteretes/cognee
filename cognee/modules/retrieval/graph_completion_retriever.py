@@ -29,6 +29,7 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.context_global_variables import session_user
@@ -182,6 +183,13 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         collections = self._get_vector_index_collections()
         unified_engine = getattr(self, "_unified_engine", None)
+        # Personal prefers weights ride into the triplet scorer. The lookup is
+        # memoized per context — on a concurrent session turn each gather lane
+        # inherits the read warmed by warm_preference_cache; without that warm
+        # a lane's read is its own — and fails open: flag off, no node, or any
+        # error yields {}, so the search stays byte-identical to an
+        # un-personalized run.
+        personal_weights = await load_preference_weights()
         return await brute_force_triplet_search(
             query,
             query_batch,
@@ -196,6 +204,7 @@ class GraphCompletionRetriever(BaseRetriever):
             unified_engine=unified_engine,
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
+            personal_weights=personal_weights or None,
         )
 
     async def get_triplets_batch(
@@ -317,9 +326,23 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> List[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
+        # Sessionless guidance site: preference text rides the guidance channel
+        # (conversation_history), never context. The lookup is memoized per
+        # context; this sessionless path runs retrieval and completion in one
+        # context, so this reuses the get_triplets read. (Across a task
+        # fan-out that sharing needs warm_preference_cache in the parent — the
+        # ContextVar does not propagate out of gather lanes.) Empty text is
+        # falsy and leaves the system prompt untouched. The session path never
+        # reaches this method, so it cannot collide with the session guidance
+        # block, which owns preference rendering on that path.
+        preference_text = await load_preference_text()
         if query_batch:
-            return await generate_completion_batch(query_batch=query_batch, **kwargs)
-        completion = await generate_completion(query=query, **kwargs)
+            return await generate_completion_batch(
+                query_batch=query_batch, conversation_history=preference_text, **kwargs
+            )
+        completion = await generate_completion(
+            query=query, conversation_history=preference_text, **kwargs
+        )
         return [completion]
 
     async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:

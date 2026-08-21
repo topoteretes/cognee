@@ -25,7 +25,7 @@ in the same 1-hop neighbourhood.
 from typing import Dict, List, Optional, Set, Tuple
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.cognify.config import get_cognify_config
@@ -62,8 +62,16 @@ def _collect_touched_node_ids(items) -> Set[str]:
 
 
 def _node_names(nodes) -> Dict[str, str]:
-    """Map node id -> display name for nodes that carry a non-empty name."""
-    return {str(node_id): props["name"] for node_id, props in nodes if (props or {}).get("name")}
+    """Map node id -> display name for nodes that carry a non-empty name.
+
+    Internal nodes are omitted, which also drops every edge touching them from
+    the candidate facts (``_build_candidate_facts`` requires two named endpoints).
+    """
+    return {
+        str(node_id): props["name"]
+        for node_id, props in nodes
+        if (props or {}).get("name") and not is_internal_node(props)
+    }
 
 
 def _build_candidate_facts(
