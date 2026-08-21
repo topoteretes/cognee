@@ -526,3 +526,47 @@ class TestQualifyModel:
 
         qualified = self._qualify("phi4", "ollama")
         assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
+
+# ── markdown-fenced JSON on the fallback path (CLO-596) ──────────────────────
+# The prompted-JSON path hands the model's reply straight to
+# model_validate_json. Models on that path routinely wrap the answer in a
+# ```json fence: the JSON inside is valid, but pydantic sees a backtick at
+# column 1 and rejects it, and the self-correction retry cannot help because a
+# model that fences once fences again. Hit while capturing the Henkel cassette.
+
+
+class TestStripJsonFence:
+    @staticmethod
+    def _strip(text):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            _strip_json_fence,
+        )
+
+        return _strip_json_fence(text)
+
+    def test_fenced_with_language_tag(self):
+        """The exact shape that broke the Henkel capture."""
+        assert self._strip('```json\n{"summary": "s"}\n```') == '{"summary": "s"}'
+
+    def test_fenced_without_language_tag(self):
+        assert self._strip('```\n{"summary": "s"}\n```') == '{"summary": "s"}'
+
+    def test_surrounding_whitespace(self):
+        assert self._strip('  ```json\n{"summary": "s"}\n```  \n') == '{"summary": "s"}'
+
+    def test_plain_json_untouched(self):
+        payload = '{"summary": "s"}'
+        assert self._strip(payload) == payload
+
+    def test_backticks_inside_a_value_untouched(self):
+        """Anchored to the whole payload, so a value containing ``` survives."""
+        payload = '{"summary": "use ```json to fence"}'
+        assert self._strip(payload) == payload
+
+    def test_fenced_payload_parses_after_stripping(self):
+        """End of the chain: the rescued payload must validate."""
+        from cognee.shared.data_models import SummarizedContent
+
+        raw = '```json\n{"summary": "a summary", "description": ""}\n```'
+        assert SummarizedContent.model_validate_json(self._strip(raw)).summary == "a summary"

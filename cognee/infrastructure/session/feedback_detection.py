@@ -1,5 +1,6 @@
 """Session turn analysis from user messages via LLM."""
 
+from cognee.base_config import get_base_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -68,6 +69,14 @@ async def analyze_turn_for_session_context(
         if not system_prompt:
             logger.warning("Feedback detection: system prompt not found, skipping")
             return SessionTurnAnalysis()
+
+        # The 1-5 previous-answer-rating question exists only to feed
+        # preference personalization. With the flag off, don't ask the model
+        # to produce a signal nothing will ever consume.
+        if get_base_config().personalization_enabled:
+            rating_section = read_query_prompt("feedback_detection_rating_section.txt")
+            if rating_section:
+                system_prompt = system_prompt + "\n\n" + rating_section
 
         text_input = "CURRENT USER MESSAGE:\n" + user_message.strip()
         text_input = _append_optional_section(
