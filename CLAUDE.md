@@ -493,7 +493,11 @@ LLM_INSTRUCTOR_MODE="json_schema_mode"  # or "tool_call", "md_json", etc.
 
 ### Structured Output Framework
 ```bash
-# Use Instructor (default, via litellm)
+# litellm_native (default): plain litellm, schema-native response_format
+# with prompted-JSON fallback — no instructor in the call path
+STRUCTURED_OUTPUT_FRAMEWORK="litellm_native"
+
+# Or use Instructor (legacy, via litellm)
 STRUCTURED_OUTPUT_FRAMEWORK="instructor"
 
 # Or use BAML (requires baml extra: pip install cognee[baml])
@@ -625,7 +629,7 @@ Supporting:
 - `datasets()` - Dataset operations
 - `serve(url)` / `disconnect()` - Point the SDK at a running instance
 
-All functions are async - use `await` or `asyncio.run()`. See `examples/demos/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
+All functions are async - use `await` or `asyncio.run()`. See `examples/advanced_guides/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
 
 ## Security Considerations
 

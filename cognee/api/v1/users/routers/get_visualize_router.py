@@ -114,7 +114,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize",
                 "dataset_id": str(dataset_id),
@@ -508,7 +508,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize Multi API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/visualize/multi",
                 "pair_count": len(pairs),
