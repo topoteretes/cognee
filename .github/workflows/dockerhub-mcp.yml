@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   docker-build-and-push:
+    # The custom runner group and Docker Hub credentials belong to the
+    # canonical upstream repository; fork pushes should skip this job.
+    if: github.repository == 'topoteretes/cognee'
     runs-on:
       group: Default
       labels:
@@ -44,13 +47,13 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.credentials.outputs.available == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           buildkitd-flags: --root /tmp/buildkit
 
       - name: Log in to Docker Hub
         if: steps.credentials.outputs.available == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -58,7 +61,7 @@ jobs:
       - name: Extract metadata
         if: steps.credentials.outputs.available == 'true'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: cognee/cognee-mcp
           tags: |

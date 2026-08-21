@@ -166,7 +166,7 @@ jobs:
       # without it the whole repo gets linted with whatever ruff was released
       # last, and unrelated files fail this job.
       - name: Run Linting on Weighted Edges Files
-        uses: astral-sh/ruff-action@v3
+        uses: astral-sh/ruff-action@v4
         with:
           version: "0.15.17"
           args: "check"
@@ -176,7 +176,7 @@ jobs:
             examples/demos/dynamic_multiple_weighted_edges_example.py
 
       - name: Run Formatting Check on Weighted Edges Files
-        uses: astral-sh/ruff-action@v3
+        uses: astral-sh/ruff-action@v4
         with:
           version: "0.15.17"
           args: "format --check"
