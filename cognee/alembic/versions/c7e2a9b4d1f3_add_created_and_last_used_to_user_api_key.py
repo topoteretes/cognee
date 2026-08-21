@@ -1,7 +1,7 @@
 """add_created_and_last_used_to_user_api_key
 
 Revision ID: c7e2a9b4d1f3
-Revises: b8c1d3e5f7a9
+Revises: a7f3c9e1b5d2
 Create Date: 2026-08-18 10:00:00.000000
 
 """
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "c7e2a9b4d1f3"
-down_revision: Union[str, None] = "b8c1d3e5f7a9"
+down_revision: Union[str, None] = "a7f3c9e1b5d2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -80,10 +80,12 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Which memory sources to include: 'graph', 'session', 'trace', "
-            "'session_context', 'tools', 'all', 'auto', or a list of these. Defaults to "
-            "'auto' (session first when session_id is set, else graph). 'tools' is "
-            "explicit opt-in only — never implied by 'auto' or 'all' — and requires "
-            "TOOL_CALLS_ENABLED on the server."
+            "'session_context', 'tools', 'code', 'all', 'auto', or a list of these. "
+            "Defaults to 'auto' (session first when session_id is set, else graph). "
+            "'tools' and 'code' are explicit opt-in only — never implied by 'auto' or "
+            "'all'. 'tools' requires TOOL_CALLS_ENABLED on the server; 'code' runs a "
+            "deterministic code-graph query (see code_query) and tags results "
+            "_source='code'."
         ),
     )
     tool_connections: Optional[list[str]] = Field(
@@ -99,6 +101,18 @@ class RecallPayloadDTO(InDTO):
         description=(
             "When the 'tools' scope runs: 'always', or 'on_empty' to query the "
             "external database only when every other requested source returned nothing."
+        ),
+    )
+    code_query: Optional[dict] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "'code' scope only: structured operation and arguments for the "
+            "deterministic code-graph query (same format as /v1/search code_query, "
+            'e.g. {"operation": "impact_analysis", "seeds": ["UserService"]}). '
+            "Omit to run the default 'explore' operation with the query text as seed. "
+            "A seed the code graph cannot resolve contributes no results rather than "
+            "failing the recall."
         ),
     )
     context_profile: str = Field(
@@ -139,7 +153,7 @@ def get_recall_router() -> APIRouter:
         """Get search/recall history for the authenticated user."""
         send_telemetry(
             "Recall API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "GET /v1/recall", "cognee_version": cognee_version},
         )
 
@@ -183,8 +197,13 @@ def get_recall_router() -> APIRouter:
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
-          "session", "trace", "session_context", "all", "auto", or a list of these
-          (default: "auto" — session first when session_id is set, else graph)
+          "session", "trace", "session_context", "tools", "code", "all", "auto", or a
+          list of these (default: "auto" — session first when session_id is set, else
+          graph). "code" is explicit opt-in only and returns deterministic code-graph
+          facts tagged _source="code" (e.g. scope=["graph", "code"])
+        - **code_query** (Optional[dict]): "code" scope only — operation and arguments
+          for the code-graph query (same format as /v1/search code_query); omit for
+          the default "explore" with the query text as seed
         - **response_schema** (Optional[dict]): JSON Schema for structured
           completion output; validated results land in each result's
           ``structured`` field. 422 on schemas outside the supported subset.
@@ -197,7 +216,7 @@ def get_recall_router() -> APIRouter:
         """
         send_telemetry(
             "Recall API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/recall",
                 "search_type": str(payload.search_type),
@@ -233,6 +252,7 @@ def get_recall_router() -> APIRouter:
                 response_model=response_model,
                 tool_connections=payload.tool_connections,
                 tools_trigger=payload.tools_trigger,
+                code_query=payload.code_query,
             )
             return jsonable_encoder(results)
         except CogneeApiError:

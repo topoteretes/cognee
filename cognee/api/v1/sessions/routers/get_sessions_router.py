@@ -13,7 +13,12 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, select
 
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.session_lifecycle.agent_usage import (
+    get_cost_by_user_agent,
+    get_sessions_with_agent_info,
+)
 from cognee.modules.session_lifecycle.metrics import (
     SessionStatus,
     get_effective_status_sql,
@@ -21,12 +26,9 @@ from cognee.modules.session_lifecycle.metrics import (
     list_session_rows,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-from cognee.modules.session_lifecycle.visibility import (
-    permitted_dataset_ids_for,
-    visible_user_ids,
-)
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user, get_visible_user_ids
 from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_permitted_dataset_ids
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("sessions_api")
@@ -108,8 +110,8 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         try:
-            permitted = await permitted_dataset_ids_for(user)
-            visible_ids = await visible_user_ids(user)
+            permitted = await get_permitted_dataset_ids(user.id)
+            visible_ids = await get_visible_user_ids(user.id)
             page = await list_session_rows(
                 user_ids=visible_ids,
                 permitted_dataset_ids=permitted,
@@ -162,8 +164,8 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         eff = get_effective_status_sql()
-        permitted = await permitted_dataset_ids_for(user)
-        visible_ids = await visible_user_ids(user)
+        permitted = await get_permitted_dataset_ids(user.id)
+        visible_ids = await get_visible_user_ids(user.id)
 
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
@@ -263,8 +265,8 @@ def get_sessions_router() -> APIRouter:
         - **range** (Literal): Time window: 24h, 7d, 30d, or all (default: 30d).
         """
         since = _range_since(range)
-        permitted = await permitted_dataset_ids_for(user)
-        visible_ids = await visible_user_ids(user)
+        permitted = await get_permitted_dataset_ids(user.id)
+        visible_ids = await get_visible_user_ids(user.id)
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
             visibility_terms = [SessionRecord.user_id.in_(visible_ids)]
@@ -307,6 +309,93 @@ def get_sessions_router() -> APIRouter:
             ]
         )
 
+    @router.get("/with-agent-info")
+    async def list_sessions_with_agent_info(
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
+        status: Optional[str] = Query(
+            None,
+            description="Effective-status filter: running, completed, failed, or abandoned.",
+        ),
+        limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
+        offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
+        order_by: str = Query("last_activity_at"),
+        descending: bool = Query(True),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Session records merged with their agent-connection metadata (CLO-434).
+
+        Joins ``session_records`` to the agent-connections registry on
+        ``session_id`` so the cloud UI can group/filter usage by client
+        (Claude Code, Codex, Slack, MCP, ...) without a second round
+        trip. When no registered connection matches a session, the
+        agent type is inferred from the session_id/origin_function
+        prefix convention (e.g. ``claude-code-...``, ``codex-...``).
+
+        Memory sources are intentionally omitted — per-agent dataset
+        attribution isn't reliably populated yet.
+
+        Response envelope mirrors ``GET /api/v1/sessions``, with each
+        session additionally carrying ``agent_type``, ``agent_source``,
+        ``agent_session_name``, and ``origin_function``.
+        """
+        since = _range_since(range)
+        try:
+            result = await get_sessions_with_agent_info(
+                user=user,
+                since=since,
+                status_filter=status,
+                limit=limit,
+                offset=offset,
+                order_by=order_by,
+                descending=descending,
+            )
+            return jsonable_encoder(result)
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns
+            # them to the caller.
+            raise
+        except Exception as exc:
+            logger.error("list_sessions_with_agent_info failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "list failed"})
+
+    @router.get("/cost-by-user-agent")
+    async def cost_by_user_agent(
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Cost + token totals grouped by (user, agent type) — feeds a
+        "who spends the most, with which agent" chart (CLO-434 follow-up).
+
+        Visibility matches every other endpoint in this router: the
+        caller, their child agents, and dataset-shared sessions. On top
+        of that base scope, a tenant owner/admin (same check
+        ``GET /tenants/{id}/users`` uses) additionally sees every
+        member's spend. A regular member — or anyone with no tenant,
+        i.e. single-user/local mode — just keeps the base scope rather
+        than being denied outright.
+        """
+        since = _range_since(range)
+        try:
+            result = await get_cost_by_user_agent(user=user, since=since)
+            return jsonable_encoder(result)
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns
+            # them to the caller.
+            raise
+        except Exception as exc:
+            logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "aggregation failed"})
+
     @router.get("/{session_id}")
     async def get_session_detail(
         session_id: str = Path(
@@ -319,8 +408,8 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
-        permitted = await permitted_dataset_ids_for(user)
-        visible_ids = await visible_user_ids(user)
+        permitted = await get_permitted_dataset_ids(user.id)
+        visible_ids = await get_visible_user_ids(user.id)
         row = await get_session_row(
             session_id=session_id,
             user_id=user.id,
