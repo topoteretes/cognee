@@ -5,8 +5,11 @@ from typing import Optional
 from functools import lru_cache
 from cognee.root_dir import get_absolute_path, ensure_absolute_path
 from cognee.modules.observability.observers import Observer
+from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
+
+logger = get_logger()
 
 
 def _tracing_explicitly_disabled() -> bool:
@@ -111,6 +114,12 @@ class BaseConfig(BaseSettings):
             # turn it off — COGNEE_TRACING_ENABLED=false is authoritative.
             if not _tracing_explicitly_disabled():
                 self.cognee_tracing_enabled = True
+
+        if self.default_feedback_influence > 0:
+            logger.warning(
+                "DEFAULT_FEEDBACK_INFLUENCE=%s defers every hybrid search to graph completion",
+                self.default_feedback_influence,
+            )
 
         return self
 

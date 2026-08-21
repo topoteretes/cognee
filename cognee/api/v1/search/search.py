@@ -40,7 +40,7 @@ logger = get_logger()
 
 async def search(
     query_text: str,
-    query_type: SearchType = SearchType.GRAPH_COMPLETION,
+    query_type: SearchType = SearchType.HYBRID_COMPLETION,
     user: Optional[User] = None,
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
@@ -50,10 +50,13 @@ async def search(
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
+    # only_context / verbose inspect retriever-specific shapes. Pin query_type:
+    # unspecified hybrid may defer to GRAPH_COMPLETION, and this return value
+    # does not include the effective type.
     only_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: Optional[dict] = None,

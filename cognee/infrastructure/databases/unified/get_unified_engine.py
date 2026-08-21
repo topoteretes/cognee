@@ -65,13 +65,13 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
     #     from cognee.infrastructure.databases.hybrid.postgres.adapter import (
     #         PostgresHybridAdapter,
     #     )
-    #     from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    #     from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
     #     from cognee.infrastructure.databases.relational.get_relational_engine import (
     #         get_relational_engine,
     #     )
     #
     #     # Graph adapter gets its own engine from the relational connection string
-    #     graph_adapter = PostgresAdapter(connection_string=get_relational_engine().db_uri)
+    #     graph_adapter = PostgresDemoAdapter(connection_string=get_relational_engine().db_uri)
     #
     #     # Vector adapter: reuse the cached PGVectorAdapter from the
     #     # vector engine factory. This requires VECTOR_DB_PROVIDER=pgvector.

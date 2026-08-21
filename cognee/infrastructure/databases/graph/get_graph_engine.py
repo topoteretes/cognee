@@ -204,12 +204,12 @@ async def get_graph_engine() -> GraphDBInterface:
 #     """Build the uncached Postgres hybrid adapter used when
 #     ``USE_UNIFIED_PROVIDER=pghybrid``. Not cached — the caller owns it, matching
 #     the original inline behavior."""
-#     from .postgres.adapter import PostgresAdapter
+#     from .postgres_demo.adapter import PostgresDemoAdapter
 #     from cognee.infrastructure.databases.relational.get_relational_engine import (
 #         get_relational_engine,
 #     )
 #
-#     return PostgresAdapter(connection_string=get_relational_engine().db_uri)
+#     return PostgresDemoAdapter(connection_string=get_relational_engine().db_uri)
 
 
 def _resolve_graph_engine_args(params: dict) -> tuple:
@@ -402,8 +402,10 @@ def _create_graph_engine(
         )
 
     # DEMO: Postgres as a graph store is not production-ready — use a graph-native
-    # backend (Kuzu, Neo4j) for production. See PostgresAdapter's docstring for details.
-    elif graph_database_provider == "postgres":
+    # backend (Kuzu, Neo4j) for production. See PostgresDemoAdapter's docstring for details.
+    # ``postgres_demo`` is the canonical name; ``postgres`` stays accepted so existing
+    # deployments and CI keep resolving to this adapter.
+    elif graph_database_provider in ("postgres", "postgres_demo"):
         from cognee.context_global_variables import backend_access_control_enabled
 
         if backend_access_control_enabled():
@@ -456,9 +458,11 @@ def _create_graph_engine(
                     f"@{db_host}:{db_port}/{db_name}"
                 )
 
-        from .postgres.adapter import PostgresAdapter
+        from .postgres_demo.adapter import PostgresDemoAdapter
 
-        return PostgresAdapter(connection_string=connection_string, schema=graph_database_schema)
+        return PostgresDemoAdapter(
+            connection_string=connection_string, schema=graph_database_schema
+        )
 
     elif graph_database_provider in ("ladybug", "kuzu"):
         if not graph_file_path:
@@ -576,6 +580,7 @@ def _create_graph_engine(
         "ladybug-remote",
         "kuzu",
         "kuzu-remote",
+        "postgres_demo",
         "postgres",
         "neptune",
         "neptune_analytics",
