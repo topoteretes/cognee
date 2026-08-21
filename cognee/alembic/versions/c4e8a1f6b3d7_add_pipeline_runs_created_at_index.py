@@ -1,7 +1,7 @@
 """Index pipeline_runs on (created_at, id)
 
 Revision ID: c4e8a1f6b3d7
-Revises: a7f3c9e1b5d2
+Revises: c7e2a9b4d1f3
 Create Date: 2026-08-21 00:00:00.000000
 
 Since a7f3c9e1b5d2 (SDK-399) pipeline_runs holds a row per *operation*, not
@@ -38,7 +38,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "c4e8a1f6b3d7"
-down_revision: Union[str, None] = "a7f3c9e1b5d2"
+down_revision: Union[str, None] = "c7e2a9b4d1f3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
