@@ -90,6 +90,13 @@ jobs:
       mode: mock_llm
       label: war_and_peace_large
       runs: '3'
+      # postgres only. The file_based arm has never produced a report: ladybug's
+      # add_edges cannot land the first 2,000-edge chunk of a 100,689-node graph
+      # inside the subprocess worker's 300s per-call deadline, so cognify times
+      # out, rolls back, and three runs walk into GitHub's 6h job ceiling — red
+      # nightly plus a wasted 6h runner, every single night. Re-enable by
+      # dropping `backends` once the adapter scales (COG-6185 / CLO-594).
+      backends: postgres
       memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace_large.json
     secrets: inherit
@@ -223,7 +230,6 @@ jobs:
             url_file_small_mock ${{ needs.perf-small-mock.outputs.file_based_html_key }}
             url_file_wap_llm ${{ needs.perf-wap-llm.outputs.file_based_html_key }}
             url_file_wap_mock ${{ needs.perf-wap-mock.outputs.file_based_html_key }}
-            url_file_wap_large_mock ${{ needs.perf-wap-large-mock.outputs.file_based_html_key }}
             url_pg_small_llm ${{ needs.perf-small-llm.outputs.postgres_html_key }}
             url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
@@ -260,7 +266,6 @@ jobs:
             📊|File Based — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_small_mock }}
             📚|File Based — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_llm }}
             📚|File Based — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_mock }}
-            📚|File Based — Medium graph - Artificial 100k nodes/edges — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_large_mock }}
             📊|Full Postgres — 50 Small Documents — Real LLM|${{ needs.perf-small-llm.result }}|${{ needs.perf-small-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_llm }}
             📊|Full Postgres — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_mock }}
             📚|Full Postgres — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_llm }}
