@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   docker-build-and-push:
+    # Publishing is owned by the canonical upstream repository. Fork pushes
+    # must not attempt Docker Hub authentication with unavailable secrets.
+    if: github.repository == 'topoteretes/cognee'
     runs-on: ubuntu-latest
 
     steps:
