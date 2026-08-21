@@ -20,9 +20,10 @@ permissions:
 
 jobs:
   linear-issue-check: # this job name is what you mark "required" in branch protection
-    # Enforce for internal PRs only. Fork PRs (head repo != base repo) skip this job;
-    # a skipped required check is treated as passing, so external PRs are not blocked.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Enforce only for internal PRs in the canonical upstream repository. A
+    # contributor fork may have its own copy of this workflow, but it must not
+    # require an internal Linear key or block the contributor's upstream PR.
+    if: github.repository == 'topoteretes/cognee' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: PR title or branch must reference a Linear issue

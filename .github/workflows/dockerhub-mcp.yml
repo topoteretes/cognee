@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   docker-build-and-push:
+    # The custom runner group and Docker Hub credentials belong to the
+    # canonical upstream repository; fork pushes should skip this job.
+    if: github.repository == 'topoteretes/cognee'
     runs-on:
       group: Default
       labels:
