@@ -8,6 +8,7 @@ import pytest
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from cognee.modules.ingestion import StoredFile
 
 # The package __init__ rebinds the name ``save_data_item_to_storage`` to the
 # function, so ``import ... as mod`` would yield the function, not the module.
@@ -35,8 +36,8 @@ async def test_nonexistent_absolute_path_is_ingested_as_text(monkeypatch):
     Windows the pre-fix code additionally crashed here with
     ``ValueError: relative path can't be expressed as a file URI``.
     """
-    save_mock = AsyncMock(return_value="text-file-path")
-    monkeypatch.setattr(mod, "save_data_to_file", save_mock)
+    save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
+    monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
 
     note = "/remember to call Bob about the meeting"
     result = await save_data_item_to_storage(note)
@@ -64,8 +65,8 @@ async def test_windows_style_paths_do_not_crash_and_fall_back_to_text(monkeypatc
     existing file is covered by the Windows-only test below and the OS-matrix CI.
     """
     fake_os = SimpleNamespace(name="nt", path=SimpleNamespace(normpath=ntpath.normpath))
-    save_mock = AsyncMock(return_value="text-file-path")
-    monkeypatch.setattr(mod, "save_data_to_file", save_mock)
+    save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
+    monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
     monkeypatch.setattr(mod, "os", fake_os)
 
     for item in ["/no/such/windows/path.txt", "C:name.txt"]:
@@ -93,8 +94,8 @@ async def test_nonexistent_absolute_path_is_text_even_when_gate_disabled(monkeyp
     # non-existent absolute-looking string is not a local file, so it is still
     # ingested as text even with the gate off (the reject branch is only reached
     # once is_file() is true). Mirrors the estimator's gate-off behavior.
-    save_mock = AsyncMock(return_value="text-file-path")
-    monkeypatch.setattr(mod, "save_data_to_file", save_mock)
+    save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
+    monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
     monkeypatch.setattr(mod.settings, "accept_local_file_path", False)
 
     result = await save_data_item_to_storage("/no/such/file.txt")
@@ -111,8 +112,8 @@ async def test_existing_directory_is_ingested_as_text(tmp_path, monkeypatch):
     # resolve_data_directories.) The dry-run estimator deliberately diverges
     # here — it rejects directories with a clearer message; see
     # test_estimator.test_directories_are_rejected.
-    save_mock = AsyncMock(return_value="text-file-path")
-    monkeypatch.setattr(mod, "save_data_to_file", save_mock)
+    save_mock = AsyncMock(return_value=StoredFile(file_path="text-file-path"))
+    monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
 
     result = await save_data_item_to_storage(str(tmp_path))
 
