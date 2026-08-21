@@ -3,7 +3,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 from cognee.modules.engine.utils import generate_node_id
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.modules.engine.models import Triplet
 from cognee.tasks.storage import index_data_points
 
@@ -119,6 +119,12 @@ def _process_single_triplet(
     start_node = triplet_datapoint.get("start_node", {})
     end_node = triplet_datapoint.get("end_node", {})
     relationship = triplet_datapoint.get("relationship_properties", {})
+
+    if is_internal_node(start_node) or is_internal_node(end_node):
+        return None, (
+            f"Skipping triplet at offset {offset + idx}: internal node endpoint "
+            "(internal nodes must never be embedded)"
+        )
 
     start_node_type = start_node.get("type")
     end_node_type = end_node.get("type")

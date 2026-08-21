@@ -118,15 +118,16 @@ async def _mark_feedback_processed(
     user_id: str,
     session_id: str,
     qa_id: str,
-    current_metadata: dict[str, Any],
     success: bool,
 ) -> None:
-    metadata = {**current_metadata, MEMIFY_METADATA_KEY: success}
+    # update_qa merges memify_metadata into the stored dict (the cache adapters
+    # overlay keys), so pass ONLY this stage's key — copying a snapshot of the
+    # whole dict could write another stage's stale value over a fresher one.
     updated = await session_manager.update_qa(
         user_id=user_id,
         session_id=session_id,
         qa_id=qa_id,
-        memify_metadata=metadata,
+        memify_metadata={MEMIFY_METADATA_KEY: success},
     )
     if not updated:
         raise CogneeSystemError(
@@ -168,7 +169,6 @@ async def _process_feedback_item(
             user_id=user_id,
             session_id=session_id,
             qa_id=qa_id,
-            current_metadata=memify_metadata,
             success=False,
         )
         return {"processed": 0, "applied": 0, "skipped": 1}
@@ -194,7 +194,6 @@ async def _process_feedback_item(
         user_id=user_id,
         session_id=session_id,
         qa_id=qa_id,
-        current_metadata=memify_metadata,
         success=qa_success,
     )
 
