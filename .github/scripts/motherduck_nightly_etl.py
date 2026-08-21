@@ -139,6 +139,33 @@ VIEWS = {
         FROM ranked WHERE rn <= 8
         GROUP BY suite, metric, stat
     """,
+    # One row per day x suite x metric x stat: the LAST run of each day wins.
+    # Dashboards plot a daily series, and a day with a re-run would otherwise
+    # show two points for the same suite.
+    #
+    # This view already existed in the warehouse but was NOT in this dict --
+    # created by hand, so CREATE OR REPLACE never refreshed it and it could not
+    # be rebuilt if dropped. It reads v_perf_metrics, so a column change there
+    # would have silently broken it with nothing in version control to fix.
+    #
+    # run_ts is the day cast back to TIMESTAMP (Superset/Preset cannot serialize
+    # a DATE as a pivot key -- same constraint as v_perf_runs); the real
+    # timestamp of the winning run is kept as actual_run_ts.
+    "v_perf_daily": """
+        WITH ranked AS (
+            SELECT CAST(run_ts AS DATE) AS d, suite, sdk, store, label, mode,
+                   metric, stat, value_s, all_passed, git_sha, run_ts,
+                   row_number() OVER (
+                       PARTITION BY CAST(run_ts AS DATE), suite, metric, stat
+                       ORDER BY run_ts DESC) AS rn
+            FROM {t}.v_perf_metrics
+        )
+        SELECT CAST(d AS TIMESTAMP) AS run_ts,
+               suite, sdk, store, label, mode, metric, stat, value_s,
+               all_passed, git_sha,
+               run_ts AS actual_run_ts
+        FROM ranked WHERE rn = 1
+    """,
 }
 
 
