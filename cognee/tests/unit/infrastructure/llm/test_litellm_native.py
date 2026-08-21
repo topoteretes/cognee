@@ -477,3 +477,52 @@ async def test_cancellation_is_not_retried():
             )
 
     assert mock_acompletion.call_count == 1
+
+
+# ── provider-qualified model names (CLO-594) ─────────────────────────────────
+# cognee stores provider and model separately; litellm routes on a qualified
+# model name. The instructor path dispatched per provider, so LLM_PROVIDER=ollama
+# with LLM_MODEL=phi4 worked there and 400s on litellm_native with
+# "LLM Provider NOT provided". This broke the Ollama nightly the first time it
+# ran on dev after litellm_native became the default framework.
+
+
+class TestQualifyModel:
+    """_qualify_model must rescue unroutable names and touch nothing else."""
+
+    @staticmethod
+    def _qualify(model, provider):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+            _qualify_model,
+        )
+
+        return _qualify_model(model, provider)
+
+    def test_bare_ollama_model_gets_prefixed(self):
+        """The exact CI failure: LLM_PROVIDER=ollama, LLM_MODEL=phi4."""
+        assert self._qualify("phi4", "ollama") == "ollama/phi4"
+
+    def test_tagged_ollama_model_gets_prefixed(self):
+        assert self._qualify("qwen3:latest", "ollama") == "ollama/qwen3:latest"
+
+    def test_already_qualified_is_untouched(self):
+        assert self._qualify("ollama/phi4", "ollama") == "ollama/phi4"
+        assert self._qualify("openai/gpt-5-mini", "openai") == "openai/gpt-5-mini"
+
+    def test_name_litellm_already_resolves_is_untouched(self):
+        """Must not re-route a configuration that works today."""
+        assert self._qualify("gpt-4o", "openai") == "gpt-4o"
+
+    def test_unknown_provider_is_untouched(self):
+        """generic/llama_cpp have no unambiguous litellm prefix — leave them be."""
+        assert self._qualify("some-custom-model", "generic") == "some-custom-model"
+
+    def test_empty_model_is_untouched(self):
+        assert self._qualify("", "ollama") == ""
+
+    def test_qualified_name_is_routable_by_litellm(self):
+        """End of the chain: the rescued name must actually resolve."""
+        import litellm
+
+        qualified = self._qualify("phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
