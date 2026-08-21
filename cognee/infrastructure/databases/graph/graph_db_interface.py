@@ -713,7 +713,7 @@ class GraphDBInterface(ABC):
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of triplets (source, edge, target).
 
-        Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
+        Optional extension — implemented by PostgresDemoAdapter, Neo4jAdapter,
         and LadybugAdapter but not NeptuneGraphDB.
 
         Parameters

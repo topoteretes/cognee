@@ -20,10 +20,10 @@ class PostgresGraphDatasetDatabaseHandler:
     async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
         graph_config = get_graph_config()
 
-        if graph_config.graph_database_provider != "postgres":
+        if graph_config.graph_database_provider not in ("postgres", "postgres_demo"):
             raise ValueError(
                 "PostgresGraphDatasetDatabaseHandler can only be used "
-                "with postgres graph database provider."
+                "with the postgres_demo graph database provider (or its postgres alias)."
             )
 
         graph_db_name = f"{dataset_id}"
