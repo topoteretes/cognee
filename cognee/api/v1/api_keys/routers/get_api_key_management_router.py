@@ -26,7 +26,7 @@ def get_api_key_management_router():
     async def get_api_keys_for_user(user: User = Depends(get_authenticated_user)):
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/auth/api-keys",
             },
@@ -63,7 +63,7 @@ def get_api_key_management_router():
     ):
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/auth/api-keys",
             },
@@ -89,7 +89,7 @@ def get_api_key_management_router():
     ):
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "DELETE /v1/auth/api-keys",
             },

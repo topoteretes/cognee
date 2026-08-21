@@ -5,7 +5,7 @@ from urllib.request import url2pathname
 from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.ingestion import save_data_to_file
+from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,12 +47,22 @@ def _resolve_local_file_uri(
     return local_path.as_uri() if local_path.is_file() else None
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+async def save_data_item_to_storage_detailed(
+    data_item: Union[BinaryIO, str, Any],
+) -> StoredFile:
+    """Put ``data_item`` in cognee storage and describe what landed there.
+
+    ``StoredFile.metadata`` is populated for every item whose bytes passed
+    through this process (uploads, fetched pages, raw text) — it is computed
+    while they are in hand, so ingestion never has to read the object back to
+    hash it. Items that are already addressable storage (an ``s3://`` URL, a
+    local path) are handed through untouched and carry no metadata.
+    """
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
 
-        return await get_data_from_llama_index(data_item)
+        return StoredFile(file_path=await get_data_from_llama_index(data_item))
 
     if "docling" in str(type(data_item)):
         from docling_core.types import DoclingDocument
@@ -62,26 +72,28 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
-        return await save_data_to_file(data_item.file, filename=data_item.filename)
+        return await save_data_to_file_detailed(data_item.file, filename=data_item.filename)
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
 
         # data is s3 file path
         if parsed_url.scheme == "s3":
-            return data_item
+            return StoredFile(file_path=data_item)
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
             # Guard against SSRF: reject disabled outbound HTTP, non-http(s) schemes,
             # and hosts that resolve to internal/reserved addresses before fetching.
             await validate_outbound_url(data_item)
             urls_to_page_contents = await fetch_page_content(data_item)
-            return await save_data_to_file(urls_to_page_contents[data_item], file_extension="html")
+            return await save_data_to_file_detailed(
+                urls_to_page_contents[data_item], file_extension="html"
+            )
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:
                 local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
                 if local_uri:
-                    return local_uri
+                    return StoredFile(file_path=local_uri)
                 raise IngestionError(message="Local file does not exist or is not a file.")
             else:
                 raise IngestionError(message="Local files are not accepted.")
@@ -106,21 +118,32 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             local_uri = _resolve_local_file_uri(data_item)
             if local_uri:
                 if settings.accept_local_file_path:
-                    return local_uri
+                    return StoredFile(file_path=local_uri)
                 raise IngestionError(message="Local files are not accepted.")
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)
         if local_uri:
             if settings.accept_local_file_path:
-                return local_uri
+                return StoredFile(file_path=local_uri)
             raise IngestionError(message="Local files are not accepted.")
 
         # data is text, save it to data storage and return the file path
-        return await save_data_to_file(data_item)
+        return await save_data_to_file_detailed(data_item)
 
     if isinstance(data_item, DataItem):
         # If instance is DataItem use the underlying data
-        return await save_data_item_to_storage(data_item.data)
+        return await save_data_item_to_storage_detailed(data_item.data)
 
     # data is not a supported type
     raise IngestionError(message=f"Data type not supported: {type(data_item)}")
+
+
+async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+    """Put ``data_item`` in cognee storage and return its path.
+
+    Thin wrapper over :func:`save_data_item_to_storage_detailed` for callers
+    that do not need the metadata.
+    """
+    stored = await save_data_item_to_storage_detailed(data_item)
+
+    return stored.file_path

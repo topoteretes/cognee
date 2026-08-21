@@ -207,3 +207,6 @@ deployment/helm/values-local.yml
 
 # Performance test results
 cognee/tests/performance/results
+
+# Local `helm template` output — generated, not checked in
+rendered.yaml
