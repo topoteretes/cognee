@@ -98,7 +98,7 @@ jobs:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -107,7 +107,7 @@ jobs:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -116,7 +116,7 @@ jobs:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -125,7 +125,7 @@ jobs:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -133,7 +133,7 @@ jobs:
   graph-db-tests:
     name: Graph Database Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -142,7 +142,7 @@ jobs:
   vector-db-tests:
     name: Vector DB Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -151,7 +151,7 @@ jobs:
   example-tests:
     name: Example Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -160,7 +160,7 @@ jobs:
   notebook-tests:
     name: Notebook Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -169,8 +169,9 @@ jobs:
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.repository == 'topoteretes/cognee' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
@@ -183,8 +184,9 @@ jobs:
   different-os-tests-extended:
     name: OS and Python Tests Extended
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.repository == 'topoteretes/cognee' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.13.x"]'
@@ -194,7 +196,7 @@ jobs:
   llm-tests:
     name: LLM Test Suite
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -203,7 +205,7 @@ jobs:
   s3-file-storage-test:
     name: S3 File Storage Test
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -212,7 +214,7 @@ jobs:
   integration-tests:
     name: Run Integration Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/integration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -221,31 +223,34 @@ jobs:
   mcp-test:
     name: MCP Tests
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.repository == 'topoteretes/cognee' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/test_mcp.yml
     secrets: inherit
 
   docker-compose-test:
     name: Docker Compose Test
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.repository == 'topoteretes/cognee' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/docker_compose.yml
     secrets: inherit
 
   docker-ci-test:
     name: Docker CI test
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.repository == 'topoteretes/cognee' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -254,7 +259,7 @@ jobs:
   search-db-tests:
     name: Search Test on Different DBs
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -263,7 +268,7 @@ jobs:
   relational-db-migration-tests:
     name: Relational DB Migration Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -272,7 +277,7 @@ jobs:
   db-examples-tests:
     name: DB Examples Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/db_examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -304,7 +309,7 @@ jobs:
       db-examples-tests,
     ]
     runs-on: ubuntu-latest
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ !cancelled() && github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Check Status
         run: |
