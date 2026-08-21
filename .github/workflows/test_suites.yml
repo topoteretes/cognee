@@ -49,8 +49,11 @@ jobs:
           # into the image, so changing it must produce a new tag (the build is
           # skipped whenever the tag already exists).
           DEP_HASH=$(sha256sum pyproject.toml uv.lock Dockerfile.ci | sha256sum | head -c 16)
-          IMAGE="ghcr.io/${{ github.repository }}/ci-env:deps-${DEP_HASH}"
+          REPOSITORY_LOWER=$(printf '%s' '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          IMAGE_BASE="ghcr.io/${REPOSITORY_LOWER}/ci-env"
+          IMAGE="${IMAGE_BASE}:deps-${DEP_HASH}"
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "cache-image=${IMAGE_BASE}:buildcache" >> "$GITHUB_OUTPUT"
           echo "dep_hash=${DEP_HASH}" >> "$GITHUB_OUTPUT"
           echo "Image tag: ${IMAGE}"
 
@@ -84,8 +87,8 @@ jobs:
           file: Dockerfile.ci
           push: true
           tags: ${{ steps.set-image.outputs.image }}
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/ci-env:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/ci-env:buildcache,mode=max
+          cache-from: type=registry,ref=${{ steps.set-image.outputs.cache-image }}
+          cache-to: type=registry,ref=${{ steps.set-image.outputs.cache-image }},mode=max
 
   pre-test:
     name: basic checks

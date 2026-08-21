@@ -217,6 +217,14 @@ def test_unset_temperature_is_not_folded_into_llm_args(monkeypatch):
     assert config.llm_args is None
 
 
+def test_empty_llm_args_env_is_treated_as_unset(monkeypatch):
+    _clear_sampling_env(monkeypatch)
+    monkeypatch.setenv("LLM_ARGS", "")
+
+    config = LLMConfig(_env_file=None)
+    assert config.llm_args is None
+
+
 def test_explicit_temperature_kwarg_folds_into_llm_args(monkeypatch):
     _clear_sampling_env(monkeypatch)
 
