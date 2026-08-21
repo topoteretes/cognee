@@ -173,7 +173,7 @@ class CogneeApiClient:
     def search(
         self,
         query: str,
-        search_type: str = "GRAPH_COMPLETION",
+        search_type: str = "HYBRID_COMPLETION",
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
     ) -> list:
@@ -312,7 +312,7 @@ class CogneeApiClient:
     def recall(
         self,
         query: str,
-        search_type: Optional[str] = "GRAPH_COMPLETION",
+        search_type: Optional[str] = "HYBRID_COMPLETION",
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
         system_prompt: Optional[str] = None,

@@ -103,6 +103,19 @@ def test_format_search_results_handles_envelope_and_completion_rows():
     assert "[beta] third answer" in rendered
 
 
+def test_format_search_results_renders_hybrid_through_completion_branch():
+    rendered = format_search_results(
+        {
+            "results": [
+                {"dataset_name": "alpha", "search_result": ["hybrid answer"]},
+            ],
+        },
+        "HYBRID_COMPLETION",
+    )
+
+    assert rendered == "[alpha] hybrid answer"
+
+
 def test_format_recall_results_handles_normalized_rows():
     rendered = format_recall_results(
         {
