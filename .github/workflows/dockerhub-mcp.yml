@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   docker-build-and-push:
+    # The custom runner group and Docker Hub credentials belong to the
+    # canonical upstream repository; fork pushes should skip this job.
+    if: github.repository == 'topoteretes/cognee'
     runs-on:
       group: Default
       labels:
@@ -29,20 +32,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Check Docker Hub credentials
+        id: credentials
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          if [[ -n "$DOCKER_USERNAME" && -n "$DOCKER_PASSWORD" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Docker Hub credentials are not configured; skipping image publication."
+          fi
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        if: steps.credentials.outputs.available == 'true'
+        uses: docker/setup-buildx-action@v4
         with:
           buildkitd-flags: --root /tmp/buildkit
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        if: steps.credentials.outputs.available == 'true'
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Extract metadata
+        if: steps.credentials.outputs.available == 'true'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: cognee/cognee-mcp
           tags: |
@@ -51,6 +70,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
+        if: steps.credentials.outputs.available == 'true'
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -65,4 +85,5 @@ jobs:
 
 
       - name: Image digest
+        if: steps.credentials.outputs.available == 'true'
         run: echo ${{ steps.build.outputs.digest }}

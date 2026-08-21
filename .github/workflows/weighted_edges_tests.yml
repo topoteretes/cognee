@@ -28,6 +28,9 @@ permissions:
 jobs:
   test-weighted-edges-functionality:
     name: Test Weighted Edges Core Functionality
+    # Core tests configure a live LLM provider; external fork runs do not have
+    # the required credentials and should rely on the mocked community tests.
+    if: github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -59,6 +62,9 @@ jobs:
 
   test-with-different-databases:
     name: Test Weighted Edges with Different Graph Databases
+    # Database integration tests call the configured LLM and embedding
+    # services; skip them for fork PRs that cannot access maintainer secrets.
+    if: github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -108,6 +114,9 @@ jobs:
 
   test-examples:
     name: Test Weighted Edges Examples
+    # The example performs real LLM/embedding calls and needs maintainer
+    # credentials, so do not run it on an external-contributor PR.
+    if: github.repository == 'topoteretes/cognee' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-22.04
     env:
       LLM_PROVIDER: openai
@@ -166,7 +175,7 @@ jobs:
       # without it the whole repo gets linted with whatever ruff was released
       # last, and unrelated files fail this job.
       - name: Run Linting on Weighted Edges Files
-        uses: astral-sh/ruff-action@v3
+        uses: astral-sh/ruff-action@v4.1.0
         with:
           version: "0.15.17"
           args: "check"
@@ -176,7 +185,7 @@ jobs:
             examples/demos/dynamic_multiple_weighted_edges_example.py
 
       - name: Run Formatting Check on Weighted Edges Files
-        uses: astral-sh/ruff-action@v3
+        uses: astral-sh/ruff-action@v4.1.0
         with:
           version: "0.15.17"
           args: "format --check"
