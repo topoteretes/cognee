@@ -27,7 +27,7 @@ jobs:
 
   mcp-test:
     name: MCP Tests
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository == 'topoteretes/cognee' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_mcp.yml
     secrets: inherit
     with:
@@ -35,7 +35,7 @@ jobs:
 
   cli-test:
     name: CLI Tests
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository == 'topoteretes/cognee' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/cli_tests.yml
     secrets: inherit
     with:
@@ -43,7 +43,7 @@ jobs:
 
   cot-retriever-test:
     name: COT Retriever Test
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository == 'topoteretes/cognee' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -79,7 +79,7 @@ jobs:
   # (LLM-free CHUNKS search), delete + recreate, forget + recreate-same-name.
   multi-user-e2e-default:
     name: Multi-User Release E2E (default file-based DBs)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository == 'topoteretes/cognee' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -117,7 +117,7 @@ jobs:
 
   multi-user-e2e-postgres:
     name: Multi-User Release E2E (Postgres graph + PGVector + Postgres)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository == 'topoteretes/cognee' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -198,7 +198,7 @@ jobs:
 
   dev-canary-release:
     name: Dev Canary Release
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.repository == 'topoteretes/cognee' && github.event_name == 'workflow_dispatch' }}
     needs: load-tests
     # The nested release-pypi job requests id-token/attestations write for
     # provenance publishing (#3298); a caller must grant at least that or
@@ -224,7 +224,7 @@ jobs:
   # Matrix covers the core adapter pairs (Neo4j deliberately excluded for now).
   large-migration-compat:
     name: "Large migration compat (${{ matrix.scenario }}, v1.2.0 → current)"
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository == 'topoteretes/cognee' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
