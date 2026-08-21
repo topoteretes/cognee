@@ -25,6 +25,7 @@ only found through the ``{default_session_id}_{dataset_id}`` naming.
 
 from uuid import UUID
 
+from cognee.infrastructure.locks import session_lock
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_persist_watermark import (
     get_persisted_qa_count,
@@ -139,7 +140,6 @@ async def _invalidate_session_entries(
     entries = await session_manager.get_session(user_id=user_id, session_id=session_id)
     if not entries:
         return (0, 0)
-    total_entries = len(entries)
 
     contaminated_qa_ids: set[str] = set()
     for entry in entries:
@@ -198,13 +198,20 @@ async def _invalidate_session_entries(
             context_deleted += 1
 
     # Clamp the persist watermark to the surviving entry count. A watermark
-    # above the count reads as "session was rebuilt" and would re-persist the
-    # WHOLE session — including content we just deleted — on the next
-    # improve() (see session_persist_watermark module docstring).
+    # above the count reads as "session was rebuilt" and makes the next
+    # improve() re-persist the whole session from the start (see the
+    # session_persist_watermark module docstring). The clamp is a fresh
+    # recount under the same (session_id, "update_qa") lock the QA
+    # delete/update flows use — never the pre-delete snapshot — so
+    # concurrent invalidations serialize and each writes the true count.
+    # Writes only ever lower the watermark; a too-low value is safe (the
+    # next improve() re-persists a little extra, deduped at add()).
     if qa_deleted:
-        remaining = max(0, total_entries - qa_deleted)
-        watermark = await get_persisted_qa_count(session_manager, user_id, session_id)
-        if watermark > remaining:
-            await save_persisted_qa_count(session_manager, user_id, session_id, remaining)
+        async with session_lock(session_id, "update_qa"):
+            surviving = await session_manager.get_session(user_id=user_id, session_id=session_id)
+            remaining = len(surviving) if surviving else 0
+            watermark = await get_persisted_qa_count(session_manager, user_id, session_id)
+            if watermark > remaining:
+                await save_persisted_qa_count(session_manager, user_id, session_id, remaining)
 
     return (qa_deleted, context_deleted)

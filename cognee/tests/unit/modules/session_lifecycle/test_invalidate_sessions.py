@@ -169,6 +169,37 @@ async def test_watermark_clamped_after_targeted_delete(session_manager):
 
 
 @pytest.mark.asyncio
+async def test_watermark_clamp_recounts_after_external_delete(session_manager):
+    """The clamp writes a fresh post-delete recount, not the pre-delete
+    snapshot — entries removed by a concurrent actor between the initial read
+    and the clamp are reflected, so overlapping invalidations converge."""
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_deleted"])
+    await _seed_qa(session_manager, "qa_2", used_node_ids=["node_other"])
+    await _seed_qa(session_manager, "qa_3", used_node_ids=["node_other"])
+    await save_persisted_qa_count(session_manager, USER_ID, SESSION_ID, 3)
+
+    original_delete_qa = session_manager.delete_qa
+
+    async def delete_qa_and_one_more(**kwargs):
+        # Simulate a concurrent invalidation removing qa_3 mid-flight.
+        deleted = await original_delete_qa(**kwargs)
+        await original_delete_qa(user_id=USER_ID, qa_id="qa_3", session_id=SESSION_ID)
+        return deleted
+
+    with patch.object(session_manager, "delete_qa", side_effect=delete_qa_and_one_more):
+        await _invalidate_session_entries(
+            session_manager,
+            user_id=USER_ID,
+            session_id=SESSION_ID,
+            deleted_node_ids={"node_deleted"},
+            deleted_edge_ids=set(),
+        )
+
+    # Snapshot math would write 3 - 1 = 2; the fresh recount sees only qa_2.
+    assert await get_persisted_qa_count(session_manager, USER_ID, SESSION_ID) == 1
+
+
+@pytest.mark.asyncio
 async def test_invalidate_sessions_for_dataset_deletes_attributed_sessions(session_manager):
     dataset_id = uuid4()
     await _seed_qa(session_manager, "qa_1", used_node_ids=["node_a"])
