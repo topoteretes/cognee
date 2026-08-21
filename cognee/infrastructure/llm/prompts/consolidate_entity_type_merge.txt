@@ -13,9 +13,10 @@ Rules:
 - Include comparisons such as minimum, maximum, "most", "best", "worst" only
   when the partial summaries agree on them across the whole type. If the
   partials conflict, or only one partial mentions a comparison, omit it.
-- Name individual members only if you are told the total member count is at
-  or below the stated naming threshold.
-- If the total member count is above the naming threshold, do not list any
-  member names, even if a partial summary names some.
+- You will be given an explicit naming instruction telling you whether to
+  name members individually or not. Follow it exactly as given - it has
+  already accounted for the total member count, so do not recompute or
+  second-guess it yourself, even if a partial summary below names some
+  members.
 - Never write a general-purpose class definition.
 - Output one paragraph of plain prose. No bullet points, no headers.

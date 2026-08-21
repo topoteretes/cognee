@@ -195,9 +195,21 @@ def test_build_entity_type_prompt_reports_total_separately_from_shown_members():
     )
 
     assert "Total member count: 20" in prompt
-    assert "Naming threshold: 5" in prompt
+    assert "MUST NOT name any individual member" in prompt
     assert "Marco: works in Milan" in prompt
     assert "Member cards shown below (1 of 20)" in prompt
+
+
+def test_build_naming_instruction_names_at_the_boundary_count():
+    # Regression test: a real run showed the LLM sometimes fails to list names
+    # when total_member_count exactly equals the threshold, even though the
+    # ticket requires "5 or fewer" (i.e. 5 itself) to be named. The fix moves
+    # the <= comparison into Python instead of asking the LLM to judge it.
+    assert "MUST name every member" in ced.build_naming_instruction(5, max_named_members=5)
+    assert "MUST name every member" in ced.build_naming_instruction(1, max_named_members=5)
+    assert "MUST NOT name any individual member" in ced.build_naming_instruction(
+        6, max_named_members=5
+    )
 
 
 @pytest.mark.asyncio

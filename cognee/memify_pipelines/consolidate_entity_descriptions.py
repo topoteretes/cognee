@@ -239,6 +239,20 @@ def group_entities_by_type(entities: List[Entity]) -> Dict[str, Dict[str, Any]]:
     return groups
 
 
+def build_naming_instruction(total_member_count: int, max_named_members: int) -> str:
+    """Decide, in code, whether members should be named - never ask the LLM to
+    compare total_member_count against the threshold itself. An LLM asked to
+    judge "is 5 at or below 5" is unreliable exactly at that boundary; a plain
+    Python `<=` never is.
+    """
+    if total_member_count <= max_named_members:
+        return (
+            "You MUST name every member shown below individually, pairing each "
+            "name with the fact that best distinguishes it from the others."
+        )
+    return "You MUST NOT name any individual member below - do not mention their names at all."
+
+
 def build_entity_type_prompt(
     entity_type_name: str,
     current_description: str,
@@ -250,8 +264,7 @@ def build_entity_type_prompt(
         f"Entity type: {entity_type_name}",
         f"Current description: {current_description or '(none)'}",
         f"Total member count: {total_member_count}",
-        f"Naming threshold: {max_named_members} (name members only if total member count "
-        "is at or below this).",
+        build_naming_instruction(total_member_count, max_named_members),
         f"Member cards shown below ({len(members)} of {total_member_count}):",
     ]
     for member in members:
@@ -280,8 +293,7 @@ def build_type_merge_prompt(
     lines = [
         f"Entity type: {entity_type_name}",
         f"Total member count: {total_member_count}",
-        f"Naming threshold: {max_named_members} (name members only if total member count "
-        "is at or below this).",
+        build_naming_instruction(total_member_count, max_named_members),
         "You are given partial summaries, each covering a different subset of the members. "
         "Synthesize them into a single final summary following the same rules.",
         "Partial summaries:",

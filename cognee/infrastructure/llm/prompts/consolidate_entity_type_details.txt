@@ -10,11 +10,10 @@ Rules:
 - Include comparisons such as minimum, maximum, "most", "best", "worst" only
   when the member cards contain a field that supports that comparison across
   multiple members. If no card supports a comparison, omit it - never invent one.
-- Name individual members only if you are told the total member count is at
-  or below the stated naming threshold. If you name members, pair each name
-  with the one fact that best distinguishes it from the others.
-- If the total member count is above the naming threshold, do not list any
-  member names, even if only a few member cards were shown to you.
+- You will be given an explicit naming instruction telling you whether to
+  name members individually or not. Follow it exactly as given - it has
+  already accounted for the total member count, so do not recompute or
+  second-guess it yourself.
 - Never write a general-purpose class definition (for example, never write
   something like "A Carrier is a company that transports goods").
 - Output one paragraph of plain prose for the type description itself. No
