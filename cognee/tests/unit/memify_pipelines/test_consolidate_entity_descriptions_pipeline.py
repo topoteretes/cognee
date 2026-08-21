@@ -12,16 +12,17 @@ from cognee.memify_pipelines.consolidate_entity_descriptions import (
     generate_consolidated_entities,
     generate_consolidated_entity,
 )
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
 
 
-def _node(entity_id, name, description, edges, neighbors, entity_type):
+def _node(entity_id, name, description, edges, neighbors, entity_types):
     return {
         "properties": {"id": entity_id, "name": name, "description": description},
         "edges": edges,
         "neighbors": neighbors,
-        "entity_type": entity_type,
+        "entity_types": entity_types,
     }
 
 
@@ -43,14 +44,35 @@ def test_format_connections_extracts_edge_text_and_entity_type():
         ),
     ]
 
-    entity_type, edges, neighbors = format_connections(node_id, connections)
+    entity_types, edges, neighbors = format_connections(node_id, connections)
 
-    assert entity_type["id"] == type_id
+    assert [entity_type["id"] for entity_type in entity_types] == [type_id]
     assert edges[neighbor_id] == {
         "relationship_name": "works_at",
         "edge_text": "Marco works in Milan",
     }
     assert any(neighbor["id"] == neighbor_id for neighbor in neighbors)
+
+
+def test_format_connections_collects_every_entity_type_not_just_the_last():
+    node_id = "entity-1"
+
+    connections = [
+        (
+            {"id": "type-person", "name": "Person", "type": "EntityType"},
+            {"relationship_name": "is_a"},
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+        ),
+        (
+            {"id": "type-author", "name": "Author", "type": "EntityType"},
+            {"relationship_name": "is_a"},
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+        ),
+    ]
+
+    entity_types, _, _ = format_connections(node_id, connections)
+
+    assert {entity_type["id"] for entity_type in entity_types} == {"type-person", "type-author"}
 
 
 def test_format_connections_omits_edge_text_when_absent():
@@ -83,12 +105,14 @@ async def test_generate_consolidated_entity_keeps_id_and_uses_edge_text():
             "neighbor-1": {"relationship_name": "works_at", "edge_text": "Marco works in Milan"}
         },
         neighbors=[{"id": "neighbor-1", "name": "Milano", "description": "A city"}],
-        entity_type={
-            "id": type_id,
-            "name": "Person",
-            "type": "EntityType",
-            "description": "Person",
-        },
+        entity_types=[
+            {
+                "id": type_id,
+                "name": "Person",
+                "type": "EntityType",
+                "description": "Person",
+            }
+        ],
     )
 
     with patch.object(
@@ -119,7 +143,7 @@ async def test_generate_consolidated_entity_without_type_neighbor_does_not_crash
         "old description",
         edges={},
         neighbors=[],
-        entity_type=None,
+        entity_types=[],
     )
 
     with patch.object(
@@ -132,6 +156,47 @@ async def test_generate_consolidated_entity_without_type_neighbor_does_not_crash
     assert str(entity.id) == entity_id
     assert entity.description == "new description"
     assert entity.is_a is None
+
+
+@pytest.mark.asyncio
+async def test_generate_consolidated_entity_with_multiple_types_uses_relations_not_is_a():
+    entity_id = str(uuid4())
+    person_type_id = str(uuid4())
+    author_type_id = str(uuid4())
+    node = _node(
+        entity_id,
+        "Marco",
+        "old description",
+        edges={},
+        neighbors=[],
+        entity_types=[
+            {
+                "id": person_type_id,
+                "name": "Person",
+                "type": "EntityType",
+                "description": "Person",
+            },
+            {
+                "id": author_type_id,
+                "name": "Author",
+                "type": "EntityType",
+                "description": "Author",
+            },
+        ],
+    )
+
+    with patch.object(
+        ced.LLMGateway,
+        "acreate_structured_output",
+        new=AsyncMock(return_value=NodeDescription(description="new description")),
+    ):
+        entity = await generate_consolidated_entity(node, system_prompt="system")
+
+    # No type is "primary" - is_a stays empty rather than arbitrarily picking one.
+    assert entity.is_a is None
+    assert len(entity.relations) == 2
+    assert {relation[1].name for relation in entity.relations} == {"Person", "Author"}
+    assert all(relation[0].relationship_type == "is_a" for relation in entity.relations)
 
 
 @pytest.mark.asyncio
@@ -152,7 +217,7 @@ async def test_generate_consolidated_entities_bounds_llm_concurrency():
 
     nodes = [
         _node(
-            str(uuid4()), f"Entity{i}", "old description", edges={}, neighbors=[], entity_type=None
+            str(uuid4()), f"Entity{i}", "old description", edges={}, neighbors=[], entity_types=[]
         )
         for i in range(ced.MAX_CONCURRENT_ENTITY_LLM_CALLS * 3)
     ]
@@ -185,6 +250,44 @@ def test_group_entities_by_type_groups_separate_instances_by_id():
     assert set(groups.keys()) == {str(person_a.id), str(city.id)}
     assert groups[str(person_a.id)]["members"] == [marco, anna]
     assert groups[str(city.id)]["members"] == [milano]
+
+
+def test_all_entity_types_reads_from_relations_when_is_a_is_none():
+    person = EntityType(name="Person", description="Person")
+    author = EntityType(name="Author", description="Author")
+    marco = Entity(
+        name="Marco",
+        is_a=None,
+        relations=[
+            (Edge(relationship_type="is_a"), person),
+            (Edge(relationship_type="is_a"), author),
+        ],
+        description="d1",
+    )
+
+    types = ced.all_entity_types(marco)
+
+    assert {entity_type.id for entity_type in types} == {person.id, author.id}
+
+
+def test_group_entities_by_type_registers_multi_type_entity_in_every_group():
+    person = EntityType(name="Person", description="Person")
+    author = EntityType(name="Author", description="Author")
+    marco = Entity(
+        name="Marco",
+        is_a=None,
+        relations=[
+            (Edge(relationship_type="is_a"), person),
+            (Edge(relationship_type="is_a"), author),
+        ],
+        description="d1",
+    )
+
+    groups = ced.group_entities_by_type([marco])
+
+    assert set(groups.keys()) == {str(person.id), str(author.id)}
+    assert groups[str(person.id)]["members"] == [marco]
+    assert groups[str(author.id)]["members"] == [marco]
 
 
 def test_build_entity_type_prompt_reports_total_separately_from_shown_members():
@@ -311,6 +414,48 @@ def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches():
 
     # Both forms still point at the same shared EntityType instance.
     assert marco_type is anna.is_a
+
+
+def test_apply_type_description_updates_one_relations_slot_without_touching_the_other():
+    person = EntityType(name="Person", description="Person")
+    author = EntityType(name="Author", description="Author")
+    marco = Entity(
+        name="Marco",
+        is_a=None,
+        relations=[
+            (Edge(relationship_type="is_a"), person),
+            (Edge(relationship_type="is_a"), author),
+        ],
+        description="d1",
+    )
+
+    # Update the Person slot first.
+    ced.apply_type_description(
+        person,
+        [marco],
+        "Person aggregate description",
+        [ced.MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: ...")],
+    )
+
+    person_relation, author_relation = marco.relations
+    assert person_relation[1].description == "Person aggregate description"
+    assert person_relation[0].edge_text == "Marco is a Person: ..."
+    # The Author slot must be untouched by the Person update.
+    assert author_relation[1] is author
+    assert author_relation[1].description == "Author"
+
+    # Now update the Author slot - the already-updated Person slot must survive.
+    ced.apply_type_description(
+        author,
+        [marco],
+        "Author aggregate description",
+        [ced.MemberIsAText(member_name="Marco", is_a_text="Marco is an Author: ...")],
+    )
+
+    person_relation, author_relation = marco.relations
+    assert person_relation[1].description == "Person aggregate description"
+    assert author_relation[1].description == "Author aggregate description"
+    assert author_relation[0].edge_text == "Marco is an Author: ..."
 
 
 @pytest.mark.asyncio

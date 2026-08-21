@@ -58,7 +58,7 @@ async def get_entity_neighborhood(
     """Fetch and format data for a single entity node."""
     connections = await graph_engine.get_connections(node_id)
 
-    entity_type, edges, filtered_neighbors = format_connections(node_id, connections)
+    entity_types, edges, filtered_neighbors = format_connections(node_id, connections)
     entity_props = get_entity_properties(props)
     if "id" not in entity_props:
         entity_props["id"] = str(node_id)
@@ -66,7 +66,7 @@ async def get_entity_neighborhood(
         "properties": entity_props,
         "edges": edges,
         "neighbors": filtered_neighbors,
-        "entity_type": entity_type,
+        "entity_types": entity_types,
     }
 
 
@@ -83,18 +83,23 @@ def format_connections(
     node_id: str,
     connections: List[Any],
     node_fields: Optional[Set[str]] = None,
-) -> tuple[Optional[Dict[str, Any]], Dict[str, Dict[str, Optional[str]]], List[Dict[str, Any]]]:
-    """Split get_connections() triples into edge info, the EntityType neighbor, and other neighbors.
+) -> tuple[List[Dict[str, Any]], Dict[str, Dict[str, Optional[str]]], List[Dict[str, Any]]]:
+    """Split get_connections() triples into EntityType neighbors, edge info, and other neighbors.
 
     get_connections(node_id) returns (source, edge, target) triples where node_id
     can be on either side of the edge, so the neighbor is whichever side does not
     match node_id. Unlike get_edges() (which never carries edge properties on any
     backend), the edge dict here includes edge_text when the edge has one.
+
+    An entity can have more than one EntityType neighbor - e.g. classified
+    differently across separate ingestions of the same (name-deduped) entity -
+    so entity_types is a list, not a single value that would silently drop all
+    but the last one found.
     """
     if node_fields is None:
         node_fields = {"id", "name", "description", "text", "type"}
 
-    entity_type = None
+    entity_types: List[Dict[str, Any]] = []
     edges: Dict[str, Dict[str, Optional[str]]] = {}
     filtered_neighbors: List[Dict[str, Any]] = []
 
@@ -112,13 +117,13 @@ def format_connections(
         }
 
         if neighbor.get("type") == "EntityType":
-            entity_type = neighbor
+            entity_types.append(neighbor)
 
         filtered_neighbor = {k: v for k, v in neighbor.items() if k in node_fields}
         if len(filtered_neighbor) > 1:
             filtered_neighbors.append(filtered_neighbor)
 
-    return entity_type, edges, filtered_neighbors
+    return entity_types, edges, filtered_neighbors
 
 
 # endregion
@@ -193,12 +198,26 @@ def build_entity_type(entity_type_node):
     return entity_type
 
 
-def build_entity(id, name, entity_type, description):
+def build_entity(id, name, entity_types: List[EntityType], description):
+    """Build an Entity from its (possibly empty) list of EntityType nodes.
+
+    A single type still goes on is_a, unchanged from before. With more than
+    one type, none is more "correct" than another - is_a can only hold one
+    value, so all of them go on relations as equally-weighted is_a-tagged
+    edges instead of picking one arbitrarily and silently dropping the rest.
+    """
+    is_a = entity_types[0] if len(entity_types) == 1 else None
+    relations = (
+        [(Edge(relationship_type="is_a"), entity_type) for entity_type in entity_types]
+        if len(entity_types) > 1
+        else []
+    )
     return Entity(
         id=UUID(id),
         name=name,
-        is_a=entity_type,
+        is_a=is_a,
         description=description,
+        relations=relations,
     )
 
 
@@ -206,8 +225,8 @@ async def generate_consolidated_entity(node, system_prompt) -> Entity:
     props = node["properties"]
     text = build_node_neighborhood_prompt(node)
     result = await query_LLM(text, system_prompt)
-    entity_type = build_entity_type(node["entity_type"]) if node["entity_type"] else None
-    entity = build_entity(props["id"], props["name"], entity_type, result.description)
+    entity_types = [build_entity_type(entity_type) for entity_type in node["entity_types"]]
+    entity = build_entity(props["id"], props["name"], entity_types, result.description)
     return entity
 
 
@@ -222,20 +241,46 @@ def _entity_type_of(is_a: Optional[Union[EntityType, tuple]]) -> Optional[Entity
     return is_a
 
 
+def _is_a_relation_type(relation: Any) -> Optional[EntityType]:
+    """Return the EntityType of an is_a-tagged (Edge, EntityType) tuple in relations, else None."""
+    if (
+        isinstance(relation, tuple)
+        and len(relation) == 2
+        and isinstance(relation[0], Edge)
+        and relation[0].relationship_type == "is_a"
+        and isinstance(relation[1], EntityType)
+    ):
+        return relation[1]
+    return None
+
+
+def all_entity_types(entity: Entity) -> List[EntityType]:
+    """Every type this entity belongs to - the single one on is_a (the common
+    case), or all of them from relations for an entity with more than one type
+    (is_a is None in that case; see build_entity)."""
+    primary = _entity_type_of(entity.is_a)
+    if primary is not None:
+        return [primary]
+    return [
+        entity_type
+        for relation in entity.relations
+        if (entity_type := _is_a_relation_type(relation)) is not None
+    ]
+
+
 def group_entities_by_type(entities: List[Entity]) -> Dict[str, Dict[str, Any]]:
     """Group rewritten entities by their EntityType id.
 
-    Entities with no type (``is_a is None``) are left out of the result -
-    there is nothing to summarize a type from for them.
+    An entity with multiple types is registered as a member of every one of
+    its type groups, not just one - see all_entity_types(). Entities with no
+    type at all are left out of the result.
     """
     groups: Dict[str, Dict[str, Any]] = {}
     for entity in entities:
-        entity_type = _entity_type_of(entity.is_a)
-        if entity_type is None:
-            continue
-        type_id = str(entity_type.id)
-        group = groups.setdefault(type_id, {"entity_type": entity_type, "members": []})
-        group["members"].append(entity)
+        for entity_type in all_entity_types(entity):
+            type_id = str(entity_type.id)
+            group = groups.setdefault(type_id, {"entity_type": entity_type, "members": []})
+            group["members"].append(entity)
     return groups
 
 
@@ -415,19 +460,44 @@ def apply_type_description(
     so the text is searchable on the edge. A member with no matching text
     (name mismatch, or none produced) falls back to the bare EntityType rather
     than raising - the entity is still rewritten, just without edge_text.
+
+    A member with more than one type appears here once per type it belongs to
+    (once per call to this function, across different groups - see
+    group_entities_by_type). Each call must only touch THIS type's slot -
+    is_a if this is the member's sole type, or the matching tuple inside
+    relations otherwise - and leave the member's other types exactly as they
+    were, since a later call for another of its types still needs them intact.
     """
     updated_entity_type = entity_type.model_copy(update={"description": new_description})
     is_a_text_by_name = {item.member_name: item.is_a_text for item in (is_a_texts or [])}
 
     for member in members:
         is_a_text = is_a_text_by_name.get(member.name)
-        if is_a_text:
+
+        primary_type = _entity_type_of(member.is_a)
+        if primary_type is not None and primary_type.id == entity_type.id:
+            # is_a is a scalar field: get_graph_from_model derives the "is_a"
+            # relationship name from the field name itself when there's no
+            # Edge wrapper, so a bare EntityType here still persists correctly.
             member.is_a = (
-                Edge(relationship_type="is_a", edge_text=is_a_text),
-                updated_entity_type,
+                (Edge(relationship_type="is_a", edge_text=is_a_text), updated_entity_type)
+                if is_a_text
+                else updated_entity_type
             )
-        else:
-            member.is_a = updated_entity_type
+            continue
+
+        for index, relation in enumerate(member.relations):
+            if _is_a_relation_type(relation) is not None and relation[1].id == entity_type.id:
+                # relations is a list field: without an explicit Edge wrapper,
+                # get_graph_from_model would label this edge "relations"
+                # instead of "is_a" (it falls back to the field name). Always
+                # wrap here, even with edge_text=None, to keep the "is_a"
+                # label - unlike the is_a slot above, there is no bare form.
+                member.relations[index] = (
+                    Edge(relationship_type="is_a", edge_text=is_a_text),
+                    updated_entity_type,
+                )
+                break
 
     return updated_entity_type
 
