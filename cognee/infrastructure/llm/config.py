@@ -161,6 +161,26 @@ class LLMConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+    @model_validator(mode="before")
+    @classmethod
+    def blank_llm_args_is_unset(cls, values: Any) -> Any:
+        """
+        Treat a blank ``LLM_ARGS`` as unset rather than a validation error.
+
+        A ``.env`` written from an empty variable — ``LLM_ARGS=`` — reaches this
+        dict field as ``""`` and raises ``ValidationError`` while
+        ``cognee/__init__`` is still importing, so the process dies before it can
+        report anything useful. An empty value cannot express any arguments, so
+        read it as "none given".
+        """
+        if isinstance(values, dict):
+            for key in ("llm_args", "LLM_ARGS"):
+                value = values.get(key)
+                if isinstance(value, str) and not value.strip():
+                    values[key] = None
+
+        return values
+
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
         """

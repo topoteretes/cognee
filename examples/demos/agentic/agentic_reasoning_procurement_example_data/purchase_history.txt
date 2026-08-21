@@ -1,0 +1,16 @@
+Previous Purchase Records:
+        1. Vendor: TechSupply Solutions
+           Item: Desktop computers - 25 units
+           Amount: $35,000
+           Date: 2024-01-15
+           Performance: Excellent delivery, good quality, delivered 2 days early
+           Rating: 5/5
+           Notes: Responsive support team, competitive pricing
+
+        2. Vendor: Office Solutions
+           Item: Office furniture
+           Amount: $12,000
+           Date: 2024-02-20
+           Performance: Delayed delivery by 1 week, average quality
+           Rating: 2/5
+           Notes: Poor communication, but acceptable product quality

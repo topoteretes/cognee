@@ -26,6 +26,7 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
     SQLAlchemyAdapter,
 )
 from cognee.modules.data.models import Data, Dataset
+from cognee.modules.ingestion import StoredFile
 
 # Import the module object explicitly: `cognee.tasks.ingestion.__init__` re-exports
 # `ingest_data` (the function), which shadows the submodule of the same name, so
@@ -87,11 +88,20 @@ def _install_mocks(stack, engine):
     storage, loaders, or dataset/permission machinery — only the relational
     engine is real."""
     meta = _metadata()
-    # get_identifier feeds the pre-loop's batch dedup (batch_id_by_hash); the
-    # mocked `identify` already returns DATA_ID, so the value only has to exist.
+
+    # get_identifier feeds the batched dedup lookup; the mocked `identify_many`
+    # maps this hash to DATA_ID, so the seeded row is the one that gets updated.
+    async def _aget_metadata():
+        return meta
+
+    async def _aget_identifier():
+        return meta["content_hash"]
+
     classified = SimpleNamespace(
         get_metadata=lambda: meta,
         get_identifier=lambda: meta["content_hash"],
+        aget_metadata=_aget_metadata,
+        aget_identifier=_aget_identifier,
     )
     # A real (transient) mapped Dataset: store_data_to_dataset does `dataset in
     # session` / session.add / session.merge, which require a mapped instance.
@@ -100,7 +110,9 @@ def _install_mocks(stack, engine):
     stack.enter_context(patch.object(ingest_module, "get_relational_engine", lambda: engine))
     stack.enter_context(
         patch.object(
-            ingest_module, "save_data_item_to_storage", AsyncMock(return_value="/tmp/doc.txt")
+            ingest_module,
+            "save_data_item_to_storage_detailed",
+            AsyncMock(return_value=StoredFile(file_path="/tmp/doc.txt")),
         )
     )
     stack.enter_context(patch.object(ingest_module, "get_data_file_path", lambda p: p))
@@ -113,23 +125,25 @@ def _install_mocks(stack, engine):
         )
     )
     stack.enter_context(patch.object(ingest_module.ingestion, "classify", lambda _f: classified))
+    # Dedup now runs as one batched lookup for the whole add() batch instead of a
+    # per-file identify(); report DATA_ID as the row already holding this content
+    # hash so the existing-record UPDATE branch runs.
     stack.enter_context(
-        patch.object(ingest_module.ingestion, "identify", AsyncMock(return_value=DATA_ID))
+        patch.object(
+            ingest_module,
+            "identify_many",
+            AsyncMock(return_value={meta["content_hash"]: DATA_ID}),
+        )
     )
-    # Dataset resolution: return the seeded dataset and report DATA_ID as already
-    # belonging to it, so the existing-record UPDATE branch (not CREATE) runs.
+    # Dataset resolution: return the seeded dataset. Dataset membership is no
+    # longer a separate full-table read (get_dataset_data); ingest_data derives
+    # it from the rows the batch resolved to, and the seeded row's dataset_id
+    # is DATASET_ID, so the existing-record UPDATE branch (not CREATE) runs.
     stack.enter_context(
         patch.object(ingest_module, "get_authorized_existing_datasets", AsyncMock(return_value=[]))
     )
     stack.enter_context(
         patch.object(ingest_module, "load_or_create_datasets", AsyncMock(return_value=dataset))
-    )
-    stack.enter_context(
-        patch.object(
-            ingest_module,
-            "get_dataset_data",
-            AsyncMock(return_value=[SimpleNamespace(id=DATA_ID)]),
-        )
     )
 
 

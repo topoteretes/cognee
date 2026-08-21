@@ -42,11 +42,26 @@ class ResponseToolEntry(BaseModel):
     structured: Optional[dict] = None
 
 
+class ResponseMarkerEntry(BaseModel):
+    """System-generated marker (not data), e.g. "memory still warming up".
+
+    ``text`` carries a human-readable message so generic consumers that fall
+    back to text rendering display something sensible.
+    """
+
+    source: Literal["system"]
+    status: str
+    text: str
+    datapoint_count: int
+    threshold: int
+
+
 RecallResponse = Annotated[
     ResponseQAEntry
     | ResponseAgentTraceEntry
     | ResponseSessionContextEntry
     | ResponseGraphEntry
-    | ResponseToolEntry,
+    | ResponseToolEntry
+    | ResponseMarkerEntry,
     Field(discriminator="source"),
 ]
