@@ -59,8 +59,11 @@ async def get_entity_neighborhood(
     connections = await graph_engine.get_connections(node_id)
 
     entity_type, edges, filtered_neighbors = format_connections(node_id, connections)
+    entity_props = get_entity_properties(props)
+    if "id" not in entity_props:
+        entity_props["id"] = str(node_id)
     return {
-        "properties": get_entity_properties(props),
+        "properties": entity_props,
         "edges": edges,
         "neighbors": filtered_neighbors,
         "entity_type": entity_type,
