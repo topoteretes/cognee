@@ -6,14 +6,15 @@ permissions:
 on:
   schedule:
     - cron: '0 3 * * *'
+  # Deliberately NOT on pull_request. This workflow used to run on any PR that
+  # touched the nightly/perf workflow files, to validate the edit before merge.
+  # The cost of that was the whole nightly gating the PR: ~13 jobs including
+  # Ollama, llama-cpp, four cloud/rust perf arms and a 100k-node benchmark, any
+  # one of which reddens the PR for something the PR did not cause. It also
+  # meant a nightly-only regression on dev surfaced as a failing check on an
+  # unrelated PR. Validate workflow edits with `workflow_dispatch` on the branch
+  # instead (Actions -> Nightly Tests -> Run workflow -> pick the branch).
   workflow_dispatch:
-  # Note: Run Nightly CI on change to any of the following files.
-  pull_request:
-    paths:
-      - '.github/workflows/nightly_tests.yml'
-      - '.github/workflows/performance_report.yml'
-      - '.github/workflows/performance_report_cloud.yml'
-      - '.github/workflows/performance_report_rust.yml'
 
 
 concurrency:
@@ -184,9 +185,7 @@ jobs:
     if: ${{ !cancelled() }}
     steps:
       # This job runs repo scripts (the Slack block renderer, the MotherDuck
-      # ETL), so it needs a working tree. It previously had none: the ETL is
-      # skipped on pull_request and has never run on a schedule from this
-      # branch, so nothing exercised the gap until the renderer landed.
+      # ETL), so it needs a working tree.
       - name: Checkout repository
         uses: actions/checkout@v6
 
@@ -280,9 +279,9 @@ jobs:
         run: python .github/scripts/build_nightly_slack_blocks.py
 
       - name: Post status to Slack
-        # Posts on scheduled/manual runs AND on pull_request validation runs
-        # (which fire when the nightly workflow files themselves change), so
-        # workflow changes surface their reports in the channel too.
+        # Posts on scheduled and manual (workflow_dispatch) runs. There is no
+        # longer a pull_request trigger, so a workflow edit surfaces its reports
+        # by being dispatched on the branch rather than by opening a PR.
         uses: slackapi/slack-github-action@v2.1.0
         with:
           method: chat.postMessage
@@ -298,8 +297,9 @@ jobs:
         # failure gate and marked continue-on-error: a warehouse hiccup must not
         # turn a green nightly red, and the reports from a failed suite are the
         # interesting rows, so they still need to land.
-        # Skipped on pull_request for the same reason as the Slack post — the
-        # trigger exists to validate this file, not to write to the warehouse.
+        # The pull_request trigger is gone, so this guard is now a belt-and-braces
+        # no-op. Kept deliberately: if anyone reinstates a PR trigger, a
+        # validation run must not write to the shared warehouse.
         if: ${{ github.event_name != 'pull_request' }}
         continue-on-error: true
         env:
