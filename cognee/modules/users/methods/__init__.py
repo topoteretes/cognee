@@ -12,3 +12,4 @@ from .get_authenticated_user import (
 from .get_principal_configuration import get_principal_configuration
 from .get_principal_configuration import get_principal_all_configuration
 from .store_principal_configuration import store_principal_configuration
+from .get_visible_user_ids import get_visible_user_ids

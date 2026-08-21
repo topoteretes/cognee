@@ -94,7 +94,7 @@ async def test_load_success_with_unstructured(
     result_path = await loader.load(test_file_path)
 
     # Assert
-    assert result_path == "/stored/text_abc123def456.txt"
+    assert result_path.file_path == "/stored/text_abc123def456.txt"
 
     # Verify partition_pdf is called with the correct parameters
     mock_partition_pdf.assert_called_once()

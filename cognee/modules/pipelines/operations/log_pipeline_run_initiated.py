@@ -1,10 +1,18 @@
+from typing import Optional
 from uuid import UUID
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import generate_pipeline_run_id
 
 
-async def log_pipeline_run_initiated(pipeline_id: UUID, pipeline_name: str, dataset_id: UUID):
+async def log_pipeline_run_initiated(
+    pipeline_id: UUID,
+    pipeline_name: str,
+    dataset_id: UUID,
+    *,
+    user_id: Optional[UUID] = None,
+):
     pipeline_run = PipelineRun(
         pipeline_run_id=generate_pipeline_run_id(pipeline_id, dataset_id),
         pipeline_name=pipeline_name,
@@ -12,6 +20,8 @@ async def log_pipeline_run_initiated(pipeline_id: UUID, pipeline_name: str, data
         status=PipelineRunStatus.DATASET_PROCESSING_INITIATED,
         dataset_id=dataset_id,
         run_info={},
+        user_id=user_id,
+        operation_name=pipeline_name,
     )
 
     db_engine = get_relational_engine()

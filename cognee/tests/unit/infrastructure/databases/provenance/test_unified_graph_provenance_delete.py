@@ -393,6 +393,35 @@ async def test_delete_by_source_ref_unowned_delete_and_shared_detach():
     assert owned is not None and shared is not None  # keep references explicit
 
 
+async def test_delete_by_source_ref_returns_hard_deleted_identities():
+    """The removal result carries only the hard-deleted (unowned) artifacts —
+    survivors that merely detached the ref are excluded. Consumed by session
+    invalidation (COG-5947)."""
+    dataset_a = uuid4()
+    ref_a = make_source_ref_key(dataset_a, uuid4())
+    ref_b = make_source_ref_key(uuid4(), uuid4())
+    run = uuid4()
+
+    graph = FakeProvenanceGraphEngine()
+    graph.add_node("n_owned", "Entity", ["name"], {"name": "Germany"})
+    graph.add_node("n_shared", "Entity", ["name"], {"name": "Europe"})
+    edge_owned = graph.add_edge("n_owned", "n_shared", "located_in", "located in")
+
+    await graph.attach_node_source_refs(["n_owned"], [ref_a], run)
+    await graph.attach_node_source_refs(["n_shared"], [ref_a, ref_b], run)
+    await graph.attach_edge_source_refs([edge_owned], [ref_a], run)
+
+    engine = _build_engine(graph, FakeVectorEngine())
+
+    result = await engine.delete_by_source_ref(ref_a)
+
+    assert result  # always truthy, even when nothing was deleted
+    assert result.deleted_node_ids == ["n_owned"]
+    assert [
+        (edge.source_id, edge.relationship_name, edge.target_id) for edge in result.deleted_edges
+    ] == [("n_owned", "located_in", "n_shared")]
+
+
 async def test_delete_by_dataset_id_preserves_cross_dataset_artifacts():
     """Removing dataset A's refs leaves dataset-B-owned artifacts intact."""
     dataset_a = uuid4()

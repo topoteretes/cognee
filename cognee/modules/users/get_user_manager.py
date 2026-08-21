@@ -3,6 +3,7 @@ import re
 import json
 import uuid
 import logging
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from typing import Optional
 from fastapi import Depends, HTTPException, Request, Response
@@ -19,6 +20,11 @@ from cognee.modules.users.api_key.hash_api_key import prepare_api_key
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 logger = logging.getLogger(__name__)
+
+# How stale last_used_at may get before an auth refreshes it. Throttling the
+# write keeps hot keys from paying a DB write per request while still giving
+# a usable "last seen" signal per key.
+API_KEY_LAST_USED_WRITE_INTERVAL = timedelta(minutes=5)
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
@@ -91,7 +97,31 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             if user_api_key is None:
                 return None
 
-            return (await session.execute(select(User).filter_by(id=user_api_key.user_id))).scalar()
+            user = (await session.execute(select(User).filter_by(id=user_api_key.user_id))).scalar()
+
+            # Best-effort "last seen" tracking on the key, throttled to one
+            # write per API_KEY_LAST_USED_WRITE_INTERVAL. Reuses the already
+            # open session (preserving the single-connection invariant above)
+            # and must never break auth: any failure is logged and swallowed.
+            try:
+                await self._touch_api_key_last_used(session, user_api_key)
+            except Exception as error:
+                logger.warning("Failed to update API key last_used_at: %s", error)
+
+            return user
+
+    @staticmethod
+    async def _touch_api_key_last_used(session, user_api_key) -> None:
+        now = datetime.now(timezone.utc)
+        last_used_at = getattr(user_api_key, "last_used_at", None)
+        if last_used_at is not None:
+            if last_used_at.tzinfo is None:
+                # SQLite hands back naive datetimes; stored values are UTC.
+                last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+            if now - last_used_at < API_KEY_LAST_USED_WRITE_INTERVAL:
+                return
+        user_api_key.last_used_at = now
+        await session.commit()
 
 
 async def get_user_manager(user_db: SQLAlchemyUserDatabase = Depends(get_user_db)):

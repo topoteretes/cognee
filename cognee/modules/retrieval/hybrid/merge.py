@@ -7,11 +7,10 @@ module does not own are taken from the primary result unchanged.
 
 from typing import Any, Optional
 
-from cognee.modules.retrieval.hybrid.results import result_id
+from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 
-# Rebuilt from the merged channels rather than carried over from the primary result.
-_DERIVED_KEYS = {"chunks", "chunk_summaries", "entities", "facts"}
+_DERIVED_KEYS = frozenset(empty_hybrid_result())
 
 
 def merge_hybrid_results(

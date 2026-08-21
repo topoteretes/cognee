@@ -8,6 +8,14 @@ from ..storage import get_file_storage
 from .local_path_safety import resolve_local_path
 
 
+# Bytes hashed per iteration. md5's block_size (64) was used here before,
+# but that constant is the digest's internal compression block, not an I/O
+# size — and FileBufferedReader forwards read() straight to the wrapped
+# object, so every 64-byte call went through the whole storage stack
+# (~16k Python-level calls per MiB). The digest is chunk-size independent.
+HASH_CHUNK_SIZE = 1024 * 1024
+
+
 async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
     h = hashlib.md5()
 
@@ -28,18 +36,10 @@ async def get_file_content_hash(file_obj: str | BinaryIO) -> str:
             file_storage = get_file_storage(file_dir_path)
 
             async with file_storage.open(file_name, "rb") as file:
-                while True:
-                    # Reading is buffered, so we can read smaller chunks.
-                    chunk = file.read(h.block_size)
-                    if not chunk:
-                        break
+                while chunk := file.read(HASH_CHUNK_SIZE):
                     h.update(chunk)
         else:
-            while True:
-                # Reading is buffered, so we can read smaller chunks.
-                chunk = file_obj.read(h.block_size)
-                if not chunk:
-                    break
+            while chunk := file_obj.read(HASH_CHUNK_SIZE):
                 h.update(chunk)
 
         return h.hexdigest()
