@@ -38,13 +38,16 @@ from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
 from cognee.context_global_variables import session_user
 
 
-def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int) -> int:
+def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
     """Search top_k feeds hybrid's chunk/entity/fact lanes, capped so default context stays small.
 
     An explicit retriever_specific_config value is not capped.
+    None is left unset so the retriever can apply its own default.
     """
     if key in config:
         return config[key]
+    if search_top_k is None:
+        return None
     return min(search_top_k, DEFAULT_HYBRID_LANE_TOP_K)
 
 

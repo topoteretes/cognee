@@ -255,6 +255,21 @@ async def test_hybrid_completion_caps_default_channel_limits():
 
 
 @pytest.mark.asyncio
+async def test_hybrid_completion_leaves_lane_defaults_when_top_k_is_none():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=None,
+    )
+
+    assert retriever_instance.chunks_top_k == 5
+    assert retriever_instance.entities_top_k == 5
+    assert retriever_instance.facts_top_k == 5
+
+
+@pytest.mark.asyncio
 async def test_hybrid_completion_keeps_search_top_k_when_below_lane_cap():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
