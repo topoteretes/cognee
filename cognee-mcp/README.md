@@ -483,6 +483,7 @@ The MCP server intentionally exposes only the memory API: `remember`, `recall`, 
 In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
 `cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
 kept internal and are not exposed as MCP tools.
+Note: The dataset tools list_dataset_data_json and create_dataset_json only work in Direct Mode. Running them while the MCP server is in API Mode will return an error. 
 
 ## 💻 Basic Usage
 
@@ -503,6 +504,8 @@ The MCP server exposes three tools:
 - **upload_file_ui**: Open the workspace for file upload
 - **open_cognee_workspace**: Generic "open the cognee UI" entry point
 - **list_datasets_json / list_dataset_data_json / create_dataset_json / get_client_info_json**: Structured-JSON helpers powering the workspace dropdown
+
+Note: list_dataset_data_json and create_dataset_json require Direct Mode and will raise an error if the MCP server is running in API Mode.
 
 The workspace lets you create/switch/delete datasets, upload files, add text, search, and view the graph from one inline panel.
 
