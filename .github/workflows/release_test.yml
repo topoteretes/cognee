@@ -68,6 +68,9 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          # COT retrieval embeds graph queries independently of the LLM
+          # completion path; provide the same OpenAI credential explicitly.
+          EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           uv run pytest cognee/tests/integration/retrieval/test_graph_completion_retriever_cot.py -v --timeout=300
 
