@@ -63,8 +63,8 @@ async def search(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
@@ -165,8 +165,8 @@ async def authorized_search(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -225,8 +225,8 @@ async def search_in_datasets_context(
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -252,8 +252,8 @@ async def search_in_datasets_context(
         node_name_filter_operator: str = "OR",
         only_context: bool = False,
         session_id: Optional[str] = None,
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: Optional[int] = None,
+        triplet_distance_penalty: Optional[float] = None,
         feedback_influence: float = get_base_config().default_feedback_influence,
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
@@ -412,6 +412,10 @@ async def search_in_datasets_context(
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
+
+    Does not include SearchResultPayload.search_type. only_context / verbose
+    callers that parse retriever-specific shapes must pin query_type; hybrid
+    may have deferred to GRAPH_COMPLETION.
     """
     # This is for maintaining backwards compatibility
     if backend_access_control_enabled():

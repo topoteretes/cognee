@@ -13,6 +13,7 @@ import os
 
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient, is_connection_error
+from cognee.cli.config import COMPLETION_SEARCH_TYPES, DEFAULT_SEARCH_TYPE
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -290,19 +291,18 @@ def _dispatch_remember(client: CogneeApiClient, args: argparse.Namespace) -> Non
 def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
     # Session-only mode: -s without -d and without explicit -t. Mirrors the
     # local recall_command behaviour so --api-url users get the same UX.
-    session_only = (
-        args.session_id is not None and not args.datasets and args.query_type == "GRAPH_COMPLETION"
-    )
+    session_only = args.session_id is not None and not args.datasets and args.query_type is None
+    effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
 
     if session_only:
         fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
     else:
         datasets_msg = f" in datasets {args.datasets}" if args.datasets else " across all datasets"
-        fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+        fmt.echo(f"Recalling: '{args.query_text}' (type: {effective_query_type}){datasets_msg}")
 
     results = client.recall(
         query=args.query_text,
-        search_type=None if session_only else args.query_type,
+        search_type=None if session_only else effective_query_type,
         datasets=args.datasets,
         top_k=args.top_k,
         system_prompt=getattr(args, "system_prompt", None),
@@ -338,9 +338,9 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
             if i < len(results):
                 fmt.echo("-" * 40)
     else:
-        fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+        fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
         fmt.echo("=" * 60)
-        if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+        if effective_query_type in COMPLETION_SEARCH_TYPES:
             for i, result in enumerate(results, 1):
                 fmt.echo(f"{fmt.bold('Response:')} {result}")
                 if i < len(results):

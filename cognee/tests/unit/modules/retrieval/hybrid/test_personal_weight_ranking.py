@@ -5,8 +5,7 @@ def _pair(chunk_id: str, rank: int, importance: float = 0.5) -> dict:
     return {
         "chunk": {"id": chunk_id, "text": chunk_id, "importance_weight": importance},
         "chunk_id": chunk_id,
-        "bm25_rank": rank,
-        "vector_rank": None,
+        "vector_rank": rank,
         "summary_rank": None,
     }
 

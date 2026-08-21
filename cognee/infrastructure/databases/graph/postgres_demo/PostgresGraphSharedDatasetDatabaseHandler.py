@@ -23,11 +23,11 @@ class PostgresGraphSharedDatasetDatabaseHandler:
     ``graph_node``/``graph_edge`` tables in a dedicated schema
     (``ds_<dataset_id>``) of cognee's main Postgres database, isolating datasets
     by pinning the per-dataset graph engine's ``search_path`` to that schema
-    (see ``PostgresAdapter``). The shared database is cognee's relational
+    (see ``PostgresDemoAdapter``). The shared database is cognee's relational
     database, so credentials/host/port come from the relational configuration.
 
     Selected with ``GRAPH_DATASET_DATABASE_HANDLER=postgres_graph_shared``
-    (requires ``GRAPH_DATABASE_PROVIDER=postgres`` and
+    (requires ``GRAPH_DATABASE_PROVIDER=postgres_demo`` and
     ``ENABLE_BACKEND_ACCESS_CONTROL=true``).
     """
 
@@ -35,10 +35,10 @@ class PostgresGraphSharedDatasetDatabaseHandler:
     async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
         graph_config = get_graph_config()
 
-        if graph_config.graph_database_provider != "postgres":
+        if graph_config.graph_database_provider not in ("postgres", "postgres_demo"):
             raise ValueError(
                 "PostgresGraphSharedDatasetDatabaseHandler can only be used "
-                "with the postgres graph database provider."
+                "with the postgres_demo graph database provider (or its postgres alias)."
             )
 
         relational_config = get_relational_config()
