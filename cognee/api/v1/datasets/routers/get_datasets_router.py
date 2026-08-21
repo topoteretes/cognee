@@ -124,7 +124,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets",
                 "cognee_version": cognee_version,
@@ -172,7 +172,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/datasets",
                 "cognee_version": cognee_version,
@@ -237,7 +237,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
                 "dataset_id": str(dataset_id),
@@ -287,7 +287,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
                 "dataset_id": str(dataset_id),
@@ -372,7 +372,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
                 "dataset_id": str(dataset_id),
@@ -474,7 +474,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/status",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
@@ -539,7 +539,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/graph-summary",
                 "dataset_ids": [str(dataset_id) for dataset_id in dataset_ids],
@@ -691,7 +691,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
                 "dataset_id": str(dataset_id),

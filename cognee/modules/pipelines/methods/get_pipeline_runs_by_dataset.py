@@ -21,7 +21,9 @@ async def get_pipeline_runs_by_dataset(dataset_id: UUID):
                 )
                 .label("rn"),
             )
-            .filter(PipelineRun.dataset_id == dataset_id)
+            # Operation-level records (record_operation) carry no pipeline_name;
+            # they are not pipeline runs and must stay invisible to status readers.
+            .filter(PipelineRun.dataset_id == dataset_id, PipelineRun.pipeline_name.isnot(None))
             .subquery()
         )
 
