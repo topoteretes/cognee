@@ -194,7 +194,7 @@ class SessionManager:
                 question=question,
                 answer=answer,
             )
-            await record_session_activity(user_id, session_id)
+            await record_session_activity(user_id, session_id, dataset_id=self.dataset_id)
             return qa_id
 
     async def add_agent_trace_step(
@@ -249,7 +249,9 @@ class SessionManager:
             error_message=error_message,
             session_feedback=session_feedback,
         )
-        await record_session_activity(user_id, session_id, errored=status == "error")
+        await record_session_activity(
+            user_id, session_id, dataset_id=self.dataset_id, errored=status == "error"
+        )
         await self._maybe_extract_agent_context(
             user_id=user_id,
             session_id=session_id,
@@ -833,6 +835,31 @@ class SessionManager:
             )
         except Exception as e:
             logger.warning("SessionManager: update_session_context_entry failed: %s", e)
+            return False
+
+    async def delete_session_context_entry(
+        self,
+        *,
+        user_id: str,
+        entry_id: str,
+        session_id: str | None = None,
+    ) -> bool:
+        """
+        Delete a single session-context entry by its "id" field.
+
+        Raises SessionParameterValidationError for invalid user_id/session_id.
+        Fail-open on infrastructure errors: returns False when the cache is
+        unavailable or the cache operation fails.
+        """
+        session_id = self.resolve_session_id(session_id)
+        self._validate_session_params(user_id=user_id, session_id=session_id)
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_session_context_entry")
+            return False
+        try:
+            return await self._cache.delete_session_context_entry(user_id, session_id, entry_id)
+        except Exception as e:
+            logger.warning("SessionManager: delete_session_context_entry failed: %s", e)
             return False
 
     async def delete_session_context(

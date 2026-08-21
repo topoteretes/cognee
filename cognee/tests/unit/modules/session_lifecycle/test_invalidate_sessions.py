@@ -1,0 +1,287 @@
+"""Unit tests for session invalidation on document/dataset deletion (COG-5947).
+
+Exercises the real SessionManager over a filesystem cache adapter; only the
+vector-index hooks and the relational session registry are patched out.
+"""
+
+import tempfile
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+
+import pytest
+
+from cognee.infrastructure.session.session_persist_watermark import (
+    get_persisted_qa_count,
+    save_persisted_qa_count,
+)
+from cognee.modules.session_lifecycle.invalidate_sessions import (
+    _invalidate_session_entries,
+    invalidate_sessions_for_dataset,
+    invalidate_sessions_for_deleted_data,
+)
+
+USER_ID = str(uuid4())
+SESSION_ID = "test_session"
+
+
+@pytest.fixture
+def session_manager():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch(
+            "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
+            return_value={"data_root_directory": tmpdir},
+        ):
+            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+                FSCacheAdapter,
+            )
+            from cognee.infrastructure.session.session_manager import SessionManager
+
+            adapter = FSCacheAdapter()
+            with (
+                patch(
+                    "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+                    new=AsyncMock(),
+                ),
+                patch(
+                    "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+                    new=AsyncMock(),
+                ),
+            ):
+                yield SessionManager(adapter)
+            adapter.cache.close()
+
+
+async def _seed_qa(session_manager, qa_id, used_node_ids=None, used_context_ids=None):
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        SESSION_ID,
+        question=f"question {qa_id}",
+        context="context",
+        answer=f"answer {qa_id}",
+        qa_id=qa_id,
+        used_graph_element_ids={"node_ids": used_node_ids} if used_node_ids else None,
+        used_session_context_ids=used_context_ids,
+    )
+
+
+async def _seed_context(session_manager, entry_dump):
+    await session_manager._cache.create_session_context_entry(USER_ID, SESSION_ID, entry_dump)
+
+
+@pytest.mark.asyncio
+async def test_targeted_invalidation_removes_direct_and_transitive_entries(session_manager):
+    """A turn using a deleted node is removed, along with the feedback entry
+    referencing it, the lesson distilled from that feedback, and the later turn
+    that consumed the lesson. Unrelated turns survive."""
+    await _seed_qa(session_manager, "qa_direct", used_node_ids=["node_deleted", "node_other"])
+    await _seed_qa(session_manager, "qa_unrelated", used_node_ids=["node_other"])
+    await _seed_qa(session_manager, "qa_downstream", used_context_ids=["lesson_1"])
+    await _seed_context(
+        session_manager,
+        {"id": "feedback_1", "kind": "feedback", "referenced_qa_ids": ["qa_direct"]},
+    )
+    await _seed_context(
+        session_manager,
+        {"id": "lesson_1", "kind": "context", "source_feedback_ids": ["feedback_1"]},
+    )
+    await _seed_context(
+        session_manager,
+        {"id": "lesson_unrelated", "kind": "context", "source_feedback_ids": ["feedback_x"]},
+    )
+
+    qa_deleted, context_deleted = await _invalidate_session_entries(
+        session_manager,
+        user_id=USER_ID,
+        session_id=SESSION_ID,
+        deleted_node_ids={"node_deleted"},
+        deleted_edge_ids=set(),
+    )
+
+    assert qa_deleted == 2
+    assert context_deleted == 2
+    surviving = await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID)
+    assert [entry.qa_id for entry in surviving] == ["qa_unrelated"]
+    surviving_context = await session_manager.get_session_context_entries(
+        user_id=USER_ID, session_id=SESSION_ID
+    )
+    assert [entry["id"] for entry in surviving_context] == ["lesson_unrelated"]
+
+
+@pytest.mark.asyncio
+async def test_no_intersection_deletes_nothing(session_manager):
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_a"])
+
+    qa_deleted, context_deleted = await _invalidate_session_entries(
+        session_manager,
+        user_id=USER_ID,
+        session_id=SESSION_ID,
+        deleted_node_ids={"node_b"},
+        deleted_edge_ids=set(),
+    )
+
+    assert (qa_deleted, context_deleted) == (0, 0)
+    surviving = await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID)
+    assert len(surviving) == 1
+
+
+@pytest.mark.asyncio
+async def test_edge_id_intersection_matches(session_manager):
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        SESSION_ID,
+        question="q",
+        context="c",
+        answer="a",
+        qa_id="qa_edge",
+        used_graph_element_ids={"edge_ids": ["edge_deleted"]},
+    )
+
+    qa_deleted, _ = await _invalidate_session_entries(
+        session_manager,
+        user_id=USER_ID,
+        session_id=SESSION_ID,
+        deleted_node_ids=set(),
+        deleted_edge_ids={"edge_deleted"},
+    )
+
+    assert qa_deleted == 1
+    assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_watermark_clamped_after_targeted_delete(session_manager):
+    """Deleting persisted turns must clamp the persist watermark, otherwise the
+    next improve() treats it as stale and re-persists the whole session."""
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_deleted"])
+    await _seed_qa(session_manager, "qa_2", used_node_ids=["node_deleted"])
+    await _seed_qa(session_manager, "qa_3", used_node_ids=["node_other"])
+    await save_persisted_qa_count(session_manager, USER_ID, SESSION_ID, 3)
+
+    await _invalidate_session_entries(
+        session_manager,
+        user_id=USER_ID,
+        session_id=SESSION_ID,
+        deleted_node_ids={"node_deleted"},
+        deleted_edge_ids=set(),
+    )
+
+    assert await get_persisted_qa_count(session_manager, USER_ID, SESSION_ID) == 1
+
+
+@pytest.mark.asyncio
+async def test_watermark_clamp_recounts_after_external_delete(session_manager):
+    """The clamp writes a fresh post-delete recount, not the pre-delete
+    snapshot — entries removed by a concurrent actor between the initial read
+    and the clamp are reflected, so overlapping invalidations converge."""
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_deleted"])
+    await _seed_qa(session_manager, "qa_2", used_node_ids=["node_other"])
+    await _seed_qa(session_manager, "qa_3", used_node_ids=["node_other"])
+    await save_persisted_qa_count(session_manager, USER_ID, SESSION_ID, 3)
+
+    original_delete_qa = session_manager.delete_qa
+
+    async def delete_qa_and_one_more(**kwargs):
+        # Simulate a concurrent invalidation removing qa_3 mid-flight.
+        deleted = await original_delete_qa(**kwargs)
+        await original_delete_qa(user_id=USER_ID, qa_id="qa_3", session_id=SESSION_ID)
+        return deleted
+
+    with patch.object(session_manager, "delete_qa", side_effect=delete_qa_and_one_more):
+        await _invalidate_session_entries(
+            session_manager,
+            user_id=USER_ID,
+            session_id=SESSION_ID,
+            deleted_node_ids={"node_deleted"},
+            deleted_edge_ids=set(),
+        )
+
+    # Snapshot math would write 3 - 1 = 2; the fresh recount sees only qa_2.
+    assert await get_persisted_qa_count(session_manager, USER_ID, SESSION_ID) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_dataset_deletes_attributed_sessions(session_manager):
+    dataset_id = uuid4()
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_a"])
+
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
+        ),
+    ):
+        result = await invalidate_sessions_for_dataset(dataset_id)
+
+    assert result == {"sessions_considered": 1, "sessions_deleted": 1}
+    assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_deleted_data_spans_sessions(session_manager):
+    dataset_id = uuid4()
+    other_session = "other_session"
+    await _seed_qa(session_manager, "qa_1", used_node_ids=["node_deleted"])
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        other_session,
+        question="q",
+        context="c",
+        answer="a",
+        qa_id="qa_other",
+        used_graph_element_ids={"node_ids": ["node_deleted"]},
+    )
+
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[(USER_ID, SESSION_ID), (USER_ID, other_session)]),
+        ),
+    ):
+        result = await invalidate_sessions_for_deleted_data(dataset_id, {"node_deleted"}, set())
+
+    assert result["sessions_considered"] == 2
+    assert result["qa_entries_deleted"] == 2
+    assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+    assert await session_manager.get_session(user_id=USER_ID, session_id=other_session) == []
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_deleted_data_noops_on_empty_ids(session_manager):
+    with patch(
+        "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+        new=AsyncMock(),
+    ) as list_mock:
+        result = await invalidate_sessions_for_deleted_data(uuid4(), set(), set())
+
+    assert result["sessions_considered"] == 0
+    list_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_session_delete_failure_is_nonfatal(session_manager):
+    """A failing session delete is swallowed and the rest still runs."""
+    dataset_id = uuid4()
+    failing = AsyncMock(side_effect=RuntimeError("cache down"))
+
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
+        ),
+        patch.object(session_manager, "delete_session", failing),
+    ):
+        result = await invalidate_sessions_for_dataset(dataset_id)
+
+    assert result == {"sessions_considered": 1, "sessions_deleted": 0}

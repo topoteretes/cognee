@@ -5,7 +5,8 @@ name: performance report
 # headline metrics + HTML object key as outputs for the caller (the Slack bot in
 # nightly_tests.yml).
 #
-# Both backends run on every call, as two separate jobs:
+# Both backends run on every call by default (see the `backends` input), as two
+# separate jobs:
 #   - file_based : cognee defaults (SQLite + Kuzu + LanceDB), no services.
 #   - postgres   : full Postgres (relational + PGVector + Postgres graph) via a
 #                  `services: postgres` container (mirrors e2e_tests.yml).
@@ -40,6 +41,16 @@ on:
         required: false
         type: string
         default: ''
+      backends:
+        # war_and_peace_large is file_based-exempt: ladybug's edge writer cannot
+        # land a 100k-node graph inside the subprocess worker's 300s per-call
+        # deadline, so that arm has never once produced a report (COG-6185).
+        # Until the adapter scales, that caller asks for 'postgres' only rather
+        # than burning a 6h runner every night. See CLO-594.
+        description: "Which backends to run: 'both' (default), 'file_based' or 'postgres'."
+        required: false
+        type: string
+        default: 'both'
     outputs:
       file_based_metrics:
         description: "File-based run: success + add/cognify/search (GRAPH_COMPLETION + HYBRID_COMPLETION)/total p50/p90/p99."
@@ -64,7 +75,13 @@ jobs:
   # ── File-based backend: SQLite + Kuzu + LanceDB (cognee defaults) ────────────
   file_based:
     name: file_based — ${{ inputs.label }} (${{ inputs.mode }})
+    if: ${{ inputs.backends == 'both' || inputs.backends == 'file_based' }}
     runs-on: ubuntu-22.04
+    # Without this the job inherits GitHub's 360-minute ceiling. A wedged
+    # benchmark then burns a full 6h runner and reports as `cancelled`, which
+    # reads like an infra blip rather than the failure it is. The slowest arm
+    # that has ever PASSED is war_and_peace_large/postgres at 59 min.
+    timeout-minutes: 120
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
       html_key: ${{ steps.upload.outputs.html_key }}
@@ -176,7 +193,10 @@ jobs:
   # ── Postgres backend: Postgres relational + PGVector + Postgres graph ────────
   postgres:
     name: postgres — ${{ inputs.label }} (${{ inputs.mode }})
+    if: ${{ inputs.backends == 'both' || inputs.backends == 'postgres' }}
     runs-on: ubuntu-22.04
+    # See the file_based job: bounded so a wedged run fails in 2h, not 6.
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
