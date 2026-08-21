@@ -24,6 +24,17 @@ class ResponseGraphEntry(SearchResultItem):
     source: Literal["graph"]
 
 
+class ResponseCodeEntry(SearchResultItem):
+    """One deterministic code-graph fact from the recall "code" scope.
+
+    Same normalized shape as graph entries (kind CODE, payload under
+    ``raw``) — only the source discriminator differs, so callers can
+    route code facts separately from semantic graph results.
+    """
+
+    source: Literal["code"]
+
+
 class ResponseToolEntry(BaseModel):
     """One tool invocation's result from the recall "tools" scope.
 
@@ -61,6 +72,7 @@ RecallResponse = Annotated[
     | ResponseAgentTraceEntry
     | ResponseSessionContextEntry
     | ResponseGraphEntry
+    | ResponseCodeEntry
     | ResponseToolEntry
     | ResponseMarkerEntry,
     Field(discriminator="source"),
