@@ -222,7 +222,7 @@ async def cognify(
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
     # Route to remote instance if connected via serve()
-    from cognee.api.v1.serve.state import get_remote_client
+    from cognee.api.v1.serve.state import get_remote_client, warn_unsupported_remote_params
 
     client = get_remote_client()
     if client is not None:
@@ -231,6 +231,16 @@ async def cognify(
                 "dry_run is not supported while connected to a remote Cognee instance. "
                 "Call cognee.disconnect() to estimate against local data."
             )
+        warn_unsupported_remote_params(
+            "cognify",
+            user=user,
+            temporal_cognify=temporal_cognify or None,
+            functional_relationships=functional_relationships,
+            graph_model=graph_model if graph_model is not KnowledgeGraph else None,
+            chunker=chunker if chunker is not TextChunker else None,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+        )
         return await client.cognify(
             datasets,
             chunk_size=chunk_size,

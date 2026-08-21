@@ -1,3 +1,11 @@
 from .serve import serve
 from .disconnect import disconnect
-from .state import is_remote_mode, get_remote_client
+from .state import is_remote_mode, get_remote_client, UNSET
+from .exceptions import (
+    CogneeAPIError,
+    CogneeTransportError,
+    CogneeHTTPError,
+    CogneeAuthError,
+    CogneeClientRequestError,
+    CogneeServerError,
+)
