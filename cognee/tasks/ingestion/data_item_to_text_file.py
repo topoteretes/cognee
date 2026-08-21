@@ -9,6 +9,7 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.utils.run_async import run_async
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,13 +25,24 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
+# Bytes copied per iteration when pulling a stored object down to a temp file.
+# The previous 8 KiB read meant one Python-level round trip through the storage
+# stack per 8 KiB of payload — ~12k iterations for a 100 MB object.
+DOWNLOAD_CHUNK_SIZE = 4 * 1024 * 1024
+
+
+def _copy_stream(source_file, destination_file) -> None:
+    """Copy a stream in chunks. Blocking: callers run this off the event loop."""
+    while chunk := source_file.read(DOWNLOAD_CHUNK_SIZE):
+        destination_file.write(chunk)
+
+
 async def pull_from_s3(file_path, destination_file) -> None:
     async with open_data_file(file_path) as file:
-        while True:
-            chunk = file.read(8192)
-            if not chunk:
-                break
-            destination_file.write(chunk)
+        # Both sides of this copy block: the reads wait on the network and the
+        # writes wait on the disk. Inline, it parked the event loop for the whole
+        # download, so the pipeline's per-item concurrency could not overlap.
+        await run_async(_copy_stream, file, destination_file)
 
 
 async def data_item_to_text_file(

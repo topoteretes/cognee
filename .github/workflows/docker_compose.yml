@@ -45,7 +45,10 @@ jobs:
         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
       run: |
-        printenv | grep -E '^(LLM_|EMBEDDING_)' > .env
+        # Only variables that actually have a value: a bare `LLM_ARGS=` (empty
+        # secret) reaches LLMConfig.llm_args — a dict field — as "" and kills
+        # the container at import time.
+        printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' > .env
         echo "EMBEDDING_DIMENSIONS=300" >> .env
         echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
         # Point the relational store at the postgres service so the e2e

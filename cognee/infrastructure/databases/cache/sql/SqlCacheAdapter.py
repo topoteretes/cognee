@@ -998,6 +998,29 @@ class SqlCacheAdapter(CacheDBInterface):
                 logger.error(error_msg)
                 raise CacheConnectionError(error_msg) from error
 
+    async def delete_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str
+    ) -> bool:
+        """Delete a single session-context entry by entry_id (single atomic DELETE)."""
+        await self._ensure_initialized()
+        try:
+            async with self.sessionmaker() as session, session.begin():
+                await self._lock_session_writes(session, cache_session_context, user_id, session_id)
+                result = await session.execute(
+                    delete(cache_session_context).where(
+                        self._session_filter(cache_session_context, user_id, session_id),
+                        cache_session_context.c.entry_id == entry_id,
+                        self._not_expired(cache_session_context),
+                    )
+                )
+                return result.rowcount > 0
+        except Exception as error:
+            error_msg = (
+                f"Unexpected error while deleting session context entry from SQL cache: {error}"
+            )
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from error
+
     async def delete_session_context(self, user_id: str, session_id: str) -> bool:
         """Delete all session-context entries for the session. True if any existed."""
         await self._ensure_initialized()

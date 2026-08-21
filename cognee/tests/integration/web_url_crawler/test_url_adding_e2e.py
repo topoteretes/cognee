@@ -308,11 +308,12 @@ async def test_beautiful_soup_loads_file_successfully():
 
         assert loader == bs_loader
 
-        cognee_loaded_txt_path = await loader_engine.load_file(
+        loaded = await loader_engine.load_file(
             file_path=file_path, preferred_loaders=preferred_loaders
         )
-
-        cognee_loaded_txt_path = get_data_file_path(cognee_loaded_txt_path)
+        # Loaders return a LoaderResult describing the text they wrote; the
+        # stored path lives on file_path.
+        cognee_loaded_txt_path = get_data_file_path(loaded.file_path)
 
         assert cognee_loaded_txt_path.endswith(".txt")
 

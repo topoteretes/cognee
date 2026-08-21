@@ -17,6 +17,7 @@ from .metrics import (
     get_effective_status_sql,
     get_session_row,
     list_session_rows,
+    list_sessions_for_dataset,
     mark_ended,
     touch_session,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "get_session_row",
     "get_sessions_with_agent_info",
     "list_session_rows",
+    "list_sessions_for_dataset",
     "mark_ended",
     "record_llm_call",
     "touch_session",
