@@ -43,4 +43,14 @@ class PipelineRunAlreadyCompleted(PipelineRunInfo):
 
 class PipelineRunErrored(PipelineRunInfo):
     status: str = "PipelineRunErrored"
+
+    # Failure detail so callers (remember(), cognify(raise_on_error=True), the
+    # recall warm-up marker, MCP cognify_status) can say WHAT failed instead of
+    # just "errored". error_message is PII-scrubbed; payload keeps the legacy
+    # repr for backward compatibility.
+    error_class: Optional[str] = None
+    error_category: Optional[str] = None
+    error_message: Optional[str] = None
+    remedy: Optional[str] = None
+    duration_seconds: Optional[float] = None
     pass

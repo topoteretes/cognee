@@ -51,6 +51,38 @@ from cognee.modules.observability import (
 logger = get_logger("cognify")
 
 
+def raise_if_cognify_errored(result) -> None:
+    """Raise ``CognifyFailedError`` if any dataset's foreground run errored.
+
+    ``result`` is the blocking executor's ``{dataset_id: PipelineRunInfo}``
+    mapping (or a bare run info when no dataset id was present). The first
+    errored run wins — a day-0 user has exactly one dataset, and for batch
+    users the exception names the dataset so the rest can be retried.
+    """
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+
+    if isinstance(result, PipelineRunErrored):
+        run_infos = [result]
+    elif isinstance(result, dict):
+        run_infos = [info for info in result.values() if isinstance(info, PipelineRunErrored)]
+    else:
+        return
+
+    for run_info in run_infos:
+        raise CognifyFailedError(
+            dataset_name=getattr(run_info, "dataset_name", None),
+            dataset_id=getattr(run_info, "dataset_id", None),
+            error_category=getattr(run_info, "error_category", None) or "unknown",
+            error_class=getattr(run_info, "error_class", None),
+            error_message=getattr(run_info, "error_message", None)
+            or str(getattr(run_info, "payload", "") or ""),
+            remedy=getattr(run_info, "remedy", None),
+            duration_seconds=getattr(run_info, "duration_seconds", None),
+            pipeline_run_id=getattr(run_info, "pipeline_run_id", None),
+        )
+
+
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -71,6 +103,7 @@ async def cognify(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = True,
     dry_run: bool = False,
+    raise_on_error: bool = True,
     **kwargs,
 ):
     """
@@ -334,6 +367,15 @@ async def cognify(
             embedding_config=embedding_config,
             data_cache=data_cache,
         )
+
+        # Loud-by-default failure: a silently "errored" run info is invisible to
+        # first-time users (57% of first SDK cognify runs errored and 0 of those
+        # accounts ever searched — the run object was never inspected). Raise a
+        # typed, classified error instead; batch/pipeline users opt out with
+        # raise_on_error=False. Background runs can't raise here — their errors
+        # land on the run record and the warm-up marker.
+        if raise_on_error and not run_in_background:
+            raise_if_cognify_errored(result)
 
         dataset_desc = str(datasets) if datasets else "all datasets"
         span.set_attribute(
