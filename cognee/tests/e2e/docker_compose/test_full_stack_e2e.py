@@ -20,7 +20,6 @@ tracebacks.
 
 from __future__ import annotations
 
-import re
 import time
 
 import requests
@@ -49,18 +48,13 @@ def test_mcp_health_and_tool_call(mcp_ready):
     health = wait_for_http_ok(CONFIG.mcp_health_url, name="cognee-mcp /health")
     assert health.json().get("status") == "ok", health.text
 
+    # `cognify_status` (no dataset_name) reports on the agent-scoped default
+    # dataset's cognify_pipeline runs; on a fresh dataset that is an empty or
+    # "not started"-style status rather than a fixed string, so `call_mcp_tool`
+    # already asserts the call round-tripped without an MCP error — here we
+    # only check it produced some text.
     call = call_mcp_tool()
-    # `list_datasets_json` renders "No datasets found." or "N dataset(s):"
-    # followed by one "- name (id)" line per dataset.
-    assert re.match(r"(No datasets found\.|\d+ datasets?:)", call.result_text), (
-        f"unexpected list_datasets_json output: {call.result_text!r}"
-    )
-    # structuredContent ({"datasets": [...]}) is only forwarded for tools
-    # advertised in tools/list; this one is gated behind the tool-search
-    # transform, so treat it as a bonus and validate the shape when present.
-    if call.structured is not None:
-        assert "datasets" in call.structured, call.structured
-        assert isinstance(call.structured["datasets"], list)
+    assert call.result_text.strip(), "cognify_status returned no text"
 
 
 def test_service_logs_are_traceback_free(requires_compose):
