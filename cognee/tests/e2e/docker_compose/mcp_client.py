@@ -3,7 +3,7 @@
 The ``cognee-mcp`` service runs with ``TRANSPORT_MODE=sse``, so it speaks the
 standard MCP SSE protocol at ``/sse``. We use the official ``mcp`` client to
 initialize a session, confirm the tool surface, and call one LLM-free tool
-(``list_datasets_json``) end to end.
+(``list_data``) end to end.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ async def _call_list_datasets(sse_url: str) -> McpToolCall:
                 f"exposes: {sorted(tool_names)}"
             )
 
-            call = await session.call_tool("list_datasets_json", arguments={})
+            call = await session.call_tool("list_data", arguments={})
             assert not getattr(call, "isError", False), f"tool call errored: {call}"
 
             text = "\n".join(getattr(item, "text", str(item)) for item in (call.content or []))
