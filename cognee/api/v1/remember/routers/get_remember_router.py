@@ -535,6 +535,9 @@ def get_remember_router() -> APIRouter:
                 **({"index_vectors": bool(index_vectors)} if content_type == "code" else {}),
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
+                # HTTP contract: an errored blocking run is reported as the 409
+                # body below, not as an exception.
+                raise_on_error=False,
             )
 
             # A blocking run that ended errored must not look like a success

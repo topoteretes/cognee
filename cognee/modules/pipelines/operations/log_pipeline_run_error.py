@@ -4,6 +4,7 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.operations import get_operation_origin, scrub_error_message
+from cognee.modules.pipelines.operations.classify_pipeline_error import classify_pipeline_error
 from cognee.modules.operations.usage_accumulator import get_parent_run_id
 from cognee.modules.pipelines.models import OperationOutcome, PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import summarize_run_info_data
@@ -36,6 +37,9 @@ async def log_pipeline_run_error(
             # Scrubbed like error_message — persisting the raw text here would
             # defeat the redaction (and run_info growth is capped, COG-5359).
             "error": scrub_error_message(e),
+            # Semantic bucket (auth/provider_quota/schema/config/loader/
+            # db_init/unknown) — the taxonomy activation analytics groups by.
+            "error_category": classify_pipeline_error(e).category,
         },
         user_id=user.id if user else None,
         tenant_id=getattr(user, "tenant_id", None) if user else None,
