@@ -105,6 +105,12 @@ async def lifespan(app: FastAPI):
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
 
+    # Flush in-flight telemetry and close its shared aiohttp session on the
+    # loop that owns them, instead of leaving it to the atexit fallback.
+    from cognee.shared.utils import close_telemetry_session
+
+    await close_telemetry_session()
+
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
