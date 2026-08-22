@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi import Form, Depends, Path
+from typing import cast
 from uuid import UUID
 
 from pydantic import Field
@@ -91,7 +92,10 @@ def get_configuration_router() -> APIRouter:
         Returns the stored configuration data as a JSON object. Returns an empty object {}
         with HTTP 200 (not 404) when no configuration with that id exists.
         """
-        return await method_get_principal_configuration(config_id=config_id)
+        return await method_get_principal_configuration(
+            config_id=config_id,
+            principal_id=cast(UUID, user.id),
+        )
 
     @router.get("/get_user_configuration/", response_model=list)
     async def get_user_all_configuration(
