@@ -116,3 +116,17 @@ def test_raise_if_cognify_errored():
     # A bare errored run info (no dataset mapping) raises too.
     with pytest.raises(CognifyFailedError):
         raise_if_cognify_errored(errored)
+
+
+def test_wrap_cognify_exception():
+    """Run-level pipeline crashes wrap into the same typed error surface."""
+    from cognee.api.v1.cognify.cognify import _wrap_cognify_exception
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+
+    wrapped = _wrap_cognify_exception(AuthenticationError("invalid api key"), ["main_dataset"])
+    assert isinstance(wrapped, CognifyFailedError)
+    assert wrapped.error_category == "auth"
+    assert wrapped.error_class == "AuthenticationError"
+
+    # Already-typed errors pass through unchanged: no double-wrapping.
+    assert _wrap_cognify_exception(wrapped, None) is wrapped
