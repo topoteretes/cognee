@@ -19,6 +19,7 @@ COMMAND_DESCRIPTIONS = {
     "feedback": "Add or remove feedback on session Q&A entries",
     "memify": "Run the memory enrichment pipeline on a dataset",
     "remember": "Ingest data and build the knowledge graph in a single call",
+    "seed": "Ingest what already exists in this workspace so the first recall returns",
     "recall": "Search the knowledge graph for relevant information",
     "improve": "Enrich an existing knowledge graph with additional context and rules",
     "forget": "Remove data from the knowledge graph",

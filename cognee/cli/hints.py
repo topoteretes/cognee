@@ -21,10 +21,11 @@ def hint_recall(dataset_name: str) -> None:
 
 
 def hint_recall_empty(dataset_name: str) -> None:
-    """After a ``recall`` that found nothing, point back at ``remember`` to seed the dataset."""
+    """After a ``recall`` that found nothing, point at seeding or ``remember``."""
     _next(
-        f'no matches in "{dataset_name}". Try "cognee-cli remember <path-or-text> '
-        f'-d {dataset_name}" to seed it, then rerun this recall.'
+        f'no matches in "{dataset_name}". Try "cognee-cli seed" to ingest what this '
+        f'workspace already knows (memory files, README, code), or "cognee-cli remember '
+        f'<path-or-text> -d {dataset_name}", then rerun this recall.'
     )
 
 
