@@ -78,6 +78,42 @@ def adapter(redis_store):
         yield RedisAdapter(host="localhost", port=6379)
 
 
+def test_ssl_disabled_by_default(redis_store):
+    """Without ssl, clients connect in plaintext (no TLS handshake)."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    sync_redis = MagicMock(return_value=MagicMock(ping=MagicMock()))
+    async_redis = MagicMock(return_value=redis_store)
+    with (
+        patch(f"{patch_mod}.redis.Redis", sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", async_redis),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        RedisAdapter(host="localhost", port=6379)
+
+    assert sync_redis.call_args.kwargs["ssl"] is False
+    assert async_redis.call_args.kwargs["ssl"] is False
+
+
+def test_ssl_forwarded_to_both_clients(redis_store):
+    """ssl / ssl_cert_reqs must reach both the sync and async redis clients so
+    the adapter can connect to a TLS-only managed Redis (ElastiCache etc.)."""
+    patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
+    sync_redis = MagicMock(return_value=MagicMock(ping=MagicMock()))
+    async_redis = MagicMock(return_value=redis_store)
+    with (
+        patch(f"{patch_mod}.redis.Redis", sync_redis),
+        patch(f"{patch_mod}.aioredis.Redis", async_redis),
+    ):
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
+
+        RedisAdapter(host="localhost", port=6379, ssl=True, ssl_cert_reqs="none")
+
+    for client in (sync_redis, async_redis):
+        assert client.call_args.kwargs["ssl"] is True
+        assert client.call_args.kwargs["ssl_cert_reqs"] == "none"
+
+
 class _FakeRedisLock:
     def __init__(self):
         self.acquired = False
@@ -573,3 +609,42 @@ async def test_get_latest_qa_backward_compat(adapter):
     via_new = await adapter.get_latest_qa_entries("u1", "s1", last_n=2)
     assert via_legacy == via_new
     assert len(via_legacy) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_order(adapter):
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+    await adapter.create_qa_entry("u1", "s1", "Q3", "C3", "A3", qa_id="id3")
+
+    entries = await adapter.get_qa_entries_by_ids("u1", "s1", ["id3", "missing", "id1"])
+
+    assert [entry.qa_id for entry in entries] == ["id1", "id3"]
+
+
+@pytest.mark.asyncio
+async def test_empty_session_returns_empty_list_for_all_last_n(adapter):
+    """[] on empty for every last_n value, including last_n=1 (matches SQL/FS, not a None quirk)."""
+    assert await adapter.get_latest_qa_entries("u1", "missing", last_n=1) == []
+    assert await adapter.get_latest_qa_entries("u1", "missing", last_n=5) == []
+    assert await adapter.get_all_qa_entries("u1", "missing") == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_removes_only_target(adapter):
+    """delete_session_context_entry removes one entry; others and other sessions survive."""
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c2", "kind": "context"})
+    await adapter.create_session_context_entry("u1", "s2", {"id": "c1", "kind": "context"})
+
+    assert await adapter.delete_session_context_entry("u1", "s1", "c1") is True
+
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["c2"]
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s2")] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_missing_returns_false(adapter):
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
+    assert await adapter.delete_session_context_entry("u1", "s1", "missing") is False
+    assert len(await adapter.get_session_context_entries("u1", "s1")) == 1

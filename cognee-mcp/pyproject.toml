@@ -1,6 +1,6 @@
 [project]
 name = "cognee-mcp"
-version = "0.5.4"
+version = "0.5.5"
 description = "Cognee MCP server"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,10 +8,18 @@ requires-python = ">=3.10"
 dependencies = [
     # For local cognee repo usage remove comment below and add absolute path to cognee. Then run `uv sync --reinstall` in the mcp folder on local cognee changes.
     #"cognee[postgres,docs,neo4j] @ file:/Users/igorilic/Desktop/cognee",
-    "cognee[postgres-binary,docs,neo4j]>=1.1.0,<2.0.0",
-    "mcp>=1.12.0,<2.0.0",
+    "cognee[postgres-binary,docs,neo4j]>=1.5.0,<2.0.0",
+    # FastMCP 3 ships tag-based visibility and the tool-search transform this
+    # server relies on; the FastMCP vendored in the `mcp` SDK is an older fork
+    # that has neither. `mcp` is still a direct dependency for its wire types.
+    "fastmcp>=3.4.0,<4.0.0",
+    "mcp>=1.24.0,<2.0.0",
     "uv>=0.6.3,<1.0.0",
     "httpx>=0.27.0,<1.0.0",
+    # Declared explicitly (already pulled in transitively via cognee[docs] ->
+    # unstructured) so the [tool.uv.sources] CPU-index redirect below actually
+    # binds — uv only applies source overrides to direct dependencies.
+    "torch>=2.0.0",
 ]
 
 authors = [
@@ -26,12 +34,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
-# The MCP App workspace bundle is gitignored (built artifact). `artifacts`
-# tells Hatch to include it in wheels when present, without erroring on
-# editable installs where the bundle hasn't been built yet (e.g. e2e CI).
-# The release pipeline runs `npm run build` before `uv build`, so PyPI
-# wheels always carry the bundle.
-artifacts = ["src/app_bundles/**/*"]
 
 [dependency-groups]
 dev = [
@@ -52,6 +54,20 @@ asyncio_mode = "auto"
 [tool.hatch.metadata]
 allow-direct-references = true
 
+# Pull torch from PyTorch's CPU wheel index on Linux. The default PyPI Linux
+# x86_64 torch wheel declares the full nvidia-*-cu12 CUDA stack (~4.3GB) plus
+# triton as dependencies; the +cpu wheels do not, so they drop out of the
+# resolution. The MCP image has no GPU and, in proxy mode, never runs torch at
+# all. Scoped to Linux only so macOS/Windows dev installs keep resolving torch
+# from PyPI (the CPU index has no wheels for those platforms).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
 [tool.uv]
 # onnxruntime is pulled in transitively via cognee[docs] -> unstructured.
 # 1.24.x dropped cp310 wheels (the MCP CI step uses Python 3.10), and
@@ -66,6 +82,11 @@ constraint-dependencies = [
 
 # Note: exclude newer packages that are less than 2 days old
 exclude-newer = "2 days"
+# ...but never for cognee itself. The 2-day window is a supply-chain guard for
+# third-party packages; applying it to our own package meant a release-day
+# `uv lock` silently resolved cognee to the *previous* release, which is how
+# the lock drifted to 1.2.2 while the image was tagged 1.4.1 (issue #4360).
+exclude-newer-package = { cognee = "0 days" }
 
 [project.scripts]
 cognee = "src:main"

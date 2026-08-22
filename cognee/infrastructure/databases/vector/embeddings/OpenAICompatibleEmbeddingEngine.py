@@ -32,25 +32,19 @@ from tenacity import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
-from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
+)
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingException,
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
-
-
-class EmbeddingException(Exception):
-    """Raised when an embedding request fails."""
-
-    def __init__(self, message: str, name: str = "EmbeddingException"):
-        self.message = message
-        self.name = name
-        super().__init__(self.message)
 
 
 class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
@@ -90,6 +84,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         endpoint: Optional[str] = "http://localhost:8080",
         api_key: Optional[str] = "no-key-required",
         batch_size: int = 36,
+        input_type: Optional[str] = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -97,6 +92,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
+        # Some OpenAI-compatible servers (e.g. self-hosted NVIDIA NIM
+        # containers) require an "input_type" field ("query" / "passage")
+        # that isn't part of the OpenAI embeddings spec. Sent via extra_body
+        # so it has no effect on servers that ignore unknown fields.
+        self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
@@ -114,7 +114,9 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((ValueError, asyncio.CancelledError)),
+        retry=retry_if_not_exception_type(
+            (EmbeddingContextWindowTooSmallError, ValueError, asyncio.CancelledError)
+        ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -143,13 +145,17 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
+            create_kwargs = {
+                "model": self.model,
+                "input": sanitized_text,
+                "encoding_format": "float",
+            }
+            if self.input_type:
+                create_kwargs["extra_body"] = {"input_type": self.input_type}
+
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
-                    self._client.embeddings.create(
-                        model=self.model,
-                        input=sanitized_text,
-                        encoding_format="float",
-                    ),
+                    self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
             embeddings = [item.embedding for item in response.data]
@@ -180,9 +186,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                     s = original_texts[0]
                     third = len(s) // 3
                     if third == 0:
-                        raise EmbeddingException(
-                            "Text is too short to split further but exceeds context window."
-                        ) from error
+                        raise EmbeddingContextWindowTooSmallError from error
                     left_part, right_part = s[: third * 2], s[third:]
                     (left_vec,), (right_vec,) = await asyncio.gather(
                         self.embed_text([left_part]),
@@ -244,17 +248,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         return self.batch_size
 
     def get_tokenizer(self):
-        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers."""
-        logger.debug("Loading HuggingfaceTokenizer for OpenAICompatibleEmbeddingEngine...")
-        try:
-            tokenizer = HuggingFaceTokenizer(
-                model=self.model,
-                max_completion_tokens=self.max_completion_tokens,
-            )
-        except Exception as error:
-            logger.warning("Could not get tokenizer from HuggingFace due to: %s", error)
-            logger.info("Switching to TikToken default tokenizer.")
-            tokenizer = TikTokenTokenizer(
-                model=None, max_completion_tokens=self.max_completion_tokens
-            )
-        return tokenizer
+        """Load a tokenizer for chunk sizing against OpenAI-compatible embedding servers.
+
+        The served model id is usually a HuggingFace repo, so resolution uses the
+        model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
+        """
+        logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
+        return resolve_embedding_tokenizer(
+            provider="openai_compatible",
+            model=self.model,
+            max_completion_tokens=self.max_completion_tokens,
+        )

@@ -3,6 +3,12 @@ name: test | docker compose
 on:
   workflow_call:
 
+env:
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+  # Profiles exercised by the full-stack e2e: the default `cognee` service plus
+  # postgres (persistence) and the MCP server.
+  COMPOSE_PROFILES: 'postgres,mcp'
+
 jobs:
   docker-compose-test:
     runs-on: ubuntu-22.04
@@ -14,26 +20,163 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
     - name: Build Docker images
       env:
-        ENVIRONMENT: dev
         ENV: dev
       run: |
         docker compose -f docker-compose.yml build
 
+    - name: Create container .env
+      # docker-compose.yml bind-mounts ./.env into the container; CI has no
+      # checked-in .env, so provide the runtime credentials the server needs.
+      # Secrets flow through the env block so the script body never renders
+      # secret material (GitHub's log masking then only has exact values to hide).
+      env:
+        LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+        LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        LLM_ARGS: ${{ secrets.LLM_ARGS }}
+        LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+        EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+        EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      run: |
+        # Only variables that actually have a value: a bare `LLM_ARGS=` (empty
+        # secret) reaches LLMConfig.llm_args — a dict field — as "" and kills
+        # the container at import time.
+        printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' > .env
+        echo "EMBEDDING_DIMENSIONS=300" >> .env
+        echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
+        # Point the relational store at the postgres service so the e2e
+        # persistence test is genuinely Postgres-backed. docker compose reads
+        # the same .env for ${DB_*} interpolation in docker-compose.yml, which
+        # is how the cognee-mcp service picks up the same database.
+        cat >> .env <<'EOF'
+        DB_PROVIDER=postgres
+        DB_HOST=postgres
+        DB_PORT=5432
+        DB_NAME=cognee_db
+        DB_USERNAME=cognee
+        DB_PASSWORD=cognee
+        EOF
+
+    - name: Start Postgres and wait for it
+      # The app services have no depends_on for postgres, so bring the
+      # database up first to keep them from crash-looping on boot.
+      run: |
+        docker compose -f docker-compose.yml up -d postgres
+        echo "Waiting for postgres to become ready..."
+        for attempt in $(seq 1 30); do
+          if docker compose -f docker-compose.yml exec -T postgres pg_isready -U cognee -d cognee_db >/dev/null 2>&1; then
+            echo "postgres ready after ~$((attempt * 3))s"
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "postgres never became ready"
+        docker compose -f docker-compose.yml logs postgres | tail -60
+        exit 1
+
     - name: Run Docker Compose
       env:
-        ENVIRONMENT: dev
         ENV: dev
       run: |
         docker compose -f docker-compose.yml up -d
 
-    - name: Wait for services to be ready
+    - name: Wait for server health
       run: |
-        # Add any necessary health checks or wait commands
-        sleep 30
+        for attempt in $(seq 1 60); do
+          if curl -sf http://localhost:8000/health >/dev/null; then
+            echo "server healthy after ~$((attempt * 3))s"
+            exit 0
+          fi
+          if [ "$(docker inspect -f '{{.State.Running}}' cognee 2>/dev/null)" != "true" ]; then
+            echo "cognee container is not running"
+            docker compose -f docker-compose.yml logs cognee | tail -60
+            exit 1
+          fi
+          sleep 3
+        done
+        echo "server did not become healthy in time"
+        docker compose -f docker-compose.yml logs cognee | tail -60
+        exit 1
+
+    - name: Wait for MCP server health
+      run: |
+        for attempt in $(seq 1 60); do
+          if curl -sf http://localhost:8001/health >/dev/null; then
+            echo "cognee-mcp healthy after ~$((attempt * 3))s"
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "cognee-mcp did not become healthy in time"
+        docker compose -f docker-compose.yml logs cognee-mcp | tail -60
+        exit 1
+
+    - name: Run full-stack e2e suite
+      # Runs before the real-LLM round-trip below so the suite's traceback
+      # scan only covers deterministic, LLM-free paths (startup, ingestion,
+      # MCP, persistence) and cannot flake on model-provider noise.
+      env:
+        COGNEE_E2E_MANAGE_COMPOSE: '1'
+        COGNEE_E2E_COMPOSE_PROFILES: 'postgres,mcp'
+      run: |
+        # The suite is decoupled from the `cognee` package: --confcutdir keeps
+        # pytest from loading the heavy ancestor conftests, and --no-project
+        # keeps uv from syncing the whole project on the runner.
+        uv run --no-project \
+          --with pytest \
+          --with pytest-timeout \
+          --with requests \
+          --with mcp \
+          python -m pytest cognee/tests/e2e/docker_compose \
+            -p no:cacheprovider \
+            --confcutdir=cognee/tests/e2e/docker_compose \
+            -v --timeout=900
+
+    - name: Verify remember and recall round-trip
+      run: |
+        TOKEN=$(curl -sf -X POST http://localhost:8000/api/v1/auth/login \
+          -d "username=default_user@example.com&password=default_password" | jq -r .access_token)
+        [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "login failed"; exit 1; }
+
+        FACT="The glassblower Odene Marsk crafted the twin cobalt lanterns of the Vellinge lighthouse in 1931."
+        echo "$FACT" > fact.txt
+        REMEMBERED=$(curl -sf -X POST http://localhost:8000/api/v1/remember \
+          -H "Authorization: Bearer $TOKEN" \
+          -F "datasetName=compose_smoke" \
+          -F "data=@fact.txt;type=text/plain")
+        echo "$REMEMBERED" | jq -e '.dataset_id != null' >/dev/null \
+          || { echo "remember returned no dataset_id"; echo "$REMEMBERED"; exit 1; }
+        echo "remember: ingested into $(echo "$REMEMBERED" | jq -r .dataset_id)"
+
+        # Deterministic check: CHUNKS recall returns the raw stored text, no
+        # LLM involved — the full stored fact must come back verbatim.
+        CHUNKS=$(curl -sf -X POST http://localhost:8000/api/v1/recall \
+          -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+          -d '{"query":"cobalt lanterns lighthouse","searchType":"CHUNKS","datasets":["compose_smoke"]}')
+        echo "$CHUNKS" | grep -qF "$FACT" || { echo "CHUNKS recall missing stored fact"; echo "$CHUNKS"; exit 1; }
+        echo "recall (CHUNKS): stored fact retrieved verbatim"
+
+        # End-to-end answer check: the graph-grounded completion must name the entity.
+        ANSWER=$(curl -sf -X POST http://localhost:8000/api/v1/recall \
+          -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+          -d '{"query":"Who crafted the twin cobalt lanterns of the Vellinge lighthouse, and in which year?","searchType":"GRAPH_COMPLETION","datasets":["compose_smoke"]}')
+        echo "recall (GRAPH_COMPLETION): $ANSWER"
+        echo "$ANSWER" | grep -qi "Marsk" || { echo "graph completion did not mention the remembered entity"; exit 1; }
+
+    - name: Show service logs on failure
+      if: failure()
+      # Filter key-shaped lines: GitHub masks exact secret values, but partial
+      # or transformed echoes (e.g. provider auth errors) would slip through.
+      run: docker compose -f docker-compose.yml logs --no-color | grep -viE "api[-_]?key|authorization|bearer" | tail -200
 
     - name: Shut down Docker Compose
       if: always()
       run: |
-        docker compose -f docker-compose.yml down
+        docker compose -f docker-compose.yml down -v

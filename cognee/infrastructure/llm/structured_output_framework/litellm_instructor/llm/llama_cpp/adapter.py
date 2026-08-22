@@ -1,19 +1,27 @@
 """Adapter for Instructor-backed Structured Output Framework for Llama CPP"""
 
+import asyncio
 import logging
+import threading
 from typing import Any, cast
 
 import instructor
-import litellm
 from instructor.core.patch import InstructorChatCompletionCreate
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
-    stop_after_delay,
     wait_exponential_jitter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
+)
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
+
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
@@ -60,7 +68,7 @@ class LlamaCppAPIAdapter(LLMInterface):
     model: str | None
     model_path: str | None
     mode_type: str  # "server" or "local"
-    default_instructor_mode = instructor.Mode.JSON
+    default_instructor_mode = get_instructor_mode("llama_cpp")
 
     def __init__(
         self,
@@ -110,6 +118,13 @@ class LlamaCppAPIAdapter(LLMInterface):
         self.model_path = model_path
         self.model = None
 
+        # llama_cpp.Llama is not thread-safe: it has a single context, KV cache and
+        # logits buffer with no internal locking. cognee fans out extraction across
+        # chunks with asyncio.gather, and each call runs via asyncio.to_thread, so
+        # without this lock multiple threads decode on the same instance concurrently
+        # and corrupt its state, aborting the process with a native GGML_ASSERT.
+        self._local_lock = threading.Lock()
+
         # Initialize llama-cpp-python with the model
         self.llama = llama_cpp.Llama(
             model_path=model_path,
@@ -142,11 +157,9 @@ class LlamaCppAPIAdapter(LLMInterface):
 
     @observe(as_type="generation")
     @retry(
-        stop=stop_after_delay(128),
+        stop=llm_retry_stop_condition,
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(
-            (litellm.exceptions.NotFoundError, litellm.exceptions.AuthenticationError)
-        ),
+        retry=llm_retry_condition,
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
@@ -168,42 +181,55 @@ class LlamaCppAPIAdapter(LLMInterface):
         --------
             - BaseModel: A structured output that conforms to the specified response model.
         """
-        async with llm_rate_limiter_context_manager():
-            # Prepare messages (system first, then user is more standard)
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text_input},
-            ]
+        try:
+            async with llm_rate_limiter_context_manager():
+                # Prepare messages (system first, then user is more standard)
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text_input},
+                ]
 
-            merged_kwargs = {**self.llm_args, **kwargs}
-            if self.mode_type == "server":
-                response = await cast(
-                    instructor.AsyncInstructor, self.aclient
-                ).chat.completions.create(
-                    model=self.model,
-                    messages=messages,  # ty:ignore[invalid-argument-type]
-                    response_model=response_model,
-                    max_retries=2,
-                    **merged_kwargs,
-                )
-
-            else:
-                import asyncio
-
-                def _call_sync():
-                    return cast(InstructorChatCompletionCreate, self.aclient)(
-                        messages=messages,
+                merged_kwargs = {**self.llm_args, **kwargs}
+                if self.mode_type == "server":
+                    response = await cast(
+                        instructor.AsyncInstructor, self.aclient
+                    ).chat.completions.create(
+                        model=self.model,
+                        messages=messages,  # ty:ignore[invalid-argument-type]
                         response_model=response_model,
+                        max_retries=2,
                         **merged_kwargs,
                     )
 
-                # Run sync function in thread pool to avoid blocking
-                response = await asyncio.to_thread(_call_sync)
+                else:
+                    import asyncio
 
-        return response
+                    def _call_sync():
+                        # Serialize decodes on the shared, non-thread-safe Llama instance.
+                        with self._local_lock:
+                            return cast(InstructorChatCompletionCreate, self.aclient)(
+                                messages=messages,
+                                response_model=response_model,
+                                **merged_kwargs,
+                            )
+
+                    # Run sync function in thread pool to avoid blocking
+                    response = await asyncio.to_thread(_call_sync)
+
+            return response
+        except Exception as e:
+            if is_budget_exhausted_error(e):
+                raise LLMPaymentRequiredError() from e
+            raise
 
     async def create_transcript(self, input: str, **kwargs: Any) -> TranscriptionReturnType:
         raise NotImplementedError
 
-    async def transcribe_image(self, input: str, **kwargs: Any) -> str:
+    async def transcribe_image(
+        self,
+        input: str,
+        prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         raise NotImplementedError

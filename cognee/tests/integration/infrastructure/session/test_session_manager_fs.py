@@ -33,6 +33,29 @@ def session_manager(fs_adapter) -> SessionManager:
     return SessionManager(cache_engine=fs_adapter)
 
 
+@pytest.fixture(autouse=True)
+def session_vector_mocks():
+    with (
+        patch(
+            "cognee.infrastructure.session.session_manager.index_session_qa", new_callable=AsyncMock
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vector",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.infrastructure.session.session_manager.delete_session_qa_vectors",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.infrastructure.session.session_turn.search_session_qa_ids",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_add_qa_and_get_session(session_manager: SessionManager):
     """Add QA via SessionManager and retrieve via get_session."""
@@ -82,11 +105,11 @@ async def test_add_agent_trace_step_and_get_trace_session(session_manager: Sessi
     """Trace steps appended via SessionManager are returned in append order."""
     with (
         patch(
-            "cognee.infrastructure.session.session_manager.read_query_prompt",
+            "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
             return_value="summarize this",
         ),
         patch(
-            "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+            "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
             return_value=AgentTraceFeedbackSummary(session_feedback="Plan created successfully."),
         ),
@@ -128,7 +151,7 @@ async def test_add_agent_trace_step_can_disable_llm_feedback_generation(
 ):
     """Disabling LLM feedback generation stores deterministic fallback feedback."""
     with patch(
-        "cognee.infrastructure.session.session_manager.LLMGateway.acreate_structured_output",
+        "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
         new_callable=AsyncMock,
     ) as mock_llm:
         trace_id = await session_manager.add_agent_trace_step(
@@ -280,7 +303,7 @@ async def test_generate_completion_with_session_saves_qa(session_manager: Sessio
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
         patch(
-            "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+            "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
             new_callable=AsyncMock,
             return_value=("Integration test answer", "", None),
         ),
@@ -309,10 +332,10 @@ async def test_generate_completion_with_session_saves_qa(session_manager: Sessio
 
 
 @pytest.mark.asyncio
-async def test_generate_completion_with_session_feedback_only_no_new_qa(
+async def test_generate_completion_with_session_feedback_only_records_qa(
     session_manager: SessionManager,
 ):
-    """When feedback only is detected: feedback persisted on last QA, no new QA added."""
+    """When no query_to_answer is detected: acknowledgement returned and recorded."""
     qa_id = await session_manager.add_qa(
         user_id="u1",
         question="What is X?",
@@ -328,20 +351,15 @@ async def test_generate_completion_with_session_feedback_only_no_new_qa(
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
         patch(
-            "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+            "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
             new_callable=AsyncMock,
-            return_value=(
-                "Generated answer",
-                "",
-                FeedbackDetectionResult(
-                    feedback_detected=True,
-                    feedback_text="User said thanks.",
-                    feedback_score=5.0,
-                    response_to_user="Thanks for your feedback!",
-                    contains_followup_question=False,
-                ),
-            ),
+            return_value=FeedbackDetectionResult(response_to_user="Thanks for your feedback!"),
         ),
+        patch(
+            "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
+            new_callable=AsyncMock,
+            return_value=("Generated answer", "", None),
+        ) as mock_generate,
     ):
         mock_session_user.get.return_value = mock_user
         mock_config = MagicMock()
@@ -359,18 +377,21 @@ async def test_generate_completion_with_session_feedback_only_no_new_qa(
 
     assert result == "Thanks for your feedback!"
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
-    assert len(entries) == 1
+    assert len(entries) == 2
     assert entries[0].qa_id == qa_id
     assert entries[0].question == "What is X?"
-    assert entries[0].feedback_text == "User said thanks."
-    assert entries[0].feedback_score == 5
+    assert entries[-1].question == "thanks, that was helpful!"
+    assert entries[-1].answer == "Thanks for your feedback!"
+    assert entries[-1].feedback_text is None
+    assert entries[-1].feedback_score is None
+    mock_generate.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_generate_completion_with_session_feedback_and_followup_adds_qa(
     session_manager: SessionManager,
 ):
-    """When feedback + follow-up: feedback on last QA and new QA added with answer."""
+    """When query_to_answer is present: new QA is added with answer."""
     qa_id_first = await session_manager.add_qa(
         user_id="u1",
         question="What is X?",
@@ -386,19 +407,17 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
         patch(
-            "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
+            "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
             new_callable=AsyncMock,
-            return_value=(
-                "Paris is the capital of France.",
-                "",
-                FeedbackDetectionResult(
-                    feedback_detected=True,
-                    feedback_text="User gave thanks and asked follow-up.",
-                    feedback_score=5.0,
-                    response_to_user="Thanks for your feedback!",
-                    contains_followup_question=True,
-                ),
+            return_value=FeedbackDetectionResult(
+                response_to_user="Thanks for your feedback!",
+                query_to_answer="What is the capital of France?",
             ),
+        ),
+        patch(
+            "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
+            new_callable=AsyncMock,
+            return_value=("Paris is the capital of France.", "", None),
         ),
     ):
         mock_session_user.get.return_value = mock_user
@@ -415,8 +434,7 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(
             system_prompt_path="sys.txt",
         )
 
-    assert "Thanks for your feedback!" in result
-    assert "Paris is the capital of France." in result
+    assert result == "Paris is the capital of France."
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert len(entries) == 2
     first_qa = next((e for e in entries if e.qa_id == qa_id_first), None)
@@ -425,7 +443,7 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(
         None,
     )
     assert first_qa is not None
-    assert first_qa.feedback_text == "User gave thanks and asked follow-up."
-    assert first_qa.feedback_score == 5
+    assert first_qa.feedback_text is None
+    assert first_qa.feedback_score is None
     assert followup_qa is not None
     assert followup_qa.answer == "Paris is the capital of France."

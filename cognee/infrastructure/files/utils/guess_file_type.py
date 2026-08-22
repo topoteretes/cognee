@@ -52,21 +52,37 @@ def guess_file_type(file: BinaryIO, name: str | None = None) -> filetype.Type:
     elif name is not None:
         ext = Path(name).suffix
 
+    # File extensions are case-insensitive: a file named "data.CSV" must be
+    # detected the same as "data.csv". Without this, uppercase extensions for
+    # types that have no magic number (csv/md/json/xml/yaml) fall through to
+    # filetype.guess, return None, and get mislabeled as text/plain — so e.g. a
+    # ".CSV" is classified as a plain TextDocument instead of a CsvDocument.
+    if ext is not None:
+        ext = ext.lower()
+
     if ext in [".txt", ".text"]:
         file_type = Type("text/plain", "txt")
         return file_type
 
     if ext in [".csv"]:
-        file_type = Type("text/csv", "csv")
-        return file_type
+        return Type("text/csv", "csv")
+
+    if ext in [".md", ".markdown"]:
+        return Type("text/markdown", "md")
+
+    if ext in [".json"]:
+        return Type("application/json", "json")
+
+    if ext in [".xml"]:
+        return Type("application/xml", "xml")
+
+    if ext in [".yaml", ".yml"]:
+        return Type("application/yaml", "yaml")
 
     file_type = filetype.guess(file)
 
     # If file type could not be determined consider it a plain text file as they don't have magic number encoding
     if file_type is None:
         file_type = Type("text/plain", "txt")
-
-    if file_type is None:
-        raise FileTypeException(f"Unknown file detected: {file.name}.")
 
     return file_type

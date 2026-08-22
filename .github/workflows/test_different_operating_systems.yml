@@ -14,6 +14,12 @@ on:
         required: false
         type: string
         default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
+      extra-dependencies:
+        # Space-separated package extras for the unit-test job (e.g. "postgres").
+        # Driver-dependent tests importorskip when their extra is absent.
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_PROVIDER:
         required: true
@@ -31,11 +37,7 @@ on:
         required: true
       EMBEDDING_MODEL:
         required: true
-      EMBEDDING_ENDPOINT:
-        required: true
       EMBEDDING_API_KEY:
-        required: true
-      EMBEDDING_API_VERSION:
         required: true
 
 env:
@@ -62,11 +64,31 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ matrix.python-version }}
+          extra-dependencies: ${{ inputs.extra-dependencies }}
+
+      - name: Drop Git for Windows usr\bin from PATH
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Same guard the delete-test jobs already carry. Without it this job
+          # hangs: the step runs under Git for Windows' bash, so its usr\bin
+          # OpenSSL DLLs shadow the ones native extensions load, and the import
+          # deadlocks. pytest then never emits a single line -- --timeout only
+          # covers test execution, so it never engages -- and the job sits until
+          # the 60-minute ceiling cancels it. Observed on 3 of 12 recent runs.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
 
       - name: Run unit tests
         shell: bash
-        run: uv run pytest cognee/tests/unit/
+        run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
         env:
+          # Unbuffered + faulthandler so a wedged interpreter leaves evidence
+          # instead of a 60-minute silent cancel.
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -78,9 +100,7 @@ jobs:
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -102,9 +122,26 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Drop Git for Windows usr\bin from PATH
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Same guard the delete-test jobs already carry. Without it this job
+          # hangs: the step runs under Git for Windows' bash, so its usr\bin
+          # OpenSSL DLLs shadow the ones native extensions load, and the import
+          # deadlocks. pytest then never emits a single line -- --timeout only
+          # covers test execution, so it never engages -- and the job sits until
+          # the 60-minute ceiling cancels it. Observed on 3 of 12 recent runs.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
+
       - name: Run default basic pipeline
         shell: bash
         env:
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -116,9 +153,7 @@ jobs:
           EMBEDDING_PROVIDER: openai
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_library.py
 
   run-build-test:
@@ -171,12 +206,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Path setup
+      - name: Drop Git for Windows usr\bin from PATH
         if: ${{ matrix.os == 'windows-latest' }}
-        shell: bash
+        shell: pwsh
         run: |
-          PATH=$(printf '%s' "$PATH" | tr ':' $'\n' | grep -vi '/git/usr/bin' | paste -sd: -)
-          export PATH
+          # Git for Windows ships OpenSSL DLLs in usr\bin that shadow the ones
+          # ladybug loads. The previous version of this step edited PATH in bash
+          # and called `export`, which dies with the step and never reached the
+          # test below; $GITHUB_ENV is what carries an edited PATH forward.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
 
       - name: Run Soft Deletion Tests
         env:
@@ -186,9 +227,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_default_graph.py
 
   run-hard-deletion-test:
@@ -211,6 +250,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Drop Git for Windows usr\bin from PATH
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Same guard as the Soft Delete job: Git for Windows ships OpenSSL
+          # DLLs in usr\bin that shadow the ones ladybug loads. This job runs
+          # the sibling delete test and never had the guard at all.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
+
       - name: Run Custom Graph Deletion Test
         env:
           ENV: 'dev'
@@ -219,7 +270,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_custom_graph.py

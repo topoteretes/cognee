@@ -1,8 +1,8 @@
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.context_global_variables import backend_access_control_enabled
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     _create_graph_engine,
     get_graph_engine,
@@ -19,6 +19,7 @@ from cognee.infrastructure.databases.cache import (
     get_cache_engine,
 )
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
+from cognee.modules.operations import record_operation
 from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.logging_utils import get_logger
 
@@ -33,7 +34,7 @@ async def prune_graph_databases():
         for dataset_database in dataset_databases:
             handler = get_graph_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
-    except (OperationalError, EntityNotFoundError) as e:
+    except (OperationalError, ProgrammingError, EntityNotFoundError) as e:
         logger.debug(
             "Skipping pruning of graph DB. Error when accessing dataset_database table: %s",
             e,
@@ -49,7 +50,7 @@ async def prune_vector_databases():
         for dataset_database in dataset_databases:
             handler = get_vector_dataset_database_handler(dataset_database)
             await handler["handler_instance"].delete_dataset(dataset_database)
-    except (OperationalError, EntityNotFoundError) as e:
+    except (OperationalError, ProgrammingError, EntityNotFoundError) as e:
         logger.debug(
             "Skipping pruning of vector DB. Error when accessing dataset_database table: %s",
             e,
@@ -60,33 +61,44 @@ async def prune_vector_databases():
 async def prune_system(graph=True, vector=True, metadata=True, cache=True):
     # Note: prune system should not be available through the API, it has no permission checks and will
     #       delete all graph and vector databases if called. It should only be used in development or testing environments.
-    if graph and not backend_access_control_enabled():
-        graph_engine = await get_graph_engine()
-        await graph_engine.delete_graph()
-    elif graph and backend_access_control_enabled():
-        await prune_graph_databases()
 
-    if vector and not backend_access_control_enabled():
-        vector_engine = get_vector_engine()
-        await vector_engine.prune()
-    elif vector and backend_access_control_enabled():
-        await prune_vector_databases()
+    async def _prune():
+        if graph and not backend_access_control_enabled():
+            graph_engine = await get_graph_engine()
+            await graph_engine.delete_graph()
+        elif graph and backend_access_control_enabled():
+            await prune_graph_databases()
 
-    if graph:
-        _create_graph_engine.cache_clear()
+        if vector and not backend_access_control_enabled():
+            vector_engine = await get_vector_engine_async()
+            await vector_engine.prune()
+        elif vector and backend_access_control_enabled():
+            await prune_vector_databases()
 
-    if vector:
-        _create_vector_engine.cache_clear()
+        if graph:
+            _create_graph_engine.cache_clear()
+
+        if vector:
+            _create_vector_engine.cache_clear()
+
+        if metadata:
+            db_engine = get_relational_engine()
+            await db_engine.delete_database()
+
+        if cache:
+            await delete_cache()
+            cache_config = get_cache_config()
+            if cache_config.caching or cache_config.usage_logging:
+                create_cache_engine.cache_clear()
+                cache_engine = get_cache_engine()
+                if cache_engine:
+                    await cache_engine.prune()
 
     if metadata:
-        db_engine = get_relational_engine()
-        await db_engine.delete_database()
-
-    if cache:
-        await delete_cache()
-        cache_config = get_cache_config()
-        if cache_config.caching or cache_config.usage_logging:
-            create_cache_engine.cache_clear()
-            cache_engine = get_cache_engine()
-            if cache_engine:
-                await cache_engine.prune()
+        # Not recorded: the record could not outlive the prune (the relational DB
+        # holding pipeline_runs is dropped), and the recorder's exit write would
+        # recreate an empty database file on connect.
+        await _prune()
+    else:
+        async with record_operation("prune_system"):
+            await _prune()

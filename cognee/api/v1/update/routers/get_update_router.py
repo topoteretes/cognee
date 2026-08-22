@@ -1,8 +1,7 @@
 from fastapi.responses import JSONResponse
-from fastapi import File, UploadFile as UF, Depends, Form, status
-from typing import Optional, Annotated
+from fastapi import File, UploadFile as UF, Depends, Form, Query, status
+from typing import Optional, Annotated, Dict
 from fastapi import APIRouter
-from fastapi.encoders import jsonable_encoder
 from typing import List
 from uuid import UUID
 from pydantic import WithJsonSchema
@@ -13,8 +12,10 @@ from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
+    PipelineRunInfo,
 )
 from cognee.api.DTO import ErrorResponse
+from cognee.exceptions import CogneeApiError
 
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
@@ -28,7 +29,7 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=None,
+        response_model=Dict[UUID, PipelineRunInfo],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -36,10 +37,32 @@ def get_update_router() -> APIRouter:
         },
     )
     async def update(
-        data_id: UUID,
-        dataset_id: UUID,
-        data: List[UploadFile] = File(default=None),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
+        data_id: UUID = Query(
+            ...,
+            description=(
+                "UUID of the existing document to update "
+                "(returned by GET /api/v1/datasets/{dataset_id}/data)."
+            ),
+            examples=["9c4e4a4b-2b1a-4f6e-9d3a-1c2b3d4e5f6a"],
+        ),
+        dataset_id: UUID = Query(
+            ...,
+            description="UUID of the dataset containing the document to update.",
+            examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+        ),
+        data: List[UploadFile] = File(
+            ...,
+            description=(
+                "New version of the document that replaces the existing one. The existing "
+                "document is deleted before the replacement is ingested, so always provide "
+                "a file."
+            ),
+        ),
+        node_set: Optional[List[str]] = Form(
+            default=[""],
+            examples=[["user_memories"]],
+            description="Node identifiers for graph organization and access control.",
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -50,30 +73,26 @@ def get_update_router() -> APIRouter:
         The document is updated, analyzed, and the changes are integrated into the knowledge graph.
 
         ## Request Parameters
-        - **data_id** (UUID): UUID of the document to update in Cognee memory
-        - **data** (List[UploadFile]): List of files to upload.
-        - **datasetId** (Optional[UUID]): UUID of an already existing dataset
-        - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
+        - **data_id** (UUID, required, query): UUID of the existing document to update (returned by GET /api/v1/datasets/{dataset_id}/data)
+        - **dataset_id** (UUID, required, query): UUID of the dataset containing the document to update
+        - **data** (List[UploadFile]): New version of the document that replaces the existing one.
+        - **node_set** (Optional[List[str]]): List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
 
         ## Response
-        Returns information about the add operation containing:
-        - Status of the operation
-        - Details about the processed data
-        - Any relevant metadata from the ingestion process
+        Returns pipeline run information for the update (delete + re-add + cognify) operation.
 
         ## Error Codes
-        - **400 Bad Request**: Neither datasetId nor datasetName provided
-        - **409 Conflict**: Error during add operation
-        - **403 Forbidden**: User doesn't have permission to add to dataset
+        - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
+        - **403 Forbidden**: User lacks write permission on the dataset
+        - **500 Internal Server Error**: Pipeline run errored or an unexpected error occurred during the update
 
         ## Notes
-        - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
-        - datasetId value can only be the UUID of an already existing dataset
+        - The existing document is deleted and replaced by the uploaded file, then the dataset is re-cognified.
         """
         send_telemetry(
             "Update API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "PATCH /v1/update",
                 "dataset_id": str(dataset_id),
@@ -112,6 +131,11 @@ def get_update_router() -> APIRouter:
                 )
             return update_run
 
+        except CogneeApiError:
+            # Typed API errors (e.g. UpdateTargetNotFoundError -> 404) carry
+            # their own status codes — let the app-level handler map them
+            # instead of flattening everything into a 500.
+            raise
         except Exception as error:
             logger.exception("Update failed")
             return JSONResponse(

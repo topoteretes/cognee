@@ -3,7 +3,7 @@ from cognee.shared.logging_utils import get_logger, setup_logging, ERROR
 
 from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -49,13 +49,13 @@ async def code_description_to_code_part(
         raise ValueError("top_k must be a positive integer.")
 
     try:
-        vector_engine = get_vector_engine()
+        vector_engine = await get_vector_engine_async()
         graph_engine = await get_graph_engine()
     except Exception as init_error:
         logger.error("Failed to initialize engines: %s", init_error, exc_info=True)
         raise RuntimeError("System initialization error. Please try again later.") from init_error
 
-    send_telemetry("code_description_to_code_part_search EXECUTION STARTED", user.id)
+    send_telemetry("code_description_to_code_part_search EXECUTION STARTED", user)
     logger.info("Search initiated by user %s with query: '%s' and top_k: %d", user.id, query, top_k)
 
     context_from_documents = ""
@@ -138,7 +138,7 @@ async def code_description_to_code_part(
             exec_error,
             exc_info=True,
         )
-        send_telemetry("code_description_to_code_part_search EXECUTION FAILED", user.id)
+        send_telemetry("code_description_to_code_part_search EXECUTION FAILED", user)
         raise RuntimeError("An error occurred while processing your request.") from exec_error
 
 

@@ -8,9 +8,15 @@ class BaseRetriever(ABC):
 
     The retrieval workflow follows a three-step pipeline:
     1. get_retrieved_objects: Fetch raw data (e.g., Graph Edges, Vector chunks).
-    2. get_context: Process raw data into a format suitable for an LLM (e.g., text string).
-    3. get_completion: Generate a final response with the help of an LLM using the context and original query.
+    2. get_context_from_objects: Process raw data into a format suitable for an LLM.
+    3. get_completion_from_context: Generate a final response with the help of an LLM
+       using the context and original query.
     """
+
+    # Deterministic retrievers can opt out of conversational session analysis.
+    # That analysis may call an LLM before retrieval, which is not appropriate
+    # for search types whose contract is explicitly non-generative.
+    supports_session_turn_preparation = True
 
     @abstractmethod
     async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
@@ -71,13 +77,48 @@ class BaseRetriever(ABC):
         """
         pass
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """
         Extract node_ids and edge_ids from retrieved_objects for session QA.
         Override in retrievers that use session and have graph elements to store.
         Only called when session is enabled.
         """
         return None
+
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        """Combine two retrievals of this retriever's own result shape.
+
+        Called when one turn retrieves twice — a session turn runs the raw question and a
+        conversational rewrite of it — so the retriever formats context from both at once.
+        Only the retriever knows its object shape, so only it can merge them.
+
+        The default keeps whichever retrieval it has: either lane may be None when the
+        other one failed, and dropping the surviving lane would discard a good result.
+        """
+        return primary if primary is not None else secondary
+
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        """Apply retriever-owned references; unsupported retrievers leave answers unchanged."""
+        return completions
+
+    async def prepare_session_turn_for_retrieval(self, query: str):
+        """Analyze a session turn before retrieval and fail open to the original query."""
+        try:
+            from cognee.infrastructure.session.get_session_manager import get_session_manager
+            from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+
+            if not query:
+                return SessionTurnPreparation(should_answer=True, effective_query=query or "")
+
+            session_manager = get_session_manager()
+            return await session_manager.prepare_session_turn(
+                session_id=getattr(self, "session_id", None),
+                query=query,
+            )
+        except Exception:
+            from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+
+            return SessionTurnPreparation(should_answer=True, effective_query=query or "")
 
     async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
         """

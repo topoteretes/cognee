@@ -1,6 +1,6 @@
-from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.llm.config import (
-    get_llm_config,
+    get_llm_context_config,
 )
 from .EmbeddingEngine import EmbeddingEngine
 from functools import lru_cache
@@ -20,8 +20,8 @@ def get_embedding_engine() -> EmbeddingEngine:
         - EmbeddingEngine: An instance of the embedding engine configured based on the
           retrieved settings.
     """
-    config = get_embedding_config()
-    llm_config = get_llm_config()
+    config = get_embedding_context_config()
+    llm_config = get_llm_context_config()
     # Embedding engine has to be a singleton based on configuration to ensure too many requests won't be sent to HuggingFace
     return create_embedding_engine(
         config.embedding_provider,
@@ -35,6 +35,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         config.huggingface_tokenizer,
         llm_config.llm_api_key,
         llm_config.llm_provider,
+        config.embedding_input_type,
     )
 
 
@@ -51,6 +52,7 @@ def create_embedding_engine(
     huggingface_tokenizer,
     llm_api_key,
     llm_provider,
+    embedding_input_type=None,
 ):
     """
     Create and return an embedding engine based on the specified provider.
@@ -111,6 +113,7 @@ def create_embedding_engine(
             endpoint=embedding_endpoint,
             api_key=embedding_api_key or llm_api_key,
             batch_size=embedding_batch_size,
+            input_type=embedding_input_type,
         )
 
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
@@ -125,4 +128,5 @@ def create_embedding_engine(
         dimensions=embedding_dimensions,
         max_completion_tokens=embedding_max_completion_tokens,
         batch_size=embedding_batch_size,
+        input_type=embedding_input_type,
     )

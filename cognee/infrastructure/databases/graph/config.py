@@ -76,10 +76,16 @@ class GraphConfig(BaseSettings):
         self.graph_dataset_database_handler = graph_dataset_database_handler
         if provider == "kuzu" and graph_dataset_database_handler == "ladybug":
             self.graph_dataset_database_handler = "kuzu"
-        if provider == "postgres" and graph_dataset_database_handler in ("ladybug", "postgres"):
+        if provider in ("postgres", "postgres_demo") and graph_dataset_database_handler in (
+            "ladybug",
+            "postgres",
+            "postgres_demo",
+        ):
             self.graph_dataset_database_handler = "postgres_graph"
         if provider == "neo4j" and graph_dataset_database_handler in ("ladybug", "neo4j"):
             self.graph_dataset_database_handler = "neo4j"
+        if provider == "turso" and graph_dataset_database_handler in ("ladybug", "turso"):
+            self.graph_dataset_database_handler = "turso_graph"
         base_config = get_base_config()
 
         databases_directory_path = os.path.join(base_config.system_root_directory, "databases")

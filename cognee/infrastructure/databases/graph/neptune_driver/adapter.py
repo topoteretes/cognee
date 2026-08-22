@@ -37,6 +37,17 @@ except ImportError:
 NEPTUNE_ENDPOINT_URL = "neptune-graph://"
 
 
+def _quote_relationship_type(relationship_name: str) -> str:
+    """Backtick-quote a relationship type for safe interpolation into openCypher.
+
+    openCypher cannot parameterize a created relationship type, so the type is
+    interpolated into the query text. Backtick-quoting it (and doubling any internal
+    backtick, per the Cypher escaping rules) lets a label contain spaces, hyphens, or
+    other characters without breaking the query or allowing injection.
+    """
+    return "`" + relationship_name.replace("`", "``") + "`"
+
+
 class NeptuneGraphDB(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
@@ -97,12 +108,10 @@ class NeptuneGraphDB(GraphDBInterface):
         )
 
         # Initialize Neptune Analytics client using langchain_aws
-        self._client: NeptuneAnalyticsGraph = self._initialize_client()
-        logger.info(
-            f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
-        )
+        self._client: Any = self._initialize_client()
+        logger.info('Initialized Neptune Analytics adapter in region: "%s"', self.region)
 
-    def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
+    def _initialize_client(self) -> Optional[Any]:
         """
         Initialize the Neptune Analytics client using langchain_aws.
 
@@ -134,6 +143,21 @@ class NeptuneGraphDB(GraphDBInterface):
             raise NeptuneAnalyticsConfigurationError(
                 message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}"
             ) from e
+
+    async def close(self) -> None:
+        """
+        Release resources held by the Neptune Analytics client.
+
+        Called automatically by ``closing_lru_cache`` when this adapter is
+        evicted from ``_create_graph_engine``'s cache. The underlying boto3
+        client is cleaned up if present.
+        """
+        if hasattr(self, "_client") and self._client is not None:
+            # NeptuneAnalyticsGraph wraps a boto3 client; close it if available
+            underlying = getattr(self._client, "client", None)
+            if underlying is not None and hasattr(underlying, "close"):
+                underlying.close()
+            self._client = None
 
     @staticmethod
     def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -228,7 +252,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add node {node.id}: {error_msg}")
             raise Exception(f"Failed to add node: {error_msg}") from e
 
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    async def add_nodes(
+        self,
+        nodes: List[DataPoint],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
@@ -505,13 +534,14 @@ class NeptuneGraphDB(GraphDBInterface):
             # Prepare edge properties
             edge_props = properties or {}
             serialized_properties = self._serialize_properties(edge_props)
+            quoted_relationship = _quote_relationship_type(relationship_name)
 
             query = f"""
             MATCH (source:{self._GRAPH_NODE_LABEL})
             WHERE id(source) = $source_id
             MATCH (target:{self._GRAPH_NODE_LABEL})
             WHERE id(target) = $target_id
-            MERGE (source)-[r:{relationship_name}]->(target)
+            MERGE (source)-[r:{quoted_relationship}]->(target)
             ON CREATE SET r = $properties, r.updated_at = timestamp()
             ON MATCH SET r = $properties, r.updated_at = timestamp()
             RETURN r
@@ -532,7 +562,12 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
             raise Exception(f"Failed to add edge: {error_msg}") from e
 
-    async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
+    async def add_edges(
+        self,
+        edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
         """
         Add multiple edges to the graph in a single operation.
 
@@ -555,6 +590,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = {}
         for relationship_name, edges_for_relationship in edges_by_relationship.items():
             try:
+                quoted_relationship = _quote_relationship_type(relationship_name)
                 # Create the bulk-edge OpenCypher query using UNWIND
                 query = f"""
                     UNWIND $edges AS edge
@@ -562,7 +598,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     WHERE id(source) = edge.from_node
                     MATCH (target:{self._GRAPH_NODE_LABEL})
                     WHERE id(target) = edge.to_node
-                    MERGE (source)-[r:{relationship_name}]->(target)
+                    MERGE (source)-[r:{quoted_relationship}]->(target)
                     ON CREATE SET r = edge.properties, r.updated_at = timestamp()
                     ON MATCH SET r = edge.properties, r.updated_at = timestamp()
                     RETURN count(*) AS edges_processed
@@ -588,7 +624,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}"
                 )
                 logger.info("Falling back to individual edge creation")
-                for edge in edges_by_relationship:
+                for edge in edges_for_relationship:
                     try:
                         source_id, target_id, relationship_name = edge[0], edge[1], edge[2]
                         properties = edge[3] if len(edge) > 3 else {}
@@ -738,6 +774,20 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to get neighborhood: {error_msg}")
             raise Exception(f"Failed to get neighborhood: {error_msg}") from e
 
+    async def is_empty(self) -> bool:
+        """Return True if the graph contains no nodes."""
+        query = f"""
+            MATCH (n:{self._GRAPH_NODE_LABEL})
+            RETURN count(n) AS node_count
+        """
+        try:
+            result = await self.query(query)
+            return not result or result[0]["node_count"] == 0
+        except Exception as e:
+            error_msg = format_neptune_error(e)
+            logger.error(f"Failed to check if graph is empty: {error_msg}")
+            raise Exception(f"Failed to check if graph is empty: {error_msg}") from e
+
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.
@@ -751,7 +801,7 @@ class NeptuneGraphDB(GraphDBInterface):
             - Dict[str, Any]: A dictionary containing graph metrics and statistics.
         """
         num_nodes, num_edges = await self._get_model_independent_graph_data()
-        num_cluster, list_clsuter_size = await self._get_connected_components_stat()
+        list_clsuter_size, num_cluster = await self._get_connected_components_stat()
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
@@ -867,9 +917,15 @@ class NeptuneGraphDB(GraphDBInterface):
             return existing_edges
 
         except Exception as e:
+            # A failed existence check is NOT an empty existence check: returning
+            # [] tells the cognify dedup that none of these edges exist, so it
+            # writes them; if the store is failing those writes fail too and the
+            # run reports success while persisting nothing (issue #4348). Surface
+            # the failure like the other backends do (neo4j re-raises;
+            # postgres/turso let it propagate) instead of masking it.
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edges existence: {error_msg}")
-            return []
+            raise
 
     async def get_edges(self, node_id: str) -> List[EdgeData]:
         """
@@ -927,7 +983,7 @@ class NeptuneGraphDB(GraphDBInterface):
         results = await self.query(query)
         return results[0]["ids"] if len(results) > 0 else []
 
-    async def get_predecessors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
         """
         Retrieve the predecessor nodes of a specified node based on an optional edge label.
 
@@ -954,7 +1010,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         return [result["predecessor"] for result in results]
 
-    async def get_successors(self, node_id: str, edge_label: str = "") -> list[str]:
+    async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
         """
         Retrieve the successor nodes of a specified node based on an optional edge label.
 
@@ -972,7 +1028,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         edge_label = f" :{edge_label}" if edge_label is not None else ""
         query = f"""
-        MATCH (node)-[r {edge_label}]->(successor)
+        MATCH (node)-[r{edge_label}]->(successor)
         WHERE node.id = $node_id
         RETURN successor
         """

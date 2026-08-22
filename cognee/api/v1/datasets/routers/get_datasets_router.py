@@ -1,12 +1,13 @@
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, Union
 from typing_extensions import Annotated
 from fastapi import status
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException, Query, Depends
+from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, Response
 from urllib.parse import urlparse
 from pathlib import Path
@@ -51,6 +52,18 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    label: Optional[str] = None
+    external_metadata: Optional[dict] = None
+
+
+class DatasetGraphSummaryDTO(OutDTO):
+    dataset_id: UUID
+    pipeline_run_id: Optional[UUID] = None
+    num_nodes: int
+    num_edges: int
+    # None while pipeline_run_id is set means the last count attempt degraded
+    # (graph store unavailable) and wasn't cached — retried on the next poll.
+    computed_at: Optional[datetime] = None
 
 
 class GraphNodeDTO(OutDTO):
@@ -72,7 +85,13 @@ class GraphDTO(OutDTO):
 
 
 class DatasetCreationPayload(InDTO):
-    name: str
+    name: str = Field(
+        examples=["main_dataset"],
+        description=(
+            "Name of the dataset to create. If a dataset with this name already exists"
+            " for the user, the existing dataset is returned instead of creating a duplicate."
+        ),
+    )
 
 
 class DatasetSchemaPayloadDTO(InDTO):
@@ -101,11 +120,11 @@ def get_datasets_router() -> APIRouter:
         - **owner_id**: ID of the dataset owner
 
         ## Error Codes
-        - **418 I'm a teapot**: Error retrieving datasets
+        - **500 Internal Server Error**: Error retrieving datasets
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets",
                 "cognee_version": cognee_version,
@@ -119,7 +138,7 @@ def get_datasets_router() -> APIRouter:
         except Exception as error:
             logger.error(f"Error retrieving datasets: {str(error)}")
             raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error retrieving datasets: {str(error)}",
             ) from error
 
@@ -149,11 +168,11 @@ def get_datasets_router() -> APIRouter:
         - **owner_id**: ID of the dataset owner
 
         ## Error Codes
-        - **418 I'm a teapot**: Error creating dataset
+        - **500 Internal Server Error**: Error creating dataset
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/datasets",
                 "cognee_version": cognee_version,
@@ -172,7 +191,7 @@ def get_datasets_router() -> APIRouter:
         except Exception as error:
             logger.error(f"Error creating dataset: {str(error)}")
             raise HTTPException(
-                status_code=status.HTTP_418_IM_A_TEAPOT,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error creating dataset: {str(error)}",
             ) from error
 
@@ -193,7 +212,13 @@ def get_datasets_router() -> APIRouter:
     @router.delete(
         "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
     )
-    async def delete_dataset(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def delete_dataset(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Delete a dataset by its ID.
 
@@ -207,12 +232,12 @@ def get_datasets_router() -> APIRouter:
         No content returned on successful deletion.
 
         ## Error Codes
-        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **401/403 Unauthorized/Forbidden**: Dataset doesn't exist or user lacks delete permission
         - **500 Internal Server Error**: Error during deletion
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
                 "dataset_id": str(dataset_id),
@@ -228,7 +253,15 @@ def get_datasets_router() -> APIRouter:
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def delete_data(
-        dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        data_id: UUID = PathParam(
+            description="Data item UUID, from GET /api/v1/datasets/{dataset_id}/data",
+            examples=["f47ac10b-58cc-4372-a567-0e02b2c3d479"],
+        ),
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Delete a specific data item from a dataset.
@@ -245,12 +278,16 @@ def get_datasets_router() -> APIRouter:
         No content returned on successful deletion.
 
         ## Error Codes
-        - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
+        - **401 Unauthorized**: Dataset doesn't exist or user lacks delete permission
         - **500 Internal Server Error**: Error during deletion
+
+        ## Notes
+        Deleting a data_id not tracked in the dataset is treated as a custom-graph-model
+        deletion and returns success.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
                 "dataset_id": str(dataset_id),
@@ -262,7 +299,13 @@ def get_datasets_router() -> APIRouter:
         await datasets.delete_data(dataset_id, data_id, user)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
-    async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def get_dataset_graph(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Get the knowledge graph visualization for a dataset.
 
@@ -275,7 +318,7 @@ def get_datasets_router() -> APIRouter:
 
         ## Response
         Returns the graph data containing:
-        - **nodes**: List of graph nodes with id, label, and properties
+        - **nodes**: List of graph nodes with id, label, type, and properties
         - **edges**: List of graph edges with source, target, and label
 
         ## Error Codes
@@ -292,7 +335,13 @@ def get_datasets_router() -> APIRouter:
         response_model=list[DataDTO],
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def get_dataset_data(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def get_dataset_data(
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Get all data items in a dataset.
 
@@ -312,6 +361,10 @@ def get_datasets_router() -> APIRouter:
         - **extension**: File extension
         - **mime_type**: MIME type of the data
         - **raw_data_location**: Storage location of the raw data
+        - **dataset_id**: ID of the containing dataset
+        - **label**: Label attached to the data item at upload, if any
+        - **external_metadata**: Stored metadata dict (upload-provided keys merged over
+          loader-derived ones), if any
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
@@ -319,7 +372,7 @@ def get_datasets_router() -> APIRouter:
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
                 "dataset_id": str(dataset_id),
@@ -332,10 +385,12 @@ def get_datasets_router() -> APIRouter:
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
                 status_code=404,
-                content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
+                content=ErrorResponseDTO(
+                    message=f"Dataset ({str(dataset_id)}) not found."
+                ).model_dump(),
             )
 
         dataset_id = dataset[0].id
@@ -345,11 +400,15 @@ def get_datasets_router() -> APIRouter:
         if dataset_data is None:
             return []
 
+        # Dict literal, not dict(**data, dataset_id=...): Data now carries its
+        # own dataset_id column, and the kwarg form raises TypeError on the
+        # duplicate key. The requested dataset id still wins — the column is
+        # nullable, so the row's value cannot be relied on here.
         return [
-            dict(
+            {
                 **jsonable_encoder(data),
-                dataset_id=dataset_id,
-            )
+                "dataset_id": dataset_id,
+            }
             for data in dataset_data
         ]
 
@@ -358,8 +417,29 @@ def get_datasets_router() -> APIRouter:
         response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
     )
     async def get_dataset_status(
-        datasets: Annotated[List[UUID], Query(alias="dataset")] = [],
-        pipelines: Annotated[List[str], Query(alias="pipeline")] = [],
+        datasets: Annotated[
+            List[UUID],
+            Query(
+                alias="dataset",
+                description=(
+                    "Dataset UUIDs to check (from GET /api/v1/datasets)."
+                    " Omit to get status for all datasets you can read."
+                ),
+                examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
+            ),
+        ] = [],
+        pipelines: Annotated[
+            List[str],
+            Query(
+                alias="pipeline",
+                description=(
+                    "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
+                    " 'code_graph_pipeline' (code ingestion via remember"
+                    " content_type='code'). Omit to default to cognify_pipeline."
+                ),
+                examples=[["cognify_pipeline"]],
+            ),
+        ] = [],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -370,12 +450,16 @@ def get_datasets_router() -> APIRouter:
         encountered errors during pipeline execution.
 
         ## Query Parameters
-        - **dataset** (List[UUID]): List of dataset UUIDs to check status for
+        - **dataset** (List[UUID]): List of dataset UUIDs to check status for.
+          If omitted, returns status for all datasets the user has read permission on
         - **pipeline** (List[str], optional): One or more pipeline names to check.
           - If omitted, defaults to **cognify_pipeline** (backward-compatible behavior)
           - If one pipeline is provided, response is a flat map
           - If multiple pipelines are provided, response is nested per dataset and pipeline
-          - **Available options: add_pipeline, cognify_pipeline**
+          - **Available options: add_pipeline, cognify_pipeline, code_graph_pipeline**
+          - Note: a background code ingest creates its pipeline run only once the
+            repository is cloned — a dataset missing from the response means the run
+            has not started yet, not that it failed
 
         ## Response
         Returns status information in one of two shapes:
@@ -389,11 +473,12 @@ def get_datasets_router() -> APIRouter:
         - **failed**: Dataset processing encountered an error
 
         ## Error Codes
-        - **500 Internal Server Error**: Error retrieving status information
+        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
+          read permission for)
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/datasets/status",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
@@ -415,11 +500,179 @@ def get_datasets_router() -> APIRouter:
 
             return datasets_statuses
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error("Error retrieving dataset statuses: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset statuses."},
+            )
+
+    @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
+    async def get_datasets_graph_summary(
+        dataset_ids: Annotated[
+            List[UUID],
+            Query(
+                alias="dataset_ids",
+                description=(
+                    "Dataset UUIDs to summarize (from GET /api/v1/datasets)."
+                    " Omit to summarize every dataset you can read."
+                ),
+                examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
+            ),
+        ] = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get node/edge counts per dataset, cached per cognify run.
+
+        Counts are computed once per dataset's latest cognify run and cached in
+        GraphMetrics, keyed by pipeline_run_id — orders of magnitude cheaper on
+        repeat polls than GET /{dataset_id}/graph, which does a full traversal.
+
+        ## Query Parameters
+        - **dataset_ids** (List[UUID], optional): Dataset UUIDs to summarize.
+          If omitted, summarizes every dataset the user has read permission on.
+
+        ## Response
+        Returns a list of summaries containing:
+        - **datasetId**: The dataset's UUID
+        - **pipelineRunId**: The dataset's latest cognify run, or null if it
+          has never been cognified
+        - **numNodes** / **numEdges**: Graph size for that run
+        - **computedAt**: When the count was cached, or null if the last
+          attempt degraded (graph store unavailable) and wasn't cached
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/graph-summary",
+                "dataset_ids": [str(dataset_id) for dataset_id in dataset_ids],
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from datetime import timezone
+        from sqlalchemy import select, func
+        from sqlalchemy.orm import aliased
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.infrastructure.databases.graph import get_graph_engine
+        from cognee.modules.data.models import GraphMetrics
+        from cognee.modules.pipelines.models import PipelineRun
+
+        authorized_datasets = await get_authorized_existing_datasets(dataset_ids, "read", user)
+
+        if not authorized_datasets:
+            return []
+
+        db_engine = get_relational_engine()
+
+        async with db_engine.get_async_session() as session:
+            ranked_runs = (
+                select(
+                    PipelineRun,
+                    func.row_number()
+                    .over(
+                        partition_by=PipelineRun.dataset_id,
+                        order_by=PipelineRun.created_at.desc(),
+                    )
+                    .label("rn"),
+                )
+                .filter(PipelineRun.dataset_id.in_([dataset.id for dataset in authorized_datasets]))
+                .filter(PipelineRun.pipeline_name == "cognify_pipeline")
+                .subquery()
+            )
+            aliased_run = aliased(PipelineRun, ranked_runs)
+            latest_runs = (
+                (await session.execute(select(aliased_run).filter(ranked_runs.c.rn == 1)))
+                .scalars()
+                .all()
+            )
+            latest_run_by_dataset = {run.dataset_id: run for run in latest_runs}
+
+        summaries = []
+        for dataset in authorized_datasets:
+            latest_run = latest_run_by_dataset.get(dataset.id)
+            if latest_run is None:
+                summaries.append(
+                    DatasetGraphSummaryDTO(dataset_id=dataset.id, num_nodes=0, num_edges=0)
+                )
+                continue
+
+            async with db_engine.get_async_session() as session:
+                cached = (
+                    (
+                        await session.execute(
+                            select(GraphMetrics).where(
+                                GraphMetrics.id == latest_run.pipeline_run_id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+
+            if cached is not None:
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id,
+                        pipeline_run_id=latest_run.pipeline_run_id,
+                        num_nodes=cached.num_nodes or 0,
+                        num_edges=cached.num_edges or 0,
+                        computed_at=cached.created_at,
+                    )
+                )
+                continue
+
+            try:
+                async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+                    graph_engine = await get_graph_engine()
+                    graph_metrics = await graph_engine.get_graph_metrics(include_optional=False)
+
+                async with db_engine.get_async_session() as session:
+                    session.add(
+                        GraphMetrics(
+                            id=latest_run.pipeline_run_id,
+                            num_nodes=graph_metrics.get("num_nodes"),
+                            num_edges=graph_metrics.get("num_edges"),
+                        )
+                    )
+                    await session.commit()
+
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id,
+                        pipeline_run_id=latest_run.pipeline_run_id,
+                        num_nodes=graph_metrics.get("num_nodes") or 0,
+                        num_edges=graph_metrics.get("num_edges") or 0,
+                        computed_at=datetime.now(timezone.utc),
+                    )
+                )
+            except Exception as error:
+                logger.warning(
+                    "Failed to compute graph metrics for dataset %s: %s", dataset.id, error
+                )
+                summaries.append(
+                    DatasetGraphSummaryDTO(
+                        dataset_id=dataset.id,
+                        pipeline_run_id=latest_run.pipeline_run_id,
+                        num_nodes=0,
+                        num_edges=0,
+                    )
+                )
+
+        return summaries
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
-        dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
+        dataset_id: UUID = PathParam(
+            description="Dataset UUID, the id field from GET /api/v1/datasets (not the name)",
+            examples=["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"],
+        ),
+        data_id: UUID = PathParam(
+            description="Data item UUID, from GET /api/v1/datasets/{dataset_id}/data",
+            examples=["f47ac10b-58cc-4372-a567-0e02b2c3d479"],
+        ),
+        user: User = Depends(get_authenticated_user),
     ) -> Response:
         """
         Download the raw data file for a specific data item.
@@ -436,12 +689,13 @@ def get_datasets_router() -> APIRouter:
         Returns the raw data file as a downloadable response.
 
         ## Error Codes
-        - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
+        - **404 Not Found**: Data item doesn't exist in the dataset, or its raw file is missing
         - **500 Internal Server Error**: Error accessing the raw data file
+        - **501 Not Implemented**: Raw data is stored on an unsupported storage scheme
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
                 "dataset_id": str(dataset_id),
@@ -450,36 +704,39 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_data
-        from cognee.modules.data.methods import get_dataset_data
+        from cognee.modules.data.methods import get_dataset_data, resolve_data_id
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
-        if dataset is None:
+        if not dataset:
             return JSONResponse(
-                status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
+                status_code=404, content={"message": f"Dataset ({dataset_id}) not found."}
             )
 
-        dataset_data = await get_dataset_data(dataset[0].id)
+        # Dataset-scoped lookup: resolves the exact id or, for a row whose
+        # identity forked in the dataset-scoping upgrade, its recorded
+        # pre-fork legacy_id — every id ever issued keeps resolving.
+        resolved_id = await resolve_data_id(dataset[0].id, data_id)
 
-        if dataset_data is None:
-            raise DataNotFoundError(message=f"No data found in dataset ({dataset_id}).")
+        if resolved_id is None:
+            raise DataNotFoundError(
+                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
+            )
 
-        matching_data = [data for data in dataset_data if data.id == data_id]
+        matching_data = [
+            data for data in await get_dataset_data(dataset[0].id) if data.id == resolved_id
+        ]
 
-        # Check if matching_data contains an element
         if len(matching_data) == 0:
             raise DataNotFoundError(
                 message=f"Data ({data_id}) not found in dataset ({dataset_id})."
             )
 
-        data = await get_data(user.id, data_id)
-
-        if data is None:
-            raise DataNotFoundError(
-                message=f"Data ({data_id}) not found in dataset ({dataset_id})."
-            )
+        # Use the data object already verified to belong to the authorized dataset,
+        # rather than calling get_data() which checks owner_id and would reject
+        # ACL-granted readers who are not the data owner.
+        data = matching_data[0]
 
         raw_location = data.raw_data_location
         parsed_uri = urlparse(raw_location)

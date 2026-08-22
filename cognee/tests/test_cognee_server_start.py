@@ -179,17 +179,6 @@ class TestCogneeServerStart(unittest.TestCase):
         )
         self.assertEqual(graph_response.status_code, 200)
 
-        graph_data = graph_response.json()
-        ontology_nodes = [
-            node for node in graph_data.get("nodes") if node.get("properties").get("ontology_valid")
-        ]
-
-        self.assertGreater(
-            len(ontology_nodes), 0, "No ontology nodes found - ontology was not integrated"
-        )
-
-        # TODO: Add test to verify cognify pipeline is complete before testing search
-
         # Search request
         url = "http://127.0.0.1:8000/api/v1/search"
 

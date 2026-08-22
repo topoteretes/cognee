@@ -9,6 +9,7 @@ import os
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
+from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
 
 logger = get_logger()
 
@@ -55,7 +56,7 @@ class DefaultUrlCrawler:
         headers: Optional[Dict[str, str]] = None,
         robots_cache_ttl: float = 3600.0,
     ):
-        """Initialize the BeautifulSoupCrawler.
+        """Initialize the DefaultUrlCrawler.
 
         Args:
             concurrency: Number of concurrent requests allowed.
@@ -88,7 +89,11 @@ class DefaultUrlCrawler:
     async def _ensure_client(self):
         """Initialize the HTTP client if not already created."""
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.timeout, headers=self.headers)
+            # follow_redirects stays disabled so a public URL cannot redirect the
+            # server to an internal address, bypassing the SSRF host validation.
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout, headers=self.headers, follow_redirects=False
+            )
 
     async def close(self):
         """Close the HTTP client."""
@@ -399,13 +404,18 @@ class DefaultUrlCrawler:
         """
         if isinstance(urls, str):
             urls = [urls]
-        else:
+        elif not isinstance(urls, list):
             raise ValueError(f"Invalid urls type: {type(urls)}")
 
         async def _task(url: str):
             async with self._sem:
                 try:
                     logger.info(f"Processing URL: {url}")
+
+                    # SSRF guard: validate the target before any outbound request
+                    # (including the robots.txt fetch) so internal/reserved hosts
+                    # are never contacted.
+                    await validate_outbound_url(url)
 
                     # Check robots.txt
                     allowed = await self._is_url_allowed(url)

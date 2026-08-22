@@ -3,7 +3,7 @@ from cognee.tasks.temporal_graph.models import EventWithEntities
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.infrastructure.engine.models.Edge import Edge
-from cognee.modules.engine.utils import generate_node_id, generate_node_name
+from cognee.modules.engine.utils import generate_node_name
 
 
 def add_entities_to_event(event: Event, event_with_entities: EventWithEntities) -> None:
@@ -36,7 +36,7 @@ def add_entities_to_event(event: Event, event_with_entities: EventWithEntities) 
         entity_type = get_or_create_entity_type(entity_types, attribute.entity_type)
 
         # Create entity
-        entity_id = generate_node_id(attribute.entity)
+        entity_id = Entity.id_for(attribute.entity)
         entity_name = generate_node_name(attribute.entity)
         entity = Entity(
             id=entity_id,
@@ -71,7 +71,7 @@ def get_or_create_entity_type(entity_types: dict, entity_type_name: str) -> Enti
         EntityType: The existing or newly created EntityType object.
     """
     if entity_type_name not in entity_types:
-        type_id = generate_node_id(entity_type_name)
+        type_id = EntityType.id_for(entity_type_name)
         type_name = generate_node_name(entity_type_name)
         entity_type = EntityType(
             id=type_id,

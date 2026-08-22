@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.exceptions import EntityNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
@@ -417,7 +417,7 @@ async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph):
     graph.add_edge(edge)
 
     edge_distances = [
-        MockScoredResult(generate_edge_id("CONNECTS_TO"), 0.92, payload={"text": "CONNECTS_TO"}),
+        MockScoredResult(EdgeType.id_for("CONNECTS_TO"), 0.92, payload={"text": "CONNECTS_TO"}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -444,7 +444,7 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph):
 
     edge_1_text = "CONNECTS_TO"
     edge_distances = [
-        MockScoredResult(generate_edge_id(edge_1_text), 0.92, payload={"text": edge_1_text}),
+        MockScoredResult(EdgeType.id_for(edge_1_text), 0.92, payload={"text": edge_1_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -472,7 +472,7 @@ async def test_map_vector_distances_edges_fallback_to_relationship_type(setup_gr
 
     edge_text = "KNOWS"
     edge_distances = [
-        MockScoredResult(generate_edge_id(edge_text), 0.85, payload={"text": edge_text}),
+        MockScoredResult(EdgeType.id_for(edge_text), 0.85, payload={"text": edge_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -499,7 +499,7 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
 
     edge_text = "SOME_OTHER_EDGE"
     edge_distances = [
-        MockScoredResult(generate_edge_id(edge_text), 0.92, payload={"text": edge_text}),
+        MockScoredResult(EdgeType.id_for(edge_text), 0.92, payload={"text": edge_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -556,10 +556,10 @@ async def test_map_vector_distances_to_graph_edges_multi_query(setup_graph):
     edge_2_text = "B"
     edge_distances = [
         [
-            MockScoredResult(generate_edge_id(edge_1_text), 0.1, payload={"text": edge_1_text})
+            MockScoredResult(EdgeType.id_for(edge_1_text), 0.1, payload={"text": edge_1_text})
         ],  # query 0
         [
-            MockScoredResult(generate_edge_id(edge_2_text), 0.2, payload={"text": edge_2_text})
+            MockScoredResult(EdgeType.id_for(edge_2_text), 0.2, payload={"text": edge_2_text})
         ],  # query 1
     ]
 
@@ -591,7 +591,7 @@ async def test_map_vector_distances_to_graph_edges_preserves_unmapped_indices(se
     edge_1_text = "A"
     edge_distances = [
         [
-            MockScoredResult(generate_edge_id(edge_1_text), 0.1, payload={"text": edge_1_text})
+            MockScoredResult(EdgeType.id_for(edge_1_text), 0.1, payload={"text": edge_1_text})
         ],  # query 0: only edge1 mapped
         [],  # query 1: no edges mapped
     ]
@@ -1008,7 +1008,7 @@ async def test_missing_distance_penalty_ranks_below_max_real_triplet(setup_graph
         {"Entity_name": [MockScoredResult("1", 2.0), MockScoredResult("2", 2.0)]}
     )
     await graph.map_vector_distances_to_graph_edges(
-        [MockScoredResult(generate_edge_id("A"), 2.0, payload={"text": "A"})]
+        [MockScoredResult(EdgeType.id_for("A"), 2.0, payload={"text": "A"})]
     )
 
     ranked = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
@@ -1090,6 +1090,183 @@ async def test_calculate_top_triplet_importances_raises_on_missing_attribute(set
 
     with pytest.raises(ValueError):
         await graph.calculate_top_triplet_importances(k=1, query_list_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Personal prefers weights (user preferences, Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_personal_weights_matches_by_node_id_and_ignores_unknown_ids(setup_graph):
+    """Weights land on nodes matched by id; unknown ids neither raise nor create nodes."""
+    graph = setup_graph
+    node1 = Node("1")
+    node2 = Node("2")
+    graph.add_node(node1)
+    graph.add_node(node2)
+
+    graph.apply_personal_weights({"1": 0.9, "ghost": 0.1})
+
+    assert node1.attributes.get("personal_weight") == 0.9
+    assert node2.attributes.get("personal_weight") is None
+    assert "ghost" not in graph.nodes
+
+
+def test_apply_personal_weights_empty_map_is_a_no_op(setup_graph):
+    """An empty weight map touches nothing."""
+    graph = setup_graph
+    node1 = Node("1")
+    graph.add_node(node1)
+
+    graph.apply_personal_weights({})
+
+    assert node1.attributes.get("personal_weight") is None
+
+
+@pytest.mark.asyncio
+async def test_personal_weight_leaves_penalty_distance_untouched(setup_graph):
+    """A fallback-penalty triplet must not be scaled by a strong personal weight.
+
+    Run with feedback_influence=0: there _effective_distance short-circuits
+    without ever consulting its range guard, so the eligibility test lives
+    only in the personal-distance code — which is where it could be dropped.
+    Both edges sit at the same penalty score, so if the weighted one were
+    scaled it would jump ahead; correct behavior preserves insertion order.
+    """
+    graph = setup_graph
+    graph.personal_influence = 1.0
+
+    node1 = Node("1", {"importance_weight": 1.0})
+    node2 = Node("2", {"importance_weight": 1.0})
+    node3 = Node("3", {"importance_weight": 1.0})
+    node4 = Node("4", {"importance_weight": 1.0})
+    for node in (node1, node2, node3, node4):
+        graph.add_node(node)
+
+    edge_plain = Edge(node1, node2, attributes={"importance_weight": 1.0})
+    edge_weighted = Edge(node3, node4, attributes={"importance_weight": 1.0})
+    graph.add_edge(edge_plain)
+    graph.add_edge(edge_weighted)
+
+    # Every component sits at the fallback penalty.
+    for element in (node1, node2, node3, node4, edge_plain, edge_weighted):
+        element.add_attribute("vector_distance", [6.5])
+
+    graph.apply_personal_weights({"3": 0.95, "4": 0.95})
+
+    results = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    assert results == [edge_plain, edge_weighted]
+
+
+@pytest.mark.asyncio
+async def test_personal_weight_neutral_is_an_exact_no_op(setup_graph):
+    """personal_factor(0.5, influence) is exactly 1.0, so a tie stays a tie."""
+    graph = setup_graph
+    graph.personal_influence = 1.0
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    node4 = Node("4")
+    for node in (node1, node2, node3, node4):
+        graph.add_node(node)
+
+    edge_first = Edge(node1, node2)
+    edge_second = Edge(node3, node4)
+    graph.add_edge(edge_first)
+    graph.add_edge(edge_second)
+
+    # Real cosine distances, identical across both triplets.
+    for element in (node1, node2, node3, node4, edge_first, edge_second):
+        element.add_attribute("vector_distance", [0.4])
+
+    graph.apply_personal_weights({"3": 0.5, "4": 0.5})
+
+    results = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    # Any factor even epsilon below 1.0 would flip this ordering; the exact
+    # no-op preserves insertion order through the stable sort.
+    assert results == [edge_first, edge_second]
+
+
+@pytest.mark.asyncio
+async def test_personal_weight_ignored_at_zero_influence(setup_graph):
+    """influence <= 0 returns the blended distance untouched, weight or not."""
+    graph = setup_graph
+    graph.personal_influence = 0.0
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    node4 = Node("4")
+    for node in (node1, node2, node3, node4):
+        graph.add_node(node)
+
+    edge_first = Edge(node1, node2)
+    edge_second = Edge(node3, node4)
+    graph.add_edge(edge_first)
+    graph.add_edge(edge_second)
+
+    for element in (node1, node2, node3, node4, edge_first, edge_second):
+        element.add_attribute("vector_distance", [0.4])
+
+    graph.apply_personal_weights({"3": 0.95, "4": 0.95})
+
+    results = await graph.calculate_top_triplet_importances(k=2, feedback_influence=0.0)
+
+    assert results == [edge_first, edge_second]
+
+
+@pytest.mark.asyncio
+async def test_personal_and_feedback_influences_compose_multiplicatively(setup_graph):
+    """Both knobs on: the personal factor scales the feedback-blended distance.
+
+    All components sit at raw distance 1.0 (importance_weight 1.0 keeps it
+    unscaled). With feedback_influence=0.5 and personal_influence=0.5, the
+    hand-computed per-edge sums are:
+
+    - both signals:    node 1.0 -> blended 0.5 -> x0.5 = 0.25; edge 0.5; sum 1.0
+    - feedback only:   node 0.5, edge 0.5; sum 1.5
+    - personal only:   node blended 1.0 -> x0.5 = 0.5; edge 1.0; sum 2.0
+    - neither:         1.0 each; sum 3.0
+
+    Only blend-then-multiply produces this strict ordering.
+    """
+    graph = setup_graph
+    graph.personal_influence = 0.5
+
+    nodes = {}
+    for index in range(1, 9):
+        node_id = str(index)
+        attrs = {"importance_weight": 1.0}
+        if index in (1, 2, 3, 4):
+            attrs["feedback_weight"] = 1.0
+        node = Node(node_id, attrs)
+        nodes[node_id] = node
+        graph.add_node(node)
+
+    edge_both = Edge(
+        nodes["1"], nodes["2"], attributes={"feedback_weight": 1.0, "importance_weight": 1.0}
+    )
+    edge_feedback_only = Edge(
+        nodes["3"], nodes["4"], attributes={"feedback_weight": 1.0, "importance_weight": 1.0}
+    )
+    edge_personal_only = Edge(nodes["5"], nodes["6"], attributes={"importance_weight": 1.0})
+    edge_neither = Edge(nodes["7"], nodes["8"], attributes={"importance_weight": 1.0})
+    for edge in (edge_both, edge_feedback_only, edge_personal_only, edge_neither):
+        graph.add_edge(edge)
+
+    for node in nodes.values():
+        node.add_attribute("vector_distance", [1.0])
+    for edge in (edge_both, edge_feedback_only, edge_personal_only, edge_neither):
+        edge.add_attribute("vector_distance", [1.0])
+
+    graph.apply_personal_weights({"1": 1.0, "2": 1.0, "5": 1.0, "6": 1.0})
+
+    results = await graph.calculate_top_triplet_importances(k=4, feedback_influence=0.5)
+
+    assert results == [edge_both, edge_feedback_only, edge_personal_only, edge_neither]
 
 
 def test_normalize_query_distance_lists_flat_list_single_query(setup_graph):

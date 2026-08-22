@@ -1,11 +1,22 @@
 import os
+import base64
 from pathlib import Path
 from typing import Optional
 from functools import lru_cache
 from cognee.root_dir import get_absolute_path, ensure_absolute_path
 from cognee.modules.observability.observers import Observer
+from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
+
+logger = get_logger()
+
+
+def _tracing_explicitly_disabled() -> bool:
+    """True when the operator set COGNEE_TRACING_ENABLED to an explicit off
+    value. An unset variable is not a veto — it leaves auto-enabling (e.g.
+    from Langfuse keys) free to happen."""
+    return os.getenv("COGNEE_TRACING_ENABLED", "").lower() in ("false", "0", "no")
 
 
 class BaseConfig(BaseSettings):
@@ -14,6 +25,46 @@ class BaseConfig(BaseSettings):
     cache_root_directory: str = get_absolute_path(".cognee_cache")
     logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", str(Path.home() / ".cognee" / "logs"))
     monitoring_tool: object = Observer.NONE
+    # Default blend weight for the learned feedback signal during graph search.
+    # Opt-in by default to preserve existing retrieval behavior.
+    default_feedback_influence: float = float(os.getenv("DEFAULT_FEEDBACK_INFLUENCE", "0.0"))
+    # How far one rating pulls a personal prefers-edge weight toward its target.
+    # Deliberately higher than the 0.1 used for global feedback_weight: a global
+    # weight aggregates every user's evidence and should move slowly, a personal
+    # weight has a single source and should be reactive.
+    preference_alpha: float = float(os.getenv("PREFERENCE_ALPHA", "0.3"))
+    # How much an untouched prefers-edge weight fades per turn. Calibrated
+    # against the per-turn clock, which ticks on every turn rather than every
+    # rated one; at 0.02 a reinforced edge decays out in a few hundred turns.
+    preference_beta: float = float(os.getenv("PREFERENCE_BETA", "0.02"))
+    # Master switch for per-user preference personalization at retrieval time.
+    # Off by default so a default deployment stays byte-identical to today.
+    personalization_enabled: bool = os.getenv("PERSONALIZATION_ENABLED", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    # The most personalization may move a ranking score: 0.3 means at most 30%.
+    # Blends via personal_factor, which is exactly 1.0 at a neutral weight.
+    personalization_influence: float = float(os.getenv("PERSONALIZATION_INFLUENCE", "0.3"))
+
+    @pydantic.model_validator(mode="after")
+    def validate_personalization_knobs(self):
+        # A startup error beats a silent runtime no-op. An out-of-range alpha
+        # would raise inside the preference stage's fail-open catch-all and
+        # silently stop learning; an influence above 1 turns the ranking
+        # factor negative (inverting order among liked items); a beta at 1 or
+        # above flips or kills the decay and a negative one grows weights
+        # without limit.
+        if not 0.0 < self.preference_alpha <= 1.0:
+            raise ValueError(f"PREFERENCE_ALPHA must be in (0, 1], got {self.preference_alpha}")
+        if not 0.0 <= self.preference_beta < 1.0:
+            raise ValueError(f"PREFERENCE_BETA must be in [0, 1), got {self.preference_beta}")
+        if not 0.0 <= self.personalization_influence <= 1.0:
+            raise ValueError(
+                f"PERSONALIZATION_INFLUENCE must be in [0, 1], got {self.personalization_influence}"
+            )
+        return self
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
@@ -32,17 +83,46 @@ class BaseConfig(BaseSettings):
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
+        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
         self.logs_root_directory = ensure_absolute_path(self.logs_root_directory)
 
-        # Set monitoring tool based on available keys
-        if self.langfuse_public_key and self.langfuse_secret_key:
-            self.monitoring_tool = Observer.LANGFUSE
+        # Langfuse rides the existing OTLP pipeline as just another destination.
+        # When LANGFUSE_* keys are set, derive the OTLP endpoint + Basic-auth header
+        # and turn tracing on. Fully opt-in: nothing changes unless a key is present.
+        if self.langfuse_public_key or self.langfuse_secret_key:
+            if not (self.langfuse_public_key and self.langfuse_secret_key):
+                raise ValueError(
+                    "Both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be provided together."
+                )
+
+            auth_str = f"{self.langfuse_public_key}:{self.langfuse_secret_key}"
+            auth_b64 = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
+
+            # LANGFUSE_HOST is canonical; fall back to LANGFUSE_BASE_URL, then Langfuse cloud.
+            host = (
+                self.langfuse_host or os.getenv("LANGFUSE_BASE_URL") or "https://cloud.langfuse.com"
+            )
+
+            # Respect an explicit OTLP endpoint/headers if the user already set one.
+            if not self.otel_exporter_otlp_endpoint:
+                self.otel_exporter_otlp_endpoint = f"{host.rstrip('/')}/api/public/otel/v1/traces"
+
+            if not self.otel_exporter_otlp_headers:
+                self.otel_exporter_otlp_headers = f"Authorization=Basic {auth_b64}"
+
+            # Keys imply tracing on ONLY when the operator did not explicitly
+            # turn it off — COGNEE_TRACING_ENABLED=false is authoritative.
+            if not _tracing_explicitly_disabled():
+                self.cognee_tracing_enabled = True
+
+        if self.default_feedback_influence > 0:
+            logger.warning(
+                "DEFAULT_FEEDBACK_INFLUENCE=%s defers every hybrid search to graph completion",
+                self.default_feedback_influence,
+            )
 
         return self
 
-    langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
-    langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
-    langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
 
@@ -55,6 +135,13 @@ class BaseConfig(BaseSettings):
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
     otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+
+    # Langfuse configuration. Read from the env by pydantic-settings at load time
+    # (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST); host falls back to
+    # LANGFUSE_BASE_URL, then Langfuse cloud (see validate_paths).
+    langfuse_public_key: Optional[str] = None
+    langfuse_secret_key: Optional[str] = None
+    langfuse_host: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

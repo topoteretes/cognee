@@ -3,10 +3,10 @@ import os
 import sys
 import argparse
 import asyncio
+import base64
 import subprocess
 from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Deque, List, Optional, Tuple
 from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
 from cognee.modules.data.methods.get_last_added_data import get_last_added_data
@@ -16,8 +16,9 @@ from cognee.shared.usage_logger import log_usage
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
-from mcp.server import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
+from fastmcp.server.transforms.search import BM25SearchTransform
+from fastmcp.server.transforms.search.base import BaseSearchTransform
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -33,6 +34,11 @@ try:
     from .strip_vectors import strip_vectors
 except ImportError:
     from strip_vectors import strip_vectors
+
+try:
+    from .tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
+except ImportError:
+    from tool_registry import DEFAULT_TAG, MEMORY_TAG, ToolRegistry
 
 try:
     from .server_utils import (
@@ -72,6 +78,10 @@ except ModuleNotFoundError:
 
 mcp = FastMCP("Cognee")
 
+# Tools register through this rather than @mcp.tool directly, so each one
+# declares its tier at the definition site (see apply_tool_mode()).
+registry = ToolRegistry(mcp)
+
 logger = get_logger()
 
 cognee_client: Optional[CogneeClient] = None
@@ -80,6 +90,7 @@ cognee_client: Optional[CogneeClient] = None
 # unbounded memory). Each entry is (iso_timestamp, error_message).
 _TASK_ERROR_HISTORY = 50
 _task_errors: dict[str, Deque[Tuple[str, str]]] = {}
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
 # weak references to tasks, so a fire-and-forget task can be GC'd mid-execution if
@@ -103,11 +114,11 @@ def _record_task_error(dataset: str, error: str) -> None:
     bucket.append((datetime.now(timezone.utc).isoformat(), error))
 
 
-def _configure_transport_security(host: str) -> None:
-    """Configure MCP transport security based on env vars and bind host.
+def _transport_security_kwargs(host: str) -> dict:
+    """Build the Host/Origin guard kwargs for mcp.http_app() from env and bind host.
 
-    Must be called before run_sse_with_cors() or run_http_with_cors(), since
-    the SDK reads mcp.settings.transport_security lazily when creating the app.
+    FastMCP 3 takes these per-app rather than off a mutable settings object, so
+    this returns kwargs instead of configuring global state.
 
     Env vars:
         MCP_DISABLE_DNS_REBINDING_PROTECTION: Set to "true" to disable all
@@ -119,17 +130,14 @@ def _configure_transport_security(host: str) -> None:
     disable = os.getenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "false").lower() == "true"
 
     if disable:
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=False,
-        )
         logger.info("MCP transport security: DNS rebinding protection disabled")
-        return
+        return {"host_origin_protection": False}
 
     extra_hosts = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
 
-    # The SDK only auto-populates localhost defaults when transport_security is
-    # None AND host is a loopback address. When the user binds to 0.0.0.0 or a
-    # LAN IP, we must provide the full allowed list ourselves.
+    # "auto" only guards loopback binds and explicit allowlists. When the user
+    # binds to 0.0.0.0 or a LAN IP, we must provide the full allowed list
+    # ourselves and turn the guard on unconditionally.
     localhost_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
     localhost_origins = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
 
@@ -138,18 +146,88 @@ def _configure_transport_security(host: str) -> None:
     allowed_origins = localhost_origins + [f"http://{h}" for h in extra_hosts]
 
     if host not in ("127.0.0.1", "localhost", "::1") or extra_hosts:
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-            allowed_hosts=allowed_hosts,
-            allowed_origins=allowed_origins,
-        )
         logger.info(
             "MCP transport security: allowed_hosts=%s",
             allowed_hosts,
         )
-    else:
-        # Loopback-only with no extra hosts — let the SDK use its own defaults.
-        logger.info("MCP transport security: using SDK defaults (localhost only)")
+        return {
+            "host_origin_protection": True,
+            "allowed_hosts": allowed_hosts,
+            "allowed_origins": allowed_origins,
+        }
+
+    # Loopback-only with no extra hosts — let FastMCP use its own defaults.
+    logger.info("MCP transport security: using FastMCP defaults (localhost only)")
+    return {}
+
+
+TOOL_MODES = ("default", "minimal", "all")
+
+# How many tools search_tools returns. Chosen from the recall sweep in
+# tests/test_tool_search_benchmark.py: over a 500-tool catalog, BM25 recall@k
+# goes 60% -> 80% between k=5 and k=10 and then plateaus, because the ranker was
+# placing the right tool just outside a 5-wide window. Recall is the metric that
+# matters — the agent sees every returned schema and picks for itself, so a tool
+# missing from the window is unrecoverable while its rank inside the window
+# barely costs anything.
+#
+# With today's small catalog this exceeds the unpinned count, so the window is
+# never the binding constraint — but that does NOT mean every search returns
+# every tool. BM25 drops zero-scoring tools, and its tokenizer does no
+# stemming, so a query only matches tokens it literally contains. Misses come
+# from vocabulary, not from k. When adding a tool, put the words an agent would
+# actually use — in both singular and plural — in its description.
+#
+# The window costs context only on turns that call search, never on the
+# per-turn tools/list payload.
+TOOL_SEARCH_MAX_RESULTS = 10
+
+
+def apply_tool_mode(mode: str = None) -> str:
+    """Gate the advertised tool surface behind FastMCP's tool-search transform.
+
+    Every tool stays registered and directly callable by name; the transform
+    only changes what ``tools/list`` advertises, replacing the non-pinned tools
+    with ``search_tools``/``call_tool``, so a fresh agent sees a handful of
+    tools instead of the whole catalog.
+
+    Modes (COGNEE_MCP_TOOL_MODE):
+        default: pin the DEFAULT_TAG tools (memory API).
+        minimal: pin only the memory API.
+        all:     no transform, advertise everything (pre-3.x behavior).
+
+    Returns the mode actually applied.
+    """
+    mode = (mode or os.getenv("COGNEE_MCP_TOOL_MODE") or "default").lower()
+
+    if mode not in TOOL_MODES:
+        logger.warning(
+            "Unknown COGNEE_MCP_TOOL_MODE=%r; falling back to 'default'. Valid: %s",
+            mode,
+            ", ".join(TOOL_MODES),
+        )
+        mode = "default"
+
+    # Drop any transform a previous call installed: add_transform() appends, so
+    # calling this twice would otherwise stack search transforms on top of each
+    # other and hide the first one's pinned tools.
+    mcp._transforms = [t for t in mcp._transforms if not isinstance(t, BaseSearchTransform)]
+
+    if mode == "all":
+        logger.info("MCP tool mode 'all': advertising all %d tools", len(registry.tags))
+        return mode
+
+    pinned = registry.names_with_tag(DEFAULT_TAG if mode == "default" else MEMORY_TAG)
+    mcp.add_transform(
+        BM25SearchTransform(max_results=TOOL_SEARCH_MAX_RESULTS, always_visible=pinned)
+    )
+    logger.info(
+        "MCP tool mode %r: advertising %s + search_tools/call_tool (%d tools searchable)",
+        mode,
+        pinned,
+        len(registry.tags) - len(pinned),
+    )
+    return mode
 
 
 def _is_running_in_docker() -> bool:
@@ -163,10 +241,14 @@ def _get_cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-async def run_sse_with_cors():
-    """Custom SSE transport with CORS middleware."""
-    sse_app = mcp.sse_app()
-    sse_app.add_middleware(
+async def _serve_with_cors(transport: str, host: str, port: int, log_level: str):
+    """Serve one of FastMCP's HTTP transports under uvicorn with CORS added.
+
+    FastMCP's own run_http_async() would bind the socket for us but gives no
+    seam for the CORS middleware, so we keep building the ASGI app ourselves.
+    """
+    app = mcp.http_app(transport=transport, **_transport_security_kwargs(host))
+    app.add_middleware(
         CORSMiddleware,
         allow_origins=_get_cors_origins(),
         allow_credentials=True,
@@ -175,31 +257,10 @@ async def run_sse_with_cors():
     )
 
     config = uvicorn.Config(
-        sse_app,
-        host=mcp.settings.host,
-        port=mcp.settings.port,
-        log_level=mcp.settings.log_level.lower(),
-    )
-    server = uvicorn.Server(config)
-    await server.serve()
-
-
-async def run_http_with_cors():
-    """Custom HTTP transport with CORS middleware."""
-    http_app = mcp.streamable_http_app()
-    http_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=_get_cors_origins(),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    config = uvicorn.Config(
-        http_app,
-        host=mcp.settings.host,
-        port=mcp.settings.port,
-        log_level=mcp.settings.log_level.lower(),
+        app,
+        host=host,
+        port=port,
+        log_level=log_level.lower(),
     )
     server = uvicorn.Server(config)
     await server.serve()
@@ -377,7 +438,7 @@ async def cognify(
                 await cognee_client.cognify(
                     datasets=[dataset_name], custom_prompt=custom_prompt, graph_model=graph_model
                 )
-                logger.info("Cognify process finished.")
+                logger.info("Cognify submitted; running in the background on the server.")
             except Exception as e:
                 logger.error("Cognify process failed.")
                 raise ValueError(f"Failed to cognify: {str(e)}") from e
@@ -495,7 +556,7 @@ async def save_interaction(data: str) -> list:
 
 @log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(
-    search_query: str, search_type: str, top_k: int = 10, datasets: str = None
+    search_query: str, search_type: str, top_k: int = 15, datasets: str = None
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -1073,13 +1134,15 @@ async def prune():
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-@log_usage(function_name="MCP remember", log_type="mcp_tool")
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def remember(
-    data: str,
+    data: str = None,
+    filename: str = None,
+    content_base64: str = None,
     dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
+    background: bool = False,
 ) -> list:
     """Store data in memory.
 
@@ -1092,10 +1155,20 @@ async def remember(
     cache only. Fast, no entity extraction. Omit session_id when the
     content should be stored as permanent graph memory.
 
+    Pass either `data` (text) or `filename` + `content_base64` (a file
+    upload, up to 10 MB), not both. File uploads are permanent-memory
+    only and don't support session_id.
+
     Parameters
     ----------
-    data : str
-        The data to store (text content).
+    data : str, optional
+        The text content to store. Mutually exclusive with
+        filename/content_base64.
+    filename : str, optional
+        Original filename for a file upload. Used to derive the stored
+        document's name. Requires content_base64.
+    content_base64 : str, optional
+        Base64-encoded file content to ingest. Requires filename.
     dataset_name : str, optional
         Target dataset name. Defaults to the current MCP client's
         agent-scoped dataset (e.g. "cursor_vscode_memory"), or
@@ -1104,12 +1177,95 @@ async def remember(
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    background : bool
+        Queue permanent ingestion as a background task and return immediately
+        instead of waiting for the pipeline. Use when the caller has a request
+        deadline shorter than ingestion takes. Ignored with session_id, which
+        is already fast. Errors surface via cognify_status, not the return
+        value.
     """
+    if content_base64 and data:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: pass either `data` or `filename` + `content_base64`, not both.",
+            )
+        ]
+    if not content_base64 and not data:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: provide `data` or `filename` + `content_base64`.",
+            )
+        ]
+    if content_base64 and session_id:
+        return [
+            types.TextContent(
+                type="text",
+                text="Error: file uploads (content_base64) don't support session_id.",
+            )
+        ]
+
+    if content_base64:
+        try:
+            decoded = base64.b64decode(content_base64, validate=True)
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
+        if len(decoded) > _MAX_UPLOAD_BYTES:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Error: file exceeds 10 MB limit ({len(decoded):,} bytes).",
+                )
+            ]
+
     dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    # Permanent-memory ingestion runs add + cognify (+ improve), which routinely
+    # outruns an MCP host's per-request deadline — the same constraint the
+    # cognify tool documents as "background process launched due to MCP timeout
+    # limitations". Callers that can't block pass background=True and poll
+    # cognify_status instead. Session-cache writes are fast, so they always
+    # run inline.
+    if background and not session_id:
+
+        async def remember_task_wrapper(**kwargs):
+            """Wrapper that captures errors from the background task."""
+            try:
+                await cognee_client.remember(**kwargs)
+            except Exception as e:
+                _record_task_error(dataset_name, str(e))
+                logger.error(f"Background remember task failed for dataset '{dataset_name}': {e}")
+
+        _track_background(
+            remember_task_wrapper(
+                data=data,
+                filename=filename,
+                content_base64=content_base64,
+                dataset_name=dataset_name,
+                session_id=None,
+                custom_prompt=custom_prompt,
+            )
+        )
+        queued = f"'{filename}'" if content_base64 else "text"
+        return [
+            types.TextContent(
+                type="text",
+                text=(
+                    f"Background process launched due to MCP timeout limitations.\n"
+                    f"Queued {queued} for dataset '{dataset_name}'.\n"
+                    f"Check progress with cognify_status, or the log file at: "
+                    f"{get_log_file_location()}"
+                ),
+            )
+        ]
+
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
                 data=data,
+                filename=filename,
+                content_base64=content_base64,
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
@@ -1117,6 +1273,11 @@ async def remember(
             status = result.get("status", "completed")
             if session_id:
                 text = f"Stored in session cache (session_id={session_id}, status={status})."
+            elif content_base64:
+                text = (
+                    f"Ingested '{filename}' ({len(decoded):,} bytes) into dataset "
+                    f"'{dataset_name}' (status={status})."
+                )
             else:
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
             return [types.TextContent(type="text", text=text)]
@@ -1126,14 +1287,14 @@ async def remember(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
-@mcp.tool()
-@log_usage(function_name="MCP recall", log_type="mcp_tool")
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def recall(
     query: str,
     search_type: str = None,
     datasets: str = None,
     session_id: str = None,
-    top_k: int = 10,
+    system_prompt: str = None,
+    top_k: int = 15,
 ) -> list:
     """Search memory with auto-routing and session awareness.
 
@@ -1156,6 +1317,10 @@ async def recall(
         Comma-separated dataset names to search within.
     session_id : str, optional
         Session ID for session-first search.
+    system_prompt : str, optional
+        Override the synthesis prompt for completion searches. When omitted,
+        falls back to COGNEE_MCP_RECALL_SYSTEM_PROMPT / _FILE if configured
+        on the server.
     top_k : int
         Maximum results to return (default: 10).
     """
@@ -1168,6 +1333,7 @@ async def recall(
                 search_type=search_type,
                 datasets=dataset_list,
                 session_id=session_id,
+                system_prompt=system_prompt,
                 top_k=normalized_top_k,
             )
             return [
@@ -1182,16 +1348,18 @@ async def recall(
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
-@mcp.tool()
-@log_usage(function_name="MCP forget", log_type="mcp_tool")
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def forget(
     dataset: str = None,
     everything: bool = False,
+    data_id: str = None,
+    dataset_id: str = None,
 ) -> list:
     """Delete data from memory.
 
-    Can target a specific dataset or delete everything the user owns.
-    Removes data from the relational DB, graph DB, and vector DB.
+    Can target a single data item, a specific dataset (by name or id), or
+    everything the user owns. Removes data from the relational DB, graph DB,
+    and vector DB.
 
     Parameters
     ----------
@@ -1199,22 +1367,57 @@ async def forget(
         Dataset name to delete entirely.
     everything : bool
         If true, delete ALL data across all datasets.
+    data_id : str, optional
+        UUID of a single data item to delete. Must be paired with `dataset`
+        or `dataset_id` so the owning dataset is unambiguous.
+    dataset_id : str, optional
+        UUID of the dataset to delete entirely, or to scope `data_id`.
     """
     with redirect_stdout(sys.stderr):
         try:
-            if not dataset and not everything:
+            if not dataset and not everything and not data_id and not dataset_id:
                 return [
                     types.TextContent(
                         type="text",
-                        text="Error: Specify 'dataset' name or set 'everything' to true.",
+                        text=(
+                            "Error: Specify 'dataset' name or set 'everything' to true. "
+                            "To remove a single item, pass 'data_id' with 'dataset' or "
+                            "'dataset_id'."
+                        ),
                     )
                 ]
-            result = await cognee_client.forget(dataset=dataset, everything=everything)
+            if data_id and not dataset and not dataset_id:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text="Error: 'data_id' requires 'dataset' or 'dataset_id'.",
+                    )
+                ]
+
+            # The UI passes ids as strings over JSON; cognee.forget() wants UUIDs.
+            # Parse here so a malformed id is a clear message rather than a
+            # cognee-internal traceback.
+            from uuid import UUID
+
+            try:
+                parsed_data_id = UUID(data_id) if data_id else None
+                parsed_dataset_id = UUID(dataset_id) if dataset_id else None
+            except ValueError as e:
+                return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+
+            result = await cognee_client.forget(
+                dataset=dataset,
+                everything=everything,
+                data_id=parsed_data_id,
+                dataset_id=parsed_dataset_id,
+            )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif parsed_data_id:
+                text = f"Data item '{data_id}' deleted (status={status})."
             else:
-                text = f"Dataset '{dataset}' deleted (status={status})."
+                text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = f"Forget failed: {str(e)}"
@@ -1274,7 +1477,14 @@ async def improve(
 # ---------------------------------------------------------------------------
 
 
-@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
+@registry.tool(
+    tags={"status"},
+    description=(
+        "Check the progress of background ingestion started by remember(background=True). "
+        "Reports active and completed pipeline jobs for a dataset, including failures that "
+        "a backgrounded call could not return inline."
+    ),
+)
 async def cognify_status(
     dataset_name: str = None,
     pipelines: List[str] = None,
@@ -1300,24 +1510,33 @@ async def cognify_status(
     - Use `pipelines` to restrict to specific pipeline names
     - Status information includes job progress, execution time, and completion status
     - The status is returned in string format for easy reading
-    - This operation is not available in API mode
+    - In API mode the dataset id is resolved over HTTP and status is read
+      from the server's `GET /api/v1/datasets/status` endpoint
     """
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             if cognee_client.use_api:
-                return [
-                    types.TextContent(
-                        type="text",
-                        text="❌ Pipeline status is not available in API mode",
-                    )
-                ]
+                # API mode: resolve the dataset id over HTTP (no local cognee
+                # instance exists in this process) before querying status.
+                datasets = await cognee_client.list_datasets()
+                dataset_id = next(
+                    (d["id"] for d in datasets if d.get("name") == dataset_name), None
+                )
+                if dataset_id is None:
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text=f"❌ Dataset '{dataset_name}' not found via API",
+                        )
+                    ]
+            else:
+                from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
+                from cognee.modules.users.methods import get_default_user
 
-            from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
-            from cognee.modules.users.methods import get_default_user
+                user = await get_default_user()
+                dataset_id = await get_unique_dataset_id(dataset_name, user)
 
-            user = await get_default_user()
-            dataset_id = await get_unique_dataset_id(dataset_name, user)
             requested_pipelines = list(dict.fromkeys(pipelines or ["cognify_pipeline"]))
 
             if len(requested_pipelines) == 1:
@@ -1358,312 +1577,6 @@ async def cognify_status(
                 error_msg += "\n".join(error_lines)
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
-
-
-# MCP App: interactive graph visualization UI. Rendered by MCP Apps-capable
-# hosts (Cursor, Claude Desktop) via the _meta.ui.resourceUri contract.
-_VISUALIZE_APP_URI = "ui://cognee-visualize/graph.html"
-
-
-@mcp.resource(
-    _VISUALIZE_APP_URI,
-    name="Cognee Graph Visualization UI",
-    description="Interactive MCP App UI that renders a Cognee knowledge graph.",
-    mime_type="text/html;profile=mcp-app",
-)
-def _visualize_graph_ui_resource() -> str:
-    # The bundle path is resolved as a sibling of this file. In a Docker /
-    # PyPI install, that's site-packages/src/app_bundles/. In from-source
-    # dev (running `python src/server.py` directly), it's cognee-mcp/src/
-    # app_bundles/. Both resolutions only work because we read via __file__
-    # rather than a hardcoded `/app/...` or repo-relative path, so the bundle
-    # lookup follows wherever this module was loaded from.
-    bundle = Path(__file__).parent / "app_bundles" / "visualize-graph.html"
-    if not bundle.is_file():
-        raise FileNotFoundError(
-            f"MCP App bundle not found at {bundle}. "
-            "Build it with: cd cognee-mcp/apps-src && npm install && npm run build"
-        )
-    return bundle.read_text(encoding="utf-8")
-
-
-# CSS overrides appended to cognee's graph HTML so it fits the MCP App
-# iframe better: the floating bottom control bar can wrap to multiple
-# rows when the iframe is narrow, and the standalone "Light mode"
-# toggle is hidden (the workspace owns theming).
-#
-# Note: d3 is loaded from a CDN by cognee's HTML, which the MCP App iframe
-# blocks via CSP. The workspace bundles d3 from its npm dependency and
-# substitutes the CDN <script> tag client-side before assigning srcDoc.
-_GRAPH_VIZ_OVERRIDES = """
-<style>
-#theme-toggle { display: none !important; }
-#controls {
-  flex-wrap: wrap;
-  max-width: calc(100vw - 16px);
-  justify-content: center;
-  bottom: 8px;
-  row-gap: 2px;
-}
-#controls .ctrl-btn { padding: 4px 8px; font-size: 10px; }
-#controls .ctrl-sep { margin: 2px 2px; }
-</style>
-"""
-
-
-def _inject_graph_viz_overrides(html: str) -> str:
-    if "</head>" in html:
-        return html.replace("</head>", _GRAPH_VIZ_OVERRIDES + "</head>", 1)
-    return html
-
-
-@mcp.tool(
-    name="visualize_graph_ui",
-    description=(
-        "Open the Cognee workspace UI and render the current knowledge graph. "
-        "The UI also lets the user upload files to memory."
-    ),
-    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
-)
-@log_usage(function_name="MCP visualize_graph_ui", log_type="mcp_tool")
-async def visualize_graph_ui(dataset_name: str = None) -> types.CallToolResult:
-    """Render the Cognee graph for a specific dataset.
-
-    With ENABLE_BACKEND_ACCESS_CONTROL=true, each (user, dataset) pair has its
-    own graph DB. Without dataset_name we'd hit the global default engine,
-    which is empty in that mode. Resolving dataset_name (explicit, or via
-    agent scoping) and routing through visualize_multi_user_graph picks up
-    the right per-dataset context.
-    """
-    from cognee.api.v1.visualize import visualize_graph
-
-    explicit_dataset = dataset_name is not None
-    dataset_name = dataset_name or _agent_scoped_default_dataset()
-
-    # Per-dataset graph routing requires direct mode (we set the database
-    # context locally); in API mode the API server controls its own graph
-    # source. Reject explicit dataset selection there instead of silently
-    # falling back to a different graph.
-    if explicit_dataset and cognee_client.use_api:
-        return types.CallToolResult(
-            isError=True,
-            content=[
-                types.TextContent(
-                    type="text",
-                    text=(
-                        "Error: per-dataset graph rendering is only supported in direct mode. "
-                        "Drop the dataset_name argument or run cognee-mcp without --api-url."
-                    ),
-                )
-            ],
-        )
-
-    with redirect_stdout(sys.stderr):
-        html: str | None = None
-        if dataset_name and not cognee_client.use_api:
-            from cognee.api.v1.visualize.visualize import visualize_multi_user_graph
-
-            user = await get_default_user()
-            datasets = await get_datasets_by_name(dataset_name, user.id)
-            if datasets:
-                html = await visualize_multi_user_graph([(user, datasets[0])])
-        if html is None:
-            html = await visualize_graph()
-
-    html = _inject_graph_viz_overrides(html)
-
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
-        structuredContent={"html": html},
-    )
-
-
-@mcp.tool(
-    name="upload_file_ui",
-    description=(
-        "Open the Cognee workspace UI so the user can upload files to memory. "
-        "The UI also shows the current knowledge graph."
-    ),
-    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
-)
-@log_usage(function_name="MCP upload_file_ui", log_type="mcp_tool")
-async def upload_file_ui() -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
-    )
-
-
-@mcp.tool(
-    name="open_cognee_workspace",
-    description=(
-        "Open the Cognee workspace UI. Use for generic intents like "
-        "'run the cognee UI', 'show the cognee app', 'open cognee'. "
-        "The UI provides dataset management, file upload, text ingestion, "
-        "search, and graph visualization."
-    ),
-    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
-)
-@log_usage(function_name="MCP open_cognee_workspace", log_type="mcp_tool")
-async def open_cognee_workspace() -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
-    )
-
-
-_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-
-
-@mcp.tool(
-    name="cognify_file",
-    description=(
-        "Ingest an uploaded file into Cognee memory. Accepts the file as base64. "
-        "Runs add synchronously, then launches cognify in the background."
-    ),
-)
-@log_usage(function_name="MCP cognify_file", log_type="mcp_tool")
-async def cognify_file(
-    filename: str,
-    content_base64: str,
-    dataset_name: str = None,
-) -> list:
-    import base64
-    import tempfile
-
-    dataset_name = dataset_name or _agent_scoped_default_dataset()
-
-    try:
-        data = base64.b64decode(content_base64, validate=True)
-    except Exception as e:
-        return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
-
-    if len(data) > _MAX_UPLOAD_BYTES:
-        return [
-            types.TextContent(
-                type="text",
-                text=f"Error: file exceeds 10 MB limit ({len(data):,} bytes).",
-            )
-        ]
-
-    # Sanitize to a basename with a fallback extension; preserves the original
-    # name so cognee's Data.name comes out as e.g. "alice_notes" rather than
-    # a tempfile slug like "tmp231sj_ac".
-    safe_name = Path(filename).name or "upload"
-    if not Path(safe_name).suffix:
-        safe_name += ".txt"
-
-    with redirect_stdout(sys.stderr):
-        tmp_dir = tempfile.mkdtemp(prefix="cognee_upload_")
-        tmp_path = os.path.join(tmp_dir, safe_name)
-        try:
-            with open(tmp_path, "wb") as f:
-                f.write(data)
-            await cognee_client.add(tmp_path, dataset_name=dataset_name)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            try:
-                os.rmdir(tmp_dir)
-            except OSError:
-                pass
-
-    async def _cognify_bg():
-        with redirect_stdout(sys.stderr):
-            try:
-                await cognee_client.cognify(datasets=[dataset_name])
-                logger.info(f"cognify_file: background cognify finished for '{dataset_name}'.")
-            except Exception as e:
-                ts = datetime.now(timezone.utc).isoformat()
-                _task_errors.setdefault(dataset_name, []).append((ts, str(e)))
-                logger.error(f"cognify_file: background cognify failed for '{dataset_name}': {e}")
-
-    asyncio.create_task(_cognify_bg())
-
-    return [
-        types.TextContent(
-            type="text",
-            text=(
-                f"Ingested '{filename}' ({len(data):,} bytes) into dataset '{dataset_name}'. "
-                f"Cognify is running in the background; refresh the workspace once it finishes."
-            ),
-        )
-    ]
-
-
-@mcp.tool(
-    name="list_datasets_json",
-    description=(
-        "List datasets as structured JSON for the Cognee workspace UI. "
-        "Returns {datasets: [{id, name}, ...]} in structuredContent."
-    ),
-)
-@log_usage(function_name="MCP list_datasets_json", log_type="mcp_tool")
-async def list_datasets_json() -> types.CallToolResult:
-    with redirect_stdout(sys.stderr):
-        raw = await cognee_client.list_datasets()
-
-    datasets = []
-    for ds in raw or []:
-        if isinstance(ds, dict):
-            datasets.append({"id": str(ds.get("id", "")), "name": ds.get("name", "")})
-        else:
-            datasets.append({"id": str(ds.id), "name": ds.name})
-
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"{len(datasets)} dataset(s).")],
-        structuredContent={"datasets": datasets},
-    )
-
-
-@mcp.tool(
-    name="list_dataset_data_json",
-    description=(
-        "List data items in a dataset as structured JSON for the Cognee workspace UI. "
-        "Returns {data: [{id, name}, ...]} in structuredContent."
-    ),
-)
-@log_usage(function_name="MCP list_dataset_data_json", log_type="mcp_tool")
-async def list_dataset_data_json(dataset_id: str) -> types.CallToolResult:
-    from uuid import UUID
-    from cognee.modules.data.methods import get_dataset, get_dataset_data
-
-    if cognee_client.use_api:
-        return types.CallToolResult(
-            isError=True,
-            content=[
-                types.TextContent(
-                    type="text",
-                    text="Error: list_dataset_data_json is only available in direct mode.",
-                )
-            ],
-        )
-
-    try:
-        dataset_uuid = UUID(dataset_id)
-    except ValueError as e:
-        return types.CallToolResult(
-            isError=True,
-            content=[types.TextContent(type="text", text=f"Error: invalid dataset_id ({e}).")],
-        )
-
-    with redirect_stdout(sys.stderr):
-        user = await get_default_user()
-        dataset = await get_dataset(user.id, dataset_uuid)
-        if not dataset:
-            return types.CallToolResult(
-                isError=True,
-                content=[
-                    types.TextContent(type="text", text=f"Error: dataset not found: {dataset_id}.")
-                ],
-            )
-        items = await get_dataset_data(dataset.id)
-
-    data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"{len(data)} data item(s).")],
-        structuredContent={"data": data},
-    )
 
 
 def _sanitize_client_name(name: str) -> str:
@@ -1714,101 +1627,6 @@ def _agent_scoped_default_dataset() -> str:
     return "main_dataset"
 
 
-@mcp.tool(
-    name="get_client_info_json",
-    description=(
-        "Return the current MCP client identity and its agent-scoped default dataset. "
-        "The workspace UI uses this to automatically separate memory per agent "
-        "(e.g. Cursor writes to 'cursor_memory', Claude Code to 'claude_code_memory'). "
-        "The default dataset is created on demand. "
-        "Returns {client: {name, version}, default_dataset} in structuredContent."
-    ),
-)
-@log_usage(function_name="MCP get_client_info_json", log_type="mcp_tool")
-async def get_client_info_json() -> types.CallToolResult:
-    from mcp.server.lowlevel.server import request_ctx
-
-    client_name = "unknown"
-    client_version = ""
-    try:
-        ctx = request_ctx.get()
-        params = getattr(ctx.session, "client_params", None)
-        if params and params.clientInfo:
-            client_name = params.clientInfo.name or "unknown"
-            client_version = params.clientInfo.version or ""
-    except LookupError:
-        pass
-
-    agent_scoped = _is_agent_scoping_enabled()
-
-    if agent_scoped:
-        default_dataset = f"{_sanitize_client_name(client_name)}_memory"
-        if not cognee_client.use_api:
-            with redirect_stdout(sys.stderr):
-                from cognee.modules.data.methods.create_authorized_dataset import (
-                    create_authorized_dataset,
-                )
-
-                user = await get_default_user()
-                await create_authorized_dataset(default_dataset, user)
-    else:
-        default_dataset = "main_dataset"
-
-    return types.CallToolResult(
-        content=[
-            types.TextContent(
-                type="text",
-                text=f"Agent: {client_name} → default dataset: {default_dataset}",
-            )
-        ],
-        structuredContent={
-            "client": {"name": client_name, "version": client_version},
-            "default_dataset": default_dataset,
-            "agent_scoped": agent_scoped,
-        },
-    )
-
-
-@mcp.tool(
-    name="create_dataset_json",
-    description=(
-        "Create an empty dataset with the given name (idempotent). "
-        "Returns {dataset: {id, name}} in structuredContent."
-    ),
-)
-@log_usage(function_name="MCP create_dataset_json", log_type="mcp_tool")
-async def create_dataset_json(name: str) -> types.CallToolResult:
-    name = (name or "").strip()
-    if not name:
-        return types.CallToolResult(
-            isError=True,
-            content=[types.TextContent(type="text", text="Error: dataset name is required.")],
-        )
-    if cognee_client.use_api:
-        return types.CallToolResult(
-            isError=True,
-            content=[
-                types.TextContent(
-                    type="text",
-                    text="Error: create_dataset_json is only available in direct mode.",
-                )
-            ],
-        )
-
-    with redirect_stdout(sys.stderr):
-        from cognee.modules.data.methods.create_authorized_dataset import (
-            create_authorized_dataset,
-        )
-
-        user = await get_default_user()
-        dataset = await create_authorized_dataset(name, user)
-
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"Dataset '{dataset.name}' ready.")],
-        structuredContent={"dataset": {"id": str(dataset.id), "name": dataset.name}},
-    )
-
-
 def node_to_string(node):
     node_data = ", ".join(
         [f'{key}: "{value}"' for key, value in node.items() if key in ["id", "name"]]
@@ -1855,6 +1673,24 @@ def load_class(model_file, model_name):
 async def main():
     global cognee_client
 
+    # Operations run in-process by this MCP server record origin="mcp" in
+    # pipeline_runs. (In client mode the remote API records origin="api".)
+    # Guarded because cognee-mcp depends on cognee from PyPI (see
+    # pyproject.toml), which may predate cognee.modules.operations — origin
+    # stamping is optional, booting is not. Loud, not silent: the warning
+    # names exactly what is degraded and when the guard can be deleted.
+    try:
+        from cognee.modules.operations import ORIGIN_MCP, set_operation_origin
+
+        set_operation_origin(ORIGIN_MCP)
+    except ImportError:
+        logger.warning(
+            "Installed cognee has no cognee.modules.operations — pipeline_runs "
+            "records from this MCP server will show origin='sdk' instead of "
+            "'mcp'. Remove this guard once cognee-mcp requires a cognee release "
+            "that ships the operations module (SDK-399)."
+        )
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -1898,18 +1734,30 @@ async def main():
         help="Argument stops database migration from being attempted",
     )
 
+    parser.add_argument(
+        "--tool-mode",
+        default=None,
+        choices=TOOL_MODES,
+        help="How many tools to advertise in tools/list. 'default' pins the memory API "
+        "and makes the rest discoverable via search_tools; "
+        "'minimal' pins only the memory API; 'all' advertises every tool. "
+        "Can also be set via COGNEE_MCP_TOOL_MODE. (default: default)",
+    )
+
     # Cognee API connection options
     parser.add_argument(
         "--api-url",
-        default=None,
-        help="Base URL of a running Cognee FastAPI server (e.g., http://localhost:8000). "
-        "If provided, the MCP server will connect to the API instead of using cognee directly.",
+        default=os.getenv("COGNEE_BASE_URL"),
+        help="Base URL of a running Cognee FastAPI server or Cognee Cloud tenant "
+        "(e.g., https://<tenant>.cognee.ai). If provided, the MCP server connects to the "
+        "API instead of using cognee directly. Can also be set via the COGNEE_BASE_URL env var.",
     )
 
     parser.add_argument(
         "--api-token",
-        default=None,
-        help="Authentication token for the API (optional, required if API has authentication enabled).",
+        default=os.getenv("COGNEE_API_KEY"),
+        help="Authentication token for the API, sent as X-Api-Key (required if the API has "
+        "authentication enabled). Can also be set via the COGNEE_API_KEY env var.",
     )
 
     # Cognee Cloud connection options
@@ -1932,9 +1780,9 @@ async def main():
     # Initialize the global CogneeClient
     cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
 
-    mcp.settings.host = args.host
-    mcp.settings.port = int(args.port)
-    _configure_transport_security(args.host)
+    host = args.host
+    port = int(args.port)
+    apply_tool_mode(args.tool_mode)
 
     # Resolve cloud connection: CLI args take precedence over env vars
     serve_url = args.serve_url or os.environ.get("COGNEE_SERVICE_URL", "")
@@ -1953,13 +1801,24 @@ async def main():
     # Skip migrations when in API or Cloud mode (remote handles its own database)
     is_remote = bool(args.api_url) or bool(serve_url)
     if not args.no_migration and not is_remote:
-        from cognee.modules.engine.operations.setup import setup
         from cognee.run_migrations import run_migrations
 
         logger.info("Running database migrations...")
 
-        await setup()
-        await run_migrations()
+        # Migrations print progress and "table already exists" notices to
+        # stdout. In stdio transport stdout is the JSON-RPC channel, so route
+        # that output to stderr — the same guard every tool applies around its
+        # cognee calls.
+        with redirect_stdout(sys.stderr):
+            # run_migrations() alone — it tells a fresh database from an
+            # existing one (fresh: schema from the models + `alembic stamp
+            # head`; existing: Alembic deltas + the graph/vector data chain).
+            # Running setup() before it used to spoil that check: create_all
+            # built the schema unstamped, so a brand-new database was
+            # classified as existing and replayed the full migration history.
+            # Vector-store tables are created on first write (add() runs
+            # setup()), the same as every SDK flow.
+            await run_migrations()
 
         logger.info("Database migrations done.")
     elif not is_remote:
@@ -1968,16 +1827,18 @@ async def main():
     try:
         match args.transport.lower():
             case "sse":
-                logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-                await run_sse_with_cors()
+                logger.info(f"Running MCP server with SSE transport on {host}:{port}")
+                await _serve_with_cors("sse", host, port, args.log_level)
             case "http":
                 logger.info(
-                    f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+                    f"Running MCP server with Streamable HTTP transport on {host}:{port}{args.path}"
                 )
-                await run_http_with_cors()
+                await _serve_with_cors("http", host, port, args.log_level)
             case _:
                 logger.info("Running MCP server with stdio")
-                await mcp.run_stdio_async()
+                # show_banner=False: the banner is cosmetic and its version check
+                # makes a network call on every startup.
+                await mcp.run_stdio_async(show_banner=False)
     finally:
         # Drain background tasks with a bounded timeout so a hung cognify can't
         # block shutdown indefinitely. Then close the HTTP client pool.

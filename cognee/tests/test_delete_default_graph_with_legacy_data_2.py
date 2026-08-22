@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
@@ -135,9 +135,11 @@ async def main(mock_create_structured_output: AsyncMock):
     await setup()
 
     user = await get_default_user()
-    await set_database_global_context_variables("main_dataset", user.id)
+    await set_database_global_context_variables(
+        (await create_authorized_dataset("main_dataset", user)).id, user.id
+    )
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
@@ -447,6 +449,9 @@ async def create_mocked_legacy_data(user):
     async with db_engine.get_async_session() as session:
         old_data = Data(
             id=legacy_document.id,
+            # Post-upgrade legacy rows are dataset-scoped (the backfill stamps
+            # sole-membership rows); membership IS this column now.
+            dataset_id=dataset.id,
             name=legacy_document.name,
             extension="txt",
             raw_data_location=legacy_document.raw_data_location,
@@ -460,9 +465,6 @@ async def create_mocked_legacy_data(user):
             },
         )
         session.add(old_data)
-
-        dataset.data.append(old_data)
-        session.add(dataset)
 
         await session.commit()
 

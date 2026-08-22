@@ -458,3 +458,70 @@ async def ensure_session(*, session_id, user_id, dataset_id=None):
 async def touch_session(*, session_id, user_id, dataset_id=None):
     """Deprecated: prefer ``ensure_and_touch_session``."""
     await ensure_and_touch_session(session_id=session_id, user_id=user_id, dataset_id=dataset_id)
+
+
+_session_record_write_failed = False
+
+
+async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for sessions attributed to the dataset.
+
+    Attribution is best-effort by design: ``dataset_id`` is backfilled on the
+    session row (heartbeats and remember() both fill it when they know the
+    dataset), and the per-dataset default session embeds the dataset id in its
+    session_id (``{default_session_id}_{dataset_id}``). Match on either, so
+    rows written before dataset threading existed are still found through
+    their session_id suffix.
+    """
+    engine = get_relational_engine()
+    suffix = f"_{dataset_id}"
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.user_id, SessionRecord.session_id).where(
+                    or_(
+                        SessionRecord.dataset_id == dataset_id,
+                        SessionRecord.session_id.endswith(suffix),
+                    )
+                )
+            )
+        ).all()
+    return [(row.user_id, row.session_id) for row in rows]
+
+
+async def record_session_activity(
+    user_id: str,
+    session_id: str,
+    *,
+    dataset_id: Optional[UUIDType] = None,
+    errored: bool = False,
+) -> None:
+    """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.
+
+    Accepts a string ``user_id`` (coerced to UUID). Swallows failures — the
+    session_records table is optional for SessionManager correctness — but logs once at
+    WARNING per process so silent breakage stays visible in ops.
+    """
+    global _session_record_write_failed
+
+    try:
+        try:
+            user_uuid = UUIDType(str(user_id))
+        except (ValueError, TypeError):
+            return
+
+        await ensure_and_touch_session(
+            session_id=session_id, user_id=user_uuid, dataset_id=dataset_id
+        )
+        if errored:
+            await accumulate_usage(session_id=session_id, user_id=user_uuid, errored=True)
+    except Exception as exc:
+        if not _session_record_write_failed:
+            _session_record_write_failed = True
+            logger.warning(
+                "session_records write failed (%s); subsequent failures will log at debug. "
+                "Check alembic migrations for the session_records table.",
+                exc,
+            )
+        else:
+            logger.debug("session_records write failed (%s)", exc)

@@ -7,14 +7,18 @@ abandonment-by-idle rule so no sweeper is needed.
 
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
-from uuid import UUID as UUIDType
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, func, or_, select
 
+from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.session_lifecycle.agent_usage import (
+    get_cost_by_user_agent,
+    get_sessions_with_agent_info,
+)
 from cognee.modules.session_lifecycle.metrics import (
     SessionStatus,
     get_effective_status_sql,
@@ -22,12 +26,9 @@ from cognee.modules.session_lifecycle.metrics import (
     list_session_rows,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user, get_visible_user_ids
 from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods.get_specific_user_permission_datasets import (
-    get_specific_user_permission_datasets,
-)
+from cognee.modules.users.permissions.methods import get_permitted_dataset_ids
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("sessions_api")
@@ -47,50 +48,55 @@ def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
     return None  # "all"
 
 
-async def _permitted_dataset_ids_for(user: User) -> list[UUIDType]:
-    """Return the UUIDs of datasets this user can read (empty on none)."""
-    try:
-        datasets = await get_specific_user_permission_datasets(user.id, "read", None)
-        return [ds.id for ds in datasets] if datasets else []
-    except PermissionDeniedError:
-        return []
-    except Exception:
-        return []
-
-
-async def _child_agent_user_ids(user_id: UUIDType) -> list[UUIDType]:
-    """Return user IDs of agents whose parent_user_id matches this user."""
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        from cognee.modules.users.models import User as UserModel
-
-        rows = (
-            await session.execute(select(UserModel.id).where(UserModel.parent_user_id == user_id))
-        ).all()
-        return [row.id for row in rows]
-
-
-async def _visible_user_ids(user: User) -> list[UUIDType]:
-    """User's own ID plus any child agent IDs."""
-    ids = [user.id]
-    ids.extend(await _child_agent_user_ids(user.id))
-    return ids
-
-
 def get_sessions_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("")
     async def list_sessions(
-        range: _RangeLiteral = Query("30d"),
-        status: Optional[str] = Query(None),
-        limit: int = Query(50, ge=1, le=500),
-        offset: int = Query(0, ge=0),
-        order_by: str = Query("last_activity_at"),
-        descending: bool = Query(True),
+        range: _RangeLiteral = Query(
+            "30d",
+            description=(
+                "Time window filtered on last_activity_at: last 24 hours (24h), "
+                "7 days (7d), 30 days (30d), or all time (all)."
+            ),
+            examples=["30d"],
+        ),
+        status: Optional[str] = Query(
+            None,
+            description=(
+                "Filter by effective status: 'running', 'completed', 'failed', or 'abandoned'. "
+                "'abandoned' is computed at read time: stored status 'running' with "
+                "last_activity_at older than SESSION_ABANDON_AFTER_SECONDS (default 30 min). "
+                "Any other value matches nothing and returns an empty list."
+            ),
+            examples=["completed"],
+        ),
+        limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
+        offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
+        order_by: str = Query(
+            "last_activity_at",
+            description=(
+                "Column to sort by: last_activity_at, started_at, ended_at, cost_usd, "
+                "tokens_in, or tokens_out. Unknown values silently fall back to "
+                "last_activity_at."
+            ),
+            examples=["cost_usd"],
+        ),
+        descending: bool = Query(True, description="Sort descending (newest/largest first)."),
         user: User = Depends(get_authenticated_user),
     ):
         """Paginated list of sessions.
+
+        ## Request Parameters
+        - **range** (Literal): Time window on last_activity_at: 24h, 7d, 30d, or all
+          (default: 30d).
+        - **status** (Optional[str]): Effective-status filter: running, completed, failed,
+          or abandoned.
+        - **limit** (int): Page size, 1-500 (default: 50).
+        - **offset** (int): Rows to skip for pagination (default: 0).
+        - **order_by** (str): Sort column: last_activity_at, started_at, ended_at, cost_usd,
+          tokens_in, or tokens_out (default: last_activity_at).
+        - **descending** (bool): Sort newest/largest first (default: true).
 
         Response envelope::
 
@@ -104,8 +110,8 @@ def get_sessions_router() -> APIRouter:
         """
         since = _range_since(range)
         try:
-            permitted = await _permitted_dataset_ids_for(user)
-            visible_ids = await _visible_user_ids(user)
+            permitted = await get_permitted_dataset_ids(user.id)
+            visible_ids = await get_visible_user_ids(user.id)
             page = await list_session_rows(
                 user_ids=visible_ids,
                 permitted_dataset_ids=permitted,
@@ -131,14 +137,35 @@ def get_sessions_router() -> APIRouter:
 
     @router.get("/stats")
     async def get_stats(
-        range: _RangeLiteral = Query("30d"),
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
         user: User = Depends(get_authenticated_user),
     ):
-        """Aggregate counters for the dashboard stat cards + status bar."""
+        """Aggregate counters for the dashboard stat cards + status bar.
+
+        ## Request Parameters
+        - **range** (Literal): Time window on last_activity_at: 24h, 7d, 30d, or all
+          (default: 30d).
+
+        ## Response
+        Returns a JSON object with:
+        - **sessions** (int): Number of sessions in the window.
+        - **total_spend_usd** / **avg_spend_per_session_usd** (float): Cost totals.
+        - **tokens_in** / **tokens_out** / **tokens_total** (int): Token totals.
+        - **agent_time_s** / **avg_session_s** (float): Summed and average session duration
+          in seconds.
+        - **success_rate** (float): completed / (completed + failed + abandoned); 1.0 when
+          no session has ended yet.
+        - **completed** / **failed** / **abandoned** / **running** (int): Effective-status
+          counts.
+        """
         since = _range_since(range)
         eff = get_effective_status_sql()
-        permitted = await _permitted_dataset_ids_for(user)
-        visible_ids = await _visible_user_ids(user)
+        permitted = await get_permitted_dataset_ids(user.id)
+        visible_ids = await get_visible_user_ids(user.id)
 
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
@@ -218,7 +245,13 @@ def get_sessions_router() -> APIRouter:
 
     @router.get("/cost-by-model")
     async def cost_by_model(
-        range: _RangeLiteral = Query("30d"),
+        range: _RangeLiteral = Query(
+            "30d",
+            description=(
+                "Time window filtered on session_records.last_activity_at: 24h, 7d, 30d, or all."
+            ),
+            examples=["30d"],
+        ),
         user: User = Depends(get_authenticated_user),
     ):
         """Cost + token totals grouped by the model that produced them.
@@ -227,10 +260,13 @@ def get_sessions_router() -> APIRouter:
         so a session that used multiple models splits its cost correctly.
         Filters on ``session_records.last_activity_at`` to scope by
         range — requires a join back to the session row.
+
+        ## Request Parameters
+        - **range** (Literal): Time window: 24h, 7d, 30d, or all (default: 30d).
         """
         since = _range_since(range)
-        permitted = await _permitted_dataset_ids_for(user)
-        visible_ids = await _visible_user_ids(user)
+        permitted = await get_permitted_dataset_ids(user.id)
+        visible_ids = await get_visible_user_ids(user.id)
         engine = get_relational_engine()
         async with engine.get_async_session() as session:
             visibility_terms = [SessionRecord.user_id.in_(visible_ids)]
@@ -273,13 +309,107 @@ def get_sessions_router() -> APIRouter:
             ]
         )
 
-    @router.get("/{session_id}")
-    async def get_session_detail(
-        session_id: str,
+    @router.get("/with-agent-info")
+    async def list_sessions_with_agent_info(
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
+        status: Optional[str] = Query(
+            None,
+            description="Effective-status filter: running, completed, failed, or abandoned.",
+        ),
+        limit: int = Query(50, ge=1, le=500, description="Page size (max 500)."),
+        offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
+        order_by: str = Query("last_activity_at"),
+        descending: bool = Query(True),
         user: User = Depends(get_authenticated_user),
     ):
-        permitted = await _permitted_dataset_ids_for(user)
-        visible_ids = await _visible_user_ids(user)
+        """Session records merged with their agent-connection metadata (CLO-434).
+
+        Joins ``session_records`` to the agent-connections registry on
+        ``session_id`` so the cloud UI can group/filter usage by client
+        (Claude Code, Codex, Slack, MCP, ...) without a second round
+        trip. When no registered connection matches a session, the
+        agent type is inferred from the session_id/origin_function
+        prefix convention (e.g. ``claude-code-...``, ``codex-...``).
+
+        Memory sources are intentionally omitted — per-agent dataset
+        attribution isn't reliably populated yet.
+
+        Response envelope mirrors ``GET /api/v1/sessions``, with each
+        session additionally carrying ``agent_type``, ``agent_source``,
+        ``agent_session_name``, and ``origin_function``.
+        """
+        since = _range_since(range)
+        try:
+            result = await get_sessions_with_agent_info(
+                user=user,
+                since=since,
+                status_filter=status,
+                limit=limit,
+                offset=offset,
+                order_by=order_by,
+                descending=descending,
+            )
+            return jsonable_encoder(result)
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns
+            # them to the caller.
+            raise
+        except Exception as exc:
+            logger.error("list_sessions_with_agent_info failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "list failed"})
+
+    @router.get("/cost-by-user-agent")
+    async def cost_by_user_agent(
+        range: _RangeLiteral = Query(
+            "30d",
+            description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
+            examples=["30d"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Cost + token totals grouped by (user, agent type) — feeds a
+        "who spends the most, with which agent" chart (CLO-434 follow-up).
+
+        Visibility matches every other endpoint in this router: the
+        caller, their child agents, and dataset-shared sessions. On top
+        of that base scope, a tenant owner/admin (same check
+        ``GET /tenants/{id}/users`` uses) additionally sees every
+        member's spend. A regular member — or anyone with no tenant,
+        i.e. single-user/local mode — just keeps the base scope rather
+        than being denied outright.
+        """
+        since = _range_since(range)
+        try:
+            result = await get_cost_by_user_agent(user=user, since=since)
+            return jsonable_encoder(result)
+        except CogneeApiError:
+            # Cognee errors carry their own status code and actionable
+            # message; the global handler in cognee/api/client.py returns
+            # them to the caller.
+            raise
+        except Exception as exc:
+            logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "aggregation failed"})
+
+    @router.get("/{session_id}")
+    async def get_session_detail(
+        session_id: str = Path(
+            ...,
+            description=(
+                "Client-supplied session identifier; the same value passed as session_id "
+                "to POST /api/v1/remember."
+            ),
+            examples=["claude-code-1718000000"],
+        ),
+        user: User = Depends(get_authenticated_user),
+    ):
+        permitted = await get_permitted_dataset_ids(user.id)
+        visible_ids = await get_visible_user_ids(user.id)
         row = await get_session_row(
             session_id=session_id,
             user_id=user.id,
@@ -317,13 +447,13 @@ def get_sessions_router() -> APIRouter:
         # (so trace-only sessions — the plugin case — still have a label).
         label = None
         for entry in qas:
-            if isinstance(entry, dict) and entry.get("question"):
-                label = str(entry["question"])[:120]
+            if getattr(entry, "question", None):
+                label = str(entry.question)[:120]
                 break
         if label is None:
             for entry in traces:
-                if isinstance(entry, dict) and entry.get("origin_function"):
-                    label = str(entry["origin_function"])
+                if getattr(entry, "origin_function", None):
+                    label = str(entry.origin_function)
                     break
         record["label"] = label
         record["msg_count"] = len(qas)

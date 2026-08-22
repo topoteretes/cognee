@@ -1,4 +1,6 @@
 import os
+from urllib.parse import unquote
+import gc
 import asyncio
 from os import path
 import tempfile
@@ -8,11 +10,10 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
+from sqlalchemy import NullPool, event, text, select, MetaData, Table, delete, inspect, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
-from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -48,6 +49,19 @@ class SQLAlchemyAdapter:
 
                     SQLite with custom timeout:
                         DATABASE_CONNECT_ARGS='{"timeout": 60}'
+            pool_args (dict, optional): SQLAlchemy connection-pool settings, loaded from
+                RelationalConfig.pool_args, which reads from the POOL_ARGS environment
+                variable.
+
+                For SQLite, the pool-sizing keys (pool_size, max_overflow,
+                pool_recycle, pool_timeout, pool_pre_ping) and poolclass are applied:
+                sizing keys switch the engine from its NullPool default to a bounded
+                pool, and poolclass "nullpool" is normalized to the NullPool class.
+                For other databases every key is forwarded, with QueuePool defaults
+                filled in when no poolclass is given.
+
+                Example:
+                    POOL_ARGS='{"pool_size": 5, "max_overflow": 10}'
         """
         self.db_path: str = None
         self.db_uri: str = connection_string
@@ -72,11 +86,52 @@ class SQLAlchemyAdapter:
                 run_sync(self.pull_from_s3())
 
         if "sqlite" in connection_string:
+            # Pool-sizing keys opt into a bounded pool; without them the engine
+            # uses NullPool (no connection reuse). ``poolclass: "nullpool"`` is
+            # normalized to the class, exactly as on the server-database branch
+            # below. Other engine kwargs stay excluded so they cannot collide
+            # with the sqlite-specific connect_args assembled here.
+            sqlite_pool_args = {
+                key: value
+                for key, value in (pool_args or {}).items()
+                if key
+                in (
+                    "pool_size",
+                    "max_overflow",
+                    "pool_recycle",
+                    "pool_timeout",
+                    "pool_pre_ping",
+                    "poolclass",
+                )
+            }
+            if sqlite_pool_args.get("poolclass", "").lower() == "nullpool":
+                sqlite_pool_args["poolclass"] = NullPool
             self.engine = create_async_engine(
                 connection_string,
-                poolclass=NullPool,
-                connect_args={**{"timeout": 30}, **final_connect_args},
+                **(sqlite_pool_args or {"poolclass": NullPool}),
+                connect_args={**{"timeout": 120}, **final_connect_args},
             )
+
+            # SQLite defaults to rollback-journal mode, where a connection that
+            # holds a read lock and then tries to upgrade to a write lock can
+            # deadlock against another reader's lock. Because cognify() fans
+            # work out to parallel greenlets that each open their own connection
+            # (NullPool by default), those read-then-write transactions race and surface as
+            # "sqlite3.OperationalError: database is locked" (see issue #2717).
+            #
+            # Enabling WAL serializes writers on a single write lock while
+            # letting readers proceed, so concurrent writers wait (bounded by
+            # busy_timeout) instead of deadlocking. These PRAGMAs are connection
+            # scoped, so they must be (re)applied on every new connection.
+            @event.listens_for(self.engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                    cursor.execute("PRAGMA busy_timeout=120000")
+                finally:
+                    cursor.close()
         else:
             # Transform pool_args from tuple into dict if provided
             # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
@@ -85,9 +140,14 @@ class SQLAlchemyAdapter:
             if pool_args.get("poolclass", "").lower() == "nullpool":
                 pool_args["poolclass"] = NullPool
             else:
-                # Standard QueuePool settings
-                pool_args.setdefault("pool_size", 20)
-                pool_args.setdefault("max_overflow", 20)
+                # Standard QueuePool settings. Lean pool_size with a large
+                # max_overflow: only pool_size connections are retained while
+                # idle (overflow connections close on release), so engines —
+                # which multiply per dataset under access control — hold few
+                # of the server's max_connections slots between bursts while
+                # keeping a 40-connection burst ceiling.
+                pool_args.setdefault("pool_size", 5)
+                pool_args.setdefault("max_overflow", 35)
                 pool_args.setdefault("pool_pre_ping", True)
                 pool_args.setdefault("pool_recycle", 280)
                 pool_args.setdefault("pool_timeout", 280)
@@ -128,8 +188,25 @@ class SQLAlchemyAdapter:
         async with async_session_maker() as session:
             try:
                 yield session
-            finally:
-                await session.close()  # Ensure the session is closed
+            except asyncio.CancelledError:
+                # A cancelled request can leave the connection in an open
+                # transaction; returning it to the pool leaks an "idle in
+                # transaction" backend. Invalidate (drop) it instead, shielded
+                # so the cleanup is not cut short by the same cancellation.
+                await asyncio.shield(self._discard_cancelled_session(session))
+                raise
+            # Happy path and ordinary exceptions: the sessionmaker context
+            # manager closes and rolls back, so no explicit close is needed.
+
+    @staticmethod
+    async def _discard_cancelled_session(session: AsyncSession) -> None:
+        # A graceful close needs a ROLLBACK round-trip that the cancellation
+        # keeps interrupting; invalidate() drops the DBAPI connection without
+        # it, so the connection is never reused dirty.
+        try:
+            await session.invalidate()
+        except Exception:
+            logger.exception("Failed to invalidate session on cancellation")
 
     def get_session(self):
         """
@@ -229,16 +306,20 @@ class SQLAlchemyAdapter:
             return 0
 
         try:
+            # Resolve the table BEFORE opening the write connection. get_table()
+            # checks out its own connection; doing it inside would hold two pooled
+            # connections at once and deadlock the pool under concurrency (#4197).
+            if self.engine.dialect.name == "sqlite":
+                table = await self.get_table(table_name)  # SQLite ignores schemas
+            else:
+                table = await self.get_table(table_name, schema_name)
+
             # Use SQLAlchemy Core insert with execution options
             async with self.engine.begin() as conn:
-                # Dialect-agnostic table reference
                 if self.engine.dialect.name == "sqlite":
                     # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
                     # so must be enabled for each database connection/session separately.
                     await conn.execute(text("PRAGMA foreign_keys=ON"))
-                    table = await self.get_table(table_name)  # SQLite ignores schemas
-                else:
-                    table = await self.get_table(table_name, schema_name)
 
                 result = await conn.execute(table.insert().values(data))
 
@@ -285,10 +366,13 @@ class SQLAlchemyAdapter:
             - schema_name (Optional[str]): The name of the schema where the table resides,
               defaults to 'public'. (default 'public')
         """
+        # Resolve the table BEFORE opening the session. get_table() checks out its
+        # own connection; doing it inside would hold two pooled connections at once
+        # and deadlock the pool under concurrency (#4197).
+        TableModel = await self.get_table(table_name, schema_name)
+
         if self.engine.dialect.name == "sqlite":
             async with self.get_async_session() as session:
-                TableModel = await self.get_table(table_name, schema_name)
-
                 # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
@@ -297,7 +381,6 @@ class SQLAlchemyAdapter:
                 await session.commit()
         else:
             async with self.get_async_session() as session:
-                TableModel = await self.get_table(table_name, schema_name)
                 await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
                 await session.commit()
 
@@ -316,65 +399,78 @@ class SQLAlchemyAdapter:
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-            # Delete DatasetData instances referencing this data_id first to maintain referential integrity.
-            await session.execute(
-                delete(DatasetData).where(
-                    DatasetData.data_id == data_id,
-                    DatasetData.dataset_id == dataset_id,
-                )
-            )
-            # Flush to ensure the count in the next step is accurate within the transaction
-            await session.flush()
-
-            # Check if any references to this data_id still exist in the DatasetData table
-            remaining_refs = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(DatasetData)
-                    .where(DatasetData.data_id == data_id)
-                )
-            ).scalar()
-
-            # If there are still datasets using this data, we stop here.
-            if remaining_refs > 0:
-                await session.commit()
-                return
-
+            # Rows are dataset-scoped: the (data_id, dataset_id) pair must
+            # match — a mismatch means a mispinned id, not a membership to
+            # silently unlink.
             try:
-                data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
-            except (ValueError, NoResultFound) as e:
-                raise EntityNotFoundError(message=f"Entity not found: {str(e)}") from e
-
-            # Check if other data objects point to the same raw data location
-            raw_data_location_entities = (
-                await session.execute(
-                    select(Data.raw_data_location).where(
-                        Data.raw_data_location == data_entity.raw_data_location
+                data_entity = (
+                    await session.scalars(
+                        select(Data).where(Data.id == data_id, Data.dataset_id == dataset_id)
                     )
-                )
-            ).all()
+                ).one()
+            except (ValueError, NoResultFound) as e:
+                raise EntityNotFoundError(
+                    message=f"Data {data_id} not found in dataset {dataset_id}: {str(e)}"
+                ) from e
 
-            # Don't delete local file unless this is the only reference to the file in the database
-            if len(raw_data_location_entities) == 1:
-                # delete local file only if it's created by cognee
-                storage_config = get_storage_config()
-
-                if (
-                    storage_config["data_root_directory"]
-                    in raw_data_location_entities[0].raw_data_location
-                ):
-                    file_storage = get_file_storage(storage_config["data_root_directory"])
-
-                    file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
-
-                    if await file_storage.file_exists(file_path):
-                        await file_storage.remove(file_path)
-                    else:
-                        # Report bug as file should exist
-                        logger.error("Local file which should exist can't be found.")
+            raw_data_location = data_entity.raw_data_location
+            original_data_location = data_entity.original_data_location
 
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
+
+        # Storage cleanup runs after the commit so the reference count reflects
+        # the deletion. Both the derived text (raw_data_location) and the
+        # stored original (original_data_location) are collected — originals
+        # live under content-addressed keys shared by identical payloads, so
+        # each is removed only once nothing references it.
+        await self.remove_data_file_if_unreferenced(raw_data_location)
+        await self.remove_data_file_if_unreferenced(original_data_location)
+
+    async def remove_data_file_if_unreferenced(self, file_location: Optional[str]) -> None:
+        """Remove a cognee-managed stored file once no ``Data`` row references it.
+
+        A location outside the data root is a user's own file (a local path, an
+        external s3:// URL) and is never touched. Content-addressed keys are
+        shared by design — two rows with identical payloads point at one object
+        — so the reference count spans both location columns of every dataset.
+        """
+        if not file_location:
+            return
+
+        storage_config = get_storage_config()
+        data_root = storage_config["data_root_directory"]
+        if data_root not in file_location:
+            return
+
+        async with self.get_async_session() as session:
+            references = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Data)
+                    .where(
+                        or_(
+                            Data.raw_data_location == file_location,
+                            Data.original_data_location == file_location,
+                        )
+                    )
+                )
+            ).scalar()
+
+        if references:
+            return
+
+        relative_path = file_location.split(data_root, 1)[1].lstrip("/\\")
+        if file_location.startswith("file://"):
+            # file:// locations carry percent-encoding (spaces as %20); storage
+            # keys are the decoded form.
+            relative_path = unquote(relative_path)
+
+        file_storage = get_file_storage(data_root)
+        if await file_storage.file_exists(relative_path):
+            await file_storage.remove(relative_path)
+        else:
+            logger.warning("Stored file to clean up was already gone: %s", file_location)
 
     async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
         """
@@ -394,10 +490,20 @@ class SQLAlchemyAdapter:
         """
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
-                # Load the schema information into the MetaData object
-                await connection.run_sync(Base.metadata.reflect)
+                # Prefer the declarative table: it carries the models' Python-side
+                # type converters (a raw reflected sqlite table would return e.g.
+                # datetimes as strings).
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
+                # Unknown to the imported models — reflect into a throwaway
+                # MetaData, never into Base.metadata: registering an on-disk
+                # table whose model module has not been imported yet makes that
+                # model's later declarative definition fail with "Table ... is
+                # already defined for this MetaData instance".
+                metadata = MetaData()
+                await connection.run_sync(metadata.reflect)
+                if table_name in metadata.tables:
+                    return metadata.tables[table_name]
                 else:
                     raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
             else:
@@ -425,6 +531,11 @@ class SQLAlchemyAdapter:
             - List[str]: A list of all table names in the database.
         """
         table_names = []
+        # Resolve the schema list BEFORE opening our reflection connection.
+        # get_schema_list() checks out its own connection; calling it inside would
+        # hold two pooled connections at once and deadlock the pool under
+        # concurrency (#4197).
+        schema_list = await self.get_schema_list() if self.engine.dialect.name != "sqlite" else []
         async with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
                 # Use a new MetaData instance to reflect all tables
@@ -432,7 +543,6 @@ class SQLAlchemyAdapter:
                 await connection.run_sync(metadata.reflect)  # Reflect the entire database
                 table_names = list(metadata.tables.keys())  # Get table names
             else:
-                schema_list = await self.get_schema_list()
                 metadata = MetaData()
                 for schema_name in schema_list:
                     await connection.run_sync(metadata.reflect, schema=schema_name)
@@ -492,18 +602,21 @@ class SQLAlchemyAdapter:
 
             A list of dictionaries representing all rows in the specified table.
         """
+        # Validate inputs to prevent SQL injection
+        if not table_name.isidentifier():
+            raise ValueError("Invalid table name")
+        if schema and not schema.isidentifier():
+            raise ValueError("Invalid schema name")
+
+        # Resolve the table BEFORE opening the session. get_table() checks out its
+        # own connection; doing it inside would hold two pooled connections at once
+        # and deadlock the pool under concurrency (#4197).
+        if self.engine.dialect.name == "sqlite":
+            table = await self.get_table(table_name)
+        else:
+            table = await self.get_table(table_name, schema)
+
         async with self.get_async_session() as session:
-            # Validate inputs to prevent SQL injection
-            if not table_name.isidentifier():
-                raise ValueError("Invalid table name")
-            if schema and not schema.isidentifier():
-                raise ValueError("Invalid schema name")
-
-            if self.engine.dialect.name == "sqlite":
-                table = await self.get_table(table_name)
-            else:
-                table = await self.get_table(table_name, schema)
-
             # Query all data from the table
             query = select(table)
             result = await session.execute(query)
@@ -578,12 +691,51 @@ class SQLAlchemyAdapter:
         try:
             if self.engine.dialect.name == "sqlite":
                 await self.engine.dispose(close=True)
-                # Wait for the database connections to close and release the file (Windows)
+                # The create_relational_engine() lru_cache keeps this adapter
+                # (and its AsyncEngine/sessionmaker) reachable, which on Windows
+                # keeps the underlying aiosqlite connection/background thread
+                # alive and holding the file handle. Drop that strong reference
+                # so the connection can finalize before we remove the file.
+                # Imported lazily to avoid the circular import
+                # (create_relational_engine imports this adapter).
+                from cognee.infrastructure.databases.relational.create_relational_engine import (
+                    create_relational_engine,
+                )
+
+                create_relational_engine.cache_clear()
+                gc.collect()
+                # Wait for the database connections to close and release the file.
+                # This settle also preserves teardown timing other resources
+                # (e.g. the graph DB) rely on between tests, so keep it
+                # unconditional.
                 await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
                 file_name = path.basename(self.db_path)
                 file_storage = get_file_storage(db_directory)
-                await file_storage.remove(file_name)
+                # On Windows the SQLite file handle can still linger after the
+                # settle above (aiosqlite closes the connection on a background
+                # thread), so os.remove fails with WinError 32. Retry with short
+                # backoff and force a GC pass to finalize lingering connection
+                # objects.
+                for attempt in range(10):
+                    try:
+                        await file_storage.remove(file_name)
+                        break
+                    except (PermissionError, OSError) as remove_error:
+                        if attempt == 9:
+                            # Best-effort cleanup: a stubborn Windows file lock
+                            # must never poison teardown/prune. No test asserts
+                            # the file is gone and every create path uses
+                            # CREATE TABLE IF NOT EXISTS, so a left-behind file
+                            # is harmless. Log and continue instead of raising.
+                            logger.warning(
+                                "Could not remove sqlite database file %s after retries: %s",
+                                file_name,
+                                remove_error,
+                            )
+                            break
+                        gc.collect()
+                        await asyncio.sleep(0.5)
             else:
                 async with self.engine.begin() as connection:
                     # Create a MetaData instance to load table information
@@ -616,9 +768,13 @@ class SQLAlchemyAdapter:
 
             A dictionary containing the schema details of the database.
         """
-        async with self.engine.begin() as connection:
-            tables = await self.get_table_names()
+        # Resolve table names / schema list BEFORE opening our connection. Each of
+        # these checks out its own connection; calling them inside would hold two
+        # pooled connections at once and deadlock the pool under concurrency (#4197).
+        tables = await self.get_table_names()
+        schema_list = await self.get_schema_list() if self.engine.dialect.name != "sqlite" else []
 
+        async with self.engine.begin() as connection:
             schema = {}
 
             if self.engine.dialect.name == "sqlite":
@@ -654,7 +810,6 @@ class SQLAlchemyAdapter:
                             }
                         )
             else:
-                schema_list = await self.get_schema_list()
                 for schema_name in schema_list:
                     # Get tables for the current schema via the inspector.
                     tables = await connection.run_sync(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,7 +65,10 @@ class TestSkillContract(unittest.TestCase):
             skill = skills[0]
             assert skill.name == "code-review"
             assert skill.dataset_scope == [str(dataset.id)]
-            assert skill.source_file.endswith("code-review/SKILL.md")
+            # source_file/source_dir are native normalized paths (see
+            # skill_parser._normalize_path), so use os.sep rather than a
+            # hard-coded "/" — on Windows the separator is "\".
+            assert skill.source_file.endswith(os.path.join("code-review", "SKILL.md"))
             assert skill.source_dir.endswith("code-review")
             assert isinstance(skill.belongs_to_set[0], NodeSet)
             assert skill.belongs_to_set[0].name == "skills"
@@ -469,3 +473,143 @@ class TestSkillContract(unittest.TestCase):
 
         _run(apply_proposal())
         assert skill.procedure == "# code-review\n\n- Read the diff."
+
+    def test_get_proposal_returns_proposal_preview(self):
+        from cognee.modules.engine.models import SkillImprovementProposal
+        from cognee.modules.memify.skill_improvement import get_proposal
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+        proposal = SkillImprovementProposal(
+            proposal_id="proposal-1",
+            skill_id=str(uuid4()),
+            skill_name="code-review",
+            dataset_scope=[str(dataset.id)],
+            old_procedure="old",
+            proposed_procedure="# code-review\n\nnew",
+            rationale="Missed regression checks.",
+            confidence=0.8,
+            status="proposed",
+        )
+
+        async def fetch():
+            with patch(
+                "cognee.modules.memify.skill_improvement._find_proposal",
+                new_callable=AsyncMock,
+                return_value=proposal,
+            ) as mock_find:
+                result = await get_proposal("proposal-1", dataset=dataset, user=user)
+                return result, mock_find
+
+        result, mock_find = _run(fetch())
+        assert result is proposal
+        assert result.old_procedure == "old"
+        assert result.proposed_procedure == "# code-review\n\nnew"
+        assert result.rationale == "Missed regression checks."
+        assert result.confidence == 0.8
+        assert mock_find.await_args.kwargs["proposal_id"] == "proposal-1"
+        assert mock_find.await_args.kwargs["dataset_id"] == dataset.id
+
+    def test_get_proposal_returns_none_for_unknown_id(self):
+        from cognee.modules.memify.skill_improvement import get_proposal
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+
+        async def fetch():
+            with patch(
+                "cognee.modules.memify.skill_improvement._find_proposal",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
+                return await get_proposal("missing", dataset=dataset, user=user)
+
+        assert _run(fetch()) is None
+
+    def test_get_proposal_requires_dataset_with_id(self):
+        from cognee.modules.memify.skill_improvement import get_proposal
+
+        with self.assertRaisesRegex(ValueError, "explicit dataset"):
+            _run(get_proposal("proposal-1", dataset=SimpleNamespace(id=None)))
+
+    def test_materialize_inline_skill_writes_slug_dir(self):
+        from cognee.api.v1.remember.remember import _materialize_inline_skill
+
+        root = Path(tempfile.mkdtemp())
+        try:
+            source = _materialize_inline_skill(_SKILL, "code-review", root)
+            md = source / "code-review" / "SKILL.md"
+            assert md.is_file()
+            assert "Review code changes" in md.read_text()
+        finally:
+            import shutil
+
+            shutil.rmtree(root)
+
+    def test_materialize_inline_skill_defaults_and_sanitizes_slug(self):
+        from cognee.api.v1.remember.remember import _materialize_inline_skill
+
+        root = Path(tempfile.mkdtemp())
+        try:
+            source = _materialize_inline_skill("# x", None, root)
+            assert (source / "skill" / "SKILL.md").is_file()
+
+            # A traversal-y name collapses to a single safe path segment.
+            source2 = _materialize_inline_skill("# x", "../../etc/evil", root)
+            assert (source2 / "evil" / "SKILL.md").is_file()
+        finally:
+            import shutil
+
+            shutil.rmtree(root)
+
+    def test_reingest_inline_skill_keeps_same_node_id(self):
+        """Re-ingesting the same skill_name into the same dataset reuses the id.
+
+        Regression for the duplicate-skill bug: inline materialization used a
+        fresh random tempdir per call, so skill.source_dir (which feeds
+        _scoped_skill_id) changed every POST /api/v1/skills and minted a new
+        Skill node. The deterministic materialize root keeps the id stable, so
+        the storage layer's upsert replaces the existing node instead.
+        """
+        from cognee.api.v1.remember.remember import (
+            _materialize_inline_skill,
+            _skill_materialize_root,
+        )
+        from cognee.modules.tools.ingest_skills import add_skills
+
+        dataset = SimpleNamespace(id=uuid4(), name="project")
+        user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+        root = _skill_materialize_root(dataset.id)
+        edited = _SKILL.replace(
+            "Read the diff, identify concrete bugs, and cite file paths.",
+            "Read the diff, identify concrete bugs, cite file paths, and add tests.",
+        )
+
+        try:
+            with patch(
+                "cognee.modules.tools.ingest_skills.add_data_points",
+                new_callable=AsyncMock,
+            ):
+                first_source = _materialize_inline_skill(_SKILL, "code-review", root)
+                first = _run(add_skills(first_source, user=user, dataset=dataset))[0]
+
+                second_source = _materialize_inline_skill(edited, "code-review", root)
+                second = _run(add_skills(second_source, user=user, dataset=dataset))[0]
+
+            assert first.id == second.id
+            assert second.procedure != first.procedure  # edited body picked up
+
+            # Same name in a different dataset gets a distinct id.
+            other_dataset = SimpleNamespace(id=uuid4(), name="other")
+            with patch(
+                "cognee.modules.tools.ingest_skills.add_data_points",
+                new_callable=AsyncMock,
+            ):
+                other_source = _materialize_inline_skill(_SKILL, "code-review", root)
+                other = _run(add_skills(other_source, user=user, dataset=other_dataset))[0]
+
+            assert other.id != first.id
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)

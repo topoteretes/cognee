@@ -15,6 +15,7 @@ permissions:
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   test-s3-storage:
@@ -47,7 +48,5 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_s3_file_storage.py

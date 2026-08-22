@@ -23,7 +23,7 @@
 
 
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
+  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://github.com/topoteretes/cognee)
   [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
   [![GitHub tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
   [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
@@ -98,7 +98,7 @@ Cognee는 두 가지 방식으로 사용할 수 있습니다.
 
 ### 필수 조건
 
-- Python 3.10 ~ 3.13
+- Python 3.10 ~ 3.14
 
 ### 1단계: Cognee 설치
 

@@ -92,3 +92,13 @@ def chunk_by_row(
             }
 
             yield chunk_dict
+
+            chunk_index += 1
+
+        # Start a fresh chunk for the next row so its pairs are not
+        # accumulated onto this row's chunk and chunk indices stay
+        # monotonically increasing. The reset must also run for a blank row
+        # (consecutive separators produce ""), otherwise its empty pair leaks
+        # into the next row's text, size, and chunk_id.
+        current_chunk_list = []
+        current_chunk_size = 0

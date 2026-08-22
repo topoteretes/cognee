@@ -16,7 +16,6 @@ from fastapi.openapi.utils import get_openapi
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.api.v1.cloud.routers import get_checks_router
-from cognee.api.v1.notebooks.routers import get_notebooks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -34,6 +33,7 @@ from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.llm.routers import get_llm_router
 from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.health.routers import get_health_router
+from cognee.api.v1.validate.routers import get_validate_router
 from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
@@ -47,28 +47,18 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.api.v1.api_keys.routers import get_api_key_management_router
 from cognee.api.v1.agents.routers import get_agents_router
+from cognee.api.v1.visualize.routers import get_schema_router
+from cognee.api.v1.skills.routers import get_skills_router
+from cognee.api.v1.proposals.routers import get_proposals_router
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
+from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
+from cognee.api.v1.integrations.routers import get_integrations_router
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
 logger = get_logger()
-
-if os.getenv("ENV", "prod") == "prod":
-    try:
-        import sentry_sdk
-
-        sentry_sdk.init(
-            dsn=os.getenv("SENTRY_REPORTING_URL"),
-            traces_sample_rate=1.0,
-            profiles_sample_rate=1.0,
-        )
-    except ImportError:
-        logger.info(
-            "Sentry SDK not available. Install with 'pip install cognee\"[monitoring]\"' to enable error monitoring."
-        )
-
 
 app_environment = os.getenv("ENV", "prod")
 
@@ -80,19 +70,22 @@ async def lifespan(app: FastAPI):
     # await prune_system(metadata = True)
     # if app_environment == "local" or app_environment == "dev":
     from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.run_migrations import run_startup_migrations
+    from cognee.run_migrations import run_migrations
 
     try:
-        await run_startup_migrations()
+        await run_migrations()
     except Exception:
         db_engine = get_relational_engine()
         await db_engine.create_database()
 
-        await run_startup_migrations()
+        await run_migrations()
 
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+
+    await recover_stale_cognify_runs_on_startup()
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
@@ -114,6 +107,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _stamp_operation_origin(request, call_next):
+    # Operations executed for this request record origin="api" in
+    # pipeline_runs. ContextVars set here propagate into the handler task.
+    from cognee.modules.operations import ORIGIN_API, set_operation_origin
+
+    set_operation_origin(ORIGIN_API)
+    return await call_next(request)
 
 
 # Read allowed origins from environment variable (comma-separated)
@@ -203,7 +206,7 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
         logger.error("Improperly defined exception: %s", exc)
         # Provide a default error response
         detail["message"] = "An unexpected error occurred."
-        status_code = status.HTTP_418_IM_A_TEAPOT
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
@@ -254,6 +257,11 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
+app.include_router(get_schema_router(), prefix="/api/v1/schema", tags=["schema"])
+
+app.include_router(get_skills_router(), prefix="/api/v1/skills", tags=["skills"])
+app.include_router(get_proposals_router(), prefix="/api/v1/proposals", tags=["skills"])
+
 app.include_router(
     get_configuration_router(),
     prefix="/api/v1/configuration",
@@ -261,6 +269,8 @@ app.include_router(
 )
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
+
+app.include_router(get_validate_router(), prefix="/api/v1/validate", tags=["validate"])
 
 app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
@@ -280,12 +290,6 @@ app.include_router(
     get_user_id_by_email_router(),
     prefix="/api/v1/users",
     tags=["users"],
-)
-
-app.include_router(
-    get_notebooks_router(),
-    prefix="/api/v1/notebooks",
-    tags=["notebooks"],
 )
 
 app.include_router(
@@ -321,6 +325,10 @@ app.include_router(get_recall_router(), prefix="/api/v1/recall", tags=["recall"]
 app.include_router(get_improve_router(), prefix="/api/v1/improve", tags=["improve"])
 app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"])
 
+app.include_router(get_slack_router(), prefix="/api/v1/slack", tags=["slack"])
+app.include_router(get_slack_channels_router(), prefix="/api/v1/slack", tags=["slack"])
+app.include_router(get_integrations_router(), prefix="/api/v1/integrations", tags=["integrations"])
+
 
 @app.get("/")
 async def root():
@@ -337,10 +345,21 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
     host (str): The host for the server.
     port (int): The port for the server.
     """
+    import socket
+
     try:
         logger.info("Starting server at %s:%s", host, port)
 
-        uvicorn.run(app, host=host, port=port)
+        # Bind before serving so the port is held during startup (including the
+        # lifespan migration): uvicorn runs the lifespan before it accepts on this
+        # socket, so while migrating, a second server on the same host:port fails
+        # fast with EADDRINUSE and no endpoint is served yet (requests queue).
+        # reuse_port=False keeps that guard — SO_REUSEPORT would let a second
+        # process share the port.
+        sock = socket.create_server((host, port), reuse_port=False)
+
+        config = uvicorn.Config(app, host=host, port=port)
+        uvicorn.Server(config).run(sockets=[sock])
     except Exception as e:
         logger.exception(f"Failed to start server: {e}")
         # Here you could add any cleanup code or error recovery code.

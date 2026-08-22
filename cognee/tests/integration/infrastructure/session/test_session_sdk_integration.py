@@ -1,7 +1,9 @@
+import asyncio
 import sys
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -54,11 +56,11 @@ class _InMemoryRedisList:
         self.data.clear()
 
 
-@pytest.fixture(params=["fs", "redis"])
+@pytest.fixture(params=["fs", "redis", "sqlite"])
 def sdk_uses_session_manager(request):
     """
-    SessionManager backed by either FsCache or in-memory Redis; SDK is patched to use it.
-    Tests run twice (once per backend).
+    SessionManager backed by FsCache, in-memory Redis, or SQL (aiosqlite); SDK is
+    patched to use it. Tests run once per backend.
     """
     backend = request.param
     if backend == "fs":
@@ -80,7 +82,7 @@ def sdk_uses_session_manager(request):
                 ):
                     yield session_manager
                 adapter.cache.close()
-    else:
+    elif backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
         with (
@@ -99,6 +101,21 @@ def sdk_uses_session_manager(request):
                 return_value=session_manager,
             ):
                 yield session_manager
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from cognee.infrastructure.databases.cache.sql.SqlCacheAdapter import (
+                SqlCacheAdapter,
+            )
+
+            adapter = SqlCacheAdapter(f"sqlite+aiosqlite:///{tmpdir}/cache.db")
+            session_manager = SessionManager(cache_engine=adapter)
+            with patch.object(
+                _session_module(),
+                "get_session_manager",
+                return_value=session_manager,
+            ):
+                yield session_manager
+            asyncio.run(adapter.close())
 
 
 @pytest.mark.asyncio
@@ -128,15 +145,50 @@ async def test_sdk_get_session_returns_entries_after_add_qa(sdk_uses_session_man
 
 @pytest.mark.asyncio
 async def test_sdk_get_session_default_session_id(sdk_uses_session_manager):
-    """get_session() without session_id uses default_session."""
-    user = _user("u1")
+    """get_session() without session_id reads the main_dataset-derived default."""
+    user_id = str(uuid4())
+    user = _user(user_id)
+    dataset = SimpleNamespace(id=uuid4())
     await sdk_uses_session_manager.add_qa(
-        user_id="u1", question="Q?", context="C", answer="A", session_id="default_session"
+        user_id=user_id,
+        question="Q?",
+        context="C",
+        answer="A",
+        session_id=f"default_session_{dataset.id}",
     )
 
-    result = await cognee.session.get_session(user=user)
+    # The fixture's get_session_manager patch ignores kwargs; the rescope needs
+    # a manager actually carrying the dataset, over the same cache backend.
+    def scoped_get_session_manager(dataset_id=None):
+        return SessionManager(cache_engine=sdk_uses_session_manager._cache, dataset_id=dataset_id)
+
+    with (
+        patch.object(
+            _session_module(), "get_session_manager", side_effect=scoped_get_session_manager
+        ),
+        patch(
+            "cognee.modules.data.methods.get_datasets_by_name",
+            AsyncMock(return_value=[dataset]),
+        ),
+    ):
+        result = await cognee.session.get_session(user=user)
     assert len(result) == 1
     assert result[0].question == "Q?"
+
+
+@pytest.mark.asyncio
+async def test_sdk_get_session_without_main_dataset_raises(sdk_uses_session_manager):
+    """No main_dataset means there is no default session to read — the bare
+    call surfaces the precondition instead of returning []."""
+    from cognee.exceptions import CogneeValidationError
+
+    user = _user(str(uuid4()))
+    with patch(
+        "cognee.modules.data.methods.get_datasets_by_name",
+        AsyncMock(return_value=[]),
+    ):
+        with pytest.raises(CogneeValidationError, match="no main_dataset"):
+            await cognee.session.get_session(user=user)
 
 
 @pytest.mark.asyncio

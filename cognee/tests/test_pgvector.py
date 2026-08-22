@@ -23,7 +23,11 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         encoded_text = data_text.encode("utf-8")
         data_hash = hashlib.md5(encoded_text).hexdigest()
         # Get data entry from database based on hash contents
-        data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
+        data = (
+            await session.scalars(
+                select(Data).where(Data.content_hash == data_hash, Data.dataset_id == dataset_2_id)
+            )
+        ).one()
         assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exist: {data.raw_data_location}"
         )
@@ -37,7 +41,10 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         # Get data entry from database based on file path
         data = (
             await session.scalars(
-                select(Data).where(Data.original_data_location == "file://" + file_location)
+                select(Data).where(
+                    Data.original_data_location == "file://" + file_location,
+                    Data.dataset_id == dataset_1_id,
+                )
             )
         ).one()
         assert os.path.isfile(data.original_data_location.replace("file://", "")), (
@@ -50,12 +57,12 @@ async def test_local_file_deletion(data_text, file_location, dataset_1_id, datas
         )
 
 
-async def test_getting_of_documents(dataset_name_1):
+async def test_getting_of_documents(dataset_id_1):
     # Test getting of documents for search per dataset
     from cognee.modules.users.permissions.methods import get_document_ids_for_user
 
     user = await get_default_user()
-    document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
+    document_ids = await get_document_ids_for_user(user.id, [dataset_id_1])
     assert len(document_ids) == 1, (
         f"Number of expected documents doesn't match {len(document_ids)} != 1"
     )
@@ -71,9 +78,9 @@ async def test_getting_of_documents(dataset_name_1):
 async def test_vector_engine_search_none_limit():
     query_text = "Tell me about Quantum computers"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
 
     collection_name = "Entity_name"
 
@@ -111,9 +118,9 @@ async def test_vector_engine_search_with_nodeset_filtering():
     node_set = ["NLP", "Quantum"]
     query_text = "Tell me about NLP"
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     # Search with "OR" operator
@@ -177,22 +184,17 @@ async def test_vector_nodeset_filtering_retriever_integration():
     node_set = ["NLP", "Quantum"]
     query_text = "Tell me about Quantum computers"
 
-    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+    from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 
     # Search with "OR" operator
-    retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="OR", top_k=250
-    )
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="OR")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-    context = await retriever.get_context_from_objects(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
 
-    assert "Quantum" in context
-    assert "NLP" in context
+    assert any("NLP" in chunk.payload["text"] for chunk in retrieved_objects)
+    assert any("Quantum" in chunk.payload["text"] for chunk in retrieved_objects)
 
     # Search with "AND" operator
-    retriever = GraphCompletionRetriever(node_name=node_set, node_name_filter_operator="AND")
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="AND")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
 
     assert len(retrieved_objects) == 0, (
@@ -202,26 +204,16 @@ async def test_vector_nodeset_filtering_retriever_integration():
     node_set = ["Quantum", "Computers"]
 
     # Search with "OR" operator
-    retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="OR", top_k=250
-    )
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="OR")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-    context = await retriever.get_context_from_objects(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
 
-    assert "Alice" in context
+    assert any("Alice" in chunk.payload["text"] for chunk in retrieved_objects)
 
     # Search with "AND" operator
-    retriever = GraphCompletionRetriever(
-        node_name=node_set, node_name_filter_operator="AND", top_k=250
-    )
+    retriever = ChunksRetriever(node_name=node_set, node_name_filter_operator="AND")
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
-    context = await retriever.get_context_from_objects(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
 
-    assert "Alice" not in context
+    assert all("Alice" not in chunk.payload["text"] for chunk in retrieved_objects)
 
 
 async def main():
@@ -281,11 +273,14 @@ async def main():
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
-    from cognee.infrastructure.databases.vector import get_vector_engine
+    from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.modules.data.methods import get_datasets_by_name
 
-    await test_getting_of_documents(dataset_name_1)
+    user = await get_default_user()
+    dataset_1 = (await get_datasets_by_name([dataset_name_1], user.id))[0]
+    await test_getting_of_documents(dataset_1.id)
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]
@@ -324,7 +319,11 @@ async def main():
         print(f"{result}\n")
 
     user = await get_default_user()
-    history = await get_history(user.id)
+    # This test runs with access control disabled (see vector_db_tests.yml), so
+    # search payloads carry no dataset and there is no per-dataset fan-out:
+    # each of the 4 searches records exactly one query and one result row.
+    # limit=0 lifts get_history's default cap of 10.
+    history = await get_history(user.id, limit=0)
     assert len(history) == 8, "Search history is not correct."
 
     await test_vector_engine_search_none_limit()

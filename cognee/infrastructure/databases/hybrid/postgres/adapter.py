@@ -1,6 +1,6 @@
 """Postgres hybrid adapter combining graph and vector functionality.
 
-Composes a PostgresAdapter (graph) and PGVectorAdapter (vector) that
+Composes a PostgresDemoAdapter (graph) and PGVectorAdapter (vector) that
 share the same Postgres database. Implements both GraphDBInterface and
 VectorDBInterface by delegating to the underlying adapters.
 
@@ -27,12 +27,11 @@ from cognee.infrastructure.databases.vector.pgvector.serialize_data import seria
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
 
 if TYPE_CHECKING:
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 
 logger = get_logger()
 
@@ -50,15 +49,18 @@ def _validate_table_name(name: str) -> str:
 class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     """Hybrid adapter backed by a single Postgres database.
 
-    Holds a PostgresAdapter for graph operations and a PGVectorAdapter
+    Holds a PostgresDemoAdapter for graph operations and a PGVectorAdapter
     for vector operations. Both share the same underlying database, so
     combined queries can JOIN across graph_node/graph_edge and vector
     collection tables.
     """
 
+    # Graph queries run as SQL via the wrapped PostgresDemoAdapter, not Cypher.
+    supports_cypher_queries = False
+
     def __init__(
         self,
-        graph_adapter: "PostgresAdapter",
+        graph_adapter: "PostgresDemoAdapter",
         vector_adapter: "PGVectorAdapter",
     ) -> None:
         self._graph = graph_adapter
@@ -76,7 +78,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         await self._graph.initialize()
 
     # ------------------------------------------------------------------
-    # GraphDBInterface: delegate to PostgresAdapter
+    # GraphDBInterface: delegate to PostgresDemoAdapter
     # ------------------------------------------------------------------
 
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
@@ -90,8 +92,13 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     ) -> None:
         return await self._graph.add_node(node, properties)
 
-    async def add_nodes(self, nodes: Union[List[Tuple[str, Dict]], List[DataPoint]]) -> None:
-        return await self._graph.add_nodes(nodes)
+    async def add_nodes(
+        self,
+        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
+    ) -> None:
+        return await self._graph.add_nodes(nodes, source_ref_key, pipeline_run_id)
 
     async def delete_node(self, node_id: str) -> None:
         return await self._graph.delete_node(node_id)
@@ -115,9 +122,12 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         return await self._graph.add_edge(source_id, target_id, relationship_name, properties)
 
     async def add_edges(
-        self, edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List]
+        self,
+        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
+        source_ref_key: Optional[str] = None,
+        pipeline_run_id: Optional[str] = None,
     ) -> None:
-        return await self._graph.add_edges(edges)
+        return await self._graph.add_edges(edges, source_ref_key, pipeline_run_id)
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         return await self._graph.has_edge(source_id, target_id, relationship_name)
@@ -336,6 +346,12 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 index_point = IndexSchema(
                     id=dp.id,
                     text=embed_text,
+                    # Reference scalars for search "Evidence"; None for non-chunks.
+                    document_id=getattr(dp, "document_id", None),
+                    document_name=getattr(dp, "document_name", None),
+                    chunk_index=getattr(dp, "chunk_index", None),
+                    source_chunk_id=getattr(dp, "source_chunk_id", None),
+                    importance_weight=getattr(dp, "importance_weight", None),
                     belongs_to_set=(dp.belongs_to_set or []),
                 )
                 payload = serialize_data(index_point.model_dump())
@@ -349,7 +365,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             vector_rows_by_table[table] = rows
 
         # Single transaction: one batched INSERT per table
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             if node_rows:
                 await session.execute(
                     text("""
@@ -441,15 +457,14 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         vector_rows = []
         table = _validate_table_name(collection)
         for edge_text, count in edge_type_counts.items():
-            edge_id = generate_edge_id(edge_id=edge_text)
             vector = text_to_vector.get(edge_text)
             if vector is None:
                 continue
             edge_type_dp = EdgeType(
-                id=edge_id,
                 relationship_name=edge_text,
                 number_of_edges=count,
             )
+            edge_id = edge_type_dp.id
             index_point = IndexSchema(
                 id=edge_id,
                 text=edge_text,
@@ -465,7 +480,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             )
 
         # Single transaction: one batched INSERT per table
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             if edge_rows:
                 await session.execute(
                     text("""
@@ -513,7 +528,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
 
         await self._graph.initialize()
 
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             # Delete from graph (CASCADE removes edges)
             await session.execute(
                 text("DELETE FROM graph_node WHERE id = ANY(:ids)"),
@@ -547,7 +562,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             edge_type_ids: IDs to delete from EdgeType_relationship_name.
             triplet_ids: IDs to delete from Triplet_text.
         """
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             if edge_type_ids:
                 table = _validate_table_name("EdgeType_relationship_name")
                 await session.execute(
@@ -656,7 +671,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 "limit": limit,
             }
 
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             result = await session.execute(sql, params)
             rows = result.mappings().fetchall()
 

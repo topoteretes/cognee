@@ -15,6 +15,7 @@ on:
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
   test-gemini:
@@ -41,7 +42,7 @@ jobs:
           EMBEDDING_MODEL: "gemini/gemini-embedding-001"
           EMBEDDING_DIMENSIONS: "768"
           EMBEDDING_MAX_TOKENS: "8076"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
 
   test-fastembed:
     name: Run Fastembed Test
@@ -68,7 +69,7 @@ jobs:
           EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
           EMBEDDING_DIMENSIONS: "384"
           EMBEDDING_MAX_TOKENS: "256"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
 
   test-openrouter:
     name: Run OpenRouter Test
@@ -95,7 +96,7 @@ jobs:
           EMBEDDING_MODEL: "openai/text-embedding-3-large"
           EMBEDDING_DIMENSIONS: "3072"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
 
   test-bedrock-api-key:
     name: Run Bedrock API Key Test
@@ -124,7 +125,7 @@ jobs:
           EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
 
   test-bedrock-aws-credentials:
     name: Run Bedrock AWS Credentials Test
@@ -153,7 +154,7 @@ jobs:
           EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
 
   test-bedrock-aws-profile:
     name: Run Bedrock AWS Profile Test
@@ -189,7 +190,7 @@ jobs:
           EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py
 
   test-claude-anthropic:
     name: Run Anthropic Claude LLM Test
@@ -216,4 +217,4 @@ jobs:
           EMBEDDING_MODEL: "openai/text-embedding-3-large"
           EMBEDDING_DIMENSIONS: "3072"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/demos/simple_cognee_example.py
+        run: uv run python ./examples/guides/simple_cognee_example.py

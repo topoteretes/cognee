@@ -27,7 +27,7 @@ Subcommands:
             "session_id",
             nargs="?",
             default=None,
-            help="Session ID (default: scoped to the current --user-id)",
+            help="Session ID (default: the default session)",
         )
         p_get.add_argument(
             "-n",
@@ -57,10 +57,10 @@ Subcommands:
     def _get(self, args: argparse.Namespace) -> None:
         async def run():
             from cognee.api.v1.session import get_session
-            from cognee.cli.user_resolution import resolve_cli_user, scoped_session_id
+            from cognee.cli.user_resolution import resolve_cli_user
 
             user = await resolve_cli_user(getattr(args, "user_id", None))
-            sid = scoped_session_id(user.id, args.session_id)
+            sid = args.session_id
 
             entries = await get_session(
                 session_id=sid,

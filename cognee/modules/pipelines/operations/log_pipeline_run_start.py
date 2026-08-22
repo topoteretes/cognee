@@ -1,21 +1,22 @@
+from datetime import datetime, timezone
+from typing import Any, Optional
 from uuid import UUID
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data
-from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
-from typing import Any
 
-from cognee.modules.pipelines.utils import generate_pipeline_run_id
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.utils import generate_pipeline_run_id, summarize_run_info_data
+from cognee.modules.users.models import User
 
 
 async def log_pipeline_run_start(
-    pipeline_id: UUID, pipeline_name: str, dataset_id: UUID, data: Any
+    pipeline_id: UUID,
+    pipeline_name: str,
+    dataset_id: UUID,
+    data: Any,
+    *,
+    user: Optional[User] = None,
 ):
-    if not data:
-        data_info = "None"
-    elif isinstance(data, list) and all(isinstance(item, Data) for item in data):
-        data_info = [str(item.id) for item in data]
-    else:
-        data_info = str(data)
+    data_info = summarize_run_info_data(data)
 
     pipeline_run_id = generate_pipeline_run_id(pipeline_id, dataset_id)
 
@@ -28,6 +29,10 @@ async def log_pipeline_run_start(
         run_info={
             "data": data_info,
         },
+        user_id=user.id if user else None,
+        tenant_id=getattr(user, "tenant_id", None) if user else None,
+        operation_name=pipeline_name,
+        started_at=datetime.now(timezone.utc),
     )
 
     db_engine = get_relational_engine()

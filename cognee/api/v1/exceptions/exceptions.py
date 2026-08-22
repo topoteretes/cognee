@@ -43,6 +43,29 @@ class DataNotFoundError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class UpdateTargetNotFoundError(CogneeValidationError):
+    """update() was called with a data_id that resolves to no document.
+
+    Neither an exact row id nor a recorded pre-fork ``legacy_id`` matched in
+    the dataset. update() replaces existing documents only — use add() to
+    create new ones.
+    """
+
+    def __init__(
+        self,
+        data_id,
+        dataset_id,
+        name: str = "UpdateTargetNotFoundError",
+        status_code: int = status.HTTP_404_NOT_FOUND,
+    ):
+        message = (
+            f"No document found to update: data_id '{data_id}' does not exist "
+            f"in dataset '{dataset_id}' (neither as a document id nor as a "
+            f"pre-fork legacy id). Use add() to create new documents."
+        )
+        super().__init__(message, name, status_code)
+
+
 class DocumentSubgraphNotFoundError(CogneeValidationError):
     def __init__(
         self,

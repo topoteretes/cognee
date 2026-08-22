@@ -1,10 +1,9 @@
-import inspect
-from tempfile import SpooledTemporaryFile
-from types import SimpleNamespace
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
+from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
@@ -17,76 +16,20 @@ from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
+from cognee.tasks.ingestion.utils import materialize_stream_for_background
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.observability import (
+    new_span,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    MEMORY_COLLECTION,
+    COGNEE_DATASET_NAME,
+    record_operation_duration,
+    increment_items_stored,
+)
 
 logger = get_logger()
-
-
-def _normalize_filename(filename: Optional[str], index: int) -> str:
-    if not filename:
-        return f"upload_{index}.bin"
-    normalized = str(filename).replace("\\", "/").split("/")[-1]
-    return normalized or f"upload_{index}.bin"
-
-
-async def _read_stream_bytes(stream: Any) -> bytes:
-    if not hasattr(stream, "read"):
-        raise TypeError(f"Expected stream-like object, got: {type(stream)}")
-
-    # Best effort to read from the start of the stream.
-    if hasattr(stream, "seek"):
-        try:
-            stream.seek(0)
-        except Exception:
-            pass
-
-    data = stream.read()
-    if inspect.isawaitable(data):
-        data = await data
-
-    if isinstance(data, str):
-        data = data.encode("utf-8")
-    if not isinstance(data, (bytes, bytearray)):
-        raise TypeError(f"Unsupported stream payload type: {type(data)}")
-
-    return bytes(data)
-
-
-async def _materialize_stream_for_background(data_item: Any, index: int = 0) -> Any:
-    if isinstance(data_item, DataItem):
-        return DataItem(
-            data=await _materialize_stream_for_background(data_item.data, index=index),
-            label=data_item.label,
-            external_metadata=data_item.external_metadata,
-            data_id=data_item.data_id,
-        )
-
-    if isinstance(data_item, list):
-        return [
-            await _materialize_stream_for_background(item, index=i)
-            for i, item in enumerate(data_item)
-        ]
-
-    # Keep stable primitives untouched.
-    if isinstance(data_item, str):
-        return data_item
-
-    stream = getattr(data_item, "file", data_item if hasattr(data_item, "read") else None)
-    if stream is None:
-        return data_item
-
-    payload = await _read_stream_bytes(stream)
-    buffer = SpooledTemporaryFile(mode="w+b")
-    buffer.write(payload)
-    buffer.seek(0)
-
-    filename = _normalize_filename(
-        getattr(data_item, "filename", None) or getattr(stream, "name", None),
-        index=index,
-    )
-
-    # Ingestion path supports objects exposing `.file` and `.filename`.
-    return SimpleNamespace(file=buffer, filename=filename)
 
 
 async def add(
@@ -99,7 +42,7 @@ async def add(
         list[DataItem],
         Any,  # DltResource, SourceFactory, or other dlt types
     ],
-    dataset_name: str = "main_dataset",
+    dataset_name: str = DEFAULT_DATASET_NAME,
     user: User = None,
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
@@ -110,6 +53,9 @@ async def add(
     data_per_batch: Optional[int] = 20,
     importance_weight: Optional[float] = 0.5,
     run_in_background: bool = False,
+    llm_config: Optional[LLMConfig] = None,
+    embedding_config: Optional[EmbeddingConfig] = None,
+    data_cache: bool = True,
     **kwargs,
 ):
     """
@@ -233,6 +179,11 @@ async def add(
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
 
+        # Add a single url and keenable extract ingestion method
+        Make sure to set KEENABLE_API_KEY = YOUR_KEENABLE_API_KEY as a environment variable
+        (Tavily takes precedence if both keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
@@ -246,9 +197,10 @@ async def add(
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
-        - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
+        - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
+        - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
 
     """
     # Route to remote instance if connected via serve()
@@ -271,6 +223,33 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
+    await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
+
+    import time as _time
+
+    _add_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.store") as _span:
+        _span.set_attribute(MEMORY_SYSTEM, "cognee")
+        _span.set_attribute(MEMORY_OPERATION, "store")
+        _span.set_attribute(MEMORY_COLLECTION, dataset_name or "main_dataset")
+        _span.set_attribute(COGNEE_DATASET_NAME, dataset_name or "main_dataset")
+
+    user, authorized_dataset = await resolve_authorized_user_dataset(
+        dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
+    # The dataset is resolved (created if needed) and write-checked above; hand
+    # its id to the ingestion task so it does not resolve the name again on
+    # every item (the pipeline also passes the dataset via ctx — this keeps the
+    # non-pipeline fallback on the cheap branch too).
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(
@@ -278,34 +257,40 @@ async def add(
             dataset_name,
             user,
             node_set,
-            dataset_id,
+            authorized_dataset.id,
             preferred_loaders,
             importance_weight,
         ),
     ]
 
-    await setup()
-
-    user, authorized_dataset = await resolve_authorized_user_dataset(
-        dataset_name=dataset_name, dataset_id=dataset_id, user=user
-    )
-
     # Expand DLT resources (and auto-detected CSV/connection strings) into
-    # standard DataItems before the pipeline sees them.
-    data = await resolve_dlt_sources(
+    # standard DataItems before the pipeline sees them. orphan_cleanup (when
+    # not None) deletes dlt rows no longer present in the source; it is
+    # deferred until after the fresh rows are committed to avoid a data-loss
+    # window on a mid-ingest failure.
+    data, orphan_cleanup = await resolve_dlt_sources(
         data,
         dataset_name=dataset_name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
 
     # Background runs must not depend on caller/request-scoped stream lifetimes.
     # Materialize stream-like inputs into owned in-memory buffers up front.
     if run_in_background:
-        data = await _materialize_stream_for_background(data)
+        # Detached pipelines run one-at-a-time (to avoid DB write conflicts)
+        # and commit later, so we cannot safely defer cleanup past their commit
+        # from here without racing them. Run it up front instead.
+        if orphan_cleanup is not None:
+            await orphan_cleanup()
+            orphan_cleanup = None
+        data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -319,14 +304,33 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-        use_pipeline_cache=True,
+        use_pipeline_cache=False,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
+        llm_config=llm_config,
+        embedding_config=embedding_config,
+        data_cache=data_cache,
     )
+
+    # Foreground runs: the fresh rows are committed by pipeline_executor_func
+    # above, so it's now safe to clean up orphans. (Background runs already ran
+    # this up front and set orphan_cleanup to None.)
+    if orphan_cleanup is not None:
+        await orphan_cleanup()
 
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
-        return next(iter(result.values()))
+        result = next(iter(result.values()))
+
+    _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
+    _attrs = {
+        "memory.system": "cognee",
+        "memory.operation": "store",
+        "memory.collection": dataset_name or "main_dataset",
+    }
+    record_operation_duration(_duration_ms, _attrs)
+    item_count = len(data) if hasattr(data, "__len__") else 1
+    increment_items_stored(item_count, _attrs)
 
     return result

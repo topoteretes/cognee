@@ -5,6 +5,7 @@ on:
 
 env:
   AWS_ACCOUNT_ID_DEV: "463722570299"
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
 

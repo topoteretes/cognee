@@ -7,7 +7,7 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
     NeptuneAnalyticsAdapter,
     IndexSchema,
@@ -51,7 +51,7 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    vector_engine = get_vector_engine()
+    vector_engine = await get_vector_engine_async()
     random_node = (
         await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]
@@ -95,17 +95,17 @@ async def vector_backend_api_test():
     # When URL is absent
     cognee.config.set_vector_db_url(None)
     with pytest.raises(OSError):
-        get_vector_engine()
+        await get_vector_engine_async()
 
     # Assert invalid graph ID.
     cognee.config.set_vector_db_url("invalid_url")
     with pytest.raises(ValueError):
-        get_vector_engine()
+        await get_vector_engine_async()
 
     # Return a valid engine object with valid URL.
     graph_id = os.getenv("GRAPH_ID", "")
     cognee.config.set_vector_db_url(f"neptune-graph://{graph_id}")
-    engine = get_vector_engine()
+    engine = await get_vector_engine_async()
     assert isinstance(engine, NeptuneAnalyticsAdapter)
 
     TEST_COLLECTION_NAME = "test"

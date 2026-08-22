@@ -1,0 +1,18 @@
+Assistant: Hello! This is Sarah from TechSupply Solutions.
+        Thanks for reaching out for your IT procurement needs.
+
+        User: We're looking to procure 50 high-performance enterprise laptops.
+        Specs: Intel i7, 16GB RAM, 512GB SSD, dedicated graphics card.
+        Budget: $80,000. What models do you have?
+
+        Assistant: TechSupply Solutions can offer Dell Precision 5570 ($1,450) and Lenovo ThinkPad P1 ($1,550).
+        Both come with a 3-year warranty. Delivery: 2–3 weeks (Dell), 3–4 weeks (Lenovo).
+
+        User: Do you provide bulk discounts? We're planning another 200 units next quarter.
+
+        Assistant: Yes! Orders over $50,000 get 8% off.
+        So for your current order:
+        - Dell = $1,334 each ($66,700 total)
+        - Lenovo = $1,426 each ($71,300 total)
+
+        And for 200 units next quarter, we can offer 12% off with flexible delivery.

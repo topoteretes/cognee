@@ -1,18 +1,22 @@
 """Tests for the rule-based query router."""
 
+import pytest
+
 from cognee.api.v1.recall.query_router import route_query, record_override, override_counts
 from cognee.modules.search.types import SearchType
 
 
 class TestFactualQueries:
     def test_simple_who(self):
-        assert route_query("Who won Nobel Prizes?").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("Who won Nobel Prizes?").search_type == SearchType.HYBRID_COMPLETION
 
     def test_simple_what(self):
-        assert route_query("What did Einstein discover?").search_type == SearchType.GRAPH_COMPLETION
+        assert (
+            route_query("What did Einstein discover?").search_type == SearchType.HYBRID_COMPLETION
+        )
 
     def test_short_list(self):
-        assert route_query("List all scientists").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("List all scientists").search_type == SearchType.HYBRID_COMPLETION
 
 
 class TestCypherQueries:
@@ -40,6 +44,28 @@ class TestCodingRules:
     def test_bare_function_is_not_code(self):
         result = route_query("What is the function of the liver?")
         assert result.search_type != SearchType.CODING_RULES
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "hook PreToolUse gate.py emergency exit",
+            "Where is def recover() mentioned in the incident notes?",
+            "Describe the import process for customer records",
+            "What does the return policy say?",
+            "Find the async workflow in the operations guide",
+            "Find the await keyword mentioned in the incident notes",
+            "Which runbook mentions class Parser(",
+            "Which runbook mentions function restore_state(",
+        ],
+    )
+    def test_incidental_code_tokens_do_not_select_coding_rules(self, query):
+        assert route_query(query).search_type != SearchType.CODING_RULES
+
+    def test_explicit_coding_intent_still_selects_coding_rules(self):
+        assert (
+            route_query("What coding rules apply to gate.py?").search_type
+            == SearchType.CODING_RULES
+        )
 
 
 class TestLexical:
@@ -134,7 +160,7 @@ class TestConfidence:
 
     def test_default_has_base_confidence(self):
         r = route_query("Tell me something interesting")
-        assert r.search_type == SearchType.GRAPH_COMPLETION
+        assert r.search_type == SearchType.HYBRID_COMPLETION
         assert r.confidence >= 0
 
 
@@ -148,7 +174,7 @@ class TestAmbiguousQueries:
         assert r.search_type == SearchType.GRAPH_SUMMARY_COMPLETION
 
     def test_default_for_vague_query(self):
-        assert route_query("Tell me something").search_type == SearchType.GRAPH_COMPLETION
+        assert route_query("Tell me something").search_type == SearchType.HYBRID_COMPLETION
 
 
 class TestOverrideTracking:
