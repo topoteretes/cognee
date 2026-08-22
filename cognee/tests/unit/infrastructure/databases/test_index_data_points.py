@@ -92,6 +92,22 @@ async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
     assert peak == 1
 
 
+
+class MultiIndexedDataPoint(DataPoint):
+    name: str
+    description: str
+    metadata: dict = {
+        "index_fields": ["name", "description"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_index_data_points_does_not_share_metadata_between_index_fields():
+    data_point = MultiIndexedDataPoint(
+        name="entity-name",
+        description="entity-description",
+    )
+
 @pytest.mark.asyncio
 async def test_index_data_points_does_not_mutate_metadata():
     data_point = TestDataPoint(name="test")
@@ -99,16 +115,24 @@ async def test_index_data_points_does_not_mutate_metadata():
 
     original_index_fields = list(data_point.metadata["index_fields"])
 
+
     mock_vector_engine = AsyncMock()
     mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
 
-    async def _get_vector_engine():
-        return mock_vector_engine
+    await index_data_points([data_point], vector_engine=mock_vector_engine)
 
-    with patch.dict(
-        index_data_points.__globals__,
-        {"get_vector_engine_async": _get_vector_engine},
-    ):
-        await index_data_points([data_point])
+    indexed_batches = mock_vector_engine.index_data_points.await_args_list
 
-    assert data_point.metadata["index_fields"] == original_index_fields
+    assert len(indexed_batches) == 2
+
+    indexed_by_field = {
+        call.args[1]: call.args[2][0]
+        for call in indexed_batches
+    }
+
+    assert indexed_by_field["name"].metadata["index_fields"] == ["name"]
+    assert indexed_by_field["description"].metadata["index_fields"] == [
+        "description"
+    ]
+
+    assert data_point.metadata["index_fields"] == ["name", "description"]
