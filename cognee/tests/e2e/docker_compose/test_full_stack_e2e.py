@@ -50,15 +50,16 @@ def test_mcp_health_and_tool_call(mcp_ready):
     assert health.json().get("status") == "ok", health.text
 
     call = call_mcp_tool()
-    # `list_data()` without arguments renders "📂 No datasets found." (with a
-    # cognify hint) or a "📂 Available Datasets:" header followed by one
-    # numbered entry per dataset.
-    assert re.match(r"📂 (No datasets found\.|Available Datasets:)", call.result_text), (
-        f"unexpected list_data output: {call.result_text!r}"
+    # `cognify_status()` renders the pipeline-status mapping as a dict string
+    # ("{}", or "{'<dataset-uuid>': ...}" once ingestion has run) — or, in API
+    # mode before any ingestion, an explicit "❌ Dataset ... not found via API"
+    # line. Any of these proves a real LLM-free tool call round-tripped.
+    assert re.match(r"(\{|❌ Dataset )", call.result_text), (
+        f"unexpected cognify_status output: {call.result_text!r}"
     )
     # structuredContent is only forwarded for tools advertised in tools/list,
-    # and `list_data` returns plain TextContent — treat any structured payload
-    # as a bonus and only sanity-check its type when present.
+    # and `cognify_status` returns plain TextContent — treat any structured
+    # payload as a bonus and only sanity-check its type when present.
     if call.structured is not None:
         assert isinstance(call.structured, dict), call.structured
 
