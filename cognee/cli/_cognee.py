@@ -152,6 +152,13 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         help="Start the cognee web UI interface",
     )
     parser.add_argument(
+        "--gateway-port",
+        type=int,
+        default=None,
+        help="Serve the UI, API backend and MCP server behind this single port, so the whole "
+        "stack is reachable at one domain. Without it each runs on its own port.",
+    )
+    parser.add_argument(
         "--user-id",
         default=None,
         help="User/agent UUID for multi-agent isolation. Each unique ID gets its own session history and permissions. Omit to use the default user.",
@@ -349,6 +356,7 @@ def main() -> int:
             frontend_port = 3000
             start_backend, backend_port = True, 8000
             start_mcp, mcp_port = True, 8001
+            gateway_port = getattr(args, "gateway_port", None)
             server_process = start_ui(
                 pid_callback=pid_callback,
                 port=frontend_port,
@@ -358,15 +366,26 @@ def main() -> int:
                 backend_port=backend_port,
                 start_mcp=start_mcp,
                 mcp_port=mcp_port,
+                gateway_port=gateway_port,
             )
 
             if server_process:
                 fmt.success("UI server started successfully!")
-                fmt.echo(f"The interface is available at: http://localhost:{frontend_port}")
-                if start_backend:
-                    fmt.echo(f"The API backend is available at: http://localhost:{backend_port}")
-                if start_mcp:
-                    fmt.echo(f"The MCP server is available at: http://localhost:{mcp_port}")
+                if gateway_port:
+                    base_url = f"http://localhost:{gateway_port}"
+                    fmt.echo(f"The interface is available at: {base_url}")
+                    if start_backend:
+                        fmt.echo(f"The API backend is available at: {base_url}/backend")
+                    if start_mcp:
+                        fmt.echo(f"The MCP server is available at: {base_url}/mcp")
+                else:
+                    fmt.echo(f"The interface is available at: http://localhost:{frontend_port}")
+                    if start_backend:
+                        fmt.echo(
+                            f"The API backend is available at: http://localhost:{backend_port}"
+                        )
+                    if start_mcp:
+                        fmt.echo(f"The MCP server is available at: http://localhost:{mcp_port}")
                 fmt.note("Press Ctrl+C to stop the server...")
 
                 try:
