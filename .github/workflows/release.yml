@@ -184,14 +184,122 @@ jobs:
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
+  bump-mcp-lock:
+    needs: [release-github, release-pypi-package]
+    name: Sync cognee-mcp lock to the released version
+    # The MCP image installs cognee from PyPI via cognee-mcp/uv.lock, which can
+    # only be re-locked after the new version is published (the lock embeds the
+    # published artifacts' hashes). Doing that by hand was missed for 1.4.1 and
+    # 1.5.0, shipping images whose tag did not match the cognee library inside
+    # (issue #4360), and stalled 1.5.2 on a failed guard — so the release now
+    # bumps the lock itself. Dev canaries are exempt: their .devN versions are
+    # never in the lock.
+    if: ${{ github.ref_name == 'main' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
+    steps:
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.ref_name }}
+          # The push back to main below must authenticate with a token that is
+          # allowed to push to the protected branch; the default workflow token
+          # is not. GH_RELEASE_TOKEN already creates the GitHub release.
+          token: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+
+      - name: Wait for cognee ${{ needs.release-github.outputs.version }} on PyPI
+        env:
+          VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -sf "https://pypi.org/pypi/cognee/${VERSION}/json" > /dev/null; then
+              echo "cognee ${VERSION} is live on PyPI."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/60: cognee ${VERSION} not on PyPI yet; retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::cognee ${VERSION} did not appear on PyPI within 15 minutes."
+          exit 1
+
+      - name: Re-lock cognee-mcp to the released version
+        env:
+          VERSION: ${{ needs.release-github.outputs.version }}
+        working-directory: cognee-mcp
+        run: |
+          uv lock --upgrade-package "cognee==${VERSION}"
+          LOCKED_VERSION="$(python3 - <<'PY'
+          import tomllib
+
+          with open("uv.lock", "rb") as lock_file:
+              lock = tomllib.load(lock_file)
+
+          print(next(p["version"] for p in lock["package"] if p["name"] == "cognee"))
+          PY
+          )"
+          echo "cognee-mcp/uv.lock now pins cognee: ${LOCKED_VERSION}"
+          if [ "${LOCKED_VERSION}" != "${VERSION}" ]; then
+            echo "::error::Re-lock did not land on ${VERSION} (got ${LOCKED_VERSION})."
+            exit 1
+          fi
+
+      - name: Commit and push the lock bump
+        id: push
+        env:
+          VERSION: ${{ needs.release-github.outputs.version }}
+        run: |
+          git config user.name "Cognee Team"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet cognee-mcp/uv.lock; then
+            echo "Lock already pinned cognee ${VERSION}; nothing to push."
+          else
+            git add cognee-mcp/uv.lock
+            git commit -m "chore: Sync cognee-mcp lock to cognee ${VERSION} [release]"
+            # Rebase in case main moved while the release was running.
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  release-mcp-docker-image:
+    # On main this waits for the lock bump and builds from the bumped commit;
+    # on dev, bump-mcp-lock is skipped and this builds from the branch head
+    # exactly as before. `!failure() && !cancelled()` lets the job run after a
+    # skipped dependency but never after a failed bump — that would rebuild
+    # exactly the tag/library skew this pipeline exists to prevent.
+    needs: [release-github, bump-mcp-lock]
+    if: ${{ !failure() && !cancelled() }}
+    name: Release MCP Docker Image from ${{ github.ref_name }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ${{ needs.bump-mcp-lock.outputs.sha || github.ref_name }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ needs.bump-mcp-lock.outputs.sha || github.ref_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
       - name: Check MCP lockfile ships the released cognee version
-        # The MCP image installs cognee from PyPI via cognee-mcp/uv.lock, which
-        # can only be re-locked after the new version is published — a manual
-        # step that was missed for 1.4.1 and 1.5.0, shipping images whose tag
-        # did not match the cognee library inside (issue #4360). Fail here
-        # instead of pushing a silently skewed cognee-mcp image. Dev canaries
-        # are exempt: their .devN versions cannot be in the lock before they
-        # are published.
+        # Safety net behind bump-mcp-lock: catches push races and manual
+        # re-runs against a stale ref instead of pushing a silently skewed
+        # cognee-mcp image (issue #4360). Dev canaries are exempt: their .devN
+        # versions cannot be in the lock before they are published.
         if: ${{ github.ref_name == 'main' }}
         env:
           RELEASE_VERSION: ${{ needs.release-github.outputs.version }}
@@ -208,7 +316,7 @@ jobs:
           echo "Release version: ${RELEASE_VERSION}"
           echo "cognee-mcp/uv.lock pins cognee: ${LOCKED_VERSION}"
           if [ "${LOCKED_VERSION}" != "${RELEASE_VERSION}" ]; then
-            echo "::error file=cognee-mcp/uv.lock::cognee-mcp/uv.lock pins cognee ${LOCKED_VERSION}, but this release is ${RELEASE_VERSION} — the cognee-mcp:${RELEASE_VERSION} image would ship the wrong library (issue #4360). Once cognee ${RELEASE_VERSION} is on PyPI, run 'uv lock --upgrade-package cognee' in cognee-mcp/, merge the lock bump, then re-run this job."
+            echo "::error file=cognee-mcp/uv.lock::cognee-mcp/uv.lock pins cognee ${LOCKED_VERSION}, but this release is ${RELEASE_VERSION} — the cognee-mcp:${RELEASE_VERSION} image would ship the wrong library (issue #4360). The bump-mcp-lock job should have synced this; re-run the workflow, or run 'uv lock --upgrade-package cognee==${RELEASE_VERSION}' in cognee-mcp/, merge the bump, then re-run this job."
             exit 1
           fi
 
