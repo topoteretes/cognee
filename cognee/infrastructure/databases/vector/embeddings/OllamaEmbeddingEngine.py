@@ -19,7 +19,10 @@ from tenacity import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.shared.rate_limiting import (
+    consume_embedding_token_budget,
+    embedding_rate_limiter_context_manager,
+)
 from cognee.shared.utils import create_secure_ssl_context
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
@@ -180,6 +183,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
             async with embedding_rate_limiter_context_manager():
+                await consume_embedding_token_budget(self.tokenizer, prompt)
                 async with session.post(
                     self.endpoint, json=payload, headers=headers, timeout=60.0
                 ) as response:
