@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models.EntityType import EntityType
@@ -6,7 +6,10 @@ from cognee.modules.engine.models.EntityType import EntityType
 
 class Entity(DataPoint):
     name: str
-    is_a: Optional[EntityType] = None
+    # Either a bare EntityType, or (Edge(relationship_type="is_a", edge_text=...),
+    # EntityType) to carry retrieval text on the edge itself - same bare-tuple
+    # convention as ``relations`` below.
+    is_a: Optional[Union[EntityType, tuple]] = None
     description: str
     relations: List[tuple] = []
     # Optional truth-alignment fields; never embedded (kept out of index_fields)
