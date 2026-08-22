@@ -13,6 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from cognee.infrastructure.llm.streaming.token_sink import stream_answer_tokens
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_context_builder import render_preference_block
@@ -213,10 +214,17 @@ async def complete_turn(
         response_model=prompts.response_model,
     )
 
-    if isinstance(user_id, UUID):
-        async with track_session_usage(session_id, user_id):
-            return await completion_call
-    return await completion_call
+    # The only place a token sink goes active. This turn runs the answer call
+    # concurrently with turn analysis (see run_concurrent_session_turn), and
+    # asyncio.gather snapshots the context per task — so promoting here, inside
+    # the answer task, is what keeps SessionTurnAnalysis output from interleaving
+    # into the user's stream. A request-scoped flag could not make that
+    # distinction. No-op unless a caller installed a sink.
+    async with stream_answer_tokens(stage="generating"):
+        if isinstance(user_id, UUID):
+            async with track_session_usage(session_id, user_id):
+                return await completion_call
+        return await completion_call
 
 
 async def commit_turn(
