@@ -23,6 +23,9 @@ env:
 
 jobs:
   prepare-merged-branches:
+    # This automation scans the upstream dev branch and opens documentation
+    # PRs; it is not applicable to contributor forks without that branch.
+    if: github.repository == 'topoteretes/cognee'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     outputs:
@@ -70,7 +73,7 @@ jobs:
   create-docs-prs:
     needs:
       - prepare-merged-branches
-    if: ${{ needs.prepare-merged-branches.outputs.has_merges == 'true' }}
+    if: ${{ github.repository == 'topoteretes/cognee' && needs.prepare-merged-branches.outputs.has_merges == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     strategy:
@@ -85,7 +88,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 
@@ -373,7 +376,7 @@ jobs:
     needs:
       - prepare-merged-branches
       - create-docs-prs
-    if: ${{ failure() }}
+    if: ${{ github.repository == 'topoteretes/cognee' && failure() }}
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
