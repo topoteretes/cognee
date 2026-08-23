@@ -10,7 +10,11 @@ from cognee.modules.engine.utils import generate_edge_name, generate_node_name
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import construct_data_points_and_edges
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.data_models import KnowledgeGraph, Node
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 _ONTOLOGY_CLASS_CATEGORY = "classes"
 _ONTOLOGY_INDIVIDUAL_CATEGORY = "individuals"
@@ -98,8 +102,14 @@ def _get_ontology_match(
 def _canonicalize_extracted_graph(
     extracted_graph: KnowledgeGraph,
     ontology_match_lookup: OntologyMatchLookup,
+    strict: bool = False,
 ) -> None:
-    """Canonicalize one graph and collapse nodes matched to the same ontology entity."""
+    """Canonicalize one graph and collapse nodes matched to the same ontology entity.
+
+    Strict mode is entity-grounding only — it drops nodes with neither a class nor an
+    individual match (and their edges), with no domain/range/cardinality/disjointness
+    reasoning, and relationship names are not checked against the ontology.
+    """
     extracted_node_ids: set[str] = set()
     for node in extracted_graph.nodes:
         if node.id in extracted_node_ids:
@@ -107,6 +117,7 @@ def _canonicalize_extracted_graph(
         extracted_node_ids.add(node.id)
 
     retained_nodes: list[Node] = []
+    dropped_node_ids: set[str] = set()
     surviving_node_id_by_entity_id: dict[UUID, str] = {}
     surviving_node_id_by_collapsed_node_id: dict[str, str] = {}
 
@@ -125,7 +136,10 @@ def _canonicalize_extracted_graph(
             node.name,
         )
         if entity_match is None:
-            retained_nodes.append(node)
+            if strict and entity_type_match is None:
+                dropped_node_ids.add(node.id)
+            else:
+                retained_nodes.append(node)
             continue
 
         node.name = entity_match.canonical_name
@@ -139,9 +153,10 @@ def _canonicalize_extracted_graph(
         surviving_node_id_by_collapsed_node_id[node.id] = surviving_node_id
 
     extracted_graph.nodes = retained_nodes
-    if not surviving_node_id_by_collapsed_node_id:
+    if not surviving_node_id_by_collapsed_node_id and not dropped_node_ids:
         return
 
+    retained_edges = []
     for edge in extracted_graph.edges:
         edge.source_node_id = surviving_node_id_by_collapsed_node_id.get(
             edge.source_node_id,
@@ -151,12 +166,25 @@ def _canonicalize_extracted_graph(
             edge.target_node_id,
             edge.target_node_id,
         )
+        if edge.source_node_id in dropped_node_ids or edge.target_node_id in dropped_node_ids:
+            continue
+        retained_edges.append(edge)
+
+    dropped_edge_count = len(extracted_graph.edges) - len(retained_edges)
+    extracted_graph.edges = retained_edges
+    if dropped_node_ids or dropped_edge_count:
+        logger.warning(
+            "Strict ontology mode dropped %s ungrounded node(s) and %s edge(s).",
+            len(dropped_node_ids),
+            dropped_edge_count,
+        )
 
 
 def canonicalize_extracted_graphs(
     data_chunks: list[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver,
+    strict: bool = False,
 ) -> tuple[list[KnowledgeGraph], OntologyMatchLookup]:
     """Canonicalize ontology matches in place before ordinary graph construction."""
     ontology_match_lookup = _find_ontology_matches_for_extracted_graphs(
@@ -167,7 +195,7 @@ def canonicalize_extracted_graphs(
 
     for extracted_graph in extracted_graphs:
         if extracted_graph:
-            _canonicalize_extracted_graph(extracted_graph, ontology_match_lookup)
+            _canonicalize_extracted_graph(extracted_graph, ontology_match_lookup, strict=strict)
 
     return extracted_graphs, ontology_match_lookup
 
@@ -321,10 +349,12 @@ def construct_data_points_and_edges_with_ontology(
     ontology_resolver: BaseOntologyResolver,
 ) -> tuple[dict[str, Entity | EntityType], dict[EdgeIdentity, Edge]]:
     """Canonicalize, construct, and enrich extracted graphs with ontology data."""
+    strict = get_ontology_env_config().ontology_mode == "strict"
     canonicalized_graphs, ontology_match_lookup = canonicalize_extracted_graphs(
         data_chunks,
         extracted_graphs,
         ontology_resolver,
+        strict=strict,
     )
     data_points_by_id, edges_by_identity = construct_data_points_and_edges(
         data_chunks,

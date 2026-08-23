@@ -1,6 +1,8 @@
 """This module contains the configuration for ontology handling."""
 
 from functools import lru_cache
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,12 +18,14 @@ class OntologyEnvConfig(BaseSettings):
     - ontology_resolver
     - ontology_matching
     - ontology_file_path
+    - ontology_mode
     - model_config
     """
 
     ontology_resolver: str = "rdflib"
     matching_strategy: str = "fuzzy"
     ontology_file_path: str = ""
+    ontology_mode: Literal["annotate", "strict"] = "annotate"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
@@ -33,6 +37,7 @@ class OntologyEnvConfig(BaseSettings):
             "ontology_resolver": self.ontology_resolver,
             "matching_strategy": self.matching_strategy,
             "ontology_file_path": self.ontology_file_path,
+            "ontology_mode": self.ontology_mode,
         }
 
 

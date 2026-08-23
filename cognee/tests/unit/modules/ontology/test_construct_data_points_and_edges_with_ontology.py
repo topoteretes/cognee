@@ -1,6 +1,9 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+import cognee.modules.ontology.construct_data_points_and_edges_with_ontology as ontology_module
 
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
@@ -184,3 +187,60 @@ def test_construct_data_points_and_edges_with_ontology_uses_the_pure_constructor
     assert widget.is_a is gadget
     assert widget.ontology_valid is True
     assert gadget.ontology_valid is True
+
+
+def _make_graph_with_ungrounded_node():
+    return KnowledgeGraph(
+        nodes=[
+            Node(id="typed-1", name="Nomatch", type="Gadget", description="class match"),
+            Node(id="named-1", name="Widget", type="Unmatched", description="individual match"),
+            Node(id="ghost-1", name="Ghost", type="Phantom", description="ungrounded"),
+        ],
+        edges=[
+            KGEdge(
+                source_node_id="named-1",
+                target_node_id="ghost-1",
+                relationship_name="haunted_by",
+            )
+        ],
+    )
+
+
+def test_strict_mode_drops_ungrounded_nodes_and_their_edges():
+    graph = _make_graph_with_ungrounded_node()
+
+    canonicalize_extracted_graphs([_make_chunk()], [graph], _StubResolver(), strict=True)
+
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1"]
+    assert graph.edges == []
+
+
+def test_annotate_mode_retains_ungrounded_nodes_and_their_edges():
+    graph = _make_graph_with_ungrounded_node()
+
+    canonicalize_extracted_graphs([_make_chunk()], [graph], _StubResolver())
+
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1", "ghost-1"]
+    assert len(graph.edges) == 1
+    assert graph.edges[0].target_node_id == "ghost-1"
+
+
+def test_construct_data_points_and_edges_with_ontology_reads_strict_mode_from_config(monkeypatch):
+    monkeypatch.setattr(
+        ontology_module,
+        "get_ontology_env_config",
+        lambda: SimpleNamespace(ontology_mode="strict"),
+    )
+    chunk = _make_chunk()
+    chunk.contains = None
+    graph = _make_graph_with_ungrounded_node()
+
+    data_points_by_id, _ = construct_data_points_and_edges_with_ontology(
+        [chunk],
+        [graph],
+        _StubResolver(),
+    )
+
+    assert str(Entity.id_for("widget_canonical")) in data_points_by_id
+    assert str(Entity.id_for("ghost")) not in data_points_by_id
+    assert [node.id for node in graph.nodes] == ["typed-1", "named-1"]
