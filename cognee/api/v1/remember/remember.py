@@ -661,6 +661,7 @@ async def remember(
     self_improvement: bool = True,
     session_ids: Optional[List[str]] = None,
     dry_run: bool = False,
+    raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
 ) -> Union["RememberResult", "DryRunEstimate"]:
     """Store data in memory.
@@ -884,6 +885,7 @@ async def remember(
             self_improvement=self_improvement,
             session_ids=session_ids,
             span=span,
+            raise_on_error=raise_on_error,
             **kwargs,
         )
 
@@ -939,6 +941,7 @@ async def _remember_inner(
     self_improvement,
     session_ids,
     span,
+    raise_on_error: bool = True,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
@@ -1366,6 +1369,12 @@ async def _remember_inner(
                 chunk_size=chunk_size,
                 custom_prompt=custom_prompt,
                 run_in_background=False,
+                # Loud-by-default: a failed build raises CognifyFailedError
+                # (typed, classified, with a remedy) out of blocking remember()
+                # instead of returning a silently "errored" result nobody
+                # inspects. Background mode still records the failure on the
+                # result and the run record — a raise has nowhere to go there.
+                raise_on_error=raise_on_error,
                 **shared_kwargs,
                 **cognify_kwargs,
             )

@@ -51,6 +51,51 @@ from cognee.modules.observability import (
 logger = get_logger("cognify")
 
 
+def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
+    """Wrap a run-level pipeline exception in a typed CognifyFailedError.
+
+    CognifyFailedError instances pass through unchanged so double-wrapping
+    can't happen.
+    """
+    from cognee.modules.operations import scrub_error_message
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+
+    if isinstance(error, CognifyFailedError):
+        return error
+    return CognifyFailedError(
+        dataset_name=str(datasets) if datasets else None,
+        error_class=type(error).__name__,
+        error_message=scrub_error_message(error),
+    )
+
+
+def raise_if_cognify_errored(result) -> None:
+    """Raise ``CognifyFailedError`` if any dataset's foreground run errored.
+
+    ``result`` is the blocking executor's ``{dataset_id: PipelineRunInfo}``
+    mapping (or a bare run info when no dataset id was present). The first
+    errored run wins — a day-0 user has exactly one dataset, and for batch
+    users the exception names the dataset so the rest can be retried.
+    """
+    from cognee.modules.pipelines.exceptions import CognifyFailedError
+    from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunErrored
+
+    if isinstance(result, PipelineRunErrored):
+        run_infos = [result]
+    elif isinstance(result, dict):
+        run_infos = [info for info in result.values() if isinstance(info, PipelineRunErrored)]
+    else:
+        return
+
+    for run_info in run_infos:
+        raise CognifyFailedError(
+            dataset_name=getattr(run_info, "dataset_name", None),
+            error_class=getattr(run_info, "error_class", None),
+            error_message=getattr(run_info, "error_message", None)
+            or str(getattr(run_info, "payload", "") or ""),
+        )
+
+
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -71,6 +116,7 @@ async def cognify(
     embedding_config: Optional[EmbeddingConfig] = None,
     data_cache: bool = True,
     dry_run: bool = False,
+    raise_on_error: bool = True,
     **kwargs,
 ):
     """
@@ -318,22 +364,42 @@ async def cognify(
         def resolve_cognify_tasks(data_item):
             return tasks_by_route[cognify_route_for(data_item)]
 
-        result = await pipeline_executor_func(
-            pipeline=run_pipeline,
-            datasets=datasets,
-            tasks=resolve_cognify_tasks,
-            pipeline_name="cognify_pipeline",
-            user=user,
-            vector_db_config=vector_db_config,
-            graph_db_config=graph_db_config,
-            incremental_loading=incremental_loading,
-            use_pipeline_cache=False,
-            data_per_batch=data_per_batch,
-            rollback_handler=cognify_rollback_handler,
-            llm_config=llm_config,
-            embedding_config=embedding_config,
-            data_cache=data_cache,
-        )
+        try:
+            result = await pipeline_executor_func(
+                pipeline=run_pipeline,
+                datasets=datasets,
+                tasks=resolve_cognify_tasks,
+                pipeline_name="cognify_pipeline",
+                user=user,
+                vector_db_config=vector_db_config,
+                graph_db_config=graph_db_config,
+                incremental_loading=incremental_loading,
+                use_pipeline_cache=False,
+                data_per_batch=data_per_batch,
+                rollback_handler=cognify_rollback_handler,
+                llm_config=llm_config,
+                embedding_config=embedding_config,
+                data_cache=data_cache,
+            )
+        except Exception as error:
+            # Run-level failures (e.g. an AuthenticationError escaping a task)
+            # re-raise straight out of the pipeline generator, bypassing the
+            # errored-run-info path below. Wrap them in the same typed,
+            # classified exception so foreground callers see ONE failure
+            # surface either way; raise_on_error=False keeps the raw exception
+            # (today's behavior).
+            if raise_on_error and not run_in_background:
+                raise _wrap_cognify_exception(error, datasets) from error
+            raise
+
+        # Loud-by-default failure: a silently "errored" run info is invisible to
+        # first-time users (57% of first SDK cognify runs errored and 0 of those
+        # accounts ever searched — the run object was never inspected). Raise a
+        # typed, classified error instead; batch/pipeline users opt out with
+        # raise_on_error=False. Background runs can't raise here — their errors
+        # land on the run record and the warm-up marker.
+        if raise_on_error and not run_in_background:
+            raise_if_cognify_errored(result)
 
         dataset_desc = str(datasets) if datasets else "all datasets"
         span.set_attribute(
