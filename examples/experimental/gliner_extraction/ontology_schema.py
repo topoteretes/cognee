@@ -188,6 +188,52 @@ async def discover_schema(
     return entity_types, relation_types
 
 
+async def refine_schema(
+    entity_types: dict,
+    relation_types: dict,
+    residue_examples: list[str],
+    sample_texts: list[str],
+    max_new_types: int = 8,
+) -> tuple[dict, dict]:
+    """Slow-pass schema refinement: ONE LLM call upgrades a provisional schema.
+
+    Input is the evidence the fast pass collected: the bank-selected types,
+    the residue spans no selected label covered, and low-coverage chunk
+    texts. The LLM proposes (a) new entity types that cover the residue and
+    (b) domain-specific relation types to replace the generic starter set.
+    Additive only — existing types are never removed, so nodes already in
+    the graph stay valid.
+    """
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+    sample = "\n---\n".join(sample_texts)[:8000]
+    proposed = await LLMGateway.acreate_structured_output(
+        text_input=(
+            f"Current entity types: {sorted(entity_types)}\n"
+            f"Current relation types (generic placeholders): {sorted(relation_types)}\n"
+            f"Text spans no current type covers: {residue_examples}\n\n"
+            f"Low-coverage samples from the dataset:\n{sample}"
+        ),
+        system_prompt=(
+            "You refine the extraction schema of a knowledge extraction system. "
+            f"Propose (a) up to {max_new_types} ADDITIONAL entity types that "
+            "cover the uncovered spans and anything the samples show the "
+            "current types miss, and (b) up to "
+            f"{max_new_types} domain-specific relation types to improve on the "
+            "generic placeholders. Do not repeat existing types. snake_case "
+            "names, one-sentence descriptions of what text spans match."
+        ),
+        response_model=ProposedSchema,
+    )
+    new_entities = {
+        t.name: t.description for t in proposed.entity_types if t.name not in entity_types
+    }
+    new_relations = {
+        t.name: t.description for t in proposed.relation_types if t.name not in relation_types
+    }
+    return new_entities, new_relations
+
+
 async def discover_additional_types(
     sample_texts: list[str],
     known_entity_types: dict,

@@ -114,6 +114,30 @@ Measured on the space demo: first ingestion **5 s** including discovery
 (13 types selected: `astronaut`, `spacecraft`, `rocket`, `space_mission`,
 `celestial_body`, `government_agency`, …), second ingestion 3 s from cache.
 
+### The slow pass: `gliner_improve()`
+
+The fast pass records what it could not judge (provisional flag, residue
+spans, low-coverage chunks). `gliner_improve(dataset, ...)` spends LLM time
+on exactly that evidence, later and off the ingestion path:
+
+```
+fast pass (seconds, no LLM)          slow pass (background, ONE LLM call)
+gliner_cognify()                     gliner_improve()
+  bank ontology v1 (provisional) --->  refine: new types for residue spans,
+  residue + low-coverage flagged        domain relations replace generic set
+                                        ontology v2 (refined, cached)
+                                        re-extract with refined schema
+```
+
+Measured on the space demo (gemma3 via Ollama, 15 s total): the refinement
+added `fuel_type`, `launch_site`, `rocket_engine`, `contract_value`,
+`person`, … and 8 domain relations (`contracted_by`, `advisor_to`,
+`engine_powered_by`, …). Re-extraction then caught what the fast pass had
+missed — `elon musk` (neither astronaut nor company), `liquid methane`,
+`$2.9 billion` — growing the graph from 49 nodes / 77 edges to
+64 / 118. Idempotent: with a refined ontology and low residue it no-ops.
+Additive only — existing types and graph nodes are never invalidated.
+
 ### Schema discovery: LLM (optional, `schema_discovery="llm"`)
 
 For LLM-invented schemas instead of bank selection. The call is constrained
@@ -215,7 +239,10 @@ discovery call (+8 entity, +8 relation types), and the re-extraction found
 - `ontology_schema.py` — OWL → GLiNER schema derivation + per-dataset LLM
   discovery of types the ontology doesn't cover.
 - `adaptive_schema.py` — per-batch entity-density monitoring with
-  density-triggered schema expansion and re-extraction.
+  density-triggered schema expansion and re-extraction; `AutoSchemaManager`
+  (cache -> bank -> LLM -> fallback resolution).
+- `label_bank.py` — the ~120-type universal label bank for schema selection.
+- `gliner_improve.py` — the slow pass: LLM schema refinement + re-extraction.
 - `demo_gliner_cognify.py` — end-to-end demo that runs with a deliberately
   broken LLM key as proof of zero LLM calls.
 - `benchmark_book.py` — whole-book benchmark (`python benchmark_book.py book.pdf`).

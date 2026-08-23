@@ -103,6 +103,17 @@ async def main():
     show_ontology()
     await show_graph()
 
+    section("RUN 3 — SLOW PASS: one gemma3 call refines the provisional ontology")
+    from gliner_improve import gliner_improve
+
+    t0 = time.time()
+    report = await gliner_improve(DATASET, extractor=extractor)
+    print(f"[{time.time() - t0:.0f}s] slow pass (LLM refinement + re-extraction)")
+    print(f"  added entity types:   {report.get('added_entity_types')}")
+    print(f"  added relation types: {report.get('added_relation_types')}")
+    show_ontology()
+    await show_graph()
+
     section("LLM-free search over the discovered-ontology graph")
     results = await cognee.search(
         query_text="Who is flying around the Moon?", query_type=SearchType.CHUNKS, top_k=1
