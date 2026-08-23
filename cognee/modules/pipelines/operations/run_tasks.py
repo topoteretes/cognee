@@ -178,6 +178,10 @@ async def run_tasks(
                     for result in results
                     if isinstance(result["run_info"], PipelineRunErrored)
                 ]
+                for errored_result in errored_results:
+                    # The non-raising per-item path hands the root cause along
+                    # in the result dict rather than as a gathered exception.
+                    first_item_error = first_item_error or errored_result.get("error")
                 if errored_results:
                     failure = PipelineRunFailedError(
                         message="Pipeline run failed. Data item could not be processed."
