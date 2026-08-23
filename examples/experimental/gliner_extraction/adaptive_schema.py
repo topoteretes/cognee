@@ -24,7 +24,7 @@ import pathlib
 
 from cognee.shared.logging_utils import get_logger
 
-from ontology_schema import discover_additional_types, discover_schema
+from ontology_schema import discover_additional_types, discover_schema, discover_schema_bank
 
 logger = get_logger("adaptive_schema")
 
@@ -163,6 +163,8 @@ class AutoSchemaManager(AdaptiveSchemaTuner):
         self,
         dataset: str,
         cache_dir: str | pathlib.Path,
+        discovery: str = "bank",
+        probe=None,
         fallback_entity_types: dict | None = None,
         fallback_relation_types: dict | None = None,
         discovery_sample_size: int = 12,
@@ -171,11 +173,14 @@ class AutoSchemaManager(AdaptiveSchemaTuner):
         super().__init__({}, {}, **tuner_kwargs)
         self.dataset = dataset
         self.cache_path = pathlib.Path(cache_dir) / f"{dataset}.json"
+        self.discovery = discovery  # "bank" (fast pass, no LLM) | "llm"
+        self.probe = probe
         self.fallback_entity_types = fallback_entity_types
         self.fallback_relation_types = fallback_relation_types
         self.discovery_sample_size = discovery_sample_size
         self.version = 0
         self.schema_source = None
+        self.residue_info = None
         self._initialized = False
 
     async def ensure_schema(self, texts: list[str]) -> None:
@@ -199,28 +204,58 @@ class AutoSchemaManager(AdaptiveSchemaTuner):
             )
             return
 
-        try:
-            sample = texts[: self.discovery_sample_size]
+        sample = texts[: self.discovery_sample_size]
+        from gliner_graph_extractor import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES
+
+        if self.discovery == "bank" and self.probe is not None:
             logger.info(
-                "No cached ontology for dataset %r — running ONE LLM ontology-discovery call over %d sample chunks",
+                "No cached ontology for dataset %r — bank selection over %d sample chunks (no LLM)",
                 self.dataset,
                 len(sample),
             )
-            self.entity_types, self.relation_types = await discover_schema(sample)
-            self.schema_source = "llm_discovery"
-        except Exception as error:
-            from gliner_graph_extractor import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES
+            selected, self.residue_info = await discover_schema_bank(sample, self.probe)
+            if selected:
+                self.entity_types = selected
+                # Relation discovery is a slow-pass concern; start generic.
+                self.relation_types = dict(self.fallback_relation_types or DEFAULT_RELATION_TYPES)
+                self.schema_source = "bank_selection_provisional"
+                if self.residue_info and self.residue_info["residue_ratio"] > 0.3:
+                    logger.warning(
+                        "High residue ratio %.2f — the label bank may be missing "
+                        "domain types for this dataset (examples: %s). Flagged for "
+                        "slow-pass refinement.",
+                        self.residue_info["residue_ratio"],
+                        ", ".join(self.residue_info["residue_examples"][:5]),
+                    )
+                self._save()
+                return
+            logger.warning("Bank selection found no firing labels — trying next source.")
 
-            self.entity_types = dict(self.fallback_entity_types or DEFAULT_ENTITY_TYPES)
-            self.relation_types = dict(self.fallback_relation_types or DEFAULT_RELATION_TYPES)
-            self.schema_source = "fallback_defaults"
-            logger.warning(
-                "Ontology discovery LLM call failed (%s: %s) — falling back to "
-                "generic default labels. Configure an LLM (a local Ollama model "
-                "works) or pass entity_types/relation_types explicitly.",
-                type(error).__name__,
-                error,
-            )
+        if self.discovery == "llm" or (self.discovery == "bank" and self.probe is None):
+            try:
+                logger.info(
+                    "Running ONE LLM ontology-discovery call over %d sample chunks",
+                    len(sample),
+                )
+                self.entity_types, self.relation_types = await discover_schema(sample)
+                self.schema_source = "llm_discovery"
+                self._save()
+                return
+            except Exception as error:
+                logger.warning(
+                    "Ontology discovery LLM call failed (%s: %s) — falling back.",
+                    type(error).__name__,
+                    error,
+                )
+
+        self.entity_types = dict(self.fallback_entity_types or DEFAULT_ENTITY_TYPES)
+        self.relation_types = dict(self.fallback_relation_types or DEFAULT_RELATION_TYPES)
+        self.schema_source = "fallback_defaults"
+        logger.warning(
+            "Using generic default labels for dataset %r — pass entity_types "
+            "explicitly, enable bank/LLM discovery, or configure an LLM.",
+            self.dataset,
+        )
         self._save()
 
     async def observe_and_maybe_expand(self, texts: list[str], results: list[dict]) -> bool:
@@ -232,16 +267,16 @@ class AutoSchemaManager(AdaptiveSchemaTuner):
     def _save(self):
         self.version += 1
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_path.write_text(
-            json.dumps(
-                {
-                    "version": self.version,
-                    "dataset": self.dataset,
-                    "schema_source": self.schema_source,
-                    "entity_types": self.entity_types,
-                    "relation_types": self.relation_types,
-                },
-                indent=2,
-            )
-        )
+        payload = {
+            "version": self.version,
+            "dataset": self.dataset,
+            "schema_source": self.schema_source,
+            "provisional": self.schema_source
+            in ("bank_selection_provisional", "fallback_defaults"),
+            "entity_types": self.entity_types,
+            "relation_types": self.relation_types,
+        }
+        if self.residue_info:
+            payload["residue"] = self.residue_info
+        self.cache_path.write_text(json.dumps(payload, indent=2))
         logger.info("Ontology v%d saved to %s", self.version, self.cache_path)

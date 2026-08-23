@@ -67,6 +67,91 @@ class ProposedSchema(BaseModel):
     relation_types: List[ProposedType]
 
 
+def _score_hits(results: list[dict]) -> dict:
+    """Aggregate per-label hits and confidence from probe results."""
+    scores = {}
+    for result in results:
+        for label, values in result.get("entities", {}).items():
+            for value in values:
+                confidence = value.get("confidence", 1.0) if isinstance(value, dict) else 1.0
+                hits, conf_sum = scores.get(label, (0, 0.0))
+                scores[label] = (hits + 1, conf_sum + confidence)
+    return scores
+
+
+async def discover_schema_bank(
+    sample_texts: list[str],
+    probe,
+    bank: dict | None = None,
+    slice_size: int = 24,
+    max_types: int = 20,
+    min_hits: int = 2,
+    min_confidence: float = 0.55,
+) -> tuple[dict, dict]:
+    """Schema SELECTION from a universal label bank — no LLM, no clustering.
+
+    Probes the sample texts with ~120 pre-named candidate types in slices of
+    `slice_size` (respecting GLiNER's measured label-count ceiling) and keeps
+    the top `max_types` labels that actually fire. Names and descriptions
+    come from the bank, so they are hand-quality and consistent across
+    datasets. Deterministic: same samples, same schema.
+
+    `probe` is an async callable (texts, labels_dict) -> list of GLiNER
+    entity results (confidence included when available).
+
+    Returns (entity_types, residue_info): residue_info records spans caught
+    by broad generic seeds that no selected label covers — the signal that
+    the bank is missing a domain type, left for the slow pass to name.
+    """
+    from label_bank import GENERIC_SEEDS, LABEL_BANK
+
+    bank = bank or LABEL_BANK
+    # min_hits guards against one-off false fires, but only makes sense when
+    # the sample is big enough that a real type would fire more than once.
+    effective_min_hits = min_hits if len(sample_texts) >= 4 else 1
+    bank_items = list(bank.items())
+    scores = {}
+    for start in range(0, len(bank_items), slice_size):
+        labels = dict(bank_items[start : start + slice_size])
+        results = await probe(sample_texts, labels)
+        scores.update(_score_hits(results))
+
+    ranked = sorted(
+        (
+            (label, hits, conf_sum / hits)
+            for label, (hits, conf_sum) in scores.items()
+            if hits >= effective_min_hits and conf_sum / hits >= min_confidence
+        ),
+        key=lambda item: (-item[1], -item[2]),
+    )
+    selected = {label: bank[label] for label, _, _ in ranked[:max_types] if label in bank}
+
+    # Residue detection: what did broad seeds catch that no selected label did?
+    seed_results = await probe(sample_texts, GENERIC_SEEDS)
+    selected_results = await probe(sample_texts, selected) if selected else seed_results
+    covered = {
+        value["text"] if isinstance(value, dict) else value
+        for result in selected_results
+        for values in result.get("entities", {}).values()
+        for value in values
+    }
+    residue = [
+        value["text"] if isinstance(value, dict) else value
+        for result in seed_results
+        for values in result.get("entities", {}).values()
+        for value in values
+        if (value["text"] if isinstance(value, dict) else value) not in covered
+    ]
+    seed_total = sum(
+        len(values) for result in seed_results for values in result.get("entities", {}).values()
+    )
+    residue_info = {
+        "residue_ratio": round(len(residue) / seed_total, 3) if seed_total else 0.0,
+        "residue_examples": sorted(set(residue))[:15],
+    }
+    return selected, residue_info
+
+
 async def discover_schema(
     sample_texts: list[str],
     max_types: int = 20,

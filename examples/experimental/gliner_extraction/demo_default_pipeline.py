@@ -1,11 +1,13 @@
 """Showcase: the DEFAULT gliner_cognify pipeline, fully local intelligence.
 
-No schema is configured anywhere. Run 1: a local LLM (Ollama gemma3 4B)
-invents the dataset ontology in ONE call, it is cached and versioned, and
+No schema is configured anywhere and NO LLM is needed. Run 1: schema
+discovery probes the data with a ~120-type label bank and keeps what fires
+(GLiNER itself does the probing); the ontology is cached and versioned, and
 GLiNER2 extracts the graph. Run 2 (more data, same dataset): the cached
-ontology loads with ZERO LLM calls. Search at the end is embeddings-only.
+ontology loads instantly. Search at the end is embeddings-only.
 
-Requires: ollama running with gemma3 pulled (ollama pull gemma3).
+Optional: set LLM_* env (e.g. Ollama gemma3) and schema_discovery="llm"
+in gliner_cognify for LLM-invented schemas instead of bank selection.
 """
 
 import asyncio
@@ -89,7 +91,7 @@ async def main():
     t0 = time.time()
     await cognee.add(RUN_1_TEXT, dataset_name=DATASET)
     await gliner_cognify(datasets=[DATASET], extractor=extractor)
-    print(f"[{time.time() - t0:.0f}s] first ingestion (includes ONE local gemma3 discovery call)")
+    print(f"[{time.time() - t0:.0f}s] first ingestion (schema from bank selection, no LLM)")
     show_ontology()
     await show_graph()
 

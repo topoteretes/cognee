@@ -92,13 +92,38 @@ default (`auto_schema=True`):
 - No LLM configured at all: falls back to generic default labels with a loud
   warning (or pass `entity_types`/`relation_types` explicitly).
 
-The discovery call is constrained (read samples, emit 10–30 labels), so a
-small local model is enough. Measured on the same discovery task (M-series
-laptop, via Ollama):
+### Schema discovery: bank selection (default, no LLM at all)
 
-| Model | Discovery time | Schema quality |
+The default discovery (`schema_discovery="bank"`) needs no LLM: it probes
+the sample chunks with a ~120-type **label bank** (`label_bank.py`, FewNERD/
+OntoNotes-style names plus technical/medical/legal/scientific types, each
+with a hand-written description) in slices of 24 labels, and keeps the top
+types that actually fire — *selection instead of invention*. GLiNER itself
+does the probing, so discovery adds only a few encoder passes.
+
+Why this beats clustering-based statistical discovery: no cluster-count
+guessing, no brittle name synthesis, hand-quality descriptions (GLiNER's
+precision depends on them), deterministic output, and **consistent type
+names across datasets** (every dataset with drugs gets `medication`, not a
+dataset-specific cluster name). The trade-off — a bank cannot invent a
+truly novel domain type — is measured per run as a **residue ratio** (spans
+broad generic seeds catch that no selected label covers) and recorded in
+the ontology cache for the slow pass to resolve.
+
+Measured on the space demo: first ingestion **5 s** including discovery
+(13 types selected: `astronaut`, `spacecraft`, `rocket`, `space_mission`,
+`celestial_body`, `government_agency`, …), second ingestion 3 s from cache.
+
+### Schema discovery: LLM (optional, `schema_discovery="llm"`)
+
+For LLM-invented schemas instead of bank selection. The call is constrained
+(read samples, emit 10–30 labels), so a small local model is enough.
+Measured on the same discovery task (M-series laptop, via Ollama):
+
+| Discovery | Time | Schema quality |
 |---|---|---|
-| **gemma3 4B** (recommended) | **12.8 s** | best (10 specific types) |
+| **Bank selection (default)** | **~3 s** | 13 specific types, consistent names |
+| gemma3 4B | 12.8 s | best LLM option (10 specific types) |
 | llama3.2 3B | 21.6 s | weakest (5 generic types) |
 | qwen3:4b + `/no_think` | 84 s | good |
 | qwen3:4b (thinking) | ~2.4 min | good |

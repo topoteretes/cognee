@@ -248,6 +248,7 @@ async def gliner_cognify(
     storage_depth: int = 1,
     auto_schema: bool = True,
     schema_cache_dir=None,
+    schema_discovery: str = "bank",
 ):
     """Run the whole cognify pipeline with GLiNER2 instead of an LLM.
 
@@ -279,10 +280,24 @@ async def gliner_cognify(
     if auto_schema and schema_tuner is None and not entity_types and not relation_types:
         from adaptive_schema import AutoSchemaManager
 
+        async def _probe(texts, labels):
+            """Entities-only GLiNER pass used by bank-selection discovery."""
+            if worker_pool is not None:
+                return await worker_pool.extract(texts, labels, {}, batch_size=gliner_batch_size)
+            return await asyncio.to_thread(
+                extractor.batch_extract_entities,
+                texts,
+                labels,
+                batch_size=gliner_batch_size,
+                include_confidence=True,
+            )
+
         dataset_names = datasets if isinstance(datasets, list) else [datasets]
         schema_tuner = AutoSchemaManager(
             dataset=str(dataset_names[0]),
             cache_dir=schema_cache_dir or pathlib.Path(__file__).parent / ".gliner_schema_cache",
+            discovery=schema_discovery,
+            probe=_probe,
         )
 
     storage = _BackgroundStorage(depth=storage_depth)
