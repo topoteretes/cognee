@@ -56,6 +56,22 @@ def is_local_llm(provider: str | None, model: str | None) -> bool:
     return (model or "").lower().startswith(LOCAL_LLM_MODEL_PREFIXES)
 
 
+def _apply_local_rate_limit_default(config: "LLMConfig") -> "LLMConfig":
+    """Apply the local-server RPM default to ``config`` unless it was set explicitly.
+
+    Lives outside the class so both the ``default_local_rate_limit_budget``
+    validator and ``stage_config`` can use it: a ``@model_validator`` is a
+    descriptor proxy on the class, not a plain callable.
+    """
+    if "llm_rate_limit_requests" in config.model_fields_set:
+        return config
+
+    if is_local_llm(config.llm_provider, config.llm_model):
+        config.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
+
+    return config
+
+
 class LLMConfig(BaseSettings):
     """
     Configuration settings for the LLM (Large Language Model) provider and related options.
@@ -272,13 +288,7 @@ class LLMConfig(BaseSettings):
         after ``infer_provider_from_model`` so the provider is already
         resolved.
         """
-        if "llm_rate_limit_requests" in self.model_fields_set:
-            return self
-
-        if is_local_llm(self.llm_provider, self.llm_model):
-            self.llm_rate_limit_requests = LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
-
-        return self
+        return _apply_local_rate_limit_default(self)
 
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
@@ -407,6 +417,11 @@ class LLMConfig(BaseSettings):
         any set llm_<stage>_* fields. Unset stage fields fall back to the base
         values, so a config with no stage overrides returns an equivalent config
         (single-model behavior preserved).
+
+        ``model_copy`` does not re-run validators, so the provider-dependent
+        defaults on the copy would still be the ones derived for the *base*
+        provider. Routing a stage to a different provider is the whole point of
+        this method, so those defaults are recomputed below.
         """
         if stage not in _STAGE_NAMES:
             return self
@@ -417,7 +432,17 @@ class LLMConfig(BaseSettings):
                 update[f"llm_{field}"] = value
         if not update:
             return self
-        return self.model_copy(update=update)
+
+        stage_config = self.model_copy(update=update)
+
+        # Re-derive the RPM default from the stage's own provider.
+        # infer_provider_from_model is not re-run: llm_provider is always in
+        # model_fields_set by this point (set explicitly, or assigned by that
+        # validator on the base config), so it would return early every time.
+        # ensure_env_vars_for_ollama is not re-run either, because it validates
+        # the environment rather than deriving a default, and running it here
+        # would move where a misconfiguration is raised.
+        return _apply_local_rate_limit_default(stage_config)
 
 
 @lru_cache
