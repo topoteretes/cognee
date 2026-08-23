@@ -1,4 +1,5 @@
 import importlib
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -47,3 +48,37 @@ async def test_cognify_raises_on_invalid_env_before_pipeline(
 
     with pytest.raises(EnvironmentError):
         await cognify_module.cognify(config=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit_model", [None, object()])
+@patch.object(serve_state_module, "get_remote_client", return_value=None)
+@patch.object(cognify_module, "get_pipeline_executor")
+@patch.object(cognify_module, "get_default_tasks", new_callable=AsyncMock)
+@patch("cognee.modules.migrations.startup.run_migrations_and_block", new_callable=AsyncMock)
+@patch.object(cognify_module, "get_configured_ontology_resolver", return_value=None)
+@patch.object(
+    cognify_module,
+    "get_graph_config",
+    return_value=SimpleNamespace(graph_model="configured-model"),
+)
+async def test_cognify_uses_configured_graph_model_only_as_default(
+    mock_graph_config,
+    mock_get_resolver,
+    mock_migrations,
+    mock_get_default_tasks,
+    mock_get_pipeline_executor,
+    mock_remote_client,
+    explicit_model,
+):
+    mock_get_default_tasks.return_value = []
+    mock_get_pipeline_executor.return_value = AsyncMock(return_value={})
+
+    await cognify_module.cognify(graph_model=explicit_model)
+
+    passed_model = mock_get_default_tasks.await_args.kwargs["graph_model"]
+    assert passed_model == ("configured-model" if explicit_model is None else explicit_model)
+    if explicit_model is None:
+        mock_graph_config.assert_called_once()
+    else:
+        mock_graph_config.assert_not_called()

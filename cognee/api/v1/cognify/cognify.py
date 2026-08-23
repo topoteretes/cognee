@@ -10,6 +10,7 @@ from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
+from cognee.infrastructure.databases.graph.config import get_graph_config
 
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
@@ -54,7 +55,7 @@ logger = get_logger("cognify")
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    graph_model: Optional[BaseModel] = None,
     chunker=TextChunker,
     chunk_size: int = None,
     chunks_per_batch: int = None,
@@ -221,6 +222,11 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    # Resolve the configured model at call time so ``config.set_graph_model``
+    # controls the default without overriding an explicit per-call model.
+    if graph_model is None:
+        graph_model = get_graph_config().graph_model
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
@@ -350,7 +356,7 @@ async def cognify(
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    graph_model: Optional[BaseModel] = None,
     chunker=TextChunker,
     chunk_size: int = None,
     config: Config = None,
@@ -359,6 +365,9 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     functional_relationships: Optional[Collection[str]] = None,
     **kwargs,
 ) -> list[Task]:
+    if graph_model is None:
+        graph_model = get_graph_config().graph_model
+
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     check_contradictions = cognify_config.contradiction_detection
