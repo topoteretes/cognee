@@ -237,7 +237,7 @@ async def test_hybrid_completion_retriever_receives_config():
 
 
 @pytest.mark.asyncio
-async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
+async def test_hybrid_completion_caps_default_channel_limits():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
 
     retriever_instance = await mod.get_search_type_retriever_instance(
@@ -247,11 +247,42 @@ async def test_hybrid_completion_uses_top_k_for_default_channel_limits():
     )
 
     assert isinstance(retriever_instance, HybridRetriever)
-    assert retriever_instance.chunks_top_k == 11
-    assert retriever_instance.entities_top_k == 11
+    assert retriever_instance.chunks_top_k == 10
+    assert retriever_instance.entities_top_k == 10
     assert retriever_instance.text_summaries_top_k is None
     assert retriever_instance.use_importance_weight is True
-    assert retriever_instance.facts_top_k == 11
+    assert retriever_instance.facts_top_k == 10
+    assert retriever_instance.include_references is False
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_leaves_lane_defaults_when_top_k_is_none():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=None,
+    )
+
+    assert retriever_instance.chunks_top_k == 5
+    assert retriever_instance.entities_top_k == 5
+    assert retriever_instance.facts_top_k == 5
+
+
+@pytest.mark.asyncio
+async def test_hybrid_completion_keeps_search_top_k_when_below_lane_cap():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        top_k=5,
+    )
+
+    assert retriever_instance.chunks_top_k == 5
+    assert retriever_instance.entities_top_k == 5
+    assert retriever_instance.facts_top_k == 5
 
 
 @pytest.mark.asyncio
@@ -278,14 +309,13 @@ async def test_hybrid_completion_get_retriever_output_smoke():
 
     vector.search = AsyncMock(side_effect=search)
     vector.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2]])
+    vector.has_collection = AsyncMock(return_value=True)
     graph = MagicMock()
     graph.is_empty = AsyncMock(return_value=False)
     graph.get_neighborhood = AsyncMock(return_value=([], []))
     unified = MagicMock()
     unified.vector = vector
     unified.graph = graph
-    bm25_retriever = MagicMock()
-    bm25_retriever.get_retrieved_objects = AsyncMock(return_value=[])
 
     with (
         patch.object(
@@ -304,8 +334,9 @@ async def test_hybrid_completion_get_retriever_output_smoke():
             return_value=unified,
         ),
         patch(
-            "cognee.modules.retrieval.hybrid.chunks.BM25ChunksRetriever",
-            return_value=bm25_retriever,
+            "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
+            new_callable=AsyncMock,
+            return_value=vector,
         ),
         patch(
             "cognee.modules.retrieval.hybrid_retriever.generate_completion",

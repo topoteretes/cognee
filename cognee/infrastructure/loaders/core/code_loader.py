@@ -5,6 +5,7 @@ from typing import Any
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 # Source-file extensions of the languages enola extracts (its per-language
 # extractors and tree-sitter grammars; see https://github.com/enola-labs/enola
@@ -103,5 +104,6 @@ class CodeLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        stored_path = await storage.store(storage_file_name, content)
-        return LoaderResult(file_path=stored_path, system_metadata={"source": "code"})
+        return await store_derived_text(
+            storage, storage_file_name, content, system_metadata={"source": "code"}
+        )

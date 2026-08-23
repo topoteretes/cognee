@@ -17,4 +17,5 @@ from .exceptions import (
     SessionQAEntryValidationError,
     SessionParameterValidationError,
     DatabaseCredentialsError,
+    Neo4jMultiDatabaseSupportError,
 )

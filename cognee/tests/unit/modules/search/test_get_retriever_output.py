@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.types import SearchType
@@ -216,3 +218,231 @@ def test_count_retrieved_objects_preserves_existing_shapes():
     assert count_retrieved_objects({"triplets": []}) == 0
     assert count_retrieved_objects({"metadata": "value"}) == 1
     assert count_retrieved_objects("answer") == 1
+
+
+@pytest.mark.asyncio
+async def test_hybrid_deferral_reports_graph_completion():
+    retriever = _DeterministicRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            new_callable=AsyncMock,
+            return_value="Entity_name collection missing",
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ) as factory,
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=({"chunks": []}, "context", ["answer"]),
+        ),
+    ):
+        result = await get_retriever_output(SearchType.HYBRID_COMPLETION, "q")
+
+    assert result.search_type is SearchType.GRAPH_COMPLETION
+    assert factory.await_args.kwargs["query_type"] is SearchType.GRAPH_COMPLETION
+
+
+@pytest.mark.asyncio
+async def test_feeling_lucky_hybrid_deferral_reports_graph_completion():
+    retriever = _DeterministicRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "select_search_type",
+            new_callable=AsyncMock,
+            return_value=SearchType.HYBRID_COMPLETION,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "hybrid_deferral_reason",
+            new_callable=AsyncMock,
+            return_value="neighborhood_depth is set",
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ) as factory,
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=({"chunks": []}, "context", ["answer"]),
+        ),
+    ):
+        result = await get_retriever_output(SearchType.FEELING_LUCKY, "q", neighborhood_depth=2)
+
+    assert result.search_type is SearchType.GRAPH_COMPLETION
+    assert factory.await_args.kwargs["query_type"] is SearchType.GRAPH_COMPLETION
+
+
+@pytest.mark.asyncio
+async def test_feeling_lucky_on_empty_graph_skips_selector_and_keeps_hybrid():
+    class _EmptyGraph:
+        async def is_empty(self):
+            return True
+
+    retriever = _DeterministicRetriever()
+    with (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_EmptyGraph(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "select_search_type",
+            new_callable=AsyncMock,
+        ) as selector,
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ) as factory,
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=(
+                {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []},
+                "",
+                ["answer"],
+            ),
+        ),
+    ):
+        result = await get_retriever_output(SearchType.FEELING_LUCKY, "q")
+
+    selector.assert_not_awaited()
+    assert result.search_type is SearchType.HYBRID_COMPLETION
+    assert factory.await_args.kwargs["query_type"] is SearchType.HYBRID_COMPLETION
+
+
+class _Entity:
+    pass
+
+
+def _factory_and_session_patches(retriever):
+    return (
+        patch.object(
+            get_retriever_output_module,
+            "get_graph_engine",
+            new_callable=AsyncMock,
+            return_value=_FakeGraphEngine(),
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "get_search_type_retriever_instance",
+            new_callable=AsyncMock,
+            return_value=retriever,
+        ),
+        patch.object(
+            get_retriever_output_module,
+            "run_session_aware_completion",
+            new_callable=AsyncMock,
+            return_value=({"chunks": []}, "context", ["answer"]),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_nodeset_scope_defers_and_forwards_node_name():
+    retriever = _DeterministicRetriever()
+    graph, factory, session = _factory_and_session_patches(retriever)
+    with graph, factory as factory_mock, session:
+        result = await get_retriever_output(
+            SearchType.HYBRID_COMPLETION,
+            "q",
+            node_name=["KEN"],
+            node_type=_Entity,
+        )
+
+    assert result.search_type is SearchType.GRAPH_COMPLETION
+    assert factory_mock.await_args.kwargs["query_type"] is SearchType.GRAPH_COMPLETION
+    assert factory_mock.await_args.kwargs["node_name"] == ["KEN"]
+    assert factory_mock.await_args.kwargs["node_type"] is _Entity
+
+
+@pytest.mark.asyncio
+async def test_nodeset_scope_stays_on_hybrid_and_forwards_node_name():
+    retriever = _DeterministicRetriever()
+    vector = AsyncMock()
+    vector.has_collection = AsyncMock(return_value=True)
+    graph, factory, session = _factory_and_session_patches(retriever)
+    with (
+        graph,
+        factory as factory_mock,
+        session,
+        patch(
+            "cognee.modules.search.methods.hybrid_deferral.get_vector_engine_async",
+            new_callable=AsyncMock,
+            return_value=vector,
+        ),
+    ):
+        result = await get_retriever_output(
+            SearchType.HYBRID_COMPLETION,
+            "q",
+            node_name=["KEN"],
+            node_type=NodeSet,
+        )
+
+    assert result.search_type is SearchType.HYBRID_COMPLETION
+    assert factory_mock.await_args.kwargs["query_type"] is SearchType.HYBRID_COMPLETION
+    assert factory_mock.await_args.kwargs["node_name"] == ["KEN"]
+    assert factory_mock.await_args.kwargs["node_type"] is NodeSet
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"wide_search_top_k": 200}, "wide_search_top_k"),
+        ({"triplet_distance_penalty": 2.5}, "triplet_distance_penalty"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_hybrid_rejects_graph_only_knobs(kwargs, match):
+    retriever = _DeterministicRetriever()
+    graph, factory, session = _factory_and_session_patches(retriever)
+    with graph, factory as factory_mock, session:
+        with pytest.raises(CogneeValidationError, match=match):
+            await get_retriever_output(SearchType.HYBRID_COMPLETION, "q", **kwargs)
+
+    factory_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_accepts_graph_only_knobs():
+    retriever = _DeterministicRetriever()
+    graph, factory, session = _factory_and_session_patches(retriever)
+    with graph, factory as factory_mock, session:
+        result = await get_retriever_output(
+            SearchType.GRAPH_COMPLETION,
+            "q",
+            wide_search_top_k=200,
+            triplet_distance_penalty=2.5,
+        )
+
+    assert result.search_type is SearchType.GRAPH_COMPLETION
+    assert factory_mock.await_args.kwargs["wide_search_top_k"] == 200
+    assert factory_mock.await_args.kwargs["triplet_distance_penalty"] == 2.5

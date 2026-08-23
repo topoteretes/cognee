@@ -59,7 +59,9 @@ class TikTokenTokenizer(TokenizerInterface):
         """
         if not isinstance(tokens, list):
             tokens = [tokens]
-        return [self.tokenizer.decode(i) for i in tokens]
+        # tiktoken's decode expects a sequence of ids, so wrap each id: passing a
+        # bare int raises "'int' object is not an instance of 'Sequence'".
+        return [self.tokenizer.decode([i]) for i in tokens]
 
     def decode_single_token(self, token: int) -> str:
         """

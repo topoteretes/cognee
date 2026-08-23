@@ -234,8 +234,10 @@ def get_remember_router() -> APIRouter:
             default=None,
             examples=[""],
             description=(
-                "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes. "
-                "Only supported value: 'skills'; leave empty for normal ingestion."
+                "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes, "
+                "or 'code' to index whole code repositories (pass them via 'repositories') "
+                "as an architectural code graph through the enola-backed pipeline. "
+                "Leave empty for normal ingestion."
             ),
         ),
         import_mode: Optional[str] = Form(
@@ -261,6 +263,28 @@ def get_remember_router() -> APIRouter:
             description=(
                 "content_type='skills' + skills_text only: name/slug for the inline skill "
                 "(defaults to 'skill')."
+            ),
+        ),
+        repositories: Optional[List[EmptyExampleStr]] = Form(
+            default=None,
+            examples=[None],
+            description=(
+                "content_type='code' only: repository specs to index — remote git URLs "
+                "(cloned server-side, shallow) or local directory paths on the server's "
+                "filesystem (requires ACCEPT_LOCAL_FILE_PATH; useful when the server "
+                "shares the caller's filesystem). One code graph is built per entry. "
+                "Combine with run_in_background=true for large repositories and poll "
+                "GET /v1/datasets/status?pipeline=code_graph_pipeline."
+            ),
+        ),
+        index_vectors: Optional[bool] = Form(
+            default=False,
+            description=(
+                "content_type='code' only: also embed the extracted code facts so "
+                "semantic/completion retrievers can see them (requires an embedding "
+                "provider). Default false — the code graph pipeline is deterministic "
+                "and makes no LLM or embedding calls, and SearchType.CODE uses graph "
+                "indexes only."
             ),
         ),
         user: User = Depends(get_authenticated_user),
@@ -296,18 +320,28 @@ def get_remember_router() -> APIRouter:
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **graph_model** (Optional[str]): JSON-serialised graph model schema (same dict format accepted by the cognify endpoint).
         - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
-          Skill nodes; omit for normal ingestion.
+          Skill nodes, or "code" to index whole repositories (see repositories);
+          omit for normal ingestion.
+        - **repositories** (Optional[List[str]]): content_type="code" only — git URLs or
+          server-local repo paths to index as code graphs, one graph per entry. Poll
+          progress via GET /v1/datasets/status?pipeline=code_graph_pipeline.
+        - **index_vectors** (Optional[bool]): content_type="code" only — also embed the
+          extracted code facts for semantic retrievers (default false, no LLM/embedding
+          calls otherwise).
 
         Either datasetName or datasetId must be provided.
 
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
-          content_type, or invalid graph_model JSON/schema
+          content_type, invalid graph_model JSON/schema, or invalid code-ingestion
+          combination (missing repositories, file uploads or session_id with
+          content_type="code", repositories/index_vectors without it, or local repo
+          paths while ACCEPT_LOCAL_FILE_PATH=false)
         - **409 Conflict**: Error during processing
         """
         send_telemetry(
             "Remember API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/remember",
                 "node_set": node_set,
@@ -360,14 +394,76 @@ def get_remember_router() -> APIRouter:
                 run_in_background=run_in_background or False,
             )
 
-        if content_type and content_type not in ("skills", "cogx-archive"):
+        if content_type and content_type not in ("skills", "code", "cogx-archive"):
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Unsupported content_type '{content_type}'. "
-                    "Use 'skills', 'cogx-archive', or leave it empty for normal ingestion."
+                    "Use 'skills', 'code', 'cogx-archive', or leave it empty for "
+                    "normal ingestion."
                 ),
             )
+
+        # Drop empty entries — Swagger UI submits untouched array items as "".
+        repo_specs = [spec.strip() for spec in (repositories or []) if spec and spec.strip()]
+
+        if repo_specs and content_type != "code":
+            raise HTTPException(
+                status_code=400,
+                detail="repositories is only supported with content_type='code'.",
+            )
+        if index_vectors and content_type != "code":
+            raise HTTPException(
+                status_code=400,
+                detail="index_vectors is only supported with content_type='code'.",
+            )
+
+        if content_type == "code":
+            if session_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "session_id is not applicable to content_type='code'; code graphs "
+                        "are stored in the permanent graph, not a session cache."
+                    ),
+                )
+            if data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "content_type='code' does not accept file uploads — pass repository "
+                        "paths or git URLs via 'repositories'. To ingest individual code "
+                        "files, upload them under their real filename without content_type."
+                    ),
+                )
+            if not repo_specs:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "content_type='code' requires at least one repository path or "
+                        "git URL in 'repositories'."
+                    ),
+                )
+
+            from cognee.tasks.code_graph.resolve_repo import is_remote_repo
+            from cognee.tasks.ingestion.save_data_item_to_storage import (
+                settings as save_data_settings,
+            )
+
+            # Local paths are read from the server's own filesystem. That is the
+            # intended setup for a local server sharing the caller's checkout, but
+            # a server that disables local file ingestion must not hand out a
+            # read-any-directory primitive through this route either.
+            if not save_data_settings.accept_local_file_path and any(
+                not is_remote_repo(spec) for spec in repo_specs
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Local repository paths are disabled on this server "
+                        "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
+                    ),
+                )
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
@@ -418,7 +514,8 @@ def get_remember_router() -> APIRouter:
                 }
 
             result = await cognee_remember(
-                data,
+                # For code, the payload is the repo specs — there are no uploads.
+                repo_specs if content_type == "code" else data,
                 dataset_name=datasetName,
                 session_id=session_id or None,
                 user=user,
@@ -433,6 +530,9 @@ def get_remember_router() -> APIRouter:
                 content_type=content_type or None,
                 skills_text=skills_text or None,
                 skill_name=skill_name or None,
+                # index_vectors may only reach remember() for code — it raises
+                # for any other content_type, including None.
+                **({"index_vectors": bool(index_vectors)} if content_type == "code" else {}),
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
             )
@@ -511,7 +611,7 @@ def get_remember_router() -> APIRouter:
         """
         send_telemetry(
             "Remember Entry API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/remember/entry",
                 "entry_type": payload.entry.type,

@@ -63,7 +63,7 @@ def get_ontology_router() -> APIRouter:
         """
         send_telemetry(
             "Ontology Upload API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /api/v1/ontologies",
                 "cognee_version": cognee_version,
@@ -139,7 +139,7 @@ def get_ontology_router() -> APIRouter:
         """
         send_telemetry(
             "Ontology Delete API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "DELETE /api/v1/ontologies/{ontology_key}",
                 "cognee_version": cognee_version,
@@ -176,7 +176,7 @@ def get_ontology_router() -> APIRouter:
         """
         send_telemetry(
             "Ontology List API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /api/v1/ontologies",
                 "cognee_version": cognee_version,

@@ -402,6 +402,10 @@ def _err(e: Exception) -> str:
     return str(e) or repr(e)
 
 
+# Transient-reset retries for tenant creation (see _create_cloud_tenant).
+_TENANT_CREATE_ATTEMPTS = 3
+
+
 async def _create_cloud_tenant(
     management_url: str, api_key: str, tenant_name: str, ready_timeout_s: float = 600.0
 ) -> tuple[str, str, float]:
@@ -416,19 +420,54 @@ async def _create_cloud_tenant(
 
     t0 = time.time()
     async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
-        async with session.post(
-            f"{management_url}/api/v1/tenants", params={"tenant_name": tenant_name}
-        ) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Tenant creation failed ({resp.status}): {body}")
-            tenant_id = (await resp.json())["tenant_id"]
+        # The controller drops the connection under load: a bare POST failed the
+        # whole nightly cloud arm on 3 of the last 4 runs with
+        # "[Errno 104] Connection reset by peer", 266s in. A reset is not a
+        # rejection -- nothing was created -- so retry it. An HTTP >=400 IS a
+        # real rejection and still fails immediately, so a genuinely broken
+        # controller is not retried into a slow green.
+        last_exc = None
+        tenant_id = None
+        for attempt in range(_TENANT_CREATE_ATTEMPTS):
+            try:
+                async with session.post(
+                    f"{management_url}/api/v1/tenants", params={"tenant_name": tenant_name}
+                ) as resp:
+                    if resp.status >= 400:
+                        body = await resp.text()
+                        raise RuntimeError(f"Tenant creation failed ({resp.status}): {body}")
+                    tenant_id = (await resp.json())["tenant_id"]
+                break
+            except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
+                last_exc = exc
+                if attempt == _TENANT_CREATE_ATTEMPTS - 1:
+                    raise
+                backoff = 2**attempt
+                print(
+                    f"  Tenant creation attempt {attempt + 1}/{_TENANT_CREATE_ATTEMPTS} failed "
+                    f"({_err(exc)}); retrying in {backoff}s",
+                    flush=True,
+                )
+                await asyncio.sleep(backoff)
+        if tenant_id is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"Tenant creation failed: {_err(last_exc)}")
 
         deadline = time.time() + ready_timeout_s
         while True:
-            async with session.get(f"{management_url}/api/v1/tenants/{tenant_id}/status") as resp:
-                if resp.status < 400 and (await resp.json()).get("status") == "healthy":
-                    break
+            # A transient reset while polling is not "unhealthy" -- keep polling
+            # until the deadline rather than failing the run on one bad packet.
+            try:
+                async with session.get(
+                    f"{management_url}/api/v1/tenants/{tenant_id}/status"
+                ) as resp:
+                    if resp.status < 400 and (await resp.json()).get("status") == "healthy":
+                        break
+            except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
+                if time.time() > deadline:
+                    raise TimeoutError(
+                        f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s "
+                        f"(last error: {_err(exc)})"
+                    ) from exc
             if time.time() > deadline:
                 raise TimeoutError(f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s")
             await asyncio.sleep(2)

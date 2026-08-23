@@ -12,11 +12,15 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from cognee.infrastructure.session.session_context_models import (
+    MIN_GATE_CONFIDENCE as MIN_GATE_CONFIDENCE,
+)
+
 # -- Tunables ----------------------------------------------------------------
 
-# Gate: a context entry is distillable only when it was never rated harmful and its
-# confidence clears this threshold. Deterministic, no search/LLM.
-MIN_GATE_CONFIDENCE = 0.75
+# Gate: a context entry is distillable only when it passes the shared usability
+# check (never rated harmful, confidence clears MIN_GATE_CONFIDENCE). The
+# threshold lives next to the session-context models; re-exported above.
 
 # Batching: pack capped timeline blocks into coarse batches. Six worst-case QA
 # blocks plus separators stays below the budget, so the batching logic can stay simple.

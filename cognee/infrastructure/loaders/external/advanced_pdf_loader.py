@@ -11,6 +11,8 @@ from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadat
 from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
 
@@ -47,7 +49,9 @@ class AdvancedPdfLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, strategy: str = "auto", **kwargs: Any) -> str:
+    async def load(
+        self, file_path: str, strategy: str = "auto", **kwargs: Any
+    ) -> "str | LoaderResult":
         """Load PDF file using unstructured library. If Exception occurs, fallback to PyPDFLoader.
 
         Args:
@@ -103,15 +107,13 @@ class AdvancedPdfLoader(LoaderInterface):
             data_root_directory = storage_config["data_root_directory"]
             storage = get_file_storage(data_root_directory)
 
-            full_file_path = await storage.store(storage_file_name, full_content)
-
-            return full_file_path
+            return await store_derived_text(storage, storage_file_name, full_content)
 
         except Exception as exc:
             logger.warning("Failed to process PDF with AdvancedPdfLoader: %s", exc)
             return await self._fallback(file_path, **kwargs)
 
-    async def _fallback(self, file_path: str, **kwargs: Any) -> str:
+    async def _fallback(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         logger.info("Falling back to PyPDF loader for %s", file_path)
         fallback_loader = PyPdfLoader()
         return await fallback_loader.load(file_path, **kwargs)
