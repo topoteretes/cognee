@@ -42,8 +42,76 @@ DEFAULT_RELATION_TYPES = {
 
 
 def _span_text(value) -> str:
-    """Normalize a GLiNER value: plain string, or a span dict when include_spans=True."""
-    return value["text"] if isinstance(value, dict) else value
+    """Normalize a GLiNER value: plain string, or a span dict when include_spans=True.
+
+    Whitespace is collapsed so node names never carry newlines from the
+    source layout ('$2.9\\nbillion' -> '$2.9 billion')."""
+    text = value["text"] if isinstance(value, dict) else value
+    return " ".join(text.split())
+
+
+def _overlaps(a: dict, b: dict) -> bool:
+    return not (a["end"] <= b["start"] or a["start"] >= b["end"])
+
+
+def merge_overlapping_entities(result: dict) -> dict:
+    """Deterministic span-boundary cleanup for one chunk's extraction result.
+
+    GLiNER often emits nested duplicates of the same mention — 'artemis ii'
+    inside 'artemis ii mission', 'raptor' inside 'raptor engines', or the
+    same span under two types. Rule: among overlapping spans keep the
+    LONGEST (ties: highest confidence); relation endpoints are remapped to
+    the surviving span so no dropped mention resurfaces as a fallback node.
+    Requires span-format results; results without spans pass through as-is.
+    """
+    spans = []
+    for entity_type, values in result.get("entities", {}).items():
+        for value in values:
+            if not (isinstance(value, dict) and "start" in value):
+                return result
+            spans.append({"entity_type": entity_type, **value})
+    if not spans:
+        return result
+
+    kept = []
+    for span in sorted(spans, key=lambda s: (-(s["end"] - s["start"]), -s.get("confidence", 0.0))):
+        if any(_overlaps(span, survivor) for survivor in kept):
+            continue
+        kept.append(span)
+
+    entities = {}
+    for span in kept:
+        value = {key: val for key, val in span.items() if key != "entity_type"}
+        entities.setdefault(span["entity_type"], []).append(value)
+
+    def _survivor(endpoint: dict) -> dict:
+        if "start" not in endpoint:
+            return endpoint
+        for survivor in kept:
+            if _overlaps(endpoint, survivor):
+                return {
+                    **endpoint,
+                    "text": survivor["text"],
+                    "start": survivor["start"],
+                    "end": survivor["end"],
+                }
+        return endpoint
+
+    relations = {}
+    for relation, pairs in result.get("relation_extraction", {}).items():
+        seen = set()
+        for pair in pairs:
+            if isinstance(pair, dict):
+                pair = {**pair, "head": _survivor(pair["head"]), "tail": _survivor(pair["tail"])}
+                key = (_span_text(pair["head"]), _span_text(pair["tail"]))
+            else:
+                key = (_span_text(pair[0]), _span_text(pair[1]))
+            if key in seen:
+                continue
+            seen.add(key)
+            relations.setdefault(relation, []).append(pair)
+
+    return {**result, "entities": entities, "relation_extraction": relations}
 
 
 def _to_knowledge_graph(result: dict) -> KnowledgeGraph:
@@ -118,8 +186,10 @@ def gliner_chunk_graph_calculator(
     schema = extractor.create_schema().entities(entity_types).relations(relation_types)
 
     def _extract_batch_sync(texts: list[str]) -> list[KnowledgeGraph]:
-        results = extractor.batch_extract(texts, schema, batch_size=batch_size, threshold=threshold)
-        return [_to_knowledge_graph(result) for result in results]
+        results = extractor.batch_extract(
+            texts, schema, batch_size=batch_size, threshold=threshold, include_spans=True
+        )
+        return [_to_knowledge_graph(merge_overlapping_entities(result)) for result in results]
 
     async def calculate_chunk_graphs(data_chunks, graph_model, custom_prompt=None, **kwargs):
         # GLiNER2 inference is synchronous CPU work — keep it off the event loop.

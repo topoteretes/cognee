@@ -33,6 +33,7 @@ from gliner_graph_extractor import (
     DEFAULT_ENTITY_TYPES,
     DEFAULT_RELATION_TYPES,
     _to_knowledge_graph,
+    merge_overlapping_entities,
 )
 from parallel_gliner import pack_texts, unpack_results
 
@@ -177,7 +178,8 @@ async def gliner_extract_and_summarize(
                 threshold=threshold,
                 include_spans=True,
             )
-        return unpack_results(packed_results, packs, len(texts))
+        results = unpack_results(packed_results, packs, len(texts))
+        return [merge_overlapping_entities(result) for result in results]
 
     results = await _extract(
         entity_types or DEFAULT_ENTITY_TYPES, relation_types or DEFAULT_RELATION_TYPES

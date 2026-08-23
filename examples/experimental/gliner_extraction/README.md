@@ -285,6 +285,19 @@ summary indexing — not more extraction speed. On GPU hardware
 (`map_location="cuda"`, `quantize=True`, FlashDeberta) extraction itself has
 another 5–20x of headroom. Apple MPS tested slower than batched CPU.
 
+## Span-boundary cleanup
+
+GLiNER often emits nested duplicates of one mention ('artemis ii' inside
+'artemis ii mission', 'raptor' inside 'raptor engines').
+`merge_overlapping_entities` runs on every extraction result: among
+overlapping spans the longest wins (ties: highest confidence), relation
+endpoints are remapped to the surviving span, and node names are
+whitespace-normalized. This closes most of the boundary-noise gap against
+LLM extraction within a pass. Variants can still arise ACROSS passes (the
+slow pass re-extracts with new types and may produce longer spans than the
+nodes already in the graph) — that is graph-level entity resolution, a
+slow-pass concern, not a span-merge concern.
+
 ## Trade-offs vs LLM extraction
 
 - Fixed label set (entity/relation types are configured, not open-ended);
