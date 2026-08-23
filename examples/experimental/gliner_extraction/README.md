@@ -138,10 +138,19 @@ storage (`perf:` commit):
 | Marginal cost | ~$0.10 (embeddings only) | same | same |
 
 Config for the best run: `workers=3, storage_depth=2, chunks_per_batch=256`,
-OpenAI embeddings. Caveat learned the hard way: switching embedding provider
-can change `HUGGINGFACE_TOKENIZER`, which changes how the chunker counts
-tokens — chunk counts (and therefore all numbers) stop being comparable, and
-oversized chunks degrade GLiNER recall. Pin the tokenizer when comparing.
+OpenAI embeddings.
+
+Caveat learned the hard way: chunk sizes are NOT comparable across embedding
+providers. cognee's chunker counts tokens word-by-word, and `chunk_by_word`
+attaches the trailing space to each word. The TikToken adapter counts that
+trailing space as a token (~2 counted tokens per word), while HuggingFace
+tokenizers drop whitespace (~1 per word) — on whole text the two tokenizers
+agree within 0.2%, so the ~2x gap is purely an artifact of per-word counting.
+Net effect: with OpenAI embeddings a `chunk_size=512` chunk closes at ~250
+real tokens; with `HUGGINGFACE_TOKENIZER` set (Ollama) the same setting
+yields ~2x bigger chunks, which broke packing (chunks exceeded
+`pack_target_chars`) and degraded GLiNER recall in our Ollama run. Halve
+`chunk_size` (or fix the upstream counting) when using HF tokenizers.
 
 After these changes extraction is fully hidden behind storage: the critical
 path is now `add_data_points` (OpenAI embedding round-trips + single-threaded
