@@ -67,68 +67,97 @@ class ProposedSchema(BaseModel):
     relation_types: List[ProposedType]
 
 
-def _score_hits(results: list[dict]) -> dict:
+def _score_hits(results: list[dict], key: str = "entities") -> dict:
     """Aggregate per-label hits and confidence from probe results."""
     scores = {}
     for result in results:
-        for label, values in result.get("entities", {}).items():
+        for label, values in result.get(key, {}).items():
             for value in values:
-                confidence = value.get("confidence", 1.0) if isinstance(value, dict) else 1.0
+                if key == "relation_extraction" and isinstance(value, dict):
+                    confidence = value.get("head", {}).get("confidence", 1.0)
+                elif isinstance(value, dict):
+                    confidence = value.get("confidence", 1.0)
+                else:
+                    confidence = 1.0
                 hits, conf_sum = scores.get(label, (0, 0.0))
                 scores[label] = (hits + 1, conf_sum + confidence)
     return scores
+
+
+def _select(scores: dict, bank: dict, max_types: int, min_hits: int, min_confidence: float) -> dict:
+    ranked = sorted(
+        (
+            (label, hits, conf_sum / hits)
+            for label, (hits, conf_sum) in scores.items()
+            if hits >= min_hits and conf_sum / hits >= min_confidence
+        ),
+        key=lambda item: (-item[1], -item[2]),
+    )
+    return {label: bank[label] for label, _, _ in ranked[:max_types] if label in bank}
 
 
 async def discover_schema_bank(
     sample_texts: list[str],
     probe,
     bank: dict | None = None,
+    relation_bank: dict | None = None,
     slice_size: int = 24,
     max_types: int = 20,
+    max_relation_types: int = 14,
     min_hits: int = 2,
     min_confidence: float = 0.55,
-) -> tuple[dict, dict]:
-    """Schema SELECTION from a universal label bank — no LLM, no clustering.
+) -> tuple[dict, dict, dict]:
+    """Schema SELECTION from universal label banks — no LLM, no clustering.
 
-    Probes the sample texts with ~120 pre-named candidate types in slices of
-    `slice_size` (respecting GLiNER's measured label-count ceiling) and keeps
-    the top `max_types` labels that actually fire. Names and descriptions
-    come from the bank, so they are hand-quality and consistent across
-    datasets. Deterministic: same samples, same schema.
+    Probes the sample texts with ~120 pre-named candidate entity types AND
+    ~48 candidate relation types in slices of `slice_size` (respecting
+    GLiNER's measured label-count ceiling) and keeps the top labels that
+    actually fire. Names and descriptions come from the banks, so they are
+    hand-quality and consistent across datasets. Deterministic: same
+    samples, same schema.
 
-    `probe` is an async callable (texts, labels_dict) -> list of GLiNER
-    entity results (confidence included when available).
+    `probe` is an async callable (texts, entity_types=None,
+    relation_types=None) -> list of GLiNER results (confidence included
+    when available).
 
-    Returns (entity_types, residue_info): residue_info records spans caught
-    by broad generic seeds that no selected label covers — the signal that
-    the bank is missing a domain type, left for the slow pass to name.
+    Returns (entity_types, relation_types, residue_info): residue_info
+    records spans caught by broad generic seeds that no selected label
+    covers — the signal that the bank is missing a domain type, left for
+    the slow pass to name.
     """
-    from label_bank import GENERIC_SEEDS, LABEL_BANK
+    from label_bank import GENERIC_SEEDS, LABEL_BANK, RELATION_BANK
 
     bank = bank or LABEL_BANK
+    relation_bank = relation_bank or RELATION_BANK
     # min_hits guards against one-off false fires, but only makes sense when
     # the sample is big enough that a real type would fire more than once.
     effective_min_hits = min_hits if len(sample_texts) >= 4 else 1
+
+    entity_scores = {}
     bank_items = list(bank.items())
-    scores = {}
     for start in range(0, len(bank_items), slice_size):
         labels = dict(bank_items[start : start + slice_size])
-        results = await probe(sample_texts, labels)
-        scores.update(_score_hits(results))
+        results = await probe(sample_texts, entity_types=labels)
+        entity_scores.update(_score_hits(results))
+    selected = _select(entity_scores, bank, max_types, effective_min_hits, min_confidence)
 
-    ranked = sorted(
-        (
-            (label, hits, conf_sum / hits)
-            for label, (hits, conf_sum) in scores.items()
-            if hits >= effective_min_hits and conf_sum / hits >= min_confidence
-        ),
-        key=lambda item: (-item[1], -item[2]),
+    # Relation selection: probe relation candidates the same way. Relation
+    # heads need entity anchors, so probe with the selected entity types.
+    relation_scores = {}
+    relation_items = list(relation_bank.items())
+    for start in range(0, len(relation_items), slice_size):
+        labels = dict(relation_items[start : start + slice_size])
+        results = await probe(sample_texts, entity_types=selected, relation_types=labels)
+        relation_scores.update(_score_hits(results, key="relation_extraction"))
+    selected_relations = _select(
+        relation_scores, relation_bank, max_relation_types, effective_min_hits, 0.0
     )
-    selected = {label: bank[label] for label, _, _ in ranked[:max_types] if label in bank}
 
     # Residue detection: what did broad seeds catch that no selected label did?
-    seed_results = await probe(sample_texts, GENERIC_SEEDS)
-    selected_results = await probe(sample_texts, selected) if selected else seed_results
+    seed_results = await probe(sample_texts, entity_types=GENERIC_SEEDS)
+    selected_results = (
+        await probe(sample_texts, entity_types=selected) if selected else seed_results
+    )
     covered = {
         value["text"] if isinstance(value, dict) else value
         for result in selected_results
@@ -149,7 +178,7 @@ async def discover_schema_bank(
         "residue_ratio": round(len(residue) / seed_total, 3) if seed_total else 0.0,
         "residue_examples": sorted(set(residue))[:15],
     }
-    return selected, residue_info
+    return selected, selected_relations, residue_info
 
 
 async def discover_schema(

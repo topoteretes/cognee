@@ -140,6 +140,63 @@ LABEL_BANK = {
     "skill": "Skills, competencies, disciplines",
 }
 
+RELATION_BANK = {
+    # generic / structural
+    "part_of": "Membership or composition: one entity is a component of another",
+    "member_of": "A person or entity belongs to a group or organization",
+    "located_in": "Geographic relationship: entity is in a place",
+    "works_for": "Employment or service: person works at an organization",
+    "founded": "A person or organization created an organization",
+    "created": "An entity made a product, work, or system",
+    "owns": "Ownership of an asset, company, or object",
+    "uses": "An entity uses a tool, technology, or material",
+    "named_after": "An entity is named after a person or thing",
+    "based_on": "A work or system derives from another",
+    # business
+    "acquired": "One company bought another company or asset",
+    "partnered_with": "Two organizations collaborate or form a partnership",
+    "invested_in": "An investor put money into a company or project",
+    "awarded_to": "A contract, prize, or grant given to a recipient",
+    "contracted_by": "An entity performs work under contract for another",
+    "supplies": "One entity provides components or services to another",
+    "manufactured_by": "A product is made by a company",
+    "funded_by": "An entity receives funding from another",
+    "led_by": "An organization, team, or program is led by a person",
+    "subsidiary_of": "A company is owned by a parent company",
+    "competes_with": "Two entities compete in a market or contest",
+    # events and time
+    "scheduled_for": "An event or mission is planned for a date",
+    "occurred_on": "An event happened on a date or at a time",
+    "participated_in": "A person or group took part in an event",
+    "caused": "One event or entity caused another event or condition",
+    # military / historical
+    "commands": "A person leads a military unit or force",
+    "fought_in": "A person or army took part in a battle or war",
+    "defeated": "One side beat another in battle, war, or contest",
+    "allied_with": "Two parties formed an alliance",
+    # people
+    "married_to": "Marriage relationship between two people",
+    "relative_of": "Family relationship between two people",
+    "advisor_to": "A person advises another person or organization",
+    "succeeded": "A person or entity followed another in a role",
+    "born_in": "A person was born in a place or year",
+    "educated_at": "A person studied at an institution",
+    # technology / science / space
+    "powered_by": "A machine or vehicle is driven by an engine or fuel",
+    "developed_by": "A technology or product was developed by an entity",
+    "runs_on": "Software runs on a platform or infrastructure",
+    "integrates_with": "One system connects to or works with another",
+    "launched_from": "A vehicle or mission launched from a site",
+    "orbits": "A body or spacecraft orbits a celestial body",
+    "discovered": "A person or team discovered something",
+    # medical
+    "treats": "A drug, procedure, or practitioner treats a condition",
+    "prescribed_by": "A medication was prescribed by a practitioner",
+    "diagnosed_with": "A patient has a diagnosed condition",
+    "administered_to": "A drug or treatment was given to a patient",
+    "symptom_of": "A finding is a symptom of a condition",
+}
+
 # Broad seeds used for residue detection: spans these catch that no selected
 # bank label covers are evidence of a type the bank is missing.
 GENERIC_SEEDS = {

@@ -282,17 +282,28 @@ async def gliner_cognify(
     if auto_schema and schema_tuner is None and not entity_types and not relation_types:
         from adaptive_schema import AutoSchemaManager
 
-        async def _probe(texts, labels):
-            """Entities-only GLiNER pass used by bank-selection discovery."""
+        async def _probe(texts, entity_types=None, relation_types=None):
+            """Schema-probing GLiNER pass used by bank-selection discovery."""
             if worker_pool is not None:
-                return await worker_pool.extract(texts, labels, {}, batch_size=gliner_batch_size)
-            return await asyncio.to_thread(
-                extractor.batch_extract_entities,
-                texts,
-                labels,
-                batch_size=gliner_batch_size,
-                include_confidence=True,
-            )
+                return await worker_pool.extract(
+                    texts, entity_types or {}, relation_types or {}, batch_size=gliner_batch_size
+                )
+
+            def _sync():
+                schema = extractor.create_schema()
+                if entity_types:
+                    schema = schema.entities(entity_types)
+                if relation_types:
+                    schema = schema.relations(relation_types)
+                return extractor.batch_extract(
+                    texts,
+                    schema,
+                    batch_size=gliner_batch_size,
+                    include_spans=True,
+                    include_confidence=True,
+                )
+
+            return await asyncio.to_thread(_sync)
 
         dataset_names = datasets if isinstance(datasets, list) else [datasets]
         schema_tuner = AutoSchemaManager(

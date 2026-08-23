@@ -67,7 +67,9 @@ def _init_worker(model_name: str, torch_threads: int):
 
 
 def _worker_extract(texts, entity_types, relation_types, threshold, batch_size):
-    schema = _worker_model.create_schema().entities(entity_types)
+    schema = _worker_model.create_schema()
+    if entity_types:
+        schema = schema.entities(entity_types)
     if relation_types:
         schema = schema.relations(relation_types)
     return _worker_model.batch_extract(

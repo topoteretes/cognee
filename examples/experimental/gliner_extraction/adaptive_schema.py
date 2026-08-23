@@ -213,11 +213,15 @@ class AutoSchemaManager(AdaptiveSchemaTuner):
                 self.dataset,
                 len(sample),
             )
-            selected, self.residue_info = await discover_schema_bank(sample, self.probe)
+            selected, selected_relations, self.residue_info = await discover_schema_bank(
+                sample, self.probe
+            )
             if selected:
                 self.entity_types = selected
-                # Relation discovery is a slow-pass concern; start generic.
-                self.relation_types = dict(self.fallback_relation_types or DEFAULT_RELATION_TYPES)
+                # Bank-selected relations when any fired; generic starter otherwise.
+                self.relation_types = selected_relations or dict(
+                    self.fallback_relation_types or DEFAULT_RELATION_TYPES
+                )
                 self.schema_source = "bank_selection_provisional"
                 if self.residue_info and self.residue_info["residue_ratio"] > 0.3:
                     logger.warning(

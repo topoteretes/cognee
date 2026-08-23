@@ -110,9 +110,20 @@ truly novel domain type — is measured per run as a **residue ratio** (spans
 broad generic seeds catch that no selected label covers) and recorded in
 the ontology cache for the slow pass to resolve.
 
-Measured on the space demo: first ingestion **5 s** including discovery
-(13 types selected: `astronaut`, `spacecraft`, `rocket`, `space_mission`,
-`celestial_body`, `government_agency`, …), second ingestion 3 s from cache.
+Both sides of the schema are bank-selected: ~120 entity types AND ~48
+relation types (`RELATION_BANK`) are probed the same way — relation
+candidates are scored with the selected entity types as anchors. GLiNER
+cannot invent predicates (it classifies pairs against the list you supply),
+so without a relation bank the fast pass shipped only 6 generic relations;
+with it, 14 domain relations (`launched_from`, `powered_by`,
+`manufactured_by`, `scheduled_for`, …) are selected LLM-free.
+
+Measured on the space demo: first ingestion **8 s** including entity AND
+relation selection (13 entity types + 14 relation types), second ingestion
+3 s from cache. Final graph uses 19 distinct relation names across 33
+semantic edges — vs 23 names for per-chunk LLM extraction, at a fraction
+of the cost, and with names that stay stable across runs (LLM predicate
+names drift between runs: `burns` vs `burns_fuel`).
 
 ### The slow pass: `gliner_improve()`
 
