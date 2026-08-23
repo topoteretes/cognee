@@ -133,30 +133,40 @@ async def discover_schema_bank(
     # the sample is big enough that a real type would fire more than once.
     effective_min_hits = min_hits if len(sample_texts) >= 4 else 1
 
+    import asyncio
+
+    def _slices(items: dict) -> list[dict]:
+        pairs = list(items.items())
+        return [dict(pairs[i : i + slice_size]) for i in range(0, len(pairs), slice_size)]
+
+    # Probe rounds run their independent slices CONCURRENTLY — with a worker
+    # pool this parallelizes across processes; with a single extractor, torch
+    # releases the GIL so threads still overlap.
     entity_scores = {}
-    bank_items = list(bank.items())
-    for start in range(0, len(bank_items), slice_size):
-        labels = dict(bank_items[start : start + slice_size])
-        results = await probe(sample_texts, entity_types=labels)
+    for results in await asyncio.gather(
+        *[probe(sample_texts, entity_types=labels) for labels in _slices(bank)]
+    ):
         entity_scores.update(_score_hits(results))
     selected = _select(entity_scores, bank, max_types, effective_min_hits, min_confidence)
 
     # Relation selection: probe relation candidates the same way. Relation
     # heads need entity anchors, so probe with the selected entity types.
     relation_scores = {}
-    relation_items = list(relation_bank.items())
-    for start in range(0, len(relation_items), slice_size):
-        labels = dict(relation_items[start : start + slice_size])
-        results = await probe(sample_texts, entity_types=selected, relation_types=labels)
+    for results in await asyncio.gather(
+        *[
+            probe(sample_texts, entity_types=selected, relation_types=labels)
+            for labels in _slices(relation_bank)
+        ]
+    ):
         relation_scores.update(_score_hits(results, key="relation_extraction"))
     selected_relations = _select(
         relation_scores, relation_bank, max_relation_types, effective_min_hits, 0.0
     )
 
     # Residue detection: what did broad seeds catch that no selected label did?
-    seed_results = await probe(sample_texts, entity_types=GENERIC_SEEDS)
-    selected_results = (
-        await probe(sample_texts, entity_types=selected) if selected else seed_results
+    seed_results, selected_results = await asyncio.gather(
+        probe(sample_texts, entity_types=GENERIC_SEEDS),
+        probe(sample_texts, entity_types=selected or GENERIC_SEEDS),
     )
     covered = {
         value["text"] if isinstance(value, dict) else value
