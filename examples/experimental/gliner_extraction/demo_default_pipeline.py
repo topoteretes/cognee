@@ -1,11 +1,11 @@
 """Showcase: the DEFAULT gliner_cognify pipeline, fully local intelligence.
 
-No schema is configured anywhere. Run 1: a local LLM (Ollama qwen3:4b)
+No schema is configured anywhere. Run 1: a local LLM (Ollama gemma3 4B)
 invents the dataset ontology in ONE call, it is cached and versioned, and
 GLiNER2 extracts the graph. Run 2 (more data, same dataset): the cached
 ontology loads with ZERO LLM calls. Search at the end is embeddings-only.
 
-Requires: ollama running with qwen3:4b pulled (ollama pull qwen3:4b).
+Requires: ollama running with gemma3 pulled (ollama pull gemma3).
 """
 
 import asyncio
@@ -24,7 +24,7 @@ os.environ["AUTO_FEEDBACK"] = "false"
 
 # The ONLY LLM in the pipeline: a small local model for ontology discovery.
 os.environ.setdefault("LLM_PROVIDER", "ollama")
-os.environ.setdefault("LLM_MODEL", "qwen3:4b")
+os.environ.setdefault("LLM_MODEL", "gemma3:latest")
 os.environ.setdefault("LLM_ENDPOINT", "http://localhost:11434/v1")
 os.environ.setdefault("LLM_API_KEY", "ollama")
 
@@ -89,7 +89,7 @@ async def main():
     t0 = time.time()
     await cognee.add(RUN_1_TEXT, dataset_name=DATASET)
     await gliner_cognify(datasets=[DATASET], extractor=extractor)
-    print(f"[{time.time() - t0:.0f}s] first ingestion (includes ONE local qwen3:4b discovery call)")
+    print(f"[{time.time() - t0:.0f}s] first ingestion (includes ONE local gemma3 discovery call)")
     show_ontology()
     await show_graph()
 

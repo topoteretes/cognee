@@ -93,18 +93,34 @@ default (`auto_schema=True`):
   warning (or pass `entity_types`/`relation_types` explicitly).
 
 The discovery call is constrained (read samples, emit 10–30 labels), so a
-small local model is enough. Verified with **qwen3:4b via Ollama** (~2.5 GB,
-`ollama pull qwen3:4b`):
+small local model is enough. Measured on the same discovery task (M-series
+laptop, via Ollama):
+
+| Model | Discovery time | Schema quality |
+|---|---|---|
+| **gemma3 4B** (recommended) | **12.8 s** | best (10 specific types) |
+| llama3.2 3B | 21.6 s | weakest (5 generic types) |
+| qwen3:4b + `/no_think` | 84 s | good |
+| qwen3:4b (thinking) | ~2.4 min | good |
+
+Thinking models (qwen3) spend minutes on hidden reasoning for a task that
+needs none — prefer a non-thinking model:
 
 ```bash
-LLM_PROVIDER=ollama LLM_MODEL=qwen3:4b \
+LLM_PROVIDER=ollama LLM_MODEL=gemma3:latest \
 LLM_ENDPOINT=http://localhost:11434/v1 LLM_API_KEY=ollama \
-python your_ingestion.py
+python your_ingestion.py    # ollama pull gemma3 first (~3.3 GB)
 ```
 
-That makes the whole pipeline local: qwen3:4b invents the schema once
-(~2 min — it is a thinking model; once per dataset, not per document),
-GLiNER2 extracts everything, no document leaves the machine.
+That makes the whole pipeline local: gemma3 invents the schema once
+(~13 s, once per dataset, not per document), GLiNER2 extracts everything,
+no document leaves the machine. Measured end-to-end in
+`demo_default_pipeline.py`: first ingestion 27 s including discovery,
+every subsequent ingestion ~3 s with zero LLM calls.
+
+Note: keep the discovered label set at 10–30 types. GLiNER encodes labels
+into the same window as the text — measured recall drops ~half at 300
+types while latency grows 19x, so more labels is not more coverage.
 
 ## Model downloads
 
