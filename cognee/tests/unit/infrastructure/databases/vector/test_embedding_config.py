@@ -57,7 +57,12 @@ def _clear_embedding_env(monkeypatch):
     # CI workflows set EMBEDDING_* env vars (see .github/workflows/basic_tests.yml),
     # and pydantic-settings reads them at construction time — bypassing the
     # class defaults and the auto-resolve path we want to test here.
-    for var in ("EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS"):
+    for var in (
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_DIMENSIONS",
+        "EMBEDDING_BATCH_SIZE",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -91,3 +96,50 @@ def test_config_falls_back_when_unresolvable(monkeypatch):
         embedding_dimensions=None,
     )
     assert cfg.embedding_dimensions == 3072
+
+
+def test_batch_size_defaults_to_36(monkeypatch):
+    # Unset batch size resolves to the single provider-agnostic default.
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(_env_file=None)
+    assert cfg.embedding_batch_size == 36
+
+
+def test_batch_size_defaults_to_36_for_non_openai(monkeypatch):
+    # The old dead if/elif made this look provider-specific; it never was.
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        embedding_provider="fastembed",
+        embedding_model="BAAI/bge-small-en-v1.5",
+        embedding_dimensions=384,
+    )
+    assert cfg.embedding_batch_size == 36
+
+
+def test_batch_size_honors_explicit_value(monkeypatch):
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(_env_file=None, embedding_batch_size=8)
+    assert cfg.embedding_batch_size == 8
+
+
+def test_none_provider_does_not_crash(monkeypatch):
+    # Regression: model_post_init used to call embedding_provider.lower()
+    # unconditionally, raising AttributeError when the provider was None.
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(
+        _env_file=None,
+        embedding_provider=None,
+        embedding_dimensions=384,
+    )
+    assert cfg.embedding_batch_size == 36
+
+
+def test_to_dict_includes_batch_size(monkeypatch):
+    # Regression: to_dict() dropped embedding_batch_size, silently losing it
+    # on a round-trip.
+    _clear_embedding_env(monkeypatch)
+    cfg = EmbeddingConfig(_env_file=None)
+    result = cfg.to_dict()
+    assert "embedding_batch_size" in result
+    assert result["embedding_batch_size"] == cfg.embedding_batch_size
