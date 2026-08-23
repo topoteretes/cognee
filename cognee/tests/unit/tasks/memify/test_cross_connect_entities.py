@@ -85,6 +85,7 @@ async def test_overlap_candidate_gets_inferred_edge():
     source, target, relationship, props = fake_graph.added_edges[0]
     assert (source, target, relationship) == ("e1", "e2", "runs_on")
     assert props["inferred"] is True
+    assert props["assertion_source"] == "llm_inferred"
     assert props["feedback_weight"] == INFERRED_EDGE_FEEDBACK_WEIGHT
     index_mock.assert_awaited_once()
 

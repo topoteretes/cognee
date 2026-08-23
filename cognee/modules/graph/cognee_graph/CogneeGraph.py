@@ -195,6 +195,10 @@ class CogneeGraph(CogneeAbstractGraph):
 
         # Process edges
         for source_id, target_id, relationship_type, properties in edges_data:
+            # Superseded assertions are history, not current facts: keep them
+            # out of the retrieval projection.
+            if properties.get("superseded"):
+                continue
             source_node = self.get_node(str(source_id))
             target_node = self.get_node(str(target_id))
             if source_node and target_node:

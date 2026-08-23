@@ -232,6 +232,7 @@ def _build_edge(
             "source_node_id": source_id,
             "target_node_id": target_id,
             "inferred": True,
+            "assertion_source": "llm_inferred",
             "confidence": relation.confidence,
             "feedback_weight": INFERRED_EDGE_FEEDBACK_WEIGHT,
         },

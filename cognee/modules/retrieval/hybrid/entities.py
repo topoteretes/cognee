@@ -93,6 +93,10 @@ def _partition_neighborhood(
             continue
         source_id, target_id = str(edge[0]), str(edge[1])
         properties = edge[3] if len(edge) > 3 and isinstance(edge[3], dict) else {}
+        # Superseded assertions are history, not current facts: keep them out
+        # of the retrieval context.
+        if properties.get("superseded"):
+            continue
         triple = (
             nodes_by_id.get(source_id, {"id": source_id}),
             {"relationship_name": edge[2], "properties": properties},

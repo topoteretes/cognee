@@ -74,6 +74,11 @@ class DataPoint(BaseModel):
     source_node_set: str | None = None
     source_user: str | None = None
     source_content_hash: str | None = None
+    # Who asserted this fact: "user_stated" (from the user's own session
+    # statements), "document_extracted" (LLM extraction from ingested documents)
+    # or "llm_inferred" (LLM inference not grounded in a specific source
+    # passage). Plain str, not Literal: consumers read untyped edge dicts.
+    assertion_source: str | None = None
     feedback_weight: float = 0.5
     importance_weight: float | None = 0.5
 

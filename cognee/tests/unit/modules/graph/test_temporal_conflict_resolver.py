@@ -122,6 +122,73 @@ def test_multiple_independent_subjects_resolved_independently():
     assert superseded_by_target == {"alice": "a-bob", "carol": "g-dave"}
 
 
+def test_older_user_stated_edge_beats_newer_llm_inferred():
+    # Authority outranks recency: the user's own statement stays current even
+    # though the LLM-inferred assertion is newer.
+    edges = [
+        _edge(
+            "c",
+            "alice",
+            "ceo_of",
+            "2020-01-01 00:00:00",
+            edge_object_id="e-alice",
+            assertion_source="user_stated",
+        ),
+        _edge(
+            "c",
+            "bob",
+            "ceo_of",
+            "2024-01-01 00:00:00",
+            edge_object_id="e-bob",
+            assertion_source="llm_inferred",
+        ),
+    ]
+    superseded = tag_superseded_edges(edges, {"ceo_of"})
+    assert [e[1] for e in superseded] == ["bob"]
+    assert superseded[0][3]["superseded_by"] == "e-alice"
+
+
+def test_untagged_edge_ranks_as_document_extracted():
+    # An edge with no assertion_source outranks a newer llm_inferred one.
+    edges = [
+        _edge("c", "alice", "ceo_of", "2020-01-01 00:00:00", edge_object_id="e-alice"),
+        _edge(
+            "c",
+            "bob",
+            "ceo_of",
+            "2024-01-01 00:00:00",
+            edge_object_id="e-bob",
+            assertion_source="llm_inferred",
+        ),
+    ]
+    superseded = tag_superseded_edges(edges, {"ceo_of"})
+    assert [e[1] for e in superseded] == ["bob"]
+    assert superseded[0][3]["superseded_by"] == "e-alice"
+
+
+def test_untagged_edges_resolve_identically_to_recency_only_behavior():
+    # Regression guard: edges with no assertion_source field must resolve
+    # byte-identically to the pre-authority behaviour — same winner, same tags.
+    edges = [
+        _edge("c", "alice", "ceo_of", "2020-01-01 00:00:00", edge_object_id="e-alice"),
+        _edge("c", "bob", "ceo_of", "2024-01-01 00:00:00", edge_object_id="e-bob"),
+    ]
+    assert tag_superseded_edges(edges, {"ceo_of"}) == [
+        (
+            "c",
+            "alice",
+            "ceo_of",
+            {
+                "updated_at": "2020-01-01 00:00:00",
+                "edge_object_id": "e-alice",
+                "superseded": True,
+                "superseded_by": "e-bob",
+                "supersession_reason": "superseded by a more recent 'ceo_of' assertion",
+            },
+        )
+    ]
+
+
 def test_superseded_edges_keep_input_order():
     edges = [
         _edge("acme", "alice", "ceo_of", "2019-01-01 00:00:00", edge_object_id="a-alice"),

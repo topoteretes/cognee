@@ -65,6 +65,29 @@ async def test_unscoped_build_keeps_out_of_set_neighbors():
 
 
 @pytest.mark.asyncio
+async def test_superseded_edges_are_dropped_from_partition():
+    """Superseded edges never reach the context; untagged siblings and edges
+    with no 'superseded' key at all are kept exactly as before."""
+    superseded_text = "Alice works at Initech."
+    edges = EDGES + [
+        (ALICE, ACME, "worked_at", {"edge_text": superseded_text, "superseded": True}),
+    ]
+
+    entities, reachable = await build_entities(
+        _graph(NODES, edges),
+        [_hit(ALICE, "Alice")],
+        max_edges_per_entity=10,
+    )
+
+    texts = _bullet_texts(entities)
+    assert superseded_text not in texts
+    assert WORKS_AT_TEXT in texts
+    assert "Alice -- is_a -- Person" in texts
+    assert str(EdgeType.id_for(superseded_text)) not in reachable
+    assert str(EdgeType.id_for(WORKS_AT_TEXT)) in reachable
+
+
+@pytest.mark.asyncio
 async def test_and_scope_requires_neighbor_to_carry_every_requested_set():
     nodes = [
         (ALICE, {"name": "Alice", "belongs_to_set": ["A", "B"]}),
