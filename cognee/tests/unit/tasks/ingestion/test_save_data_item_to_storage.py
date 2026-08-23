@@ -77,6 +77,32 @@ async def test_windows_style_paths_do_not_crash_and_fall_back_to_text(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("as_file_uri", [False, True], ids=["absolute_path", "file_uri"])
+async def test_copy_local_files_snapshots_bytes_into_storage(tmp_path, monkeypatch, as_file_uri):
+    # With COPY_LOCAL_FILES on, a local path is no longer passed through by
+    # reference: its bytes are routed through save_data_to_file_detailed (as a
+    # binary handle, keeping the source basename) and the copy's path is
+    # returned. The flag-off default is pinned by
+    # test_existing_absolute_file_returns_file_uri above.
+    file_path = tmp_path / "note.txt"
+    file_path.write_text("hello", encoding="utf-8")
+    save_mock = AsyncMock(return_value=StoredFile(file_path="managed-copy-path"))
+    monkeypatch.setattr(mod, "save_data_to_file_detailed", save_mock)
+    # ``settings`` is a module-level import-time singleton; env vars would not
+    # be re-read here, so patch the attribute directly.
+    monkeypatch.setattr(mod.settings, "copy_local_files", True)
+
+    data_item = file_path.as_uri() if as_file_uri else str(file_path)
+    result = await save_data_item_to_storage(data_item)
+
+    assert result == "managed-copy-path"
+    save_mock.assert_awaited_once()
+    (handle,), kwargs = save_mock.await_args
+    assert handle.mode == "rb"
+    assert kwargs == {"filename": "note.txt"}
+
+
+@pytest.mark.asyncio
 async def test_existing_absolute_file_rejected_when_gate_disabled(tmp_path, monkeypatch):
     # An existing absolute local file is still rejected when
     # ACCEPT_LOCAL_FILE_PATH is off — the fix must not weaken that gate.

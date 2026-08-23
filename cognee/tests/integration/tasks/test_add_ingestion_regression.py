@@ -296,6 +296,43 @@ async def test_local_path_add_records_the_source_location(add_env):
     assert row.original_data_location == Path(os.path.realpath(source)).as_uri()
 
 
+async def test_local_path_add_with_copy_flag_snapshots_the_source(add_env, monkeypatch):
+    # Twin of the test above with COPY_LOCAL_FILES on: instead of referencing
+    # the user's file in place, add() snapshots its bytes into cognee-managed
+    # storage — original_data_location points at the copy under the data root,
+    # the copy's bytes hash to content_hash, and the content stays readable
+    # after the source file is deleted.
+    import importlib
+    import os
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    import cognee
+    from cognee.base_config import get_base_config
+
+    mod = importlib.import_module("cognee.tasks.ingestion.save_data_item_to_storage")
+    monkeypatch.setattr(mod.settings, "copy_local_files", True)
+
+    body = b"copy flag body"
+    source = add_env / "copied_note.txt"
+    source.write_bytes(body)
+
+    await cognee.add([str(source)], "reg_copyflag")
+    os.remove(source)
+
+    (row,) = await _rows("reg_copyflag")
+    location = str(row.original_data_location)
+    copy_path = (
+        Path(url2pathname(urlparse(location).path))
+        if location.startswith("file://")
+        else Path(location)
+    )
+    data_root = Path(os.path.realpath(get_base_config().data_root_directory))
+    assert Path(os.path.realpath(copy_path)).is_relative_to(data_root)
+    assert hashlib.md5(copy_path.read_bytes()).hexdigest() == str(row.content_hash)
+    assert await _read_raw(row) == body
+
+
 async def _stored_original_files():
     import os as _os
 

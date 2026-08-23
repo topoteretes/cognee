@@ -20,6 +20,7 @@ logger = get_logger()
 
 class SaveDataSettings(BaseSettings):
     accept_local_file_path: bool = True
+    copy_local_files: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -47,6 +48,23 @@ def _resolve_local_file_uri(
     return local_path.as_uri() if local_path.is_file() else None
 
 
+async def _stored_local_file(local_uri: str) -> StoredFile:
+    """Turn a resolved local ``file://`` URI into the StoredFile add() records.
+
+    Default (``COPY_LOCAL_FILES`` off): the user's file is referenced in place —
+    nothing is copied, and the StoredFile carries no metadata. With the flag on,
+    the file's bytes are snapshotted through :func:`save_data_to_file_detailed`
+    into cognee-managed storage (content-addressed under DATA_ROOT), and the
+    StoredFile points at that copy, metadata included.
+    """
+    if not settings.copy_local_files:
+        return StoredFile(file_path=local_uri)
+
+    local_path = Path(url2pathname(urlparse(local_uri).path))
+    with open(local_path, "rb") as file_handle:
+        return await save_data_to_file_detailed(file_handle, filename=local_path.name)
+
+
 async def save_data_item_to_storage_detailed(
     data_item: Union[BinaryIO, str, Any],
 ) -> StoredFile:
@@ -57,6 +75,13 @@ async def save_data_item_to_storage_detailed(
     while they are in hand, so ingestion never has to read the object back to
     hash it. Items that are already addressable storage (an ``s3://`` URL, a
     local path) are handed through untouched and carry no metadata.
+
+    Local paths are handed through *by reference* by default: cognee records
+    the path and its ``content_hash``, which can later verify the original but
+    cannot recover it if the file changes or disappears. Setting
+    ``COPY_LOCAL_FILES=true`` snapshots the bytes into cognee-managed storage
+    at add time instead; re-adding the same file with the flag on makes
+    ``original_data_location`` point at the cognee-managed copy.
     """
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
@@ -93,7 +118,7 @@ async def save_data_item_to_storage_detailed(
             if settings.accept_local_file_path:
                 local_uri = _resolve_local_file_uri(url2pathname(parsed_url.path), strict=True)
                 if local_uri:
-                    return StoredFile(file_path=local_uri)
+                    return await _stored_local_file(local_uri)
                 raise IngestionError(message="Local file does not exist or is not a file.")
             else:
                 raise IngestionError(message="Local files are not accepted.")
@@ -118,13 +143,13 @@ async def save_data_item_to_storage_detailed(
             local_uri = _resolve_local_file_uri(data_item)
             if local_uri:
                 if settings.accept_local_file_path:
-                    return StoredFile(file_path=local_uri)
+                    return await _stored_local_file(local_uri)
                 raise IngestionError(message="Local files are not accepted.")
         # Data is a relative file path
         local_uri = _resolve_local_file_uri(data_item)
         if local_uri:
             if settings.accept_local_file_path:
-                return StoredFile(file_path=local_uri)
+                return await _stored_local_file(local_uri)
             raise IngestionError(message="Local files are not accepted.")
 
         # data is text, save it to data storage and return the file path

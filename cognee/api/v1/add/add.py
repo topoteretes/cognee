@@ -76,6 +76,10 @@ async def add(
             * Absolute paths: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
+
+            Local paths are referenced in place by default (no copy is made); set
+            COPY_LOCAL_FILES=true to snapshot the original bytes into cognee-managed
+            storage at add time.
         - **Binary file objects**: File handles/streams (BinaryIO)
         - **Lists**: Multiple files or text strings in a single call
 
