@@ -134,7 +134,7 @@ jobs:
           shared-key: perf-rust
 
       - name: Cache ORT binary
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: cognee-rs/target/ort-cache
           key: ort-perf-rust-linux-x86_64
