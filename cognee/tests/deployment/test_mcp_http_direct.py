@@ -28,22 +28,15 @@ PINNED_TOOLS = {
     "remember",
     "recall",
     "forget",
-    "visualize_graph_ui",
-    "upload_file_ui",
-    "open_cognee_workspace",
 }
 SEARCH_TRANSFORM_TOOLS = {"search_tools", "call_tool"}
 EXPECTED_TOOLS = PINNED_TOOLS | SEARCH_TRANSFORM_TOOLS
 
 # Registered but deliberately not advertised; reachable by name and via search.
-# The workspace UI calls these directly, so hiding them must not unreach them.
 # Not exhaustive on purpose — asserted as a subset, so the catalog can change
-# (e.g. cognify_file folding into remember) without touching this list.
+# without touching this list.
 HIDDEN_TOOLS = {
-    "list_datasets_json",
-    "list_dataset_data_json",
-    "create_dataset_json",
-    "get_client_info_json",
+    "cognify_status",
 }
 
 # The MCP SDK's transport-security middleware rejects a bad Host with 421 (and a
@@ -120,22 +113,21 @@ async def test_list_tools_over_http(mcp_http_container):
 async def test_hidden_tools_stay_reachable_over_http(mcp_http_container):
     """Gating ``tools/list`` must not gate calling.
 
-    The workspace UI invokes these internals by name via app.callServerTool and
-    never sees them in ``tools/list``, so an unadvertised tool that stopped being
-    callable would break the UI without failing the surface assertion above.
+    Unadvertised tools stay callable by name, so a tool that stopped being
+    callable would break callers without failing the surface assertion above.
     """
     async with mcp_client_session(mcp_http_container.mcp_url) as session:
         listed = {tool.name for tool in (await session.list_tools()).tools}
         assert not (HIDDEN_TOOLS & listed), "hidden tools should not be advertised"
 
-        direct = await session.call_tool("list_datasets_json", arguments={})
+        direct = await session.call_tool("cognify_status", arguments={})
         assert not direct.isError, _text_of(direct)
 
         found = await session.call_tool(
-            "search_tools", arguments={"query": "list all of my datasets"}
+            "search_tools", arguments={"query": "check ingestion status"}
         )
 
-    assert "list_datasets_json" in _text_of(found), (
+    assert "cognify_status" in _text_of(found), (
         f"search_tools did not surface the hidden tool: {_text_of(found)!r}"
     )
 

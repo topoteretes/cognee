@@ -57,6 +57,10 @@ jobs:
   cloud:
     name: cloud — ${{ inputs.label }}
     runs-on: ubuntu-22.04
+    # Bounded like the local perf jobs: tenant provisioning against the live
+    # tenant can hang (observed: 266s to a "Connection reset by peer"), and
+    # without this the job would sit on GitHub's 6h default.
+    timeout-minutes: 90
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
       html_key: ${{ steps.upload.outputs.html_key }}

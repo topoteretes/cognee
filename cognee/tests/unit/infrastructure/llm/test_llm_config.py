@@ -188,6 +188,12 @@ def test_instructor_mode_table_and_adapter_wiring():
     # Table values match the historical per-adapter defaults.
     assert get_instructor_mode("openai") == "json_schema_mode"
     assert get_instructor_mode("anthropic") == "anthropic_tools"
+    # ollama DELIBERATELY diverges from its historical "json_mode" default.
+    # json_mode sends response_format=json_object, so the pydantic schema reaches
+    # the model as prompt text only and never as a decoder constraint. Measured
+    # against llama3.1:8b with max_retries=0: json_mode returned 2/5 valid
+    # KnowledgeGraph objects on the first attempt, json_schema_mode returned 5/5.
+    assert get_instructor_mode("ollama") == "json_schema_mode"
     # An unknown provider fails loudly rather than silently defaulting.
     with pytest.raises(KeyError):
         get_instructor_mode("totally-unknown-provider")

@@ -167,7 +167,7 @@ Subcommands:
 
             output = json.dumps(graph, indent=2, default=str)
             if args.output:
-                with open(args.output, "w") as f:
+                with open(args.output, "w", encoding="utf-8") as f:
                     f.write(output)
                 fmt.success(f"Graph exported to {args.output}")
             else:

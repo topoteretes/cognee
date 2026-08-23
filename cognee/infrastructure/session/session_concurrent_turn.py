@@ -15,11 +15,13 @@ from pydantic import BaseModel, ConfigDict
 
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
+from cognee.infrastructure.session.session_context_builder import render_preference_block
 from cognee.infrastructure.session.session_turn import (
     apply_session_turn_analysis,
     build_active_context_block_safe,
     coerce_qa_entry,
     compose_session_prompt,
+    load_preference_lines_safe,
     load_served_context_payload,
     select_session_history,
 )
@@ -86,6 +88,7 @@ async def load_turn_context(
     """
     try:
         auto_feedback = session_manager.is_auto_feedback_enabled()
+        preference_lines = await load_preference_lines_safe()
         loads = [
             session_manager.get_session(
                 user_id=user_id,
@@ -107,11 +110,18 @@ async def load_turn_context(
                     user_id=user_id,
                     session_id=session_id,
                     query=raw_message,
+                    preference_lines=preference_lines,
                 )
             )
         # The guidance block is the only optional load, so it is the only trailing result.
         recent_entries, completion_history, *optional = await asyncio.gather(*loads)
-        active_context, active_context_ids = optional[0] if optional else ("", [])
+        if optional:
+            active_context, active_context_ids = optional[0]
+        else:
+            # No stored-entry guidance layer; durable preferences still render
+            # through the same owner, budgets, and block shape.
+            active_context = render_preference_block(preference_lines) if preference_lines else ""
+            active_context_ids = []
 
         # get_session already caps at last_n=2 above; recent_qas inherits that bound.
         recent_rows = [coerce_qa_entry(entry) for entry in recent_entries or []]

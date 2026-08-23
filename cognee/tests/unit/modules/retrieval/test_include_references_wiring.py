@@ -13,6 +13,8 @@ import pytest
 
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.search.types import SearchType
 
 
 MOCK_ANSWER = "Revenue grew 12 percent."
@@ -284,3 +286,52 @@ async def test_graph_references_skip_non_str_completions():
 
     assert completion == [structured]
     engine.search.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# HybridRetriever (chunk-lane evidence, factory wiring)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_factory_passes_include_references():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as factory
+
+    retriever = await factory.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        include_references=True,
+    )
+
+    assert isinstance(retriever, HybridRetriever)
+    assert retriever.include_references is True
+
+
+@pytest.mark.asyncio
+async def test_hybrid_references_skipped_for_non_str_response_model():
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        answer: str
+
+    retriever = HybridRetriever(include_references=True, response_model=Answer)
+    model_obj = Answer(answer="structured")
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.generate_completion",
+            new_callable=AsyncMock,
+            return_value=model_obj,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.CacheConfig",
+            return_value=_cache_disabled(),
+        ),
+    ):
+        completion = await retriever.get_completion_from_context(
+            query="q",
+            retrieved_objects={"chunks": [_chunk_scored()]},
+            context="ctx",
+        )
+
+    assert completion == [model_obj]

@@ -15,6 +15,8 @@ from cognee.infrastructure.session.session_context_builder import (
     apply_candidate_updates,
     build_active_context_block,
     coerce_active_context_entries,
+    fit_preference_lines,
+    render_preference_block,
 )
 from cognee.infrastructure.session.session_context_models import (
     SessionContextEntry,
@@ -244,6 +246,106 @@ async def test_build_fail_open_on_raising_manager():
     )
     assert block == ""
     assert served == []
+
+
+# ----------------------------------------------------------- preference-line merging
+
+
+@pytest.mark.asyncio
+async def test_build_merges_preference_lines_into_the_preferences_section():
+    entries = [_entry("preferences", "Prefer bullet points.", id="p1")]
+    sm = FakeSessionManager(entries)
+    block, served = await build_active_context_block(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        query="q",
+        preference_lines=["Keep answers concise."],
+    )
+    # One block: the durable line rides the same Preferences section as the
+    # session entry, ahead of it so the session entry wins conflicts.
+    assert block.count("### Preferences") == 1
+    assert block.index("Keep answers concise.") < block.index("Prefer bullet points.")
+    assert served == ["p1"]
+
+
+@pytest.mark.asyncio
+async def test_build_skips_preference_lines_duplicating_selected_entries():
+    entries = [_entry("preferences", "Keep answers concise.", id="p1")]
+    sm = FakeSessionManager(entries)
+    block, _served = await build_active_context_block(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        query="q",
+        preference_lines=["keep  answers CONCISE.", "Prefer tables."],
+    )
+    assert block.count("concise") + block.count("CONCISE") == 1
+    assert "Prefer tables." in block
+
+
+@pytest.mark.asyncio
+async def test_build_preference_lines_share_the_section_budget():
+    entries = [_entry("preferences", "a" * 90, id="p1")]
+    sm = FakeSessionManager(entries)
+    block, _served = await build_active_context_block(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        query="q",
+        per_section_char_budget=100,
+        total_char_budget=10_000,
+        preference_lines=["b" * 20, "c" * 5],
+    )
+    # 90 chars are already spent by the entry; only the 5-char line still fits.
+    assert "c" * 5 in block
+    assert "b" * 20 not in block
+
+
+@pytest.mark.asyncio
+async def test_build_renders_preference_lines_even_without_stored_entries():
+    sm = FakeSessionManager([])
+    block, served = await build_active_context_block(
+        session_manager=sm,
+        user_id="u",
+        session_id="s",
+        query="q",
+        preference_lines=["Keep answers concise."],
+    )
+    assert "### Preferences" in block
+    assert "Keep answers concise." in block
+    assert served == []
+
+
+@pytest.mark.asyncio
+async def test_build_without_preference_lines_and_entries_stays_empty():
+    sm = FakeSessionManager([])
+    block, served = await build_active_context_block(
+        session_manager=sm, user_id="u", session_id="s", query="q", preference_lines=[]
+    )
+    assert block == ""
+    assert served == []
+
+
+def test_fit_preference_lines_keeps_newest_within_budget_and_renders_oldest_first():
+    kept = fit_preference_lines(
+        ["newest", "middle", "oldest"],
+        preferences_used=0,
+        total_used=0,
+        per_section_char_budget=12,
+        total_char_budget=10_000,
+        existing_normalized=set(),
+    )
+    # newest (6) + middle (6) exhaust the budget; the survivors render oldest first.
+    assert kept == ["middle", "newest"]
+
+
+def test_render_preference_block_is_the_same_block_shape():
+    block = render_preference_block(["Keep answers concise."])
+    assert block.startswith("## Active session guidance")
+    assert "### Preferences" in block
+    assert "- Keep answers concise." in block
+    assert render_preference_block([]) == ""
 
 
 # --------------------------------------------------------------------------- applier

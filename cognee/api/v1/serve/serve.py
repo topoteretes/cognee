@@ -137,17 +137,19 @@ async def _serve_cloud(
     creds = load_credentials()
 
     if creds and creds.service_url and creds.api_key:
-        if not is_token_expired(creds):
-            logger.info("Using saved credentials for %s", creds.email)
-            client = CloudClient(creds.service_url, creds.api_key)
+        client = CloudClient(creds.service_url, creds.api_key)
+        try:
             if await client._health_check():
+                logger.info("Using cached credentials for %s (token status ignored)", creds.email)
                 set_remote_client(client)
                 print(f"  Connected to Cognee Cloud at {creds.service_url}")
                 return client
-            else:
-                logger.warning("Saved service URL unreachable, re-authenticating")
-                await client.close()
+        except Exception as e:
+            logger.warning("Immediate health check failed: %s", e)
+        await client.close()
 
+        if not is_token_expired(creds):
+            logger.warning("Saved service URL unreachable, re-authenticating")
         elif creds.refresh_token:
             try:
                 logger.info("Refreshing expired token for %s", creds.email)

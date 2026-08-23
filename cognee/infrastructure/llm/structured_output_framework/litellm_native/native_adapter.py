@@ -21,10 +21,11 @@ to the configured fallback model. This file never imports ``instructor``.
 import asyncio
 import json
 import logging
+import re
 from typing import Any, cast
 
 import litellm
-from litellm.exceptions import ContentPolicyViolationError
+from litellm.exceptions import BadRequestError, ContentPolicyViolationError
 from pydantic import BaseModel, ValidationError
 from tenacity import (
     before_sleep_log,
@@ -46,9 +47,65 @@ from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 logger = get_logger()
 observe = get_observe()
 
+# Models on the prompted-JSON path routinely wrap their answer in a markdown
+# fence (```json ... ```). That is not a malformed answer -- the JSON inside is
+# valid -- but model_validate_json() sees a backtick at column 1 and rejects it,
+# and the self-correction retry does not help because a model that fences once
+# fences again. Strip a fence that wraps the entire payload before parsing.
+# Deliberately anchored to the whole string: JSON that merely *contains*
+# backticks in a value is left alone.
+_JSON_FENCE_RE = re.compile(r"\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z", re.DOTALL)
+
+
+def _strip_json_fence(text: str) -> str:
+    """Return ``text`` with a wrapping markdown code fence removed, if present."""
+    match = _JSON_FENCE_RE.match(text)
+    return match.group(1) if match else text
+
+
 # Max self-correction attempts when a json-object provider returns JSON that
 # fails validation. Separate from the tenacity retry (transient HTTP errors).
 _MAX_VALIDATION_RETRIES: int = 3
+
+# (llm_model, response_model.__name__) pairs whose schema the provider's strict
+# mode has rejected. Once demoted, calls go straight to the non-strict payload,
+# so the failed strict request is paid once per process, not per call.
+_NONSTRICT_DEMOTIONS: set[tuple[str, str]] = set()
+
+
+def clear_nonstrict_demotions() -> None:
+    _NONSTRICT_DEMOTIONS.clear()
+
+
+def _nonstrict_response_format(response_model: type[BaseModel]) -> dict:
+    """Non-strict ``json_schema`` payload: the raw schema travels as guidance.
+
+    Without ``strict: true`` the provider does not enforce its restricted
+    schema subset, so constructs strict mode rejects (``oneOf``/``discriminator``
+    from discriminated unions, free-form dict fields, ``format``) are accepted.
+    Conformance is still checked app-side by validating against the original
+    Pydantic model.
+    """
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": response_model.__name__,
+            "schema": response_model.model_json_schema(),
+            "strict": False,
+        },
+    }
+
+
+def _attach_raw_response(instance: BaseModel, response) -> BaseModel:
+    """Attach the raw litellm response as ``_raw_response``, like instructor does.
+
+    The LLMGateway usage recorder reads ``result._raw_response.usage`` for the
+    provider-billed token counts (which include hidden reasoning tokens no
+    text-based estimate can see). ``object.__setattr__`` bypasses pydantic's
+    field validation for the non-field attribute.
+    """
+    object.__setattr__(instance, "_raw_response", response)
+    return instance
 
 
 def _supports_native_schema(model_name: str) -> bool:
@@ -168,6 +225,7 @@ class NativeLiteLLMAdapter:
         api_key: str | None,
         endpoint: str | None,
         api_version: str | None,
+        strict: bool = True,
         **merged_kwargs: Any,
     ) -> BaseModel:
         """Pass the Pydantic model as ``response_format`` and validate the JSON."""
@@ -178,14 +236,16 @@ class NativeLiteLLMAdapter:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": text_input},
                 ],
-                response_format=response_model,
+                response_format=(
+                    response_model if strict else _nonstrict_response_format(response_model)
+                ),
                 api_key=api_key,
                 api_base=endpoint,
                 api_version=api_version,
                 **merged_kwargs,
             )
         raw_content = response.choices[0].message.content or "{}"
-        return response_model.model_validate_json(raw_content)
+        return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
     async def _acreate_json_fallback(
         self,
@@ -237,9 +297,11 @@ class NativeLiteLLMAdapter:
                     **merged_kwargs,
                 )
 
-            raw_content = response.choices[0].message.content or "{}"
+            raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
-                return response_model.model_validate_json(raw_content)
+                return _attach_raw_response(
+                    response_model.model_validate_json(raw_content), response
+                )
             except (ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
                 logger.warning(
@@ -270,16 +332,61 @@ class NativeLiteLLMAdapter:
     ) -> BaseModel:
         """Route to the schema-native or json-object path based on the model."""
         if _supports_native_schema(model):
-            return await self._acreate_schema_native(
-                text_input,
-                system_prompt,
-                response_model,
-                model=model,
-                api_key=api_key,
-                endpoint=endpoint,
-                api_version=api_version,
-                **merged_kwargs,
-            )
+            demotion_key = (model, response_model.__name__)
+            attempts = [False] if demotion_key in _NONSTRICT_DEMOTIONS else [True, False]
+            for strict in attempts:
+                try:
+                    return await self._acreate_schema_native(
+                        text_input,
+                        system_prompt,
+                        response_model,
+                        model=model,
+                        api_key=api_key,
+                        endpoint=endpoint,
+                        api_version=api_version,
+                        strict=strict,
+                        **merged_kwargs,
+                    )
+                except ValidationError as error:
+                    # Output that fails app-side validation must not bubble into
+                    # the tenacity retry: that re-sends the same prompt blindly
+                    # (no error feedback) under a 240s stop floor. The
+                    # prompted-JSON path below has the self-correcting retry
+                    # loop, so route there instead.
+                    logger.warning(
+                        "litellm_native: %s native output failed validation for %s; "
+                        "using json fallback (%s)",
+                        model,
+                        response_model.__name__,
+                        error,
+                    )
+                    break
+                except BadRequestError as error:
+                    # Strict schema-native mode rejects Pydantic models whose
+                    # JSON schema it cannot enforce — e.g. a free-form dict
+                    # field, which OpenAI 400s with "'additionalProperties' is
+                    # required to be supplied and to be false". Non-strict mode
+                    # accepts those schemas as guidance, so demote and retry
+                    # once before giving up on the native path entirely.
+                    if "schema" not in str(error).lower():
+                        raise
+                    if strict:
+                        _NONSTRICT_DEMOTIONS.add(demotion_key)
+                        logger.warning(
+                            "litellm_native: %s rejected the strict schema for %s; "
+                            "demoting to non-strict json_schema for this process (%s)",
+                            model,
+                            response_model.__name__,
+                            error,
+                        )
+                    else:
+                        logger.warning(
+                            "litellm_native: %s rejected the non-strict schema for "
+                            "%s; retrying via json fallback (%s)",
+                            model,
+                            response_model.__name__,
+                            error,
+                        )
         return await self._acreate_json_fallback(
             text_input,
             system_prompt,

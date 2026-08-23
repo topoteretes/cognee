@@ -12,10 +12,7 @@ def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     if global_context:
         sections.append(global_context)
 
-    passages = format_passages(
-        retrieved_objects.get("chunks", []),
-        retrieved_objects.get("chunk_summaries", {}),
-    )
+    passages = format_passages(retrieved_objects.get("chunks", []))
     if passages:
         sections.append(passages)
 
@@ -30,12 +27,21 @@ def format_hybrid_context(global_context: str, retrieved_objects: Any) -> str:
     return "\n\n".join(sections)
 
 
+def format_hybrid_context_batch(global_contexts, retrieved_objects_list) -> list[str]:
+    return [
+        format_hybrid_context(global_context, retrieved)
+        for global_context, retrieved in zip(global_contexts, retrieved_objects_list)
+    ]
+
+
 def extract_context_object_ids(retrieved_objects: Any) -> Optional[dict[str, list[str]]]:
-    # Facts are intentionally excluded: their ids are EdgeType vector rows, not graph nodes.
+    # Facts are EdgeType vector rows, not graph nodes, so they stay excluded.
+    # Rendered entity edges contribute edge_object_id when the graph stamped one.
     if not isinstance(retrieved_objects, dict):
         return None
 
     node_ids = set()
+    edge_ids = set()
     for chunk in retrieved_objects.get("chunks", []):
         chunk_id = result_id(chunk)
         if chunk_id:
@@ -54,24 +60,21 @@ def extract_context_object_ids(retrieved_objects: Any) -> Optional[dict[str, lis
                 edge_node_id = display_value(edge.get(key))
                 if edge_node_id:
                     node_ids.add(edge_node_id)
+            edge_object_id = display_value(edge.get("edge_object_id"))
+            if edge_object_id:
+                edge_ids.add(edge_object_id)
 
-    return {"node_ids": sorted(node_ids)} if node_ids else None
+    used_ids = {}
+    if node_ids:
+        used_ids["node_ids"] = sorted(node_ids)
+    if edge_ids:
+        used_ids["edge_ids"] = sorted(edge_ids)
+    return used_ids or None
 
 
-def format_passages(chunks: list[Any], chunk_summaries: Optional[dict[str, str]] = None) -> str:
-    texts = []
-    chunk_summaries = chunk_summaries or {}
-    for chunk in chunks or []:
-        text = display_value(payload(chunk).get("text"))
-        if not text:
-            continue
-
-        chunk_id = result_id(chunk)
-        summary_text = chunk_summaries.get(chunk_id) if chunk_id else None
-        if summary_text:
-            texts.append(f"[Passage Summary]: {summary_text}\n[Raw Passage]: {text}")
-        else:
-            texts.append(text)
+def format_passages(chunks: list[Any]) -> str:
+    texts = [display_value(payload(chunk).get("text")) for chunk in chunks or []]
+    texts = [text for text in texts if text]
     if not texts:
         return ""
     return "## Relevant passages\n" + "\n---\n".join(texts)

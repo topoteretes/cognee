@@ -108,7 +108,7 @@ def get_skills_router() -> APIRouter:
 
         send_telemetry(
             "Skill Ingest API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/skills",
                 "cognee_version": cognee_version,
@@ -156,7 +156,7 @@ def get_skills_router() -> APIRouter:
         """Return the skills available in an authorized dataset, with publisher metadata."""
         send_telemetry(
             "Skills List API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/skills",
                 "dataset_id": str(dataset_id),

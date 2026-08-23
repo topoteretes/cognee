@@ -81,7 +81,13 @@ class LLMConfig(BaseSettings):
     - stage_config
     """
 
-    structured_output_framework: str = "instructor"
+    # litellm_native (default): plain litellm two-path structured output —
+    # schema-native response_format when the model supports it, prompted-JSON
+    # fallback otherwise. No instructor in the call path, which is a
+    # prerequisite for removing the instructor dependency. Exact token capture
+    # works on this path via the adapter's explicit _raw_response attachment.
+    # Set STRUCTURED_OUTPUT_FRAMEWORK=instructor (or baml) to opt back.
+    structured_output_framework: str = "litellm_native"
     llm_instructor_mode: str = ""
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
@@ -162,6 +168,26 @@ class LLMConfig(BaseSettings):
     baml_registry: Any | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def blank_llm_args_is_unset(cls, values: Any) -> Any:
+        """
+        Treat a blank ``LLM_ARGS`` as unset rather than a validation error.
+
+        A ``.env`` written from an empty variable — ``LLM_ARGS=`` — reaches this
+        dict field as ``""`` and raises ``ValidationError`` while
+        ``cognee/__init__`` is still importing, so the process dies before it can
+        report anything useful. An empty value cannot express any arguments, so
+        read it as "none given".
+        """
+        if isinstance(values, dict):
+            for key in ("llm_args", "LLM_ARGS"):
+                value = values.get(key)
+                if isinstance(value, str) and not value.strip():
+                    values[key] = None
+
+        return values
 
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":

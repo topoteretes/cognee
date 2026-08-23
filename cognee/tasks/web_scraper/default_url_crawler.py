@@ -56,7 +56,7 @@ class DefaultUrlCrawler:
         headers: Optional[Dict[str, str]] = None,
         robots_cache_ttl: float = 3600.0,
     ):
-        """Initialize the BeautifulSoupCrawler.
+        """Initialize the DefaultUrlCrawler.
 
         Args:
             concurrency: Number of concurrent requests allowed.
@@ -404,7 +404,7 @@ class DefaultUrlCrawler:
         """
         if isinstance(urls, str):
             urls = [urls]
-        else:
+        elif not isinstance(urls, list):
             raise ValueError(f"Invalid urls type: {type(urls)}")
 
         async def _task(url: str):
