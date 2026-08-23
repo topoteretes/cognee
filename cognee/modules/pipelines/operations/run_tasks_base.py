@@ -82,6 +82,15 @@ def _stamp_provenance(
         elif current_node_set is not None and data.source_node_set is None:
             data.source_node_set = current_node_set
 
+        # Who asserted this fact: data bridged from the session cache carries
+        # the "user_sessions_from_cache" node set (see cognify_session);
+        # everything else on this path came out of document extraction.
+        if data.assertion_source is None:
+            if current_node_set is not None and "user_sessions_from_cache" in current_node_set:
+                data.assertion_source = "user_stated"
+            else:
+                data.assertion_source = "document_extracted"
+
         # Propagate content_hash from parent or pick up from this data point
         current_hash = content_hash
         if data.source_content_hash is not None:

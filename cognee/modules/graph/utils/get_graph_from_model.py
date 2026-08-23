@@ -93,7 +93,11 @@ def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[Dat
 
 
 def _create_edge_properties(
-    source_id: str, target_id: str, relationship_name: str, edge_metadata: Optional[Edge]
+    source_id: str,
+    target_id: str,
+    relationship_name: str,
+    edge_metadata: Optional[Edge],
+    assertion_source: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create edge properties dictionary with metadata if present."""
     properties = {
@@ -102,6 +106,11 @@ def _create_edge_properties(
         "relationship_name": relationship_name,
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+    # Carry the source node's assertion authority onto the stored edge so the
+    # temporal conflict resolver can rank assertions it reads back later.
+    if assertion_source is not None:
+        properties["assertion_source"] = assertion_source
 
     if edge_metadata:
         # Add edge metadata
@@ -281,7 +290,11 @@ async def get_graph_from_model(
         edge_key = f"{data_point_id}_{target_datapoint.id}_{field_name}"
         if edge_key not in added_edges:
             edge_properties = _create_edge_properties(
-                data_point.id, target_datapoint.id, relationship_name, edge_metadata
+                data_point.id,
+                target_datapoint.id,
+                relationship_name,
+                edge_metadata,
+                assertion_source=data_point.assertion_source,
             )
             edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
             logger.debug("Added edge to graph")

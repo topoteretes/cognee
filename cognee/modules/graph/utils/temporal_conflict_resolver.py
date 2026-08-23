@@ -4,11 +4,13 @@ When a *functional* (single-valued) relationship holds more than one target for
 the same source — e.g. two documents name a different current CEO — the most
 recent assertion is the current fact and the older ones are outdated. This
 module tags the outdated ones instead of deleting them, so the history and its
-provenance stay in the graph and retrieval can tell a current fact from a
-replaced one.
+provenance stay in the graph. The tag is metadata on the stored edge; graph
+retrievers skip edges tagged superseded when building context.
 
-Ranking is deterministic (recency by the edge's own ``updated_at``, ties broken
-by position), so it stays reproducible under the mocked-LLM CI harness.
+Ranking is deterministic — authority first (``assertion_source``: user-stated
+beats document-extracted beats LLM-inferred; untagged edges rank as
+document-extracted), then recency by the edge's own ``updated_at``, ties broken
+by position — so it stays reproducible under the mocked-LLM CI harness.
 
 Nothing is applied automatically: the caller names the relationships that are
 single-valued. Most cognee relationships (``knows``, ``mentions``, ...) are
@@ -24,16 +26,24 @@ from typing import Any, Collection
 # (source_node_id, target_node_id, relationship_name, properties) tuples.
 Edge = tuple[Any, Any, str, dict]
 
+# What the user stated outranks what a document said, which outranks what an
+# LLM inferred on its own.
+_AUTHORITY_RANK = {"user_stated": 2, "document_extracted": 1, "llm_inferred": 0}
 
-def _recency_key(index: int, properties: dict) -> tuple[str, int]:
-    """Rank an edge by recency.
 
-    ``updated_at`` is a sortable ``"%Y-%m-%d %H:%M:%S"`` string stamped on every
-    edge by ``get_graph_from_model`` and refreshed each time the fact is
-    re-asserted; a missing value sorts oldest. The position breaks ties so equal
-    timestamps still resolve to a stable winner (the later assertion wins).
+def _recency_key(index: int, properties: dict) -> tuple[int, str, int]:
+    """Rank an edge by authority, then recency.
+
+    ``assertion_source`` maps to an authority rank; edges without the field
+    rank as document-extracted, so pre-existing/untagged edges resolve exactly
+    as before. ``updated_at`` is a sortable ``"%Y-%m-%d %H:%M:%S"`` string
+    stamped on every edge by ``get_graph_from_model`` and refreshed each time
+    the fact is re-asserted; a missing value sorts oldest. The position breaks
+    ties so equal timestamps still resolve to a stable winner (the later
+    assertion wins).
     """
-    return (str(properties.get("updated_at") or ""), index)
+    rank = _AUTHORITY_RANK.get(properties.get("assertion_source"), 1)
+    return (rank, str(properties.get("updated_at") or ""), index)
 
 
 def tag_superseded_edges(

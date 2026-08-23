@@ -8,7 +8,11 @@ assertion and tags the older ones as superseded.
 
 Nothing is deleted: a superseded edge stays in the graph with its provenance,
 tagged (``superseded``, ``superseded_by``, ``supersession_reason``) so the
-current fact can be told apart from the history it replaced.
+current fact can be told apart from the history it replaced. Graph retrievers
+exclude superseded edges when building context; ``contradicts`` edges remain
+visible (labeled by their relationship type in the formatted context). Not
+filtered: TRIPLET_COMPLETION's precomputed triplet embeddings and raw chunk
+text.
 
 Because it reads the stored neighbourhood rather than the batch in flight, a
 fact ingested today supersedes one ingested last month: entity node ids are

@@ -133,6 +133,35 @@ async def test_project_graph_from_db_full_graph(setup_graph, mock_adapter):
 
 
 @pytest.mark.asyncio
+async def test_project_graph_from_db_skips_superseded_edges(setup_graph, mock_adapter):
+    """Superseded edges are dropped from the projection; untagged siblings and
+    edges with no 'superseded' key at all are projected exactly as before."""
+    graph = setup_graph
+
+    nodes_data = [
+        ("1", {"name": "Node1"}),
+        ("2", {"name": "Node2"}),
+        ("3", {"name": "Node3"}),
+    ]
+    edges_data = [
+        ("1", "2", "ceo_of", {"relationship_name": "ceo_of", "superseded": True}),
+        ("1", "3", "ceo_of", {"relationship_name": "ceo_of", "superseded": False}),
+        ("2", "3", "mentions", {"relationship_name": "mentions"}),
+    ]
+
+    mock_adapter.get_graph_data = AsyncMock(return_value=(nodes_data, edges_data))
+
+    await graph.project_graph_from_db(
+        adapter=mock_adapter,
+        node_properties_to_project=["name"],
+        edge_properties_to_project=["relationship_name"],
+    )
+
+    assert len(graph.nodes) == 3
+    assert [(edge.node1.id, edge.node2.id) for edge in graph.edges] == [("1", "3"), ("2", "3")]
+
+
+@pytest.mark.asyncio
 async def test_project_graph_from_db_id_filtered(setup_graph, mock_adapter):
     """Test projecting an ID-filtered graph from database."""
     graph = setup_graph

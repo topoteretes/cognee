@@ -229,6 +229,7 @@ async def detect_contradictions(data_points: List[DataPoint], **kwargs) -> List[
                         "second_fact": second_fact,
                         "reason": contradiction.reason,
                         "confidence": contradiction.confidence,
+                        "assertion_source": "llm_inferred",
                     },
                 )
             )

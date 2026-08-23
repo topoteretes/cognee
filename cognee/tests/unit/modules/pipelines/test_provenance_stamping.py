@@ -163,3 +163,51 @@ def test_stamp_provenance_no_infinite_recursion():
     circular_list = [dp]
     _stamp_provenance(circular_list, "pipe", "task")
     assert dp.source_pipeline == "pipe"
+
+
+# ── Assertion-source stamping (real implementation) ──
+#
+# The tests above exercise an inline replica; the assertion_source rules are
+# new, so they are tested against the real _stamp_provenance and the real
+# COGNEE_PROVENANCE_MODE gate used by handle_task.
+
+from cognee.infrastructure.engine import DataPoint as RealDataPoint  # noqa: E402
+from cognee.modules.pipelines.operations.run_tasks_base import (  # noqa: E402
+    _stamp_provenance as real_stamp_provenance,
+)
+from cognee.modules.pipelines.provenance_config import ProvenanceConfig  # noqa: E402
+
+
+def test_assertion_source_defaults_to_document_extracted():
+    dp = RealDataPoint()
+    real_stamp_provenance(dp, "pipe", "task")
+    assert dp.assertion_source == "document_extracted"
+
+
+def test_assertion_source_user_stated_via_session_node_set():
+    """Data bridged from the session cache carries the user_sessions_from_cache tag."""
+    dp = RealDataPoint()
+    real_stamp_provenance(dp, "pipe", "task", node_set="user_sessions_from_cache")
+    assert dp.assertion_source == "user_stated"
+
+
+def test_assertion_source_user_stated_in_joined_node_set():
+    """classify_documents joins node sets with ', '; substring matching still applies."""
+    dp = RealDataPoint()
+    real_stamp_provenance(dp, "pipe", "task", node_set="docs, user_sessions_from_cache")
+    assert dp.assertion_source == "user_stated"
+
+
+def test_assertion_source_never_overwrites_preset_value():
+    dp = RealDataPoint(assertion_source="llm_inferred")
+    real_stamp_provenance(dp, "pipe", "task", node_set="user_sessions_from_cache")
+    assert dp.assertion_source == "llm_inferred"
+
+
+def test_assertion_source_stays_none_when_gate_disabled():
+    """handle_task skips stamping entirely when COGNEE_PROVENANCE_MODE=disabled."""
+    dp = RealDataPoint()
+    _provenance_config = ProvenanceConfig(provenance_mode="disabled")
+    if not _provenance_config.is_disabled():
+        real_stamp_provenance(dp, "pipe", "task")
+    assert dp.assertion_source is None
