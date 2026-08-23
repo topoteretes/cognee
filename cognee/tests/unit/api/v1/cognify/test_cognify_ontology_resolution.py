@@ -82,3 +82,44 @@ async def test_cognify_uses_configured_graph_model_only_as_default(
         mock_graph_config.assert_called_once()
     else:
         mock_graph_config.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit_model", [None, object()])
+@patch.object(cognify_module, "Task")
+@patch.object(cognify_module, "get_max_chunk_tokens", new_callable=AsyncMock)
+@patch.object(cognify_module, "get_cognify_config")
+@patch.object(
+    cognify_module,
+    "get_graph_config",
+    return_value=SimpleNamespace(graph_model="configured-model"),
+)
+async def test_get_default_tasks_uses_graph_model_for_extraction_task(
+    mock_graph_config,
+    mock_get_cognify_config,
+    mock_get_max_chunk_tokens,
+    mock_task,
+    explicit_model,
+):
+    mock_get_cognify_config.return_value = SimpleNamespace(
+        triplet_embedding=False,
+        contradiction_detection=False,
+        provenance_tracking=False,
+        chunks_per_batch=None,
+    )
+    mock_get_max_chunk_tokens.return_value = 128
+
+    await cognify_module.get_default_tasks(graph_model=explicit_model)
+
+    extraction_call = next(
+        call
+        for call in mock_task.call_args_list
+        if call.args[0] is cognify_module.extract_graph_and_summarize
+    )
+    assert extraction_call.kwargs["graph_model"] == (
+        "configured-model" if explicit_model is None else explicit_model
+    )
+    if explicit_model is None:
+        mock_graph_config.assert_called_once()
+    else:
+        mock_graph_config.assert_not_called()
