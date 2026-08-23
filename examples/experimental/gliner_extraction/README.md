@@ -58,6 +58,63 @@ sentences + an entity digest), not abstractive. Answer generation at query
 time (`GRAPH_COMPLETION`) still needs an LLM; `CHUNKS`/`SUMMARIES`/`CHUNKS_LEXICAL`
 search stays fully LLM-free.
 
+## The default pipeline: cached ontology + GLiNER
+
+`gliner_cognify()` with no explicit schema runs the full architecture by
+default (`auto_schema=True`):
+
+```
+                 COGNEE DATASET
+                       │
+               cached ontology?
+                  /           \
+               yes             no
+                │               │
+          (no LLM call)   ONE LLM ontology-
+                │         discovery call over
+                │         the first batch
+                └───────┬───────┘
+                        ▼
+                  ontology vN  (versioned JSON per dataset)
+                        ▼
+                    GLiNER2  ← all chunks, batched, LLM-free
+                        ▼
+          low-density batch? → one discovery call → ontology vN+1
+```
+
+- First ingestion of a dataset: one LLM call invents the ontology from the
+  data (verified: a medical sample produced `clinical_event`, `diagnosis`,
+  `medication`, `healthcare_facility`, …), saved as
+  `.gliner_schema_cache/<dataset>.json` v1.
+- Every later ingestion: the cached ontology loads with **zero LLM calls**.
+- Density-triggered expansion (below) bumps the cached version, so the
+  ontology evolves while the LLM stays out of the hot path.
+- No LLM configured at all: falls back to generic default labels with a loud
+  warning (or pass `entity_types`/`relation_types` explicitly).
+
+The discovery call is constrained (read samples, emit 10–30 labels), so a
+small local model is enough. Verified with **qwen3:4b via Ollama** (~2.5 GB,
+`ollama pull qwen3:4b`):
+
+```bash
+LLM_PROVIDER=ollama LLM_MODEL=qwen3:4b \
+LLM_ENDPOINT=http://localhost:11434/v1 LLM_API_KEY=ollama \
+python your_ingestion.py
+```
+
+That makes the whole pipeline local: qwen3:4b invents the schema once
+(~2 min — it is a thinking model; once per dataset, not per document),
+GLiNER2 extracts everything, no document leaves the machine.
+
+## Model downloads
+
+The GLiNER2 checkpoint (~450 MB for base) downloads from HuggingFace on
+first use and is cached under `~/.cache/huggingface`. `gliner_cognify` and
+`GLiNERWorkerPool` call `ensure_model_available()` up front, which prints a
+visible notice before downloading — and pre-downloads in the parent process
+so N workers never race the download. Ollama models are pulled explicitly
+(`ollama pull qwen3:4b`, with its own progress output).
+
 ## Where the schema comes from (OWL + LLM discovery)
 
 GLiNER is schema-driven: it only extracts the types you name. Instead of the

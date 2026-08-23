@@ -50,7 +50,11 @@ async def main():
     extractor = GLiNER2.from_pretrained("fastino/gliner2-base-v1")
 
     await cognee.add(TEXT, dataset_name="gliner_demo")
-    await gliner_cognify(datasets=["gliner_demo"], extractor=extractor)
+    # auto_schema=False: this demo deliberately runs with a broken LLM key,
+    # so LLM ontology discovery is off; the generic default labels are used.
+    # With a working LLM config, drop the flag to get the default pipeline
+    # (cached per-dataset ontology, discovered by one LLM call).
+    await gliner_cognify(datasets=["gliner_demo"], extractor=extractor, auto_schema=False)
 
     from cognee.infrastructure.databases.graph import get_graph_engine
 

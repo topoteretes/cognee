@@ -19,9 +19,12 @@ LLM cost is bounded by `max_discoveries` for the whole run; re-extraction
 costs one extra GLiNER pass for the triggering batch only.
 """
 
+import json
+import pathlib
+
 from cognee.shared.logging_utils import get_logger
 
-from ontology_schema import discover_additional_types
+from ontology_schema import discover_additional_types, discover_schema
 
 logger = get_logger("adaptive_schema")
 
@@ -136,3 +139,109 @@ class AdaptiveSchemaTuner:
             "final_entity_types": sorted(self.entity_types),
             "final_relation_types": sorted(self.relation_types),
         }
+
+
+class AutoSchemaManager(AdaptiveSchemaTuner):
+    """Zero-configuration schema: cached per-dataset ontology + LLM discovery.
+
+    The default schema source for `gliner_cognify`. Resolution order on the
+    first batch of a run:
+
+      1. Load the dataset's cached ontology (``<cache_dir>/<dataset>.json``,
+         versioned) — no LLM call. This is the hot path for every ingestion
+         after the first.
+      2. No cache: ONE LLM ontology-discovery call over the first batch's
+         texts (works with a small local model, e.g. Ollama qwen3:4b).
+      3. LLM unavailable: fall back to the generic default labels, loudly.
+
+    Density-triggered expansion (inherited from AdaptiveSchemaTuner) keeps
+    working; every expansion bumps the cache version, so the ontology
+    evolves across ingestions while the LLM stays out of the hot path.
+    """
+
+    def __init__(
+        self,
+        dataset: str,
+        cache_dir: str | pathlib.Path,
+        fallback_entity_types: dict | None = None,
+        fallback_relation_types: dict | None = None,
+        discovery_sample_size: int = 12,
+        **tuner_kwargs,
+    ):
+        super().__init__({}, {}, **tuner_kwargs)
+        self.dataset = dataset
+        self.cache_path = pathlib.Path(cache_dir) / f"{dataset}.json"
+        self.fallback_entity_types = fallback_entity_types
+        self.fallback_relation_types = fallback_relation_types
+        self.discovery_sample_size = discovery_sample_size
+        self.version = 0
+        self.schema_source = None
+        self._initialized = False
+
+    async def ensure_schema(self, texts: list[str]) -> None:
+        """Resolve the schema once per run; called before the first extraction."""
+        if self._initialized:
+            return
+        self._initialized = True
+
+        if self.cache_path.exists():
+            cached = json.loads(self.cache_path.read_text())
+            self.entity_types = cached["entity_types"]
+            self.relation_types = cached["relation_types"]
+            self.version = cached["version"]
+            self.schema_source = "cache"
+            logger.info(
+                "Ontology v%d loaded from cache for dataset %r (%d entity, %d relation types) — no LLM call",
+                self.version,
+                self.dataset,
+                len(self.entity_types),
+                len(self.relation_types),
+            )
+            return
+
+        try:
+            sample = texts[: self.discovery_sample_size]
+            logger.info(
+                "No cached ontology for dataset %r — running ONE LLM ontology-discovery call over %d sample chunks",
+                self.dataset,
+                len(sample),
+            )
+            self.entity_types, self.relation_types = await discover_schema(sample)
+            self.schema_source = "llm_discovery"
+        except Exception as error:
+            from gliner_graph_extractor import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES
+
+            self.entity_types = dict(self.fallback_entity_types or DEFAULT_ENTITY_TYPES)
+            self.relation_types = dict(self.fallback_relation_types or DEFAULT_RELATION_TYPES)
+            self.schema_source = "fallback_defaults"
+            logger.warning(
+                "Ontology discovery LLM call failed (%s: %s) — falling back to "
+                "generic default labels. Configure an LLM (a local Ollama model "
+                "works) or pass entity_types/relation_types explicitly.",
+                type(error).__name__,
+                error,
+            )
+        self._save()
+
+    async def observe_and_maybe_expand(self, texts: list[str], results: list[dict]) -> bool:
+        expanded = await super().observe_and_maybe_expand(texts, results)
+        if expanded:
+            self._save()
+        return expanded
+
+    def _save(self):
+        self.version += 1
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cache_path.write_text(
+            json.dumps(
+                {
+                    "version": self.version,
+                    "dataset": self.dataset,
+                    "schema_source": self.schema_source,
+                    "entity_types": self.entity_types,
+                    "relation_types": self.relation_types,
+                },
+                indent=2,
+            )
+        )
+        logger.info("Ontology v%d saved to %s", self.version, self.cache_path)

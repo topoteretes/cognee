@@ -16,6 +16,7 @@ embedding model. No LLM completion is invoked anywhere.
 """
 
 import asyncio
+import pathlib
 import re
 from uuid import uuid5
 
@@ -149,11 +150,16 @@ async def gliner_extract_and_summarize(
     if not data_chunks:
         return data_chunks
 
+    texts = [chunk.text for chunk in data_chunks]
+
     if schema_tuner is not None:
+        # AutoSchemaManager resolves its schema on the first batch:
+        # cached ontology -> one LLM discovery call -> loud fallback.
+        ensure = getattr(schema_tuner, "ensure_schema", None)
+        if ensure is not None:
+            await ensure(texts)
         entity_types = schema_tuner.entity_types
         relation_types = schema_tuner.relation_types
-
-    texts = [chunk.text for chunk in data_chunks]
 
     async def _extract(ents, rels):
         packed_texts, packs = pack_texts(texts, target_chars=pack_target_chars)
@@ -240,8 +246,18 @@ async def gliner_cognify(
     pack_target_chars: int = 1800,
     model_name: str = "fastino/gliner2-base-v1",
     storage_depth: int = 1,
+    auto_schema: bool = True,
+    schema_cache_dir=None,
 ):
     """Run the whole cognify pipeline with GLiNER2 instead of an LLM.
+
+    DEFAULT SCHEMA BEHAVIOR (`auto_schema=True`): when no explicit
+    entity_types/relation_types/schema_tuner is given, the schema comes from
+    an `AutoSchemaManager` — the dataset's cached ontology if one exists
+    (no LLM call), otherwise ONE LLM ontology-discovery call over the first
+    batch (a small local model via Ollama works), cached and versioned under
+    `schema_cache_dir` for every later ingestion. Density-triggered expansion
+    keeps evolving the cached ontology.
 
     With `workers > 0`, extraction runs in that many GLiNER worker processes
     (~2 GB RAM each) and `extractor` is not needed. Storage always overlaps
@@ -255,6 +271,19 @@ async def gliner_cognify(
         worker_pool = GLiNERWorkerPool(model_name=model_name, workers=workers)
     elif extractor is None:
         raise ValueError("Provide `extractor` or set `workers` > 0")
+    else:
+        from parallel_gliner import ensure_model_available
+
+        ensure_model_available(model_name)
+
+    if auto_schema and schema_tuner is None and not entity_types and not relation_types:
+        from adaptive_schema import AutoSchemaManager
+
+        dataset_names = datasets if isinstance(datasets, list) else [datasets]
+        schema_tuner = AutoSchemaManager(
+            dataset=str(dataset_names[0]),
+            cache_dir=schema_cache_dir or pathlib.Path(__file__).parent / ".gliner_schema_cache",
+        )
 
     storage = _BackgroundStorage(depth=storage_depth)
     tasks = [

@@ -24,6 +24,33 @@ from concurrent.futures import ProcessPoolExecutor
 
 _SEPARATOR = "\n\n"
 
+
+def ensure_model_available(model_name: str = "fastino/gliner2-base-v1") -> bool:
+    """Make sure the GLiNER checkpoint is in the local HuggingFace cache.
+
+    Announces the download when one is needed (first run only, ~450 MB for
+    gliner2-base) instead of silently blocking, and pre-downloads in the
+    calling process so multiple worker processes never race the download.
+    Returns True when a download happened.
+    """
+    from huggingface_hub import snapshot_download
+
+    try:
+        snapshot_download(model_name, local_files_only=True)
+        return False
+    except Exception:
+        pass
+
+    print(
+        f"⬇ Downloading GLiNER2 model '{model_name}' from HuggingFace "
+        "(~450 MB for gliner2-base-v1, one-time; cached under ~/.cache/huggingface)...",
+        flush=True,
+    )
+    snapshot_download(model_name)
+    print(f"✓ Model '{model_name}' downloaded.", flush=True)
+    return True
+
+
 # --- worker process side -----------------------------------------------------
 
 _worker_model = None
@@ -142,6 +169,9 @@ class GLiNERWorkerPool:
     ):
         cpu_count = os.cpu_count() or 4
         threads = torch_threads_per_worker or max(1, cpu_count // workers)
+        # Download once in the parent (with a visible notice) so N workers
+        # load from cache instead of racing the download.
+        ensure_model_available(model_name)
         # Workers import this module by path; make sure spawn can find it.
         module_dir = str(pathlib.Path(__file__).parent)
         existing = os.environ.get("PYTHONPATH", "")

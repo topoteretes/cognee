@@ -67,6 +67,42 @@ class ProposedSchema(BaseModel):
     relation_types: List[ProposedType]
 
 
+async def discover_schema(
+    sample_texts: list[str],
+    max_types: int = 20,
+) -> tuple[dict, dict]:
+    """Zero-schema ontology discovery: ONE LLM call proposes the full label set.
+
+    Give it representative sample texts (a first pipeline batch works well);
+    it returns (entity_types, relation_types) for GLiNER. Works with any LLM
+    cognee is configured for — including a small local model via Ollama
+    (e.g. qwen3:4b), since the task is constrained: read samples, emit
+    10-30 labels with descriptions.
+    """
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+    sample = "\n---\n".join(sample_texts)[:12000]
+    proposed = await LLMGateway.acreate_structured_output(
+        text_input=f"Sample of the dataset:\n{sample}",
+        system_prompt=(
+            "You are performing ontology discovery for a knowledge extraction "
+            "system. Analyze the text and identify the distinct TYPES of "
+            "entities and relationships that matter for representing its "
+            "knowledge. Do NOT extract individual entities. Categories must "
+            "be semantically meaningful, reusable across the document, "
+            "domain-specific, and mutually distinct. Avoid overly broad "
+            "categories (thing, object, concept) and categories that apply "
+            f"to only one entity. Propose at most {max_types} entity types "
+            f"and {max_types} relation types. snake_case names, one-sentence "
+            "descriptions of what text spans match."
+        ),
+        response_model=ProposedSchema,
+    )
+    entity_types = {t.name: t.description for t in proposed.entity_types}
+    relation_types = {t.name: t.description for t in proposed.relation_types}
+    return entity_types, relation_types
+
+
 async def discover_additional_types(
     sample_texts: list[str],
     known_entity_types: dict,
