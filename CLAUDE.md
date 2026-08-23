@@ -543,6 +543,7 @@ Configuration:
 ONTOLOGY_RESOLVER=rdflib  # Default: uses rdflib and OWL files
 MATCHING_STRATEGY=fuzzy   # Default: fuzzy matching with 80% similarity
 ONTOLOGY_FILE_PATH=/path/to/your/ontology.owl  # Full path to ontology file
+ONTOLOGY_MODE=annotate    # Default: enrich only. strict drops entities with no ontology grounding
 ```
 
 Implementation: `cognee/modules/ontology/`
@@ -695,6 +696,14 @@ await cognee.recall("my question", datasets=["my_project"])
 
 ### DataPoints
 Atomic knowledge units that form the foundation of graph structures. All graph nodes extend the `DataPoint` base class with versioning and metadata support.
+
+### Temporal Model & Assertion Authority
+Cognee's fact store is **uni-temporal**: nodes carry `created_at`/`updated_at` (ms epoch, ingestion clock) and every edge carries one ingestion-time `updated_at`. No real-world validity interval is attached to facts, and there is no as-of / point-in-time query.
+
+- **Real-world time exists only on the opt-in temporal path**: `cognify(temporal_cognify=True)` (SDK-only; replaces the default task list) extracts event occurrence times into `Timestamp`/`Interval` nodes linked from `Event` nodes, queryable via `SearchType.TEMPORAL`. This is occurrence time on events, not validity on facts/edges.
+- **Supersession is opt-in**: `cognify(functional_relationships=[...])` tags older edges of a declared single-valued relationship with `superseded=True`. The winner is chosen by authority first (`assertion_source`), then ingestion-time recency. Graph retrievers skip superseded-tagged edges when building context; precomputed triplet embeddings and raw chunk text are not filtered. Contradiction detection (below) is also opt-in and only annotates.
+- **Assertion authority**: nodes carry derivational provenance (`source_pipeline`, `source_task`, `source_user`, `source_content_hash`) plus `assertion_source` (`user_stated` for session-bridged facts / `document_extracted` / `llm_inferred`), stamped under `COGNEE_PROVENANCE_MODE` (default `lightweight`). Only the supersession resolver consults it; retrieval ranking, dedup, and entity merging do not.
+- **Dormant fields**: `DataPoint.valid_to` (and the `close_node`/`is_valid` helpers) are application-level only — no default pipeline writes or reads them. Zep-imported `valid_at`/`invalid_at` edge properties are carried but not queried (see `cognee/modules/migration/cogx.py` for the roadmap note).
 
 ### Contradiction Detection
 Opt-in LLM check that runs as the last `cognify()` task (default **off**). After the graph is stored, it gathers the facts one hop from the entities this ingestion touched — new and pre-existing alike — asks an LLM which pairs cannot both be true, and records each confident conflict as a `contradicts` edge carrying both fact texts, the reason, and the confidence. It only adds edges (never rewrites or deletes) and swallows its own errors, so it can never break ingestion.

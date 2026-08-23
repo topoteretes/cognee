@@ -63,8 +63,10 @@ class DataPoint(BaseModel):
     ontology_uri: str | None = None
     version: int = 1  # Default version
     topological_rank: int | None = 0
-    # Bi-temporal validity: ms epoch when this fact was superseded (via close_node);
-    # None = still current. Not the same as Event/Interval time_to (when an event occurred).
+    # Ms epoch when this fact was superseded (via the close_node helper); None =
+    # still current. No default pipeline writes this today — close_node has no
+    # in-pipeline caller, so valid_to stays None unless application code sets it.
+    # Not the same as Event/Interval time_to (when an event occurred in the world).
     valid_to: int | None = None
     metadata: MetaData = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)

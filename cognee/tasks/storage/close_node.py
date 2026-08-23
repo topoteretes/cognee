@@ -5,6 +5,11 @@ When a fact changes (e.g. "Alice works at X" -> "Alice works at Y"), call
 deleting it — and then write the replacement. Consumers filter stale facts with
 ``is_valid(node)``, which stays true while ``valid_to`` is ``None`` (never closed) or
 still lies in the future.
+
+This is an application-level helper: no default cognee pipeline or retriever calls
+``close_node`` or ``is_valid`` today, so ``valid_to`` stays ``None`` on every node
+unless your own code stamps it. It also requires a graph backend with partial node
+updates (currently Ladybug only); others log a warning and return ``False``.
 """
 
 import logging
