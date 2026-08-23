@@ -235,14 +235,23 @@ class LLMConfig(BaseSettings):
         adapter merges into each completion call — without this fold the two
         fields are read by nothing and never reach the provider.
 
-        ``llm_temperature`` is folded only when set explicitly (env var or
-        kwarg): the default model family (gpt-5) rejects any temperature other
+        ``llm_temperature`` is folded when set explicitly (env var or kwarg),
+        or when the model runs on a local inference server. The gate exists
+        because the default model family (gpt-5) rejects any temperature other
         than the provider default, so an unset field must not silently send
-        ``0.0``. Keys given directly in ``LLM_ARGS`` win over the dedicated
-        fields.
+        ``0.0`` there. That restriction is specific to the hosted OpenAI
+        reasoning models: local servers (Ollama, llama.cpp, LM Studio) accept
+        the field, and leaving it unfolded means extraction silently runs at
+        whatever the model itself defaults to (1.0 for several Ollama models)
+        instead of the deterministic ``0.0`` that ``docs/ollama_models.md``
+        documents. Runs after ``infer_provider_from_model`` so the provider is
+        already resolved. Keys given directly in ``LLM_ARGS`` win over the
+        dedicated fields.
         """
         folded: dict[str, Any] = {}
-        if "llm_temperature" in self.model_fields_set:
+        if "llm_temperature" in self.model_fields_set or is_local_llm(
+            self.llm_provider, self.llm_model
+        ):
             folded["temperature"] = self.llm_temperature
         if self.llm_seed is not None:
             folded["seed"] = self.llm_seed
