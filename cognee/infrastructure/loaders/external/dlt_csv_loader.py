@@ -25,6 +25,7 @@ from cognee.infrastructure.files.storage import get_file_storage, get_storage_co
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 
 class DltCsvLoader(LoaderInterface):
@@ -103,10 +104,10 @@ class DltCsvLoader(LoaderInterface):
             "dlt_manifest_" + hashlib.md5(manifest_text.encode()).hexdigest() + ".txt"
         )
         storage = get_file_storage(get_storage_config()["data_root_directory"])
-        stored_path = await storage.store(storage_file_name, manifest_text)
-
-        return LoaderResult(
-            file_path=stored_path,
+        return await store_derived_text(
+            storage,
+            storage_file_name,
+            manifest_text,
             data_id=manifest_item.data_id,
             system_metadata=manifest_item.system_metadata,
         )

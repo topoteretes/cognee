@@ -2,8 +2,8 @@
 
 The guarantee these tests protect: shrinking what ``tools/list`` advertises must
 not shrink what is *callable*. Every unadvertised tool has to stay reachable
-both directly by name (how the workspace UI calls its internals) and through
-the ``call_tool`` proxy (how an agent calls something it just found).
+both directly by name and through the ``call_tool`` proxy (how an agent calls
+something it just found).
 """
 
 import json
@@ -23,17 +23,27 @@ from src.tool_registry import DEFAULT_TAG, MEMORY_TAG  # noqa: E402
 
 SYNTHETIC_TOOLS = {"search_tools", "call_tool"}
 MEMORY_TOOLS = {"remember", "recall", "forget"}
-WORKSPACE_UI_ENTRY_TOOLS = {"visualize_graph_ui", "upload_file_ui", "open_cognee_workspace"}
 
 # Deliberately not enumerated: the unpinned tools are derived from the registry so
-# this file keeps working as the catalog changes (cognify_file in particular is
-# being merged into remember). Only the pinned sets are spelled out, because those
-# are the contract worth reviewing by eye.
+# this file keeps working as the catalog changes. Only the pinned sets are spelled
+# out, because those are the contract worth reviewing by eye.
 
 
 def hidden_tools() -> set[str]:
     """Registered but not advertised in default mode."""
     return set(server.registry.tags) - set(server.registry.names_with_tag(DEFAULT_TAG))
+
+
+class FakeStatusClient:
+    """Drives cognify_status down its API-mode path with no real backend."""
+
+    use_api = True
+
+    async def list_datasets(self):
+        return [{"id": "id-1", "name": "main_dataset"}]
+
+    async def get_pipeline_status(self, dataset_ids, pipeline_name):
+        return {"id-1": "DATASET_PROCESSING_COMPLETED"}
 
 
 @pytest.fixture(autouse=True)
@@ -75,18 +85,14 @@ async def test_every_tool_declares_a_tier():
 
 def test_pinned_sets_are_derived_from_tags():
     assert set(server.registry.names_with_tag(MEMORY_TAG)) == MEMORY_TOOLS
-    assert set(server.registry.names_with_tag(DEFAULT_TAG)) == (
-        MEMORY_TOOLS | WORKSPACE_UI_ENTRY_TOOLS
-    )
+    assert set(server.registry.names_with_tag(DEFAULT_TAG)) == MEMORY_TOOLS
 
 
 # --- what each mode advertises ------------------------------------------------
 
 
 async def test_default_mode_advertises_pinned_plus_synthetic():
-    assert await advertised("default") == (
-        MEMORY_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | SYNTHETIC_TOOLS
-    )
+    assert await advertised("default") == MEMORY_TOOLS | SYNTHETIC_TOOLS
 
 
 async def test_minimal_mode_advertises_only_the_memory_api():
@@ -101,9 +107,7 @@ async def test_all_mode_restores_the_flat_surface():
 
 async def test_unknown_mode_falls_back_to_default():
     assert server.apply_tool_mode("banana") == "default"
-    assert {tool.name for tool in await server.mcp.list_tools()} == (
-        MEMORY_TOOLS | WORKSPACE_UI_ENTRY_TOOLS | SYNTHETIC_TOOLS
-    )
+    assert {tool.name for tool in await server.mcp.list_tools()} == (MEMORY_TOOLS | SYNTHETIC_TOOLS)
 
 
 async def test_apply_tool_mode_is_idempotent():
@@ -134,22 +138,14 @@ async def test_result_window_is_not_the_binding_constraint():
 @pytest.mark.parametrize(
     "query, expected",
     [
-        ("what datasets do I have?", "list_datasets_json"),
-        ("list my datasets", "list_datasets_json"),
-        ("show me all the datasets", "list_datasets_json"),
-        ("show the data inside a dataset", "list_dataset_data_json"),
-        ("make a new dataset", "create_dataset_json"),
-        ("which client am I connected as", "get_client_info_json"),
+        ("is my background ingestion finished?", "cognify_status"),
+        ("check the progress of a pipeline job", "cognify_status"),
+        ("did remember fail in the background", "cognify_status"),
     ],
 )
 async def test_natural_language_queries_rank_their_tool_first(query, expected):
-    """The table in README.md's "Writing a tool so search can find it".
-
-    Lexical matching has real edges (see the next test), but the phrasings an
-    agent actually produces are multi-word and land at rank 1. Pinned here so a
-    description edit that breaks discoverability fails loudly, and so the README
-    claim stays honest.
-    """
+    """The phrasings an agent actually produces are multi-word and land at rank 1.
+    Pinned here so a description edit that breaks discoverability fails loudly."""
     server.apply_tool_mode("default")
 
     async with Client(server.mcp) as client:
@@ -158,26 +154,19 @@ async def test_natural_language_queries_rank_their_tool_first(query, expected):
     assert results and results[0] == expected, f"{query!r} -> {results}"
 
 
-async def test_search_matches_on_vocabulary_not_on_the_result_limit():
-    """The window being wide enough does NOT mean every search returns everything.
-
-    BM25 drops zero-scoring tools and its tokenizer does no stemming, so "dataset"
-    does not match `list_datasets_json` (token "datasets"). This is the behavior
-    that makes tool *descriptions* the lever for recall, and it is surprising
-    enough to pin: if a future fastmcp adds stemming, we want to notice.
-    """
+async def test_search_matches_on_vocabulary_not_everything():
+    """BM25 drops zero-scoring tools: a query sharing no vocabulary with a tool's
+    description returns nothing, which makes tool *descriptions* the lever for
+    recall. A query covering the description's vocabulary reaches every hidden
+    tool, confirming the result limit is not the cap."""
     server.apply_tool_mode("default")
     hidden = hidden_tools()
 
     async with Client(server.mcp) as client:
-        singular = set(await search(client, "dataset"))
-        plural = set(await search(client, "datasets"))
-        combined = set(await search(client, "dataset datasets file client info create list"))
+        unrelated = set(await search(client, "banana smoothie recipe"))
+        combined = set(await search(client, "background ingestion pipeline status progress"))
 
-    assert "create_dataset_json" in singular
-    assert "list_datasets_json" not in singular, "unexpected stemming — revisit the docs"
-    assert "list_datasets_json" in plural
-    # Covering both forms does reach everything, confirming the limit is not the cap.
+    assert not unrelated
     assert combined == hidden
 
 
@@ -185,8 +174,7 @@ async def test_hidden_tools_are_discoverable_by_search():
     server.apply_tool_mode("default")
 
     async with Client(server.mcp) as client:
-        assert "list_datasets_json" in await search(client, "list all of my datasets")
-        assert "create_dataset_json" in await search(client, "create a new dataset")
+        assert "cognify_status" in await search(client, "check ingestion status")
 
 
 async def test_search_never_returns_pinned_tools():
@@ -196,41 +184,32 @@ async def test_search_never_returns_pinned_tools():
 
     async with Client(server.mcp) as client:
         for query in ("remember this for later", "search my memory", "delete a dataset"):
-            assert not (MEMORY_TOOLS | WORKSPACE_UI_ENTRY_TOOLS) & set(await search(client, query))
+            assert not MEMORY_TOOLS & set(await search(client, query))
 
 
 async def test_hidden_tool_is_callable_directly(monkeypatch):
-    """How the workspace UI reaches its internals: by name, never via tools/list."""
-
-    class FakeClient:
-        async def list_datasets(self):
-            return [{"id": "id-1", "name": "alpha"}]
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
+    """Unadvertised tools stay reachable by name, never via tools/list."""
+    monkeypatch.setattr(server, "cognee_client", FakeStatusClient())
     server.apply_tool_mode("default")
 
     async with Client(server.mcp) as client:
-        assert "list_datasets_json" not in {tool.name for tool in await client.list_tools()}
+        assert "cognify_status" not in {tool.name for tool in await client.list_tools()}
 
-        result = await client.call_tool("list_datasets_json", {})
-        assert "alpha (id-1)" in result.content[0].text
+        result = await client.call_tool("cognify_status", {"dataset_name": "main_dataset"})
+        assert "DATASET_PROCESSING_COMPLETED" in result.content[0].text
 
 
 async def test_hidden_tool_is_callable_through_the_proxy(monkeypatch):
     """How an agent reaches a tool it just found via search_tools."""
-
-    class FakeClient:
-        async def list_datasets(self):
-            return [{"id": "id-2", "name": "beta"}]
-
-    monkeypatch.setattr(server, "cognee_client", FakeClient())
+    monkeypatch.setattr(server, "cognee_client", FakeStatusClient())
     server.apply_tool_mode("default")
 
     async with Client(server.mcp) as client:
         result = await client.call_tool(
-            "call_tool", {"name": "list_datasets_json", "arguments": {}}
+            "call_tool",
+            {"name": "cognify_status", "arguments": {"dataset_name": "main_dataset"}},
         )
-        assert "beta (id-2)" in result.content[0].text
+        assert "DATASET_PROCESSING_COMPLETED" in result.content[0].text
 
 
 async def test_proxy_refuses_to_call_the_synthetic_tools():
@@ -242,19 +221,17 @@ async def test_proxy_refuses_to_call_the_synthetic_tools():
                 await client.call_tool("call_tool", {"name": name, "arguments": {}})
 
 
-async def test_hidden_tools_keep_their_schemas_and_ui_metadata():
+async def test_hidden_tools_keep_their_schemas():
     """Search results must carry enough for an agent to call the tool without a
-    second round trip, and the workspace UI's resourceUri must survive."""
+    second round trip."""
     server.apply_tool_mode("minimal")
 
     async with Client(server.mcp) as client:
-        result = await client.call_tool("search_tools", {"query": "data items inside a dataset"})
+        result = await client.call_tool("search_tools", {"query": "background ingestion status"})
         tools = {tool["name"]: tool for tool in json.loads(result.content[0].text)}
 
     # Full input schema, so the agent can call it straight away.
-    assert "dataset_id" in tools["list_dataset_data_json"]["inputSchema"]["properties"]
-    # MCP App metadata survives the transform.
-    assert tools["visualize_graph_ui"]["meta"]["ui"]["resourceUri"]
+    assert "dataset_name" in tools["cognify_status"]["inputSchema"]["properties"]
 
 
 async def test_usage_logging_name_survives_the_registry_wrapper():

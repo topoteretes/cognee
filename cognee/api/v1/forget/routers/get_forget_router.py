@@ -89,7 +89,7 @@ def get_forget_router() -> APIRouter:
         """
         send_telemetry(
             "Forget API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/forget",
                 "cognee_version": cognee_version,

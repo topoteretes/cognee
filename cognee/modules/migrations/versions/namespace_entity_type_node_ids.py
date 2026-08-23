@@ -761,6 +761,42 @@ async def _restore_provenance_bulk(attach, items_with_snapshots) -> None:
             await attach(artifacts, [source_ref_key], run_refs_by_key.get(source_ref_key))
 
 
+async def _edges_needing_reassert(graph_engine, at_risk: list) -> list:
+    """Narrow the at-risk set to the edges the backend actually dropped.
+
+    ``at_risk`` is every survivor edge incident to a node whose neighbourhood
+    was rewritten — potentially the whole graph. Upserting all of them is
+    correct but pays ~102k writes on a 100k-node fork to repair drops that are
+    usually zero.
+
+    One scan of the edge table answers the question directly, and a scan is the
+    operation an embedded graph engine is fastest at. Backends that cannot
+    answer it (no Cypher, unsupported syntax) fall back to re-asserting
+    everything, so behaviour is unchanged where the shortcut does not apply.
+    """
+    try:
+        rows = await graph_engine.query(
+            "MATCH (a:Node)-[r:EDGE]->(b:Node) RETURN a.id, b.id, r.relationship_name"
+        )
+    except Exception as error:
+        logger.info(
+            "namespace migration: edge listing unavailable (%s), re-asserting all "
+            "%d at-risk edge(s)",
+            error,
+            len(at_risk),
+        )
+        return at_risk
+
+    present = {(str(row[0]), str(row[1]), str(row[2])) for row in rows}
+    dropped = [edge for edge in at_risk if (edge[0], edge[1], edge[2]) not in present]
+    logger.info(
+        "namespace migration: %d of %d at-risk edge(s) were dropped and need re-asserting",
+        len(dropped),
+        len(at_risk),
+    )
+    return dropped
+
+
 async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edges: list) -> int:
     """Remap old-scheme node ids (and their edges) in the graph database."""
     inverse_id_map = {new_id: old_id for old_id, new_id in id_map.items()}
@@ -845,23 +881,30 @@ async def _migrate_graph(graph_engine, id_map: dict, properties_by_id: dict, edg
     #    incoming ``TextSummary -made_from-> DocumentChunk``. add_edges is an
     #    idempotent upsert, so re-asserting is a no-op where the edge survived and
     #    restores it where the backend dropped it.
+    #
+    #    Re-asserting blindly costs one upsert per at-risk edge — on a 100k-node
+    #    fork that is ~102k writes (~22 min measured) to repair a handful of
+    #    drops, or none at all. When the backend can list its edges in one scan,
+    #    ask it which ones actually vanished and rewrite only those.
     at_risk = [
         edge
         for edge in survivor_edges
         if edge[0] in affected_neighbors or edge[1] in affected_neighbors
     ]
     if at_risk:
-        await graph_engine.add_edges(at_risk)
-        await _restore_provenance_bulk(
-            graph_engine.attach_edge_source_refs,
-            [
-                (edge, edge_snapshots.get(edge))
-                for edge in (
-                    _edge_identity(source_id, target_id, relationship_name)
-                    for source_id, target_id, relationship_name, _properties in at_risk
-                )
-            ],
-        )
+        to_reassert = await _edges_needing_reassert(graph_engine, at_risk)
+        if to_reassert:
+            await graph_engine.add_edges(to_reassert)
+            await _restore_provenance_bulk(
+                graph_engine.attach_edge_source_refs,
+                [
+                    (edge, edge_snapshots.get(edge))
+                    for edge in (
+                        _edge_identity(source_id, target_id, relationship_name)
+                        for source_id, target_id, relationship_name, _properties in to_reassert
+                    )
+                ],
+            )
 
     return len(remapped_edges)
 

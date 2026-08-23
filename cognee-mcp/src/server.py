@@ -7,7 +7,6 @@ import base64
 import subprocess
 from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Deque, List, Optional, Tuple
 from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
 from cognee.modules.data.methods.get_last_added_data import get_last_added_data
@@ -20,7 +19,6 @@ import mcp.types as types
 from fastmcp import FastMCP
 from fastmcp.server.transforms.search import BM25SearchTransform
 from fastmcp.server.transforms.search.base import BaseSearchTransform
-from fastmcp.tools.tool import ToolResult
 from cognee.modules.storage.utils import JSONEncoder
 from starlette.responses import JSONResponse
 from starlette.middleware import Middleware
@@ -173,13 +171,12 @@ TOOL_MODES = ("default", "minimal", "all")
 # missing from the window is unrecoverable while its rank inside the window
 # barely costs anything.
 #
-# With today's 11 tools this exceeds the unpinned count, so the window is never
-# the binding constraint — but that does NOT mean every search returns every
-# tool. BM25 drops zero-scoring tools, and its tokenizer does no stemming, so
-# query "dataset" matches `create_dataset_json` but not `list_datasets_json`
-# (token "datasets"). Misses come from vocabulary, not from k. When adding a
-# tool, put the words an agent would actually use — in both singular and plural
-# — in its description.
+# With today's small catalog this exceeds the unpinned count, so the window is
+# never the binding constraint — but that does NOT mean every search returns
+# every tool. BM25 drops zero-scoring tools, and its tokenizer does no
+# stemming, so a query only matches tokens it literally contains. Misses come
+# from vocabulary, not from k. When adding a tool, put the words an agent would
+# actually use — in both singular and plural — in its description.
 #
 # The window costs context only on turns that call search, never on the
 # per-turn tools/list payload.
@@ -191,12 +188,11 @@ def apply_tool_mode(mode: str = None) -> str:
 
     Every tool stays registered and directly callable by name; the transform
     only changes what ``tools/list`` advertises, replacing the non-pinned tools
-    with ``search_tools``/``call_tool``. That keeps the workspace UI working
-    (it calls internals by name via app.callServerTool) while a fresh agent
-    sees a handful of tools instead of the whole catalog.
+    with ``search_tools``/``call_tool``, so a fresh agent sees a handful of
+    tools instead of the whole catalog.
 
     Modes (COGNEE_MCP_TOOL_MODE):
-        default: pin the DEFAULT_TAG tools (memory API + workspace UI entry).
+        default: pin the DEFAULT_TAG tools (memory API).
         minimal: pin only the memory API.
         all:     no transform, advertise everything (pre-3.x behavior).
 
@@ -1146,6 +1142,7 @@ async def remember(
     dataset_name: str = None,
     session_id: str = None,
     custom_prompt: str = None,
+    background: bool = False,
 ) -> list:
     """Store data in memory.
 
@@ -1180,6 +1177,12 @@ async def remember(
         Session ID. When set, stores in session cache only.
     custom_prompt : str, optional
         Custom prompt for entity extraction (permanent mode only).
+    background : bool
+        Queue permanent ingestion as a background task and return immediately
+        instead of waiting for the pipeline. Use when the caller has a request
+        deadline shorter than ingestion takes. Ignored with session_id, which
+        is already fast. Errors surface via cognify_status, not the return
+        value.
     """
     if content_base64 and data:
         return [
@@ -1217,6 +1220,46 @@ async def remember(
             ]
 
     dataset_name = dataset_name or _agent_scoped_default_dataset()
+
+    # Permanent-memory ingestion runs add + cognify (+ improve), which routinely
+    # outruns an MCP host's per-request deadline — the same constraint the
+    # cognify tool documents as "background process launched due to MCP timeout
+    # limitations". Callers that can't block pass background=True and poll
+    # cognify_status instead. Session-cache writes are fast, so they always
+    # run inline.
+    if background and not session_id:
+
+        async def remember_task_wrapper(**kwargs):
+            """Wrapper that captures errors from the background task."""
+            try:
+                await cognee_client.remember(**kwargs)
+            except Exception as e:
+                _record_task_error(dataset_name, str(e))
+                logger.error(f"Background remember task failed for dataset '{dataset_name}': {e}")
+
+        _track_background(
+            remember_task_wrapper(
+                data=data,
+                filename=filename,
+                content_base64=content_base64,
+                dataset_name=dataset_name,
+                session_id=None,
+                custom_prompt=custom_prompt,
+            )
+        )
+        queued = f"'{filename}'" if content_base64 else "text"
+        return [
+            types.TextContent(
+                type="text",
+                text=(
+                    f"Background process launched due to MCP timeout limitations.\n"
+                    f"Queued {queued} for dataset '{dataset_name}'.\n"
+                    f"Check progress with cognify_status, or the log file at: "
+                    f"{get_log_file_location()}"
+                ),
+            )
+        ]
+
     with redirect_stdout(sys.stderr):
         try:
             result = await cognee_client.remember(
@@ -1309,11 +1352,14 @@ async def recall(
 async def forget(
     dataset: str = None,
     everything: bool = False,
+    data_id: str = None,
+    dataset_id: str = None,
 ) -> list:
     """Delete data from memory.
 
-    Can target a specific dataset or delete everything the user owns.
-    Removes data from the relational DB, graph DB, and vector DB.
+    Can target a single data item, a specific dataset (by name or id), or
+    everything the user owns. Removes data from the relational DB, graph DB,
+    and vector DB.
 
     Parameters
     ----------
@@ -1321,22 +1367,57 @@ async def forget(
         Dataset name to delete entirely.
     everything : bool
         If true, delete ALL data across all datasets.
+    data_id : str, optional
+        UUID of a single data item to delete. Must be paired with `dataset`
+        or `dataset_id` so the owning dataset is unambiguous.
+    dataset_id : str, optional
+        UUID of the dataset to delete entirely, or to scope `data_id`.
     """
     with redirect_stdout(sys.stderr):
         try:
-            if not dataset and not everything:
+            if not dataset and not everything and not data_id and not dataset_id:
                 return [
                     types.TextContent(
                         type="text",
-                        text="Error: Specify 'dataset' name or set 'everything' to true.",
+                        text=(
+                            "Error: Specify 'dataset' name or set 'everything' to true. "
+                            "To remove a single item, pass 'data_id' with 'dataset' or "
+                            "'dataset_id'."
+                        ),
                     )
                 ]
-            result = await cognee_client.forget(dataset=dataset, everything=everything)
+            if data_id and not dataset and not dataset_id:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text="Error: 'data_id' requires 'dataset' or 'dataset_id'.",
+                    )
+                ]
+
+            # The UI passes ids as strings over JSON; cognee.forget() wants UUIDs.
+            # Parse here so a malformed id is a clear message rather than a
+            # cognee-internal traceback.
+            from uuid import UUID
+
+            try:
+                parsed_data_id = UUID(data_id) if data_id else None
+                parsed_dataset_id = UUID(dataset_id) if dataset_id else None
+            except ValueError as e:
+                return [types.TextContent(type="text", text=f"Error: invalid UUID ({e}).")]
+
+            result = await cognee_client.forget(
+                dataset=dataset,
+                everything=everything,
+                data_id=parsed_data_id,
+                dataset_id=parsed_dataset_id,
+            )
             status = result.get("status", "unknown") if isinstance(result, dict) else "completed"
             if everything:
                 text = f"All data deleted (status={status})."
+            elif parsed_data_id:
+                text = f"Data item '{data_id}' deleted (status={status})."
             else:
-                text = f"Dataset '{dataset}' deleted (status={status})."
+                text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = f"Forget failed: {str(e)}"
@@ -1396,7 +1477,14 @@ async def improve(
 # ---------------------------------------------------------------------------
 
 
-@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
+@registry.tool(
+    tags={"status"},
+    description=(
+        "Check the progress of background ingestion started by remember(background=True). "
+        "Reports active and completed pipeline jobs for a dataset, including failures that "
+        "a backgrounded call could not return inline."
+    ),
+)
 async def cognify_status(
     dataset_name: str = None,
     pipelines: List[str] = None,
@@ -1491,263 +1579,6 @@ async def cognify_status(
             return [types.TextContent(type="text", text=error_msg)]
 
 
-# MCP App: interactive graph visualization UI. Rendered by MCP Apps-capable
-# hosts (Cursor, Claude Desktop) via the _meta.ui.resourceUri contract.
-_VISUALIZE_APP_URI = "ui://cognee-visualize/graph.html"
-
-
-@mcp.resource(
-    _VISUALIZE_APP_URI,
-    name="Cognee Graph Visualization UI",
-    description="Interactive MCP App UI that renders a Cognee knowledge graph.",
-    mime_type="text/html;profile=mcp-app",
-)
-def _visualize_graph_ui_resource() -> str:
-    # The bundle path is resolved as a sibling of this file. In a Docker /
-    # PyPI install, that's site-packages/src/app_bundles/. In from-source
-    # dev (running `python src/server.py` directly), it's cognee-mcp/src/
-    # app_bundles/. Both resolutions only work because we read via __file__
-    # rather than a hardcoded `/app/...` or repo-relative path, so the bundle
-    # lookup follows wherever this module was loaded from.
-    bundle = Path(__file__).parent / "app_bundles" / "visualize-graph.html"
-    if not bundle.is_file():
-        raise FileNotFoundError(
-            f"MCP App bundle not found at {bundle}. "
-            "Build it with: cd cognee-mcp/apps-src && npm install && npm run build"
-        )
-    return bundle.read_text(encoding="utf-8")
-
-
-# CSS overrides appended to cognee's graph HTML so it fits the MCP App
-# iframe better: the floating bottom control bar can wrap to multiple
-# rows when the iframe is narrow, and the standalone "Light mode"
-# toggle is hidden (the workspace owns theming).
-#
-# Note: d3 is loaded from a CDN by cognee's HTML, which the MCP App iframe
-# blocks via CSP. The workspace bundles d3 from its npm dependency and
-# substitutes the CDN <script> tag client-side before assigning srcDoc.
-_GRAPH_VIZ_OVERRIDES = """
-<style>
-#theme-toggle { display: none !important; }
-#controls {
-  flex-wrap: wrap;
-  max-width: calc(100vw - 16px);
-  justify-content: center;
-  bottom: 8px;
-  row-gap: 2px;
-}
-#controls .ctrl-btn { padding: 4px 8px; font-size: 10px; }
-#controls .ctrl-sep { margin: 2px 2px; }
-</style>
-"""
-
-
-def _inject_graph_viz_overrides(html: str) -> str:
-    if "</head>" in html:
-        return html.replace("</head>", _GRAPH_VIZ_OVERRIDES + "</head>", 1)
-    return html
-
-
-@registry.tool(
-    tags={DEFAULT_TAG, "workspace"},
-    name="visualize_graph_ui",
-    description=(
-        "Open the Cognee workspace UI and render the current knowledge graph. "
-        "The UI also lets the user upload files to memory."
-    ),
-    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
-)
-async def visualize_graph_ui(dataset_name: str = None) -> ToolResult:
-    """Render the Cognee graph for a specific dataset.
-
-    With ENABLE_BACKEND_ACCESS_CONTROL=true, each (user, dataset) pair has its
-    own graph DB. Without dataset_name we'd hit the global default engine,
-    which is empty in that mode. Resolving dataset_name (explicit, or via
-    agent scoping) and routing through visualize_multi_user_graph picks up
-    the right per-dataset context.
-    """
-    from cognee.api.v1.visualize import visualize_graph
-
-    explicit_dataset = dataset_name is not None
-    dataset_name = dataset_name or _agent_scoped_default_dataset()
-
-    # Per-dataset graph routing requires direct mode (we set the database
-    # context locally); in API mode the API server controls its own graph
-    # source. Reject explicit dataset selection there instead of silently
-    # falling back to a different graph.
-    if explicit_dataset and cognee_client.use_api:
-        return ToolResult(
-            is_error=True,
-            content=[
-                types.TextContent(
-                    type="text",
-                    text=(
-                        "Error: per-dataset graph rendering is only supported in direct mode. "
-                        "Drop the dataset_name argument or run cognee-mcp without --api-url."
-                    ),
-                )
-            ],
-        )
-
-    with redirect_stdout(sys.stderr):
-        html: str | None = None
-        if dataset_name and not cognee_client.use_api:
-            from cognee.api.v1.visualize.visualize import visualize_multi_user_graph
-
-            user = await get_default_user()
-            datasets = await get_datasets_by_name(dataset_name, user.id)
-            if datasets:
-                html = await visualize_multi_user_graph([(user, datasets[0])])
-        if html is None:
-            html = await visualize_graph()
-
-    html = _inject_graph_viz_overrides(html)
-
-    return ToolResult(
-        content=[types.TextContent(type="text", text="Cognee knowledge graph rendered.")],
-        structured_content={"html": html},
-    )
-
-
-@registry.tool(
-    tags={DEFAULT_TAG, "workspace"},
-    name="upload_file_ui",
-    description=(
-        "Open the Cognee workspace UI so the user can upload files to memory. "
-        "The UI also shows the current knowledge graph."
-    ),
-    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
-)
-async def upload_file_ui() -> ToolResult:
-    return ToolResult(
-        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
-    )
-
-
-@registry.tool(
-    tags={DEFAULT_TAG, "workspace"},
-    name="open_cognee_workspace",
-    description=(
-        "Open the Cognee workspace UI. Use for generic intents like "
-        "'run the cognee UI', 'show the cognee app', 'open cognee'. "
-        "The UI provides dataset management, file upload, text ingestion, "
-        "search, and graph visualization."
-    ),
-    meta={"ui": {"resourceUri": _VISUALIZE_APP_URI}},
-)
-async def open_cognee_workspace() -> ToolResult:
-    return ToolResult(
-        content=[types.TextContent(type="text", text="Cognee workspace opened.")],
-    )
-
-
-def _format_named_items(items, singular: str, plural: str, limit: int = 50) -> str:
-    """Render a list of {id, name} dicts into human-readable text content.
-
-    Text-only MCP clients (e.g. agents in Cursor) never see structuredContent,
-    so the names have to be serialized into the text channel too — otherwise
-    they only get a count and have to fall back to raw HTTP to learn what
-    exists. Long lists are capped to keep the text payload reasonable; the full
-    set always remains in structuredContent.
-    """
-    count = len(items)
-    if count == 0:
-        return f"No {plural} found."
-    lines = [f"{count} {singular if count == 1 else plural}:"]
-    for item in items[:limit]:
-        name = item.get("name") or "(unnamed)"
-        item_id = item.get("id") or ""
-        lines.append(f"- {name} ({item_id})" if item_id else f"- {name}")
-    if count > limit:
-        lines.append(f"… and {count - limit} more (see structuredContent).")
-    return "\n".join(lines)
-
-
-@registry.tool(
-    tags={"workspace", "datasets"},
-    name="list_datasets_json",
-    description=(
-        "List datasets as structured JSON for the Cognee workspace UI. "
-        "Returns {datasets: [{id, name}, ...]} in structuredContent."
-    ),
-)
-async def list_datasets_json() -> ToolResult:
-    with redirect_stdout(sys.stderr):
-        raw = await cognee_client.list_datasets()
-
-    datasets = []
-    for ds in raw or []:
-        if isinstance(ds, dict):
-            datasets.append({"id": str(ds.get("id", "")), "name": ds.get("name", "")})
-        else:
-            datasets.append({"id": str(ds.id), "name": ds.name})
-
-    return ToolResult(
-        content=[
-            types.TextContent(
-                type="text",
-                text=_format_named_items(datasets, "dataset", "datasets"),
-            )
-        ],
-        structured_content={"datasets": datasets},
-    )
-
-
-@registry.tool(
-    tags={"workspace", "datasets"},
-    name="list_dataset_data_json",
-    description=(
-        "List data items in a dataset as structured JSON for the Cognee workspace UI. "
-        "Returns {data: [{id, name}, ...]} in structuredContent."
-    ),
-)
-async def list_dataset_data_json(dataset_id: str) -> ToolResult:
-    from uuid import UUID
-    from cognee.modules.data.methods import get_dataset, get_dataset_data
-
-    if cognee_client.use_api:
-        return ToolResult(
-            is_error=True,
-            content=[
-                types.TextContent(
-                    type="text",
-                    text="Error: list_dataset_data_json is only available in direct mode.",
-                )
-            ],
-        )
-
-    try:
-        dataset_uuid = UUID(dataset_id)
-    except ValueError as e:
-        return ToolResult(
-            is_error=True,
-            content=[types.TextContent(type="text", text=f"Error: invalid dataset_id ({e}).")],
-        )
-
-    with redirect_stdout(sys.stderr):
-        user = await get_default_user()
-        dataset = await get_dataset(user.id, dataset_uuid)
-        if not dataset:
-            return ToolResult(
-                is_error=True,
-                content=[
-                    types.TextContent(type="text", text=f"Error: dataset not found: {dataset_id}.")
-                ],
-            )
-        items = await get_dataset_data(dataset.id)
-
-    data = [{"id": str(item.id), "name": item.name or "(unnamed)"} for item in items]
-    return ToolResult(
-        content=[
-            types.TextContent(
-                type="text",
-                text=_format_named_items(data, "data item", "data items"),
-            )
-        ],
-        structured_content={"data": data},
-    )
-
-
 def _sanitize_client_name(name: str) -> str:
     import re
 
@@ -1796,101 +1627,6 @@ def _agent_scoped_default_dataset() -> str:
     return "main_dataset"
 
 
-@registry.tool(
-    tags={"workspace"},
-    name="get_client_info_json",
-    description=(
-        "Return the current MCP client identity and its agent-scoped default dataset. "
-        "The workspace UI uses this to automatically separate memory per agent "
-        "(e.g. Cursor writes to 'cursor_memory', Claude Code to 'claude_code_memory'). "
-        "The default dataset is created on demand. "
-        "Returns {client: {name, version}, default_dataset} in structuredContent."
-    ),
-)
-async def get_client_info_json() -> ToolResult:
-    from mcp.server.lowlevel.server import request_ctx
-
-    client_name = "unknown"
-    client_version = ""
-    try:
-        ctx = request_ctx.get()
-        params = getattr(ctx.session, "client_params", None)
-        if params and params.clientInfo:
-            client_name = params.clientInfo.name or "unknown"
-            client_version = params.clientInfo.version or ""
-    except LookupError:
-        pass
-
-    agent_scoped = _is_agent_scoping_enabled()
-
-    if agent_scoped:
-        default_dataset = f"{_sanitize_client_name(client_name)}_memory"
-        if not cognee_client.use_api:
-            with redirect_stdout(sys.stderr):
-                from cognee.modules.data.methods.create_authorized_dataset import (
-                    create_authorized_dataset,
-                )
-
-                user = await get_default_user()
-                await create_authorized_dataset(default_dataset, user)
-    else:
-        default_dataset = "main_dataset"
-
-    return ToolResult(
-        content=[
-            types.TextContent(
-                type="text",
-                text=f"Agent: {client_name} → default dataset: {default_dataset}",
-            )
-        ],
-        structured_content={
-            "client": {"name": client_name, "version": client_version},
-            "default_dataset": default_dataset,
-            "agent_scoped": agent_scoped,
-        },
-    )
-
-
-@registry.tool(
-    tags={"workspace", "datasets"},
-    name="create_dataset_json",
-    description=(
-        "Create an empty dataset with the given name (idempotent). "
-        "Returns {dataset: {id, name}} in structuredContent."
-    ),
-)
-async def create_dataset_json(name: str) -> ToolResult:
-    name = (name or "").strip()
-    if not name:
-        return ToolResult(
-            is_error=True,
-            content=[types.TextContent(type="text", text="Error: dataset name is required.")],
-        )
-    if cognee_client.use_api:
-        return ToolResult(
-            is_error=True,
-            content=[
-                types.TextContent(
-                    type="text",
-                    text="Error: create_dataset_json is only available in direct mode.",
-                )
-            ],
-        )
-
-    with redirect_stdout(sys.stderr):
-        from cognee.modules.data.methods.create_authorized_dataset import (
-            create_authorized_dataset,
-        )
-
-        user = await get_default_user()
-        dataset = await create_authorized_dataset(name, user)
-
-    return ToolResult(
-        content=[types.TextContent(type="text", text=f"Dataset '{dataset.name}' ready.")],
-        structured_content={"dataset": {"id": str(dataset.id), "name": dataset.name}},
-    )
-
-
 def node_to_string(node):
     node_data = ", ".join(
         [f'{key}: "{value}"' for key, value in node.items() if key in ["id", "name"]]
@@ -1936,6 +1672,24 @@ def load_class(model_file, model_name):
 
 async def main():
     global cognee_client
+
+    # Operations run in-process by this MCP server record origin="mcp" in
+    # pipeline_runs. (In client mode the remote API records origin="api".)
+    # Guarded because cognee-mcp depends on cognee from PyPI (see
+    # pyproject.toml), which may predate cognee.modules.operations — origin
+    # stamping is optional, booting is not. Loud, not silent: the warning
+    # names exactly what is degraded and when the guard can be deleted.
+    try:
+        from cognee.modules.operations import ORIGIN_MCP, set_operation_origin
+
+        set_operation_origin(ORIGIN_MCP)
+    except ImportError:
+        logger.warning(
+            "Installed cognee has no cognee.modules.operations — pipeline_runs "
+            "records from this MCP server will show origin='sdk' instead of "
+            "'mcp'. Remove this guard once cognee-mcp requires a cognee release "
+            "that ships the operations module (SDK-399)."
+        )
 
     parser = argparse.ArgumentParser()
 
@@ -1985,7 +1739,7 @@ async def main():
         default=None,
         choices=TOOL_MODES,
         help="How many tools to advertise in tools/list. 'default' pins the memory API "
-        "and workspace UI entry tools and makes the rest discoverable via search_tools; "
+        "and makes the rest discoverable via search_tools; "
         "'minimal' pins only the memory API; 'all' advertises every tool. "
         "Can also be set via COGNEE_MCP_TOOL_MODE. (default: default)",
     )

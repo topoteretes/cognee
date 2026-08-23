@@ -4,7 +4,12 @@ import json
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
+from cognee.cli.config import (
+    COMPLETION_SEARCH_TYPES,
+    DEFAULT_SEARCH_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall_empty
@@ -28,8 +33,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION)",
+            default=None,
+            help="Search mode (default: HYBRID_COMPLETION)",
         )
         parser.add_argument(
             "--datasets",
@@ -73,10 +78,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
 
             # Session-only mode: -s without -d and without explicit -t
             session_only = (
-                args.session_id is not None
-                and not args.datasets
-                and args.query_type == "GRAPH_COMPLETION"  # i.e., the user didn't pass -t
+                args.session_id is not None and not args.datasets and args.query_type is None
             )
+            effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
 
             if session_only:
                 fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
@@ -84,7 +88,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                 datasets_msg = (
                     f" in datasets {args.datasets}" if args.datasets else " across all datasets"
                 )
-                fmt.echo(f"Recalling: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+                fmt.echo(
+                    f"Recalling: '{args.query_text}' (type: {effective_query_type}){datasets_msg}"
+                )
 
             async def run_recall():
                 try:
@@ -100,7 +106,7 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             **session_kwargs,
                         )
                     else:
-                        query_type = SearchType[args.query_type]
+                        query_type = SearchType[effective_query_type]
                         recall_kwargs = {
                             "query_text": args.query_text,
                             "query_type": query_type,
@@ -152,10 +158,10 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         if i < len(results):
                             fmt.echo("-" * 40)
                 else:
-                    fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
+                    fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
                     fmt.echo("=" * 60)
 
-                    if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                    if effective_query_type in COMPLETION_SEARCH_TYPES:
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold('Response:')} {result}")
                             if i < len(results):
