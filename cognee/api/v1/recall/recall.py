@@ -707,17 +707,21 @@ async def recall(
                         guard_active = False
 
                 if guard_active:
-                    from cognee.modules.recall.methods.graph_warmup import is_memory_warm
+                    from cognee.modules.recall.methods.graph_warmup import (
+                        STATE_BUILD_FAILED,
+                        assess_memory_readiness,
+                    )
 
-                    warm, datapoint_count = await is_memory_warm(user, probe_dataset_ids)
-                    if not warm:
+                    probe = await assess_memory_readiness(user, probe_dataset_ids)
+                    if not probe.is_warm:
                         logger.info(
-                            "Recall warm-up short-circuit: graph has %d datapoints "
+                            "Recall warm-up short-circuit: graph readiness is '%s' "
                             "(threshold %d); skipping search.",
-                            datapoint_count,
+                            probe.state,
                             recall_config.recall_warmup_threshold,
                         )
                         span.set_attribute("cognee.recall.warmup_shortcircuit", True)
+                        span.set_attribute("cognee.recall.warmup_state", probe.state)
                         if sources != ["graph"]:
                             # Multi-source recall: a cold graph contributes
                             # nothing, so other lanes — and the tools
@@ -725,16 +729,31 @@ async def recall(
                             # merged result is empty — behave exactly as if
                             # the graph lane returned no results.
                             return []
+                        if probe.state == STATE_BUILD_FAILED:
+                            failure_desc = probe.error_class or "unknown error"
+                            if probe.error_message:
+                                failure_desc = f"{failure_desc}: {probe.error_message}"
+                            status = "build_failed"
+                            text = (
+                                "Memory build failed: the last ingestion for the requested "
+                                f"datasets ended in an error ({failure_desc}). Fix the cause "
+                                "and re-run remember() or cognify()."
+                            )
+                        else:
+                            status = "memory_warming_up"
+                            text = (
+                                "Memory is still warming up: no knowledge graph data "
+                                "exists yet for the requested datasets."
+                            )
                         return [
                             ResponseMarkerEntry(
                                 source="system",
-                                status="memory_warming_up",
-                                text=(
-                                    "Memory is still warming up: no knowledge graph data "
-                                    "exists yet for the requested datasets."
-                                ),
-                                datapoint_count=datapoint_count,
+                                status=status,
+                                text=text,
+                                datapoint_count=probe.datapoint_count,
                                 threshold=recall_config.recall_warmup_threshold,
+                                error_class=probe.error_class,
+                                error_message=probe.error_message,
                             )
                         ]
 
