@@ -296,6 +296,36 @@ summary indexing — not more extraction speed. On GPU hardware
 (`map_location="cuda"`, `quantize=True`, FlashDeberta) extraction itself has
 another 5–20x of headroom. Apple MPS tested slower than batched CPU.
 
+## Local / in-process embeddings: measured findings
+
+`EMBEDDING_PROVIDER=fastembed` (in-process ONNX, `pip install fastembed`)
+and `EMBEDDING_PROVIDER=ollama` (local server, Metal GPU on macs) both work
+with this pipeline — the demo runs fully local with either. But on a
+laptop, measured against the OpenAI-API baseline on War & Peace
+(12-label schema, 3 workers, storage_depth=2):
+
+| Embeddings | extract/batch | storage wait | cycle |
+|---|---|---|---|
+| OpenAI API (baseline) | 5.9 s | ~2-3 s | **8.0 s** |
+| fastembed, in-process CPU | 16.8-21.7 s | 4.7-9.3 s | ~26 s |
+| Ollama, Metal GPU | 10.3 s | **0.0 s** | 11.4 s |
+
+Findings:
+- GPU-side embeddings eliminate the storage bottleneck entirely (0.0 s
+  wait) — embedding fully overlaps extraction.
+- But no local option wins end-to-end on a laptop: in-process CPU
+  embeddings fight the GLiNER workers for cores; Metal embeddings fight
+  them for unified-memory bandwidth (extraction 5.9 -> 10.3 s). The
+  embedding API is, in effect, free offloaded compute.
+- Local embeddings pay off when embedding compute is genuinely separate
+  (discrete GPU, second machine) or when extraction is not saturating the
+  box. For privacy-first fully-local ingestion they work fine — at ~1.4x
+  the wall clock, with zero data leaving the machine.
+- Two comparability traps, both measured: HF embedding tokenizers change
+  the chunker's token counting (~2x; halve `chunk_size`), and schema size
+  is a first-order extraction cost (the 34-label auto-selected schema runs
+  ~2x slower per chunk than the 12-label baseline schema).
+
 ## Span-boundary cleanup
 
 GLiNER often emits nested duplicates of one mention ('artemis ii' inside

@@ -45,6 +45,10 @@ from gliner_cognify import gliner_cognify  # noqa: E402
 DATASET = "gliner_benchmark"
 WORKERS = int(sys.argv[2]) if len(sys.argv) > 2 else 3
 STORAGE_DEPTH = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+# With an HF embedding tokenizer (fastembed/ollama) the chunker counts real
+# tokens (~2x the tiktoken per-word count) — use chunk_size=256 to keep
+# chunks the same physical size as OpenAI-embedding runs.
+CHUNK_SIZE = int(sys.argv[4]) if len(sys.argv) > 4 else 512
 
 
 def stamp(label, t0, timings):
@@ -65,10 +69,22 @@ async def main():
     await cognee.add(BOOK, dataset_name=DATASET)
     t = stamp("add() - ingestion", t, timings)
 
+    schema_kwargs = {}
+    if os.environ.get("GLINER_BENCH_SIMPLE_SCHEMA"):
+        # 12-label generic schema, identical to the original baseline runs —
+        # isolates embedding-backend changes from schema-size changes.
+        from gliner_graph_extractor import DEFAULT_ENTITY_TYPES, DEFAULT_RELATION_TYPES
+
+        schema_kwargs = {
+            "entity_types": DEFAULT_ENTITY_TYPES,
+            "relation_types": DEFAULT_RELATION_TYPES,
+        }
+
     await gliner_cognify(
         datasets=[DATASET],
         workers=WORKERS,
-        chunk_size=512,
+        **schema_kwargs,
+        chunk_size=CHUNK_SIZE,
         chunks_per_batch=256,
         gliner_batch_size=32,
         storage_depth=STORAGE_DEPTH,
