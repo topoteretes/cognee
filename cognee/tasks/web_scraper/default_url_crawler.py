@@ -407,10 +407,10 @@ class DefaultUrlCrawler:
         elif not isinstance(urls, list):
             raise ValueError(f"Invalid urls type: {type(urls)}")
 
-        async def _task(url: str):
+        async def _task(url: str, position: int):
             async with self._sem:
                 try:
-                    logger.info(f"Processing URL: {url}")
+                    logger.info(f"Processing URL {position} of {len(urls)}")
 
                     # SSRF guard: validate the target before any outbound request
                     # (including the robots.txt fetch) so internal/reserved hosts
@@ -446,7 +446,7 @@ class DefaultUrlCrawler:
                     return url, ""
 
         logger.info(f"Creating {len(urls)} async tasks for concurrent fetching")
-        tasks = [asyncio.create_task(_task(u)) for u in urls]
+        tasks = [asyncio.create_task(_task(u, position)) for position, u in enumerate(urls, 1)]
         results = {}
         completed = 0
         total = len(tasks)

@@ -26,7 +26,7 @@ from cognee.modules.migration.loader import (
     translate_record_stream,
     wrap_graph_batch,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import IMPORT_MODES, MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
@@ -41,6 +41,19 @@ logger = get_logger("migration.import")
 DATA_ITEMS_PER_ADD = 200
 
 _GRAPH_RECORD_KINDS = ("entity", "fact", "raw_node")
+
+
+def _source_label(source: MemorySource) -> str:
+    """A loggable identifier for a source. Sources can carry archive data
+    (including credentials in the social layer), so their attribute values
+    must never reach the logs — the class name identifies the system instead."""
+    return type(source).__name__
+
+
+def _mode_label(source: MemorySource) -> str:
+    """The static IMPORT_MODES copy of the source's (validated) mode, so the
+    logged string never derives from the source object itself."""
+    return IMPORT_MODES[IMPORT_MODES.index(source.mode)]
 
 
 async def _ensure_user(user_payload: Dict[str, Any]):
@@ -70,7 +83,8 @@ async def _ensure_user(user_payload: Dict[str, Any]):
         record.is_superuser = user_payload.get("is_superuser", False)
         record.is_verified = user_payload.get("is_verified", False)
         await session.commit()
-    logger.info("Restored user %s from archive social layer.", user_payload["email"])
+    # The payload carries credentials (hashed password, email) — log nothing from it.
+    logger.info("Restored a user account from the archive social layer.")
     return created
 
 
@@ -195,9 +209,8 @@ async def _restamp_to_source_revision(source: MemorySource, dataset_name: str, u
     ordered_revisions = [migration.revision for migration in order_migrations(MIGRATIONS)]
     if archive_revision not in ordered_revisions:
         logger.warning(
-            "Archive migration revision %r is unknown to this chain — the archive was "
-            "exported by newer code; leaving the store's migration stamp unchanged.",
-            archive_revision,
+            "Archive migration revision is unknown to this chain — the archive was "
+            "exported by newer code; leaving the store's migration stamp unchanged."
         )
         return
 
@@ -238,12 +251,15 @@ async def _restamp_to_source_revision(source: MemorySource, dataset_name: str, u
             return
         await stamp_revisions(target=target)
 
+    # Log the registry's own copy of the revision string — archive-derived
+    # values must never reach the logs (target is guaranteed to be in the chain).
+    stamped_revision = ordered_revisions[ordered_revisions.index(target)]
     logger.info(
         "Stamped store back to archive migration revision %r (was %r); the next "
         "migration run replays %r -> head over the imported data.",
-        target,
+        stamped_revision,
         stored_revision,
-        target,
+        stamped_revision,
     )
 
 
@@ -353,7 +369,7 @@ async def _import_streaming(
         await add(pending, dataset_name=dataset_name, user=user, node_set=node_set)
         data_items_stored += len(pending)
 
-    logger.info("Importing from %s (mode=preserve, streaming): %s", source.source_system, counts)
+    logger.info("Importing from %s (mode=preserve, streaming): %s", _source_label(source), counts)
 
     stats: Dict[str, int] = {
         "graph_nodes": 0,
@@ -393,7 +409,7 @@ async def _import_streaming(
         logger.warning(
             "Skipped %d facts with unresolvable UUID references during import from %s.",
             stats["skipped_facts"],
-            source.source_system,
+            _source_label(source),
         )
 
     run_id = _pipeline_run_id(pipeline_result)
@@ -450,15 +466,15 @@ async def _import_buffered(
     logger.info(
         "Importing %d records from %s (mode=%s): %s",
         sum(translation.counts.values()),
-        source.source_system,
-        source.mode,
+        _source_label(source),
+        _mode_label(source),
         translation.counts,
     )
     if translation.skipped_facts:
         logger.warning(
             "Skipped %d facts with unresolvable UUID references during import from %s.",
             translation.skipped_facts,
-            source.source_system,
+            _source_label(source),
         )
 
     graph_nodes = sum(len(batch["nodes"]) for batch in translation.graph_batches)

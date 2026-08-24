@@ -264,8 +264,21 @@ def get_recall_router() -> APIRouter:
             raise
         except ValueError as error:
             # normalize_scope rejects unknown scope names with ValueError;
-            # surface it as a 422 with the valid values instead of an opaque 409.
-            return JSONResponse(status_code=422, content={"error": str(error)})
+            # surface it as a 422 with the valid values instead of an opaque
+            # 409. The message is rebuilt here rather than echoed from the
+            # exception: any ValueError raised deeper in the recall path lands
+            # in this handler too, and its text must not reach the client.
+            from cognee.memory.entries import _VALID_SCOPES
+
+            logger = get_logger()
+            logger.warning("Recall request validation failed: %s", error)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "Invalid recall request. If a scope was given, valid values are: "
+                    f"{sorted(_VALID_SCOPES)}."
+                },
+            )
         except Exception as error:
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)

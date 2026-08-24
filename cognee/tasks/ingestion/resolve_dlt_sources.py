@@ -243,23 +243,29 @@ def _normalize_structured_inputs(data_list: list, query: Optional[str]) -> list:
 
 def _log_structured_inputs_without_dlt(data_list: list) -> None:
     """Warn when inputs that would auto-route to the DLT path are about to be
-    ingested as plain documents because dlt is not installed."""
-    names = []
+    ingested as plain documents because dlt is not installed. Only counts are
+    logged — the inputs themselves may embed credentials (connection strings)."""
+    csv_paths = 0
+    connection_strings = 0
+    csv_uploads = 0
     for item in data_list:
         if isinstance(item, str) and is_csv_path(item):
-            names.append(item)
+            csv_paths += 1
         elif isinstance(item, str) and is_connection_string(item):
-            # Never log the string itself — it may embed credentials.
-            names.append("<connection string>")
+            connection_strings += 1
         elif is_csv_upload(item):
-            names.append(getattr(item, "filename", None) or getattr(item, "name", "<upload>"))
-    if names:
+            csv_uploads += 1
+    total = csv_paths + connection_strings + csv_uploads
+    if total:
         logger.warning(
-            "dlt is not installed: %d structured input(s) (%s) will be ingested as plain "
-            "documents through the standard LLM pipeline instead of the DLT manifest path. "
-            'Install the dlt extra (pip install "cognee[dlt]") to route them through DLT.',
-            len(names),
-            ", ".join(str(name) for name in names[:5]),
+            "dlt is not installed: %d structured input(s) (%d CSV path(s), %d connection "
+            "string(s), %d CSV upload(s)) will be ingested as plain documents through the "
+            "standard LLM pipeline instead of the DLT manifest path. Install the dlt extra "
+            '(pip install "cognee[dlt]") to route them through DLT.',
+            total,
+            csv_paths,
+            connection_strings,
+            csv_uploads,
         )
 
 

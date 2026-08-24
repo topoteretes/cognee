@@ -42,7 +42,7 @@ def get_validate_router() -> APIRouter:
             logger.error("validate() failed: %s", error, exc_info=True)
             return JSONResponse(
                 status_code=500,
-                content={"status": "error", "reason": f"validation failed: {str(error)}"},
+                content={"status": "error", "reason": "validation failed; see server logs."},
             )
 
     return validate_router

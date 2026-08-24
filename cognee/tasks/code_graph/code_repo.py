@@ -233,12 +233,11 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
     if documents and not get_llm_config().llm_api_key:
         logger.warning(
             "No LLM API key configured (LLM_API_KEY): excluding %d document file(s) of "
-            "code project %s from processing — their pipelines need an LLM (image "
+            "the code project from processing — their pipelines need an LLM (image "
             "transcription at add time, text extraction at cognify). The code graph is "
             "unaffected (enola is LLM-free). Set LLM_API_KEY and re-add the repository "
             "to ingest its documents.",
             len(documents),
-            directory,
         )
         skipped = skipped + documents
         documents = []
@@ -263,8 +262,7 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
     )
 
     logger.info(
-        "Code project detected at %s: 1 repo item covering %d file(s), %d document(s), %d skipped.",
-        directory,
+        "Code project detected: 1 repo item covering %d file(s), %d document(s), %d skipped.",
         len(covered),
         len(documents),
         len(skipped),

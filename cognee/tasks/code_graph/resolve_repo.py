@@ -133,7 +133,19 @@ async def resolve_repo_source(
     works but is the legacy path.
     """
     if not is_remote_repo(spec):
-        path = Path(spec).expanduser()
+        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+        # Repo specs can arrive from outside the SDK (CLI arguments, API
+        # callers), so local paths take the same allowlist containment check
+        # as ingestion's local-file reads instead of dereferencing an
+        # arbitrary path.
+        try:
+            path = resolve_local_path(spec)
+        except ValueError:
+            raise CodeRepositoryError(
+                message=f"Repository path '{spec}' is outside the allowed local roots. "
+                "Add its root to COGNEE_ALLOWED_LOCAL_FILE_ROOTS to index it."
+            )
         if not path.is_dir():
             raise CodeRepositoryError(
                 message=f"Repository path '{spec}' is not a directory. "
@@ -155,13 +167,23 @@ async def resolve_repo_source(
     has_credentials = clean_url != url
 
     def _scrub(text: str) -> str:
-        # git error output often echoes the URL, token included.
-        return text.replace(url, clean_url) if has_credentials else text
+        # git error output often echoes the URL, token included. Strip the
+        # exact spec first, then any other URL userinfo git may print (e.g.
+        # a redirect target or a credential-helper rewrite of the URL).
+        if has_credentials:
+            text = text.replace(url, clean_url)
+        return re.sub(r"://[^/\s@]+@", "://", text)
 
     auth_env = _credential_env(credentials) if credentials else None
 
-    target = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
-    target = target / _clone_slug(clean_url)
+    base = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
+    target = base / _clone_slug(clean_url)
+    # The slug regex already forbids separators and dot-runs; keep an
+    # explicit containment check so a clone can never land outside the
+    # clones directory regardless of what the URL decomposed into.
+    base_real = os.path.realpath(base)
+    if not os.path.realpath(target).startswith(base_real.rstrip(os.sep) + os.sep):
+        raise CodeRepositoryError(message=f"Could not derive a safe clone name for {clean_url}.")
 
     if (target / ".git").is_dir():
         # Legacy URL-embedded credentials: fetch from the explicit URL

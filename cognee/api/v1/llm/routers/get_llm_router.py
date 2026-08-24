@@ -246,8 +246,13 @@ def get_llm_router() -> APIRouter:
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
         except LLMPaymentRequiredError as error:
+            logger.warning("LLM custom prompt generation hit the token budget: %s", error)
             return JSONResponse(
-                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+                status_code=402,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": "The configured LLM token budget is exhausted.",
+                },
             )
         except ValueError as error:
             logger.warning("LLM custom prompt generation validation failed: %s", error)
@@ -367,8 +372,13 @@ def get_llm_router() -> APIRouter:
                 content={"error": "LLM output did not match expected schema."},
             )
         except LLMPaymentRequiredError as error:
+            logger.warning("LLM schema inference hit the token budget: %s", error)
             return JSONResponse(
-                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+                status_code=402,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": "The configured LLM token budget is exhausted.",
+                },
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)
