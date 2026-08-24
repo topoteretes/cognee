@@ -89,7 +89,12 @@ jobs:
     # 150 leaves the report room to reach ~125 min against a 54-min best case.
     # The other three arms finish far sooner, so the only cost is a longer
     # worst case for a genuinely hung job.
-    timeout-minutes: 150
+    # TEMPORARY (experiment/rust-wap-llm-only): 150 -> 200. This branch runs 5
+    # iterations instead of 3. If the concurrency override does nothing, the
+    # worst observed per-run cost (1490s) times five plus the ~20 min build
+    # lands at ~144 min — inside 150 only by a rounding error, and a cancelled
+    # job produces no report at all. Reverts with the rest of the branch.
+    timeout-minutes: 200
     outputs:
       metrics: ${{ steps.parse.outputs.metrics }}
       html_key: ${{ steps.upload.outputs.html_key }}
@@ -259,6 +264,26 @@ jobs:
             export EMBEDDING_PROVIDER="openai"
             export EMBEDDING_DIMENSIONS=1536
             echo "embedding parity override: model=$EMBEDDING_MODEL dims=$EMBEDDING_DIMENSIONS"
+
+            # Concurrency parity with the Python arms. Python's
+            # extract_graph_from_data fires one unbounded asyncio.gather over
+            # every chunk (LLM_RATE_LIMIT_ENABLED defaults false and is unset in
+            # CI), so all 171 W&P chunks are in flight at once. Rust bounds graph
+            # extraction with Semaphore(max_parallel_extractions), fed from
+            # llm_max_parallel_requests, default 20 — nine serialized waves over
+            # the same corpus. Lift it clear of the chunk count.
+            #
+            # This does NOT reach full parity. chunks_per_batch is hardcoded to
+            # 100 in CognifyConfig::default() (crates/cognify/src/config.rs:212),
+            # reachable only through the with_chunks_per_batch() builder, which
+            # the bench never calls — there is no env path. So 171 chunks still
+            # split into a 100-chunk batch and a 71-chunk batch with a hard
+            # barrier between them: two waves against Python's one, for both
+            # extraction and summarization. Rust stays handicapped by one wave,
+            # which makes this a conservative test — if it wins anyway, the
+            # concurrency hypothesis holds a fortiori.
+            export LLM_MAX_PARALLEL_REQUESTS=200
+            echo "concurrency override: LLM_MAX_PARALLEL_REQUESTS=$LLM_MAX_PARALLEL_REQUESTS (chunks_per_batch stays 100 — not env-reachable)"
             # ── end TEMPORARY ─────────────────────────────────────────────────
           fi
 

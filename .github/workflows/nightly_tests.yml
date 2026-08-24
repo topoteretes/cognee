@@ -35,7 +35,11 @@ jobs:
     name: Performance — Rust SDK — War and Peace (real LLM)
     uses: ./.github/workflows/performance_report_rust.yml
     with:
-      runs: '3'
+      # 5, not the nightly's 3. Per-run spread on this arm is roughly +/-50%
+      # (810s to 1193s within one job on the previous dispatch), so three
+      # samples cannot separate a real shift from API latency noise. Run count
+      # does not affect per-run timing, only the confidence in the percentiles.
+      runs: '5'
       mode: llm
       label: war_and_peace
       memories: scripts/perf/fixtures/war_and_peace/memories.json
