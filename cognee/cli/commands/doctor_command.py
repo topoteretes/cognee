@@ -77,7 +77,7 @@ Exits non-zero when any check fails, so it can gate CI and setup scripts.
         fmt.echo(
             f"  Embeddings: provider={embedding_config.embedding_provider} "
             f"model={embedding_config.embedding_model} "
-            f"api_key={'set' if (embedding_config.embedding_api_key or '').strip() else 'not set'} "
+            f"api_key={'set' if (embedding_config.embedding_api_key or '').strip() else 'NOT SET'} "
             f"dimensions={embedding_config.embedding_dimensions}"
         )
 

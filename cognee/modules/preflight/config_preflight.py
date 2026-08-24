@@ -134,11 +134,11 @@ def validate_provider_config(force: bool = False) -> None:
     global _checked
     if _checked and not force:
         return
-    if _skip_preflight():
-        _checked = True
-        return
     with _check_lock:
         if _checked and not force:
+            return
+        if _skip_preflight():
+            _checked = True
             return
         problems = check_provider_config()
         if problems:
