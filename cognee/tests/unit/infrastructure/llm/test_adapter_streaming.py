@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
@@ -81,11 +82,30 @@ def _streaming_completion(chunks, seen=None, streams=None):
     return _acompletion
 
 
-def _flag(enabled: bool):
-    return patch(
-        "cognee.infrastructure.llm.config.get_llm_context_config",
-        return_value=SimpleNamespace(llm_answer_streaming=enabled),
-    )
+@contextmanager
+def _flag(enabled: bool, adapter_streams: bool = True):
+    """Set both preconditions for promotion.
+
+    The capability is pinned for the same reason test_token_sink pins it: the
+    probe reads the ambient LLM configuration, and whether promotion happens
+    must not depend on what the host environment configures. Left unpinned, a
+    host where the probe resolves False skips promotion, the sink is never
+    terminated, and the drain below waits forever — a 300s pytest-timeout in
+    CI's container job. patch.object, not a string target: the LLMGateway class
+    shadows its module, and Python 3.10's mock resolves strings onto the class.
+    """
+    with (
+        patch(
+            "cognee.infrastructure.llm.config.get_llm_context_config",
+            return_value=SimpleNamespace(llm_answer_streaming=enabled),
+        ),
+        patch.object(
+            LLMGateway,
+            "supports_answer_streaming",
+            return_value=adapter_streams,
+        ),
+    ):
+        yield
 
 
 @contextmanager
