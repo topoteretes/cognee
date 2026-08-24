@@ -395,7 +395,10 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
             )
 
             await invalidate_sessions_for_deleted_data(
-                dataset_id, deleted_elements.node_ids, deleted_elements.edge_ids
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
             )
         except Exception as error:
             logger.warning(

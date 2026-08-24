@@ -489,6 +489,30 @@ async def list_sessions_for_dataset(dataset_id: UUIDType) -> list[tuple[UUIDType
     return [(row.user_id, row.session_id) for row in rows]
 
 
+async def list_unattributed_sessions_for_user(user_id: UUIDType) -> list[tuple[UUIDType, str]]:
+    """Return (user_id, session_id) pairs for the user's dataset-unattributed sessions.
+
+    A search that spans multiple datasets (or resolves none) runs in the plain
+    default session, whose SessionRecord row carries no ``dataset_id`` and no
+    dataset suffix — so dataset-scoped invalidation can never find it. Data-level
+    invalidation matches turns by deleted element ids, which is precise, so these
+    sessions are safe to over-scan (COG-6292).
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(SessionRecord.user_id, SessionRecord.session_id).where(
+                    and_(
+                        SessionRecord.user_id == user_id,
+                        SessionRecord.dataset_id.is_(None),
+                    )
+                )
+            )
+        ).all()
+    return [(row.user_id, row.session_id) for row in rows]
+
+
 async def record_session_activity(
     user_id: str,
     session_id: str,

@@ -39,7 +39,9 @@ async def _invalidate_sessions_for_dataset_nonfatal(dataset_id: UUID) -> None:
 
 
 async def _invalidate_sessions_for_deleted_data_nonfatal(
-    dataset_id: UUID, deleted_elements: Optional[DeletedGraphElements]
+    dataset_id: UUID,
+    deleted_elements: Optional[DeletedGraphElements],
+    user_id: Optional[UUID] = None,
 ) -> None:
     """Remove session entries that used the deleted elements. Never fails the delete."""
     if deleted_elements is None:
@@ -50,7 +52,10 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
         )
 
         await invalidate_sessions_for_deleted_data(
-            dataset_id, deleted_elements.node_ids, deleted_elements.edge_ids
+            dataset_id,
+            deleted_elements.node_ids,
+            deleted_elements.edge_ids,
+            user_id=user_id,
         )
     except Exception as error:
         logger.warning("Session invalidation after data delete failed (non-fatal): %s", error)
@@ -211,7 +216,7 @@ class datasets:
                             dataset_id, data_id, user.id
                         )
                         await _invalidate_sessions_for_deleted_data_nonfatal(
-                            dataset.id, deleted_elements
+                            dataset.id, deleted_elements, user.id
                         )
 
                         dataset_data = await get_dataset_data(dataset.id)
@@ -243,7 +248,7 @@ class datasets:
                             deleted_elements = await legacy_delete(data, "soft")
 
                     await _invalidate_sessions_for_deleted_data_nonfatal(
-                        dataset.id, deleted_elements
+                        dataset.id, deleted_elements, user.id
                     )
 
                     await delete_data(data, dataset_id)

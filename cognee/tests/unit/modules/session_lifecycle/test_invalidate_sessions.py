@@ -254,6 +254,78 @@ async def test_invalidate_sessions_for_deleted_data_spans_sessions(session_manag
 
 
 @pytest.mark.asyncio
+async def test_invalidate_sessions_for_deleted_data_scans_unattributed_user_sessions(
+    session_manager,
+):
+    """Sessions with no dataset attribution (the plain default session of an
+    unscoped search) are scanned when the deleting user is known, so their
+    contaminated turns are removed too (COG-6292). Overlap with the
+    dataset-attributed list is deduplicated."""
+    dataset_id = uuid4()
+    user_uuid = uuid4()
+    unattributed_session = "default_session"
+    await _seed_qa(session_manager, "qa_attributed", used_node_ids=["node_deleted"])
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        unattributed_session,
+        question="q",
+        context="c",
+        answer="a",
+        qa_id="qa_unattributed",
+        used_graph_element_ids={"node_ids": ["node_deleted"]},
+    )
+
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_unattributed_sessions_for_user",
+            new=AsyncMock(return_value=[(USER_ID, unattributed_session), (USER_ID, SESSION_ID)]),
+        ) as list_unattributed_mock,
+    ):
+        result = await invalidate_sessions_for_deleted_data(
+            dataset_id, {"node_deleted"}, set(), user_id=user_uuid
+        )
+
+    list_unattributed_mock.assert_awaited_once_with(user_uuid)
+    assert result["sessions_considered"] == 2  # duplicate (USER_ID, SESSION_ID) collapsed
+    assert result["qa_entries_deleted"] == 2
+    assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+    assert await session_manager.get_session(user_id=USER_ID, session_id=unattributed_session) == []
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_deleted_data_skips_unattributed_without_user(
+    session_manager,
+):
+    """Without a user id, only dataset-attributed sessions are scanned."""
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_unattributed_sessions_for_user",
+            new=AsyncMock(),
+        ) as list_unattributed_mock,
+    ):
+        result = await invalidate_sessions_for_deleted_data(uuid4(), {"node_x"}, set())
+
+    list_unattributed_mock.assert_not_awaited()
+    assert result["sessions_considered"] == 0
+
+
+@pytest.mark.asyncio
 async def test_invalidate_sessions_for_deleted_data_noops_on_empty_ids(session_manager):
     with patch(
         "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
