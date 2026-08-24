@@ -17,6 +17,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.data.methods import get_datasets_graph_counts
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.exceptions import DataNotFoundError
@@ -538,8 +539,16 @@ def get_datasets_router() -> APIRouter:
         - **pipelineRunId**: The dataset's latest cognify run, or null if it
           has never been cognified
         - **numNodes** / **numEdges**: Graph size for that run
-        - **computedAt**: When the count was cached, or null if the last
-          attempt degraded (graph store unavailable) and wasn't cached
+        - **computedAt**: When the count was cached, or null when it wasn't —
+          either the last attempt degraded (graph store unavailable, counts
+          are 0 and retried on the next poll) or a concurrent caller cached
+          the same run first (counts are exact)
+
+        ## Error Codes
+        - **409 Conflict**: The summary could not be built (generic message;
+          the detail is server-logged rather than returned). A single
+          unreadable graph store does not cause this — that dataset comes back
+          with zero counts — so this means the relational read itself failed.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -551,116 +560,38 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from datetime import timezone
-        from sqlalchemy import select, func
-        from sqlalchemy.orm import aliased
-        from cognee.context_global_variables import set_database_global_context_variables
-        from cognee.infrastructure.databases.graph import get_graph_engine
-        from cognee.modules.data.models import GraphMetrics
-        from cognee.modules.pipelines.models import PipelineRun
+        try:
+            authorized_datasets = await get_authorized_existing_datasets(dataset_ids, "read", user)
 
-        authorized_datasets = await get_authorized_existing_datasets(dataset_ids, "read", user)
+            if not authorized_datasets:
+                return []
 
-        if not authorized_datasets:
-            return []
-
-        db_engine = get_relational_engine()
-
-        async with db_engine.get_async_session() as session:
-            ranked_runs = (
-                select(
-                    PipelineRun,
-                    func.row_number()
-                    .over(
-                        partition_by=PipelineRun.dataset_id,
-                        order_by=PipelineRun.created_at.desc(),
-                    )
-                    .label("rn"),
-                )
-                .filter(PipelineRun.dataset_id.in_([dataset.id for dataset in authorized_datasets]))
-                .filter(PipelineRun.pipeline_name == "cognify_pipeline")
-                .subquery()
+            counts = await get_datasets_graph_counts(authorized_datasets)
+        except Exception as error:
+            # Same posture as GET /statuses above and the sibling
+            # GET /visualize/brains-summary: a poll that fails transiently is a
+            # 409 with a generic message, not an unhandled 500 carrying
+            # internals to the client. Scoped to the two relational reads
+            # this route makes; the DTO construction below is pure Python
+            # over an already-validated shape, so a bug there still surfaces
+            # as a real 500 instead of being misreported as this endpoint's
+            # documented transient-failure case.
+            logger.error("Error retrieving dataset graph summary: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset graph summary."},
             )
-            aliased_run = aliased(PipelineRun, ranked_runs)
-            latest_runs = (
-                (await session.execute(select(aliased_run).filter(ranked_runs.c.rn == 1)))
-                .scalars()
-                .all()
+
+        return [
+            DatasetGraphSummaryDTO(
+                dataset_id=dataset.id,
+                pipeline_run_id=counts[dataset.id].pipeline_run_id,
+                num_nodes=counts[dataset.id].num_nodes,
+                num_edges=counts[dataset.id].num_edges,
+                computed_at=counts[dataset.id].computed_at,
             )
-            latest_run_by_dataset = {run.dataset_id: run for run in latest_runs}
-
-        summaries = []
-        for dataset in authorized_datasets:
-            latest_run = latest_run_by_dataset.get(dataset.id)
-            if latest_run is None:
-                summaries.append(
-                    DatasetGraphSummaryDTO(dataset_id=dataset.id, num_nodes=0, num_edges=0)
-                )
-                continue
-
-            async with db_engine.get_async_session() as session:
-                cached = (
-                    (
-                        await session.execute(
-                            select(GraphMetrics).where(
-                                GraphMetrics.id == latest_run.pipeline_run_id
-                            )
-                        )
-                    )
-                    .scalars()
-                    .first()
-                )
-
-            if cached is not None:
-                summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id,
-                        pipeline_run_id=latest_run.pipeline_run_id,
-                        num_nodes=cached.num_nodes or 0,
-                        num_edges=cached.num_edges or 0,
-                        computed_at=cached.created_at,
-                    )
-                )
-                continue
-
-            try:
-                async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                    graph_engine = await get_graph_engine()
-                    graph_metrics = await graph_engine.get_graph_metrics(include_optional=False)
-
-                async with db_engine.get_async_session() as session:
-                    session.add(
-                        GraphMetrics(
-                            id=latest_run.pipeline_run_id,
-                            num_nodes=graph_metrics.get("num_nodes"),
-                            num_edges=graph_metrics.get("num_edges"),
-                        )
-                    )
-                    await session.commit()
-
-                summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id,
-                        pipeline_run_id=latest_run.pipeline_run_id,
-                        num_nodes=graph_metrics.get("num_nodes") or 0,
-                        num_edges=graph_metrics.get("num_edges") or 0,
-                        computed_at=datetime.now(timezone.utc),
-                    )
-                )
-            except Exception as error:
-                logger.warning(
-                    "Failed to compute graph metrics for dataset %s: %s", dataset.id, error
-                )
-                summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id,
-                        pipeline_run_id=latest_run.pipeline_run_id,
-                        num_nodes=0,
-                        num_edges=0,
-                    )
-                )
-
-        return summaries
+            for dataset in authorized_datasets
+        ]
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
