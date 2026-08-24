@@ -5,8 +5,27 @@ import pytest
 from cognee.infrastructure.llm.config import LOCAL_DEFAULT_RATE_LIMIT_REQUESTS, LLMConfig
 
 
+@pytest.fixture(autouse=True)
+def _isolate_llm_env(monkeypatch):
+    """Build every config in this file from kwargs alone, never the ambient env.
+
+    Same trap as test_llm_config.py: cognee loads .env into os.environ at
+    import, and ensure_env_vars_for_ollama inspects os.environ rather than the
+    values the config was constructed with. A developer whose .env sets only
+    LLM_API_KEY therefore gets "some but not all of the required environment
+    variables" on every ollama case here, while CI (which sets all three)
+    passes. Clearing all three makes the file hermetic either way.
+    """
+    for var in ("LLM_PROVIDER", "LLM_MODEL", "LLM_ENDPOINT", "LLM_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
 def _build(**kwargs):
-    defaults = dict(llm_api_key="test-key", llm_endpoint="http://localhost:11434/v1")
+    defaults = dict(
+        llm_api_key="test-key",
+        llm_endpoint="http://localhost:11434/v1",
+        _env_file=None,
+    )
     defaults.update(kwargs)
     return LLMConfig(**defaults)
 

@@ -208,7 +208,23 @@ def test_instructor_mode_table_and_adapter_wiring():
 
 
 def _clear_sampling_env(monkeypatch):
-    for var in ("LLM_TEMPERATURE", "LLM_SEED", "LLM_ARGS", "LLM_PROVIDER", "LLM_MODEL"):
+    # LLM_ENDPOINT and LLM_API_KEY belong here even though no test reads them:
+    # cognee loads .env into os.environ at import, and LLMConfig's
+    # ensure_env_vars_for_ollama inspects os.environ rather than the values it
+    # was constructed with. Leaving either one set makes an ollama config raise
+    # "some but not all of the required environment variables" no matter what
+    # the test passes as kwargs. _env_file=None does not help: it disables
+    # pydantic's dotenv reading, not the environment already populated at
+    # import time.
+    for var in (
+        "LLM_TEMPERATURE",
+        "LLM_SEED",
+        "LLM_ARGS",
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "LLM_ENDPOINT",
+        "LLM_API_KEY",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
