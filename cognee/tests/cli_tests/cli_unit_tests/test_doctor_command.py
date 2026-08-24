@@ -121,3 +121,23 @@ class TestDoctorCommand:
         with pytest.raises(CliCommandException) as exc_info:
             DoctorCommand().execute(_make_args())
         assert exc_info.value.error_code == 1
+
+    def test_health_check_error_logs_are_suppressed_then_restored(self, monkeypatch, stub_configs):
+        """The health checker logs failures at ERROR with full tracebacks; the
+        doctor reports them as ✗ lines instead, so those logs must be disabled
+        while the check runs — and re-enabled once doctor is done."""
+        import logging
+
+        import cognee.api.v1.health.health as health_module
+
+        disable_level_during_check = []
+
+        async def record_and_fail(detailed=False):
+            disable_level_during_check.append(logging.root.manager.disable)
+            return _unhealthy_response()
+
+        monkeypatch.setattr(health_module.health_checker, "get_health_status", record_and_fail)
+        with pytest.raises(CliCommandException):
+            DoctorCommand().execute(_make_args())
+        assert disable_level_during_check == [logging.ERROR]
+        assert logging.root.manager.disable == logging.NOTSET
