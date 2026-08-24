@@ -160,6 +160,32 @@ async def get_active_credential_for_user(
         return result.scalars().first()
 
 
+async def list_active_credentials_for_user(user_id: UUID) -> dict[str, IntegrationCredential]:
+    """The user's active connections across all providers, one query.
+
+    Returns a dict of ``provider -> credential`` holding at most one
+    credential per provider, chosen newest-first — the same tiebreak as
+    :func:`get_active_credential_for_user`, so the aggregate status endpoint
+    and the per-provider connection endpoint always agree on which
+    connection represents a provider. For display use: token material stays
+    encrypted on the rows and must not be surfaced by callers.
+    """
+    engine = get_relational_engine()
+    async with engine.get_async_session() as db:
+        result = await db.execute(
+            select(IntegrationCredential)
+            .where(
+                IntegrationCredential.user_id == user_id,
+                IntegrationCredential.status == STATUS_ACTIVE,
+            )
+            .order_by(IntegrationCredential.created_at.desc())
+        )
+        credentials: dict[str, IntegrationCredential] = {}
+        for credential in result.scalars().all():
+            credentials.setdefault(credential.provider, credential)
+        return credentials
+
+
 async def get_active_credential_for_workspace(
     workspace_id: UUID, provider: str
 ) -> Optional[IntegrationCredential]:

@@ -13,7 +13,6 @@ logger = get_logger("HybridRetriever")
 
 
 def chunk_summary_pairs(
-    bm25_chunks: list[Any],
     vector_chunks: list[Any],
     summary_hits: list[Any],
     node_name: Optional[list[str]] = None,
@@ -21,25 +20,20 @@ def chunk_summary_pairs(
 ) -> list[dict]:
     pairs = []
 
-    for rank_field, chunks in (("bm25_rank", bm25_chunks), ("vector_rank", vector_chunks)):
-        for rank, chunk in enumerate(chunks or []):
-            chunk_id = result_id(chunk)
-            chunk_text = display_value(payload(chunk).get("text"))
-            if not chunk_id and not chunk_text:
-                continue
+    for rank, chunk in enumerate(vector_chunks or []):
+        chunk_id = result_id(chunk)
+        chunk_text = display_value(payload(chunk).get("text"))
+        if not chunk_id and not chunk_text:
+            continue
 
-            pair = _find_chunk_summary_pair(pairs, chunk_id, chunk_text)
-            if pair is None:
-                pair = _new_chunk_summary_pair(chunk_id=chunk_id, chunk_text=chunk_text)
-                pairs.append(pair)
-            if pair["chunk"] is None:
-                set_pair_chunk(pair, chunk)
-            elif pair["chunk_id"] is None and chunk_id:
-                # Text-merged onto an idless chunk (e.g. BM25 payload without id):
-                # adopt the id so summary hits can pair by source_chunk_id.
-                pair["chunk_id"] = chunk_id
-            if pair[rank_field] is None:
-                pair[rank_field] = rank
+        pair = _find_chunk_summary_pair(pairs, chunk_id, chunk_text)
+        if pair is None:
+            pair = _new_chunk_summary_pair(chunk_id=chunk_id, chunk_text=chunk_text)
+            pairs.append(pair)
+        if pair["chunk"] is None:
+            set_pair_chunk(pair, chunk)
+        if pair["vector_rank"] is None:
+            pair["vector_rank"] = rank
 
     for rank, summary in enumerate(summary_hits or []):
         summary_payload = payload(summary)
@@ -125,7 +119,6 @@ def _new_chunk_summary_pair(
         "summary_id": None,
         "summary_text": None,
         "chunk": None,
-        "bm25_rank": None,
         "vector_rank": None,
         "summary_rank": None,
     }

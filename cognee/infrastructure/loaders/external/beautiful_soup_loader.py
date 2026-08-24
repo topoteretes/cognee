@@ -12,6 +12,8 @@ from bs4 import BeautifulSoup
 
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
 
@@ -156,7 +158,7 @@ class BeautifulSoupLoader(LoaderInterface):
         extraction_rules: dict[str, Any] | None = None,
         join_all_matches: bool = False,
         **kwargs: Any,
-    ) -> str:
+    ) -> "str | LoaderResult":
         """Load an HTML file, extract content, and save to storage.
 
         Args:
@@ -227,10 +229,8 @@ class BeautifulSoupLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, full_content)
-
         logger.info(f"Extracted {len(full_content)} characters from HTML")
-        return full_file_path
+        return await store_derived_text(storage, storage_file_name, full_content)
 
     def _normalize_rule(self, rule: str | dict[str, Any]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.

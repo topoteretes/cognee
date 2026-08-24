@@ -189,3 +189,36 @@ async def test_openai_compatible_embedding_does_not_retry_unsplittable_context_w
         await engine.embed_text(["ab"])
 
     assert create_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_litellm_embedding_splits_batch_on_vertex_instance_limit_error():
+    import litellm
+
+    with patch(
+        "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine."
+        "LiteLLMEmbeddingEngine.get_tokenizer",
+        return_value=Mock(),
+    ):
+        from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+            LiteLLMEmbeddingEngine,
+        )
+
+        engine = LiteLLMEmbeddingEngine(model="test-model", dimensions=2)
+
+    instance_limit_error = litellm.exceptions.BadRequestError(
+        message="2 instance(s) is allowed per prediction. Actual: 4",
+        model="test-model",
+        llm_provider="vertex_ai",
+    )
+
+    async def fake_aembedding(**kwargs):
+        if len(kwargs["input"]) > 2:
+            raise instance_limit_error
+        return Mock(data=[{"embedding": [1.0, 1.0]} for _ in kwargs["input"]])
+
+    with patch("litellm.aembedding", AsyncMock(side_effect=fake_aembedding)) as embed_mock:
+        result = await engine.embed_text(["a", "b", "c", "d"])
+
+    assert result == [[1.0, 1.0]] * 4
+    assert embed_mock.await_count > 1

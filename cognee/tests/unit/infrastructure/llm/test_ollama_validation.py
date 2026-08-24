@@ -139,6 +139,6 @@ async def test_local_ollama_example_executes_offline(monkeypatch):
         patch.object(LLMGateway, "acreate_structured_output", new=_mock_acreate),
         patch.object(LiteLLMEmbeddingEngine, "embed_text", new=_mock_embed_text),
     ):
-        from examples.demos.local_ollama_example import main
+        from examples.guides.local_ollama_example import main
 
         await main()

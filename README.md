@@ -372,7 +372,7 @@ pip install "cognee[postgres]"
 ```bash
 DB_PROVIDER=postgres
 VECTOR_DB_PROVIDER=pgvector
-GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_PROVIDER=postgres_demo
 CACHE_BACKEND=postgres
 
 DB_HOST=localhost
