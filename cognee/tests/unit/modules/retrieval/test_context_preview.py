@@ -5,8 +5,10 @@ much about what it must *not* do — call an LLM, write to the session — as ab
 strings it returns.
 """
 
+import importlib
+from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,6 +23,21 @@ from cognee.modules.retrieval.context_preview import (
     render_context_for_prompt,
 )
 from cognee.modules.retrieval.utils.completion import build_completion_prompts
+
+# Resolve module objects explicitly and patch with patch.object. Dotted-string targets
+# are unreliable here: `cognee.infrastructure.session.__init__` re-exports the *function*
+# `get_session_manager`, shadowing the same-named submodule, so a string target resolves
+# to the function or the module depending on which import ran first — passing in
+# isolation and failing in a full-suite run. Same reason for LLMGateway, a module holding
+# a class of the same name. (See the identical note in test_get_retriever_output.py.)
+get_session_manager_module = importlib.import_module(
+    "cognee.infrastructure.session.get_session_manager"
+)
+session_turn_module = importlib.import_module("cognee.infrastructure.session.session_turn")
+session_context_builder_module = importlib.import_module(
+    "cognee.infrastructure.session.session_context_builder"
+)
+llm_gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGateway")
 
 
 class _PromptRetriever:
@@ -64,30 +81,39 @@ class _FakeSessionManager:
         self.added_qas.append(kwargs)
 
 
-def _patch_session(session_manager, *, block="", preference_lines=None, history=None):
-    """Patch the read-only session primitives the preview pulls in lazily."""
+@contextmanager
+def patched_session(session_manager, *, block="", preference_lines=None, history=None):
+    """Stub the read-only session primitives the preview imports lazily.
+
+    Yields the ``build_active_context_block`` mock, the one collaborator tests assert on.
+    """
     history_text = session_manager.history if history is None else history
-    return (
-        patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+    with (
+        patch.object(
+            get_session_manager_module,
+            "get_session_manager",
             return_value=session_manager,
         ),
-        patch(
-            "cognee.infrastructure.session.session_turn.select_session_history",
+        patch.object(
+            session_turn_module,
+            "select_session_history",
             new_callable=AsyncMock,
             return_value=history_text,
         ),
-        patch(
-            "cognee.infrastructure.session.session_turn.load_preference_lines_safe",
+        patch.object(
+            session_turn_module,
+            "load_preference_lines_safe",
             new_callable=AsyncMock,
             return_value=preference_lines or [],
         ),
-        patch(
-            "cognee.infrastructure.session.session_context_builder.build_active_context_block",
+        patch.object(
+            session_context_builder_module,
+            "build_active_context_block",
             new_callable=AsyncMock,
             return_value=(block, ["entry-1"]),
-        ),
-    )
+        ) as build_block,
+    ):
+        yield build_block
 
 
 @pytest.fixture
@@ -111,8 +137,7 @@ def test_render_context_for_prompt_joins_lists_and_passes_strings_through():
 @pytest.mark.asyncio
 async def test_session_prompt_puts_guidance_ahead_of_history(as_user):
     manager = _FakeSessionManager(history="Previous conversation:\n\nQUESTION: q\nANSWER: a\n")
-    patches = _patch_session(manager, block="## Active session guidance\n- be terse")
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patched_session(manager, block="## Active session guidance\n- be terse"):
         prompt = await load_read_only_session_prompt(_PromptRetriever(), "why?")
 
     assert prompt.startswith("## Active session guidance")
@@ -124,8 +149,7 @@ async def test_session_prompt_puts_guidance_ahead_of_history(as_user):
 async def test_session_prompt_performs_no_session_writes(as_user):
     """The guidance block must be built with stamp_served=False."""
     manager = _FakeSessionManager()
-    patches = _patch_session(manager, block="## Active session guidance\n- x")
-    with patches[0], patches[1], patches[2], patches[3] as build_block:
+    with patched_session(manager, block="## Active session guidance\n- x") as build_block:
         await load_read_only_session_prompt(_PromptRetriever(), "why?")
 
     assert build_block.await_args.kwargs["stamp_served"] is False
@@ -137,8 +161,7 @@ async def test_session_prompt_performs_no_session_writes(as_user):
 async def test_session_prompt_renders_preferences_when_auto_feedback_is_off(as_user):
     """Mirrors generate_session_answer: preferences still reach the prompt."""
     manager = _FakeSessionManager(auto_feedback=False)
-    patches = _patch_session(manager, preference_lines=["Answer in Portuguese"])
-    with patches[0], patches[1], patches[2], patches[3] as build_block:
+    with patched_session(manager, preference_lines=["Answer in Portuguese"]) as build_block:
         prompt = await load_read_only_session_prompt(_PromptRetriever(), "why?")
 
     build_block.assert_not_awaited()
@@ -148,8 +171,7 @@ async def test_session_prompt_renders_preferences_when_auto_feedback_is_off(as_u
 @pytest.mark.asyncio
 async def test_session_prompt_is_empty_without_an_available_session(as_user):
     manager = _FakeSessionManager(available=False)
-    patches = _patch_session(manager, block="## Active session guidance\n- x")
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patched_session(manager, block="## Active session guidance\n- x"):
         assert await load_read_only_session_prompt(_PromptRetriever(), "why?") == ""
 
 
@@ -160,8 +182,9 @@ async def test_session_prompt_is_empty_without_a_user():
 
 @pytest.mark.asyncio
 async def test_session_prompt_fails_open(as_user):
-    with patch(
-        "cognee.infrastructure.session.get_session_manager.get_session_manager",
+    with patch.object(
+        get_session_manager_module,
+        "get_session_manager",
         side_effect=RuntimeError("cache down"),
     ):
         assert await load_read_only_session_prompt(_PromptRetriever(), "why?") == ""
@@ -171,8 +194,7 @@ async def test_session_prompt_fails_open(as_user):
 async def test_preview_matches_what_generate_completion_would_build(as_user):
     """The whole point: preview strings equal the real assembly, not a lookalike."""
     manager = _FakeSessionManager(history="Previous conversation:\n\nQUESTION: q\nANSWER: a\n")
-    patches = _patch_session(manager, block="## Active session guidance\n- be terse")
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patched_session(manager, block="## Active session guidance\n- be terse"):
         preview = await build_context_preview(
             _PromptRetriever(), query="why?", context="node1 -- rel -- node2"
         )
@@ -198,27 +220,23 @@ async def test_preview_matches_what_generate_completion_would_build(as_user):
 @pytest.mark.asyncio
 async def test_preview_never_calls_an_llm(as_user):
     manager = _FakeSessionManager()
-    patches = _patch_session(manager, block="")
     with (
-        patch(
-            "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
-            new_callable=AsyncMock,
+        patch.object(
+            llm_gateway_module.LLMGateway,
+            "acreate_structured_output",
+            new_callable=MagicMock,
         ) as llm,
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
+        patched_session(manager, block=""),
     ):
         await build_context_preview(_PromptRetriever(), query="why?", context="ctx")
 
-    llm.assert_not_awaited()
+    llm.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_preview_omits_prompts_for_non_generative_retrievers(as_user):
     manager = _FakeSessionManager()
-    patches = _patch_session(manager, block="## Active session guidance\n- x")
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patched_session(manager, block="## Active session guidance\n- x"):
         preview = await build_context_preview(
             _NonGenerativeRetriever(), query="why?", context=["chunk-a", "chunk-b"]
         )
@@ -235,8 +253,7 @@ async def test_preview_fails_open_when_rendering_raises(as_user):
         user_prompt_path = "this_template_does_not_exist.txt"
 
     manager = _FakeSessionManager()
-    patches = _patch_session(manager, block="## Active session guidance\n- x")
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patched_session(manager, block="## Active session guidance\n- x"):
         preview = await build_context_preview(_BadPromptRetriever(), query="why?", context="ctx")
 
     assert isinstance(preview, ContextPreview)
