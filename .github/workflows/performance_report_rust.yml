@@ -234,6 +234,32 @@ jobs:
               text-embedding-3-large) export EMBEDDING_DIMENSIONS=3072 ;;
               text-embedding-3-small | text-embedding-ada-002) export EMBEDDING_DIMENSIONS=1536 ;;
             esac
+
+            # ── TEMPORARY (experiment/rust-wap-llm-only). DO NOT MERGE. ────────
+            # Embedding-width parity with the Python arms. The org secret is
+            # `openai/text-embedding-3-large`; the Python bench pins
+            # `set_embedding_dimensions(1536)` and OpenAI truncates server-side
+            # via the `dimensions` request field. The Rust client has no such
+            # field (`EmbeddingRequest` in crates/embedding/src/openai_compatible.rs
+            # is model/input/encoding_format only), so it always stores the
+            # model's native 3072-d vectors — twice Python's width.
+            #
+            # Truncation is therefore unreachable from the workflow: declaring
+            # EMBEDDING_DIMENSIONS=1536 against 3-large only makes every insert
+            # fail on a dimension mismatch. The one width-matching lever
+            # available here is a natively-1536 model, so pin 3-small.
+            #
+            # This changes WHICH vectors are produced (3-small, not a truncated
+            # 3-large), but the point of the experiment is cost, not recall:
+            # both arms now embed and index at the same 1536 dimensions.
+            #
+            # The durable fix is a `dimensions` field on the cognee-rs embedding
+            # request, after which this block goes away.
+            export EMBEDDING_MODEL="text-embedding-3-small"
+            export EMBEDDING_PROVIDER="openai"
+            export EMBEDDING_DIMENSIONS=1536
+            echo "embedding parity override: model=$EMBEDDING_MODEL dims=$EMBEDDING_DIMENSIONS"
+            # ── end TEMPORARY ─────────────────────────────────────────────────
           fi
 
           # Capture the exit code instead of failing here: the report writes its
