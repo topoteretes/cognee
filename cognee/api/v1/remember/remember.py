@@ -66,6 +66,7 @@ class RememberKwargs(TypedDict, total=False):
     content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
     index_vectors: bool
+    repo_credentials: str
     skills_text: str
     skill_name: str
     primary_key: str
@@ -974,8 +975,12 @@ async def _remember_inner(
     # normal remember), so they must be consumed here regardless of content_type.
     skills_text = kwargs.pop("skills_text", None)
     skill_name = kwargs.pop("skill_name", None)
-    # code-only kwarg, consumed here for the same reason as the skills ones.
+    # code-only kwargs, consumed here for the same reason as the skills ones.
     index_vectors = kwargs.pop("index_vectors", None)
+    # Out-of-band auth token for private https remotes (e.g. a GitHub App
+    # installation token). Kept out of the repo URLs so no secret ever rides
+    # a loggable string — see resolve_repo_source.
+    repo_credentials = kwargs.pop("repo_credentials", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -993,6 +998,8 @@ async def _remember_inner(
         )
     if index_vectors is not None and content_type != "code":
         raise ValueError("index_vectors is supported only for content_type='code'.")
+    if repo_credentials is not None and content_type != "code":
+        raise ValueError("repo_credentials is supported only for content_type='code'.")
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1060,7 +1067,7 @@ async def _remember_inner(
                     result.error = f"code_graph_pipeline errored for repository '{item['source']}'"
 
         async def _run_one_repo(spec) -> dict:
-            repo_path = await resolve_repo_source(spec)
+            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
             # redact: connector-supplied URLs may carry a token in the
             # userinfo, which must not surface in results or logs.
             item = {

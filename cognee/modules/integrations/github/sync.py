@@ -43,14 +43,15 @@ def dataset_name_for_account(account_login: str) -> str:
     return f"{GITHUB_DATASET_PREFIX}_{slug or 'account'}"
 
 
-def authenticated_clone_url(full_name: str, token: str) -> str:
-    """An https clone URL carrying the (hour-lived) installation token.
+def clone_url(full_name: str) -> str:
+    """The credential-free https clone URL for a repository.
 
-    ``resolve_repo_source`` strips the userinfo before computing the clone
-    slug, persisting the remote, or logging — the token is used for the
-    clone/fetch itself and nowhere else.
+    Deliberately carries no token: auth travels out-of-band as
+    ``repo_credentials`` (injected into git via environment config by
+    ``resolve_repo_source``), so no URL-derived string — clone slugs, result
+    items, logs, git error output — can ever leak a secret.
     """
-    return f"https://x-access-token:{token}@github.com/{full_name}.git"
+    return f"https://github.com/{full_name}.git"
 
 
 async def list_installation_repositories(token: str) -> list[str]:
@@ -116,10 +117,11 @@ async def sync_repositories(
         dataset_name_for_account(account_login),
     )
     result = await cognee_remember(
-        [authenticated_clone_url(full_name, token) for full_name in repo_full_names],
+        [clone_url(full_name) for full_name in repo_full_names],
         dataset_name=dataset_name_for_account(account_login),
         user=owner,
         content_type="code",
+        repo_credentials=token,
     )
     if getattr(result, "status", None) == "errored":
         logger.warning(

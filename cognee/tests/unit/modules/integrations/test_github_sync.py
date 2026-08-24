@@ -41,9 +41,10 @@ def test_dataset_name_is_one_per_account_and_identifier_safe():
     assert sync_module.dataset_name_for_account("---") == "github_account"
 
 
-def test_authenticated_clone_url_shape():
-    url = sync_module.authenticated_clone_url("acme/api", "tok123")
-    assert url == "https://x-access-token:tok123@github.com/acme/api.git"
+def test_clone_url_carries_no_credentials():
+    # Auth travels out-of-band as repo_credentials; a token in the URL would
+    # taint every URL-derived string (slugs, logs, git errors) with a secret.
+    assert sync_module.clone_url("acme/api") == "https://github.com/acme/api.git"
 
 
 @pytest.fixture
@@ -72,12 +73,13 @@ async def test_default_sync_covers_every_installation_repo(mocks):
     mocks.list_repos.assert_awaited_once_with("tok123")
     mocks.remember.assert_awaited_once_with(
         [
-            "https://x-access-token:tok123@github.com/acme/api.git",
-            "https://x-access-token:tok123@github.com/acme/web.git",
+            "https://github.com/acme/api.git",
+            "https://github.com/acme/web.git",
         ],
         dataset_name="github_acme_org",
         user=mocks.owner,
         content_type="code",
+        repo_credentials="tok123",
     )
 
 
@@ -88,7 +90,8 @@ async def test_explicit_repo_list_skips_the_listing_call(mocks):
     mocks.list_repos.assert_not_awaited()
     mocks.remember.assert_awaited_once()
     (urls,) = mocks.remember.await_args.args
-    assert urls == ["https://x-access-token:tok123@github.com/acme/api.git"]
+    assert urls == ["https://github.com/acme/api.git"]
+    assert mocks.remember.await_args.kwargs["repo_credentials"] == "tok123"
 
 
 @pytest.mark.asyncio

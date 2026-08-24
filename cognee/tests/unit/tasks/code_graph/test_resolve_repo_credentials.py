@@ -35,7 +35,7 @@ def test_redact_repo_spec_leaves_credential_free_specs_alone():
 async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path):
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -61,7 +61,7 @@ async def test_existing_clone_pulls_from_the_credentialed_url(monkeypatch, tmp_p
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -80,7 +80,7 @@ async def test_credential_free_urls_keep_the_bare_pull(monkeypatch, tmp_path):
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -92,8 +92,61 @@ async def test_credential_free_urls_keep_the_bare_pull(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_path):
+    """The preferred path (connectors): token via ``credentials=``, not the URL.
+
+    The URL stays clean everywhere — argv, slug, remote — and the token
+    reaches git only as environment-level config, so no URL-derived string
+    can leak it.
+    """
+    git_calls = []
+
+    async def fake_run_git(args, cwd=None, env=None):
+        git_calls.append((args, cwd, env))
+        return 0, ""
+
+    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
+
+    resolved = await resolve_module.resolve_repo_source(
+        _CLEAN_URL, clones_dir=tmp_path, credentials="tok-SECRET"
+    )
+
+    assert resolved == tmp_path / "github.com-org-repo"
+    ((clone_args, _cwd, clone_env),) = git_calls
+    # argv carries only the clean URL; the token is nowhere in it.
+    assert clone_args == ["clone", "--depth", "1", _CLEAN_URL, str(resolved)]
+    assert "tok-SECRET" not in " ".join(clone_args)
+    # ...and rides GIT_CONFIG_* as a basic-auth header instead.
+    assert clone_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert clone_env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+
+
+@pytest.mark.asyncio
+async def test_out_of_band_credentials_apply_to_pulls_too(monkeypatch, tmp_path):
+    clone_dir = tmp_path / "github.com-org-repo"
+    (clone_dir / ".git").mkdir(parents=True)
+    git_calls = []
+
+    async def fake_run_git(args, cwd=None, env=None):
+        git_calls.append((args, cwd, env))
+        return 0, ""
+
+    monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
+
+    await resolve_module.resolve_repo_source(
+        _CLEAN_URL, clones_dir=tmp_path, credentials="tok-SECRET"
+    )
+
+    ((pull_args, pull_cwd, pull_env),) = git_calls
+    # Bare pull against the (clean) stored remote; auth via the environment.
+    assert pull_args == ["pull", "--ff-only"]
+    assert pull_cwd == clone_dir
+    assert pull_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+
+
+@pytest.mark.asyncio
 async def test_failed_clone_error_is_scrubbed(monkeypatch, tmp_path):
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         # git echoes the full URL, token included, in its error output.
         return 128, f"fatal: unable to access '{_TOKEN_URL}': 403"
 
