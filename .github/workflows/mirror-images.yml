@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   mirror:
+    if: github.repository == 'topoteretes/cognee'
     permissions:
       contents: read
       packages: write
@@ -31,11 +32,15 @@ jobs:
           - pgvector/pgvector:pg17
     steps:
       - name: Log in to Docker Hub (authenticated source pulls)
+        if: ${{ env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != '' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         continue-on-error: true   # best-effort: fall back to anonymous if unset
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
@@ -48,7 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           SRC="${{ matrix.image }}"
-          DST="ghcr.io/${{ github.repository_owner }}/${SRC##*/}"
+          OWNER="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          DST="ghcr.io/${OWNER}/${SRC##*/}"
           echo "Mirroring $SRC -> $DST"
           docker pull "$SRC"
           docker tag  "$SRC" "$DST"

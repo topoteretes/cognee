@@ -22,6 +22,7 @@ jobs:
   # ── Gate: run core test suites before publishing ────────────────────
   test-gate:
     name: Canary Test Gate
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/basic_tests.yml
     with:
       ci-image: ""
@@ -30,6 +31,7 @@ jobs:
   # ── Compute canary version ──────────────────────────────────────────
   prepare:
     name: Prepare Canary Version
+    if: github.repository == 'topoteretes/cognee'
     runs-on: ubuntu-latest
     needs: test-gate
     outputs:
@@ -62,6 +64,7 @@ jobs:
   # ── Publish to PyPI ─────────────────────────────────────────────────
   release-pypi:
     name: Publish Dev Canary to PyPI
+    if: github.repository == 'topoteretes/cognee'
     needs: prepare
     # Publishing via PyPI Trusted Publishing (OIDC) so dev canaries also carry
     # verifiable PEP 740 provenance + a SLSA build-provenance attestation.
@@ -126,6 +129,7 @@ jobs:
   # ── Publish Docker image ────────────────────────────────────────────
   release-docker:
     name: Publish Dev Canary Docker Image
+    if: github.repository == 'topoteretes/cognee'
     needs: prepare
     permissions:
       contents: read
