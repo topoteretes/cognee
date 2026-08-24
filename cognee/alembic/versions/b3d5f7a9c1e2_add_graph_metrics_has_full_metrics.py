@@ -1,7 +1,7 @@
 """add_graph_metrics_has_full_metrics
 
 Revision ID: b3d5f7a9c1e2
-Revises: a7f3c9e1b5d2
+Revises: c4e8a1f6b3d7
 Create Date: 2026-08-21 00:00:00.000000
 
 """
