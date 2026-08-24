@@ -102,7 +102,11 @@ class CompletionRetriever(BaseRetriever):
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
-        self.wide_search_top_k = wide_search_top_k
+        # None means "not set by the caller", not "do not widen": the search
+        # path passes it through unset, and `max(top_k, None or 0)` below would
+        # silently collapse the wide fetch back to top_k. Same normalization,
+        # same default, as GraphCompletionRetriever.
+        self.wide_search_top_k = 100 if wide_search_top_k is None else wide_search_top_k
         self.system_prompt = system_prompt
         self.session_id = session_id
         self.response_model = response_model
