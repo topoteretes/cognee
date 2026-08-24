@@ -54,6 +54,13 @@ from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
 from cognee.api.v1.integrations.routers import get_integrations_router
+
+# Registers the GitHub App integration with the integrations registry as an
+# import side effect. Slack registers via its router imports above; GitHub
+# mounts no routers of its own (webhooks arrive on the generic
+# /api/v1/integrations/github/events route), so the registration import is
+# explicit here.
+import cognee.modules.integrations.github  # noqa: F401,E402
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr

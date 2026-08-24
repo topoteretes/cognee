@@ -1006,7 +1006,7 @@ async def _remember_inner(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
-        from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
+        from cognee.tasks.code_graph.resolve_repo import redact_repo_spec, resolve_repo_source
 
         repo_specs = data if isinstance(data, list) else [data]
         if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
@@ -1061,7 +1061,13 @@ async def _remember_inner(
 
         async def _run_one_repo(spec) -> dict:
             repo_path = await resolve_repo_source(spec)
-            item = {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
+            # redact: connector-supplied URLs may carry a token in the
+            # userinfo, which must not surface in results or logs.
+            item = {
+                "kind": "code_repository",
+                "source": redact_repo_spec(spec),
+                "path": str(repo_path),
+            }
             pipeline_result = await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
@@ -1096,14 +1102,15 @@ async def _remember_inner(
                     try:
                         item = await _run_one_repo(spec)
                     except Exception as exc:
-                        logger.exception("Background code-graph run failed for '%s'", spec)
+                        source = redact_repo_spec(spec)
+                        logger.exception("Background code-graph run failed for '%s'", source)
                         item = {
                             "kind": "code_repository",
-                            "source": str(spec),
+                            "source": source,
                             "status": "errored",
                             "error": str(exc),
                         }
-                        errors.append(f"{spec}: {exc}")
+                        errors.append(f"{source}: {exc}")
                     result.items.append(item)
                 result.items_processed = len(
                     [item for item in result.items if item.get("status") != "errored"]

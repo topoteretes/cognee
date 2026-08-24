@@ -12,6 +12,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Optional, Union
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import status
 
@@ -42,6 +43,24 @@ class CodeRepositoryError(CogneeSystemError):
 def is_remote_repo(spec) -> bool:
     """Whether the spec is a remote git URL rather than a local path."""
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
+
+
+def redact_repo_spec(spec: Union[str, Path]) -> str:
+    """The spec with any URL-embedded credentials removed.
+
+    Connectors pass short-lived tokens in the URL userinfo
+    (``https://x-access-token:<token>@github.com/...``); anything persisted
+    or logged — clone slugs, the stored git remote, result items, error
+    messages — must use this form instead of the raw spec.
+    """
+    url = str(spec)
+    if "://" not in url:
+        return url
+    parts = urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    host = parts.netloc.rsplit("@", 1)[1]
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 def _clone_slug(url: str) -> str:
@@ -103,22 +122,39 @@ async def resolve_repo_source(
         )
 
     url = str(spec)
+    # Slug, remote, logs, and errors all use the credential-free URL: tokens
+    # in the userinfo are short-lived, so persisting one anywhere would both
+    # leak it and (via the slug) mint a new clone dir per sync.
+    clean_url = redact_repo_spec(url)
+    has_credentials = clean_url != url
+
+    def _scrub(text: str) -> str:
+        # git error output often echoes the URL, token included.
+        return text.replace(url, clean_url) if has_credentials else text
+
     target = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
-    target = target / _clone_slug(url)
+    target = target / _clone_slug(clean_url)
 
     if (target / ".git").is_dir():
-        returncode, stderr = await _run_git(["pull", "--ff-only"], cwd=target)
+        # With credentials in hand, fetch from the explicit URL instead of
+        # the stored remote (which is deliberately credential-free).
+        pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
+        returncode, stderr = await _run_git(pull_args, cwd=target)
         if returncode != 0:
             # A stale clone is still indexable; the caller asked for the repo,
             # not for freshness guarantees.
             logger.warning(
-                "Reusing existing clone at %s (git pull failed: %s)", target, stderr[-500:]
+                "Reusing existing clone at %s (git pull failed: %s)", target, _scrub(stderr[-500:])
             )
         return target
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Cloning %s into %s", url, target)
+    logger.info("Cloning %s into %s", clean_url, target)
     returncode, stderr = await _run_git(["clone", "--depth", "1", url, str(target)])
     if returncode != 0:
-        raise CodeRepositoryError(message=f"Failed to clone '{url}': {stderr[-1000:]}")
+        raise CodeRepositoryError(
+            message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
+        )
+    if has_credentials:
+        await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
     return target
