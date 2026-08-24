@@ -51,7 +51,7 @@ async def test_remote_refused_when_http_disabled(monkeypatch, tmp_path):
 async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -74,7 +74,7 @@ async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -93,7 +93,7 @@ async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
     (clone_dir / ".git").mkdir(parents=True)
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         return 1, "fatal: not fast-forward"
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
@@ -107,7 +107,7 @@ async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_failed_clone_raises_with_stderr(monkeypatch, tmp_path):
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         return 128, "fatal: repository not found"
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)

@@ -13,6 +13,9 @@ Route roles differ sharply in their auth model, which is the point:
 * ``GET/DELETE /{provider}/connection`` — authenticated; a user only ever
   sees or disconnects their own connection (credentials are user-scoped, not
   shared across a tenant/org).
+* ``POST /{provider}/events`` — unauthenticated webhook receiver; the
+  provider's registered ``WebhookVerifier`` (HMAC over raw bytes) is the
+  entire auth model. Providers without a verifier 404.
 
 Adding a second provider (Notion, GitHub, ...) needs none of these endpoints
 touched — only a new ``OAuthIntegration`` registered via
@@ -30,13 +33,14 @@ generic ``{provider}`` routes so ``plugins`` is never captured as a
 provider name.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
 from sqlalchemy.exc import IntegrityError
@@ -85,6 +89,26 @@ from cognee.modules.users.methods.store_principal_configuration import (
 from cognee.modules.users.models import User
 
 logger = logging.getLogger(__name__)
+
+# Detached post-install / webhook work (initial syncs, event handling) runs
+# off the request path; strong references keep the tasks alive until done —
+# same pattern as remember()'s _BACKGROUND_REMEMBER_TASKS.
+_BACKGROUND_INTEGRATION_TASKS: set = set()
+
+
+def _spawn_background(coro, *, description: str) -> None:
+    """Run ``coro`` detached, logging (never raising) on failure."""
+
+    async def _guarded():
+        try:
+            await coro
+        except Exception:  # noqa: BLE001 - detached work must log, not crash the loop
+            logger.exception("%s failed", description)
+
+    task = asyncio.create_task(_guarded())
+    _BACKGROUND_INTEGRATION_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_INTEGRATION_TASKS.discard)
+
 
 # Plugin keys with a native AgentConnectionType; anything else registers as
 # a generic "sdk" connection in the agent-connection registry.
@@ -458,7 +482,9 @@ def get_integrations_router():
                 )
 
     @integrations_router.get("/{provider}/callback", include_in_schema=False)
-    async def callback(provider: str, code: str = "", state: str = "", error: str = ""):
+    async def callback(
+        provider: str, request: Request, code: str = "", state: str = "", error: str = ""
+    ):
         """OAuth redirect target — state-authenticated, browser-facing."""
         with new_span("cognee.integrations.callback") as span:
             span.set_attribute("cognee.integrations.provider", provider)
@@ -477,7 +503,15 @@ def get_integrations_router():
                 return _frontend_redirect(integration, "error_invalid_state")
 
             try:
-                credential = await complete_installation(integration, code=code, user_id=user_id)
+                credential = await complete_installation(
+                    integration,
+                    code=code,
+                    user_id=user_id,
+                    # The full query string, for providers whose redirect
+                    # carries more than a code (GitHub's installation_id).
+                    # The adapter decides what in here it trusts.
+                    callback_params=dict(request.query_params),
+                )
             except CrossUserConflictError:
                 # The account is already connected to another user; refuse
                 # rather than silently reassign it (see upsert_credential).
@@ -496,8 +530,47 @@ def get_integrations_router():
                 credential.provider_account_id,
                 user_id,
             )
+            # Post-install work (e.g. GitHub's initial repo sync) runs
+            # detached — the browser gets its redirect now, not after.
+            _spawn_background(
+                integration.on_installed(credential),
+                description=f"{provider} on_installed hook",
+            )
             span.set_attribute("cognee.integrations.outcome", "connected")
             return _frontend_redirect(integration, "connected")
+
+    @integrations_router.post("/{provider}/events", include_in_schema=False)
+    async def provider_events(provider: str, request: Request):
+        """Generic webhook receiver, one URL per provider.
+
+        Unauthenticated by design — providers can't send a bearer token, so
+        the provider's own ``WebhookVerifier`` (HMAC over the raw bytes) is
+        the entire auth model, exactly like the Slack routes. A provider
+        that registers no verifier simply doesn't accept webhooks: 404, the
+        same answer an unknown provider gets, so the route leaks nothing
+        about which providers are configured.
+
+        The delivery is acked as soon as the signature checks out; the
+        actual handling (which may clone repositories or run pipelines) runs
+        detached so the provider's delivery timeout is never in play.
+        """
+        with new_span("cognee.integrations.events") as span:
+            span.set_attribute("cognee.integrations.provider", provider)
+            integration = _integration_or_404(provider)
+            verifier = integration.webhook_verifier()
+            if verifier is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"{provider} does not accept webhook deliveries.",
+                )
+
+            raw_body = await verifier.verify(request)
+            headers = {key.lower(): value for key, value in request.headers.items()}
+            _spawn_background(
+                integration.handle_webhook(raw_body, headers),
+                description=f"{provider} webhook handling",
+            )
+            return {"ok": True}
 
     @integrations_router.get("/{provider}/connection", response_model_exclude_none=True)
     async def connection_status(
