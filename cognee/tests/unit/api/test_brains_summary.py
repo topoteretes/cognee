@@ -95,6 +95,23 @@ async def test_each_readable_dataset_gets_the_documented_shape_keyed_by_id():
 
 
 @pytest.mark.asyncio
+async def test_a_dataset_the_caller_cannot_read_never_reaches_the_payload():
+    """Scoping is entirely delegated to get_all_user_permission_datasets — this
+    endpoint does no filtering of its own. Pin that contract here: if a caller
+    is not authorized for a dataset, get_all_user_permission_datasets simply
+    never returns it, and the payload must not mention its id."""
+    readable = _dataset("billing")
+    unreadable = _dataset("someone_elses_dataset")
+
+    ctx_a, ctx_b, ctx_c = _patches([readable], {})
+    with ctx_a, ctx_b, ctx_c:
+        payload = await visualize_module.build_brains_summary_payload(user=MagicMock())
+
+    assert set(payload) == {str(readable.id)}
+    assert str(unreadable.id) not in payload
+
+
+@pytest.mark.asyncio
 async def test_no_datasets_is_an_empty_payload_not_an_error():
     with patch.object(
         visualize_module, "get_all_user_permission_datasets", AsyncMock(return_value=[])
