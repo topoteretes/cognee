@@ -6,11 +6,16 @@ Call sites that know the active session_id wrap their work in
 opts in) calls ``record_llm_call`` after each LLM completion. The
 tracker accumulates into the ``SessionRecord`` row.
 
-Token counts are approximate — we don't currently extract
-``response.usage`` from the litellm/instructor client (requires
-changes deeper in the stack). A ~chars/4 heuristic is close enough
-for the dashboard's "are we spending?" question without plumbing
-upstream.
+Token counts are exact for the instructor and litellm_native
+structured-output paths — ``LLMGateway`` reads real
+``prompt_tokens``/``completion_tokens`` off the raw provider response
+(instructor attaches it internally; the litellm_native adapter attaches
+it explicitly, see ``_attach_raw_response``) and passes them as
+``tokens_in_override``/``tokens_out_override`` below (see
+``LLMGateway._exact_usage_from_result``). BAML and the plain-string path
+that skips structured output don't expose that raw response, so calls
+through those still fall back to the ~chars/4 heuristic here — close
+enough for the dashboard's "are we spending?" question on those paths.
 """
 
 from contextlib import asynccontextmanager
@@ -19,6 +24,10 @@ from typing import Optional
 from uuid import UUID as UUIDType
 
 from cognee.shared.logging_utils import get_logger
+
+# Submodule import on purpose: avoids the cognee.modules.operations
+# package-init chain from this low-level module.
+from cognee.modules.operations.usage_accumulator import get_active_operation_usage
 
 logger = get_logger("session_usage")
 
@@ -141,17 +150,25 @@ async def record_llm_call(
     caller has exact counts from ``response.usage``; otherwise the
     char-based estimate is used.
     """
-    target = _active_session.get()
-    if target is None:
-        return
-    session_id, user_id = target
-
     tokens_in = (
         tokens_in_override if tokens_in_override is not None else _estimate_tokens(input_text)
     )
     tokens_out = (
         tokens_out_override if tokens_out_override is not None else _estimate_tokens(output_text)
     )
+
+    # Operation-level accumulation is session-independent: an active
+    # record_operation / run_tasks scope captures tokens even when no
+    # session-usage target is set (SDK-399).
+    op_usage = get_active_operation_usage()
+    if op_usage is not None:
+        op_usage.add(tokens_in, tokens_out)
+
+    target = _active_session.get()
+    if target is None:
+        return
+    session_id, user_id = target
+
     cost = _estimate_cost_usd(model, tokens_in, tokens_out)
 
     try:

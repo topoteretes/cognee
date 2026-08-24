@@ -1,6 +1,6 @@
 """Postgres hybrid adapter combining graph and vector functionality.
 
-Composes a PostgresAdapter (graph) and PGVectorAdapter (vector) that
+Composes a PostgresDemoAdapter (graph) and PGVectorAdapter (vector) that
 share the same Postgres database. Implements both GraphDBInterface and
 VectorDBInterface by delegating to the underlying adapters.
 
@@ -27,7 +27,7 @@ from cognee.infrastructure.databases.vector.pgvector.serialize_data import seria
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
 
 if TYPE_CHECKING:
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.graph.models.EdgeType import EdgeType
@@ -49,18 +49,18 @@ def _validate_table_name(name: str) -> str:
 class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     """Hybrid adapter backed by a single Postgres database.
 
-    Holds a PostgresAdapter for graph operations and a PGVectorAdapter
+    Holds a PostgresDemoAdapter for graph operations and a PGVectorAdapter
     for vector operations. Both share the same underlying database, so
     combined queries can JOIN across graph_node/graph_edge and vector
     collection tables.
     """
 
-    # Graph queries run as SQL via the wrapped PostgresAdapter, not Cypher.
+    # Graph queries run as SQL via the wrapped PostgresDemoAdapter, not Cypher.
     supports_cypher_queries = False
 
     def __init__(
         self,
-        graph_adapter: "PostgresAdapter",
+        graph_adapter: "PostgresDemoAdapter",
         vector_adapter: "PGVectorAdapter",
     ) -> None:
         self._graph = graph_adapter
@@ -78,7 +78,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         await self._graph.initialize()
 
     # ------------------------------------------------------------------
-    # GraphDBInterface: delegate to PostgresAdapter
+    # GraphDBInterface: delegate to PostgresDemoAdapter
     # ------------------------------------------------------------------
 
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
@@ -365,7 +365,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             vector_rows_by_table[table] = rows
 
         # Single transaction: one batched INSERT per table
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             if node_rows:
                 await session.execute(
                     text("""
@@ -480,7 +480,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             )
 
         # Single transaction: one batched INSERT per table
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             if edge_rows:
                 await session.execute(
                     text("""
@@ -528,7 +528,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
 
         await self._graph.initialize()
 
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             # Delete from graph (CASCADE removes edges)
             await session.execute(
                 text("DELETE FROM graph_node WHERE id = ANY(:ids)"),
@@ -562,7 +562,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             edge_type_ids: IDs to delete from EdgeType_relationship_name.
             triplet_ids: IDs to delete from Triplet_text.
         """
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             if edge_type_ids:
                 table = _validate_table_name("EdgeType_relationship_name")
                 await session.execute(
@@ -671,7 +671,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 "limit": limit,
             }
 
-        async with self._graph._session() as session:
+        async with self._graph.sessionmaker() as session:
             result = await session.execute(sql, params)
             rows = result.mappings().fetchall()
 

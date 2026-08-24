@@ -286,6 +286,27 @@ class CacheDBInterface(ABC):
         """
         pass
 
+    async def delete_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str
+    ) -> bool:
+        """
+        Delete a single session-context entry by its ``id`` field.
+        Returns True if deleted, False if entry_id not found.
+
+        Non-abstract so external adapters keep working: the default rebuilds
+        the list through the existing primitives (read all, drop the entire
+        list, re-create survivors). Adapters should override with an atomic
+        implementation.
+        """
+        entries = await self.get_session_context_entries(user_id, session_id)
+        surviving = [entry for entry in entries if entry.get("id") != entry_id]
+        if len(surviving) == len(entries):
+            return False
+        await self.delete_session_context(user_id, session_id)
+        for entry in surviving:
+            await self.create_session_context_entry(user_id, session_id, entry)
+        return True
+
     @abstractmethod
     async def prune(self) -> None:
         """

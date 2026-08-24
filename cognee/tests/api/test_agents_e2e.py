@@ -469,11 +469,11 @@ class TestAgentsE2E:
 
         with (
             patch(
-                "cognee.modules.agents.operations._readable_datasets_for",
+                "cognee.modules.agents.operations.get_readable_datasets",
                 readable_datasets_for,
             ),
             patch(
-                "cognee.modules.agents.operations._visible_user_ids",
+                "cognee.modules.agents.operations.get_visible_user_ids",
                 visible_user_ids,
             ),
             patch(

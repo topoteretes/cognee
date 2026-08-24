@@ -1,9 +1,31 @@
 from typing import Optional, Dict
 from fastapi import Response
 from fastapi.security import APIKeyHeader
+from starlette.requests import HTTPConnection
 from fastapi_users.authentication import Transport
 
 from fastapi import Request
+
+from cognee.modules.users.authentication.websocket_query_param import (
+    resolve_websocket_query_param_fallback,
+)
+
+
+class _APIKeyHeaderOrWebSocketQueryParam(APIKeyHeader):
+    """``APIKeyHeader`` that also accepts the key via ``?token=`` on a WebSocket handshake.
+
+    See ``resolve_websocket_query_param_fallback`` for why the fallback is
+    scoped to WebSocket connections only.
+    """
+
+    def __init__(self, header_name: str):
+        super().__init__(name=header_name, auto_error=False)
+
+    # See the note in api_bearer_transport.py: an unannotated parameter here
+    # turns every unauthenticated HTTP call into a 422 instead of a 401.
+    async def __call__(self, request: HTTPConnection) -> Optional[str]:
+        api_key = await super().__call__(request)
+        return await resolve_websocket_query_param_fallback(request, api_key)
 
 
 class APIKeyHeaderTransport(Transport):
@@ -13,7 +35,7 @@ class APIKeyHeaderTransport(Transport):
     @property
     def scheme(self) -> APIKeyHeader:
         # Used in OpenAPI; not security type
-        return APIKeyHeader(name=self.header_name, auto_error=False)
+        return _APIKeyHeaderOrWebSocketQueryParam(self.header_name)
 
     async def get_authentication_token(self, request: Request) -> Optional[str]:
         return request.headers.get(self.header_name)
