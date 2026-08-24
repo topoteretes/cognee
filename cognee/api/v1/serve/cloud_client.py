@@ -7,6 +7,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_PROMPT
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -218,6 +219,10 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
+        # Only the non-default shape is worth sending: an older instance ignores the
+        # field, and omitting it keeps the request identical to what it always was.
+        if kwargs.get("context_format") == CONTEXT_FORMAT_PROMPT:
+            payload["context_format"] = kwargs["context_format"]
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -357,6 +362,8 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
+        if kwargs.get("context_format") == CONTEXT_FORMAT_PROMPT:
+            payload["contextFormat"] = kwargs["context_format"]
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:

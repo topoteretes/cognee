@@ -10,6 +10,7 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
+from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_CONTEXT
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
@@ -64,6 +65,16 @@ class SearchPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    context_format: str = Field(
+        default=CONTEXT_FORMAT_CONTEXT,
+        examples=[CONTEXT_FORMAT_CONTEXT],
+        description=(
+            "Shape of an only_context result. 'context' returns the bare retrieval"
+            " context; 'prompt' returns the full envelope a completion would have"
+            " received — session guidance, conversation history, and the rendered"
+            " user and system prompts. Ignored unless only_context is true."
+        ),
+    )
     verbose: bool = Field(
         default=False,
         description=(
@@ -190,6 +201,7 @@ def get_search_router() -> APIRouter:
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
+        - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -226,6 +238,7 @@ def get_search_router() -> APIRouter:
                 "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
+                "context_format": payload.context_format,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
                 "tools": payload.tools,
@@ -252,6 +265,7 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                context_format=payload.context_format,
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,

@@ -1,4 +1,10 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.retrieval.context_preview import (
+    CONTEXT_FORMAT_CONTEXT,
+    CONTEXT_FORMAT_PROMPT,
+    ContextPreview,
+    build_context_preview,
+)
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
@@ -72,11 +78,24 @@ async def get_retriever_output(
         only_context=only_context,
         search_type_for_spans=effective_query_type,
     )
+
+    # An unknown format degrades to the historical shape rather than failing a retrieval
+    # that already succeeded; search()/recall() reject bad values at their boundary.
+    context_format = kwargs.get("context_format") or CONTEXT_FORMAT_CONTEXT
+    preview = ContextPreview()
+    if only_context and context_format == CONTEXT_FORMAT_PROMPT:
+        preview = await build_context_preview(retriever_instance, query=query_text, context=context)
+
     return SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
         search_type=effective_query_type,
         only_context=only_context,
+        question=query_text,
+        context_format=context_format,
+        session_context=preview.session_context or None,
+        user_prompt=preview.user_prompt,
+        system_prompt=preview.system_prompt,
         **_dataset_fields(kwargs),
     )

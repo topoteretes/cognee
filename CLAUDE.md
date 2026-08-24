@@ -400,6 +400,34 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
+#### only_context and `context_format`
+
+`only_context=True` returns the retrieval context instead of an LLM completion. By
+default that is the bare context string and nothing else — no session guidance, no
+conversation history, no rendered prompt — which is less than a real completion
+receives. Pass `context_format="prompt"` to get the full envelope instead:
+
+```python
+result = await cognee.recall(
+    "why did the migration stall?",
+    session_id="s1",
+    only_context=True,
+    context_format="prompt",   # default: "context"
+)
+```
+
+The `"prompt"` shape returns `question`, `context`, `session_context` (the guidance
+block plus conversation history), `user_prompt`, and `system_prompt` — the exact
+strings `generate_completion` would have sent. It stays read-only: no LLM call, no
+session write, no recorded QA turn. Non-generative search types (`CHUNKS`,
+`SUMMARIES`, `CODE`, …) have no prompt template, so they report the session layer and
+leave the prompt fields empty.
+
+Two caveats. `context_format` only affects `only_context` calls. And the context
+itself still comes from a raw-query retrieval — a real turn retrieves with a
+session-rewritten query — so the envelope reports the prompt for the context actually
+retrieved, not a replay of a full turn.
+
 ### Memory & Performance Tuning Flags
 
 Four flags trade memory features for speed. Know what each turns off before flipping it:

@@ -15,6 +15,7 @@ from cognee.modules.recall.types.SearchResultItem import (
     SearchResultItem,
     SearchResultKind,
 )
+from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_PROMPT
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
 
@@ -103,8 +104,13 @@ def _build_item(
     entry: Any,
     payload: SearchResultPayload,
     kind: SearchResultKind,
+    text_override: str | None = None,
 ) -> SearchResultItem:
-    """Build a single SearchResultItem from one retriever output element."""
+    """Build a single SearchResultItem from one retriever output element.
+
+    ``text_override`` replaces the derived display text, for shapes whose readable form
+    is not what ``entry`` would flatten to.
+    """
     structured: Any | None = None
 
     if isinstance(entry, str):
@@ -128,7 +134,7 @@ def _build_item(
     return SearchResultItem(
         kind=kind,
         search_type=payload.search_type,
-        text=text,
+        text=text if text_override is None else text_override,
         score=_score_from(entry),
         dataset_id=str(payload.dataset_id) if payload.dataset_id else None,
         dataset_name=payload.dataset_name,
@@ -150,6 +156,20 @@ def _flatten(value: Any) -> list[Any]:
 def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultItem]:
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
+
+    if payload.only_context and payload.context_format == CONTEXT_FORMAT_PROMPT:
+        # One item, not one per context entry: the caller asked for the prompt a
+        # completion would receive, and that is a single artifact. The parts stay on
+        # `raw` so a consumer can still take just the context or just the history.
+        envelope = payload.prompt_envelope
+        return [
+            _build_item(
+                envelope,
+                payload,
+                kind,
+                text_override=payload.user_prompt or _text_from_dict(envelope),
+            )
+        ]
 
     if payload.only_context:
         entries = _flatten(payload.context)

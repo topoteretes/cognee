@@ -1,5 +1,9 @@
 import pytest
 from pydantic import BaseModel
+from cognee.modules.retrieval.context_preview import (
+    CONTEXT_FORMAT_CONTEXT,
+    CONTEXT_FORMAT_PROMPT,
+)
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types.SearchType import SearchType
 
@@ -43,6 +47,51 @@ def test_search_result_payload_only_context():
         context="Some context here", only_context=True, search_type=SearchType.GRAPH_COMPLETION
     )
     assert payload.result == "Some context here"
+
+
+def test_search_result_payload_only_context_default_format_is_unchanged():
+    """The historical shape is the default: a bare context, no envelope."""
+    payload = SearchResultPayload(
+        context="Some context here",
+        only_context=True,
+        question="why?",
+        session_context="## Active session guidance\n- be terse",
+        user_prompt="The question is: `why?`",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert payload.context_format == CONTEXT_FORMAT_CONTEXT
+    assert payload.result == "Some context here"
+
+
+def test_search_result_payload_prompt_format_returns_the_envelope():
+    payload = SearchResultPayload(
+        context="Some context here",
+        only_context=True,
+        context_format=CONTEXT_FORMAT_PROMPT,
+        question="why?",
+        session_context="## Active session guidance\n- be terse",
+        user_prompt="The question is: `why?`",
+        system_prompt="history\nTASK:answer",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert payload.result == {
+        "question": "why?",
+        "context": "Some context here",
+        "session_context": "## Active session guidance\n- be terse",
+        "user_prompt": "The question is: `why?`",
+        "system_prompt": "history\nTASK:answer",
+    }
+
+
+def test_search_result_payload_prompt_format_ignored_without_only_context():
+    """context_format shapes only_context results; a real completion still wins."""
+    payload = SearchResultPayload(
+        completion=["answer"],
+        context="Some context here",
+        context_format=CONTEXT_FORMAT_PROMPT,
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert payload.result == ["answer"]
 
 
 def test_search_result_payload_with_plain_dict():

@@ -2,6 +2,10 @@ from uuid import UUID
 from typing import Optional, Any, List, Union
 from pydantic import BaseModel, ConfigDict, field_serializer
 from pydantic.alias_generators import to_camel
+from cognee.modules.retrieval.context_preview import (
+    CONTEXT_FORMAT_CONTEXT,
+    CONTEXT_FORMAT_PROMPT,
+)
 from cognee.modules.search.types.SearchType import SearchType
 
 
@@ -23,6 +27,18 @@ class SearchResultPayload(BaseModel):
     # TODO: Add return_type info
     search_type: SearchType
     only_context: bool = False
+
+    # The query this payload answers. Carried so the prompt envelope can report how the
+    # question was framed around the context instead of leaving the caller to guess.
+    question: Optional[str] = None
+
+    # Shape of the only_context result. CONTEXT_FORMAT_CONTEXT (default) returns the
+    # bare context, as it always has; CONTEXT_FORMAT_PROMPT returns the whole envelope
+    # a completion would have received. Only populated on only_context calls.
+    context_format: str = CONTEXT_FORMAT_CONTEXT
+    session_context: Optional[str] = None
+    user_prompt: Optional[str] = None
+    system_prompt: Optional[str] = None
 
     dataset_name: Optional[str] = None
     dataset_id: Optional[UUID] = None
@@ -67,10 +83,28 @@ class SearchResultPayload(BaseModel):
         return v
 
     @property
+    def prompt_envelope(self) -> dict:
+        """Everything a completion would have been sent, as one dict.
+
+        The question is included because that is the discrepancy this shape exists to
+        close: a bare context leaves the caller guessing how cognee framed the question
+        around it.
+        """
+        return {
+            "question": self.question,
+            "context": self.context,
+            "session_context": self.session_context or "",
+            "user_prompt": self.user_prompt,
+            "system_prompt": self.system_prompt,
+        }
+
+    @property
     def result(self) -> Any:
         """Function used to determine search_result for users request.
         Return context if only_context is True, else return completion if it exists, else return result_object."""
         if self.only_context:
+            if self.context_format == CONTEXT_FORMAT_PROMPT:
+                return self.prompt_envelope
             return self.context
         elif self.completion:
             return self.completion

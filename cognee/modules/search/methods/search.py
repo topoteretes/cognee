@@ -23,6 +23,7 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_CONTEXT
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
@@ -62,6 +63,7 @@ async def search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: str = CONTEXT_FORMAT_CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -120,6 +122,7 @@ async def search(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -164,6 +167,7 @@ async def authorized_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: str = CONTEXT_FORMAT_CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -197,6 +201,7 @@ async def authorized_search(
         node_name=node_name,
         node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
+        context_format=context_format,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
@@ -224,6 +229,7 @@ async def search_in_datasets_context(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: str = CONTEXT_FORMAT_CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -251,6 +257,7 @@ async def search_in_datasets_context(
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         only_context: bool = False,
+        context_format: str = CONTEXT_FORMAT_CONTEXT,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = None,
         triplet_distance_penalty: Optional[float] = None,
@@ -304,6 +311,7 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -353,6 +361,7 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -381,6 +390,7 @@ async def search_in_datasets_context(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -409,6 +419,21 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
+def _prompt_preview_fields(search_result) -> dict:
+    """Prompt-preview keys for verbose output, present only when a preview was built.
+
+    Verbose callers parse a fixed set of keys, so an ordinary search must keep the shape
+    it always had; these appear only for only_context calls that asked for the prompt.
+    """
+    if search_result.user_prompt is None and search_result.session_context is None:
+        return {}
+    return {
+        "session_context_result": search_result.session_context,
+        "user_prompt_result": search_result.user_prompt,
+        "system_prompt_result": search_result.system_prompt,
+    }
+
+
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
@@ -432,6 +457,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
+                search_result_dict.update(_prompt_preview_fields(search_result))
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -447,6 +473,7 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
+                    **_prompt_preview_fields(search_result),
                 }
                 return_value.append(search_result_dict)
             return return_value

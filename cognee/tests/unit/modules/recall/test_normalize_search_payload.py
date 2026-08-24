@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 
 from cognee.modules.recall.methods.normalize_search_payload import normalize_search_payload
+from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_PROMPT
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
@@ -114,3 +115,40 @@ def test_structured_response_model_populates_structured_field():
     assert items[0].structured == {"answer": "Revenue grew 12%", "confidence": 0.91}
     assert items[0].raw == items[0].structured
     assert "Revenue grew 12%" in items[0].text
+
+
+def test_only_context_default_format_yields_one_item_per_context_entry():
+    payload = SearchResultPayload(
+        context=["triplet-a", "triplet-b"],
+        only_context=True,
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert [item.text for item in items] == ["triplet-a", "triplet-b"]
+
+
+def test_only_context_prompt_format_yields_one_item_carrying_the_parts():
+    """The prompt is a single artifact, so it must not be split per context entry."""
+    payload = SearchResultPayload(
+        context=["triplet-a", "triplet-b"],
+        only_context=True,
+        context_format=CONTEXT_FORMAT_PROMPT,
+        question="why?",
+        session_context="## Active session guidance\n- be terse",
+        user_prompt="The question is: `why?` ... triplet-a\n---\ntriplet-b",
+        system_prompt="history\nTASK:answer",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.text == "The question is: `why?` ... triplet-a\n---\ntriplet-b"
+    # The parts stay addressable so a caller can still take just one layer.
+    assert item.raw["question"] == "why?"
+    assert item.raw["context"] == ["triplet-a", "triplet-b"]
+    assert item.raw["session_context"] == "## Active session guidance\n- be terse"
+    assert item.raw["system_prompt"] == "history\nTASK:answer"
