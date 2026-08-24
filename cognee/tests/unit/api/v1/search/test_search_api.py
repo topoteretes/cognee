@@ -60,7 +60,7 @@ async def test_api_graph_search_passes_feedback_influence_to_search_function(
 
 
 @pytest.mark.asyncio
-async def test_api_graph_search_uses_updated_default_triplet_penalty(monkeypatch, api_search_mod):
+async def test_api_graph_search_omits_unspecified_triplet_penalty(monkeypatch, api_search_mod):
     user = _make_user()
     dataset = _make_dataset()
 
@@ -68,7 +68,7 @@ async def test_api_graph_search_uses_updated_default_triplet_penalty(monkeypatch
         return None
 
     async def dummy_search_function(**kwargs):
-        assert kwargs["triplet_distance_penalty"] == 6.5
+        assert kwargs["triplet_distance_penalty"] is None
         return ["ok"]
 
     monkeypatch.setattr(

@@ -57,6 +57,11 @@ def get_parsed_path(file_path: str) -> str:
         return os.path.normpath(file_path)
 
 
+# Bytes read from a source stream per write iteration — the peak RAM one
+# store adds, independent of file size.
+WRITE_CHUNK_SIZE = 4 * 1024 * 1024
+
+
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
@@ -65,6 +70,37 @@ class LocalFileStorage(Storage):
 
     def __init__(self, storage_path: str) -> None:
         self.storage_path = storage_path
+
+    def _storage_root(self) -> str:
+        # The local-file allowlist is enforced at user-input ingestion entry points
+        # (resolve_data_directories / save_data_item_to_storage), not here:
+        # LocalFileStorage is also used internally with trusted storage roots and to
+        # open arbitrary user-referenced file:// paths, so applying the allowlist to
+        # every storage root breaks those legitimate uses. Intra-root traversal is
+        # still blocked by _resolve_storage_path below. realpath canonicalizes
+        # symlinks without requiring the path to exist.
+        return os.path.realpath(os.path.expanduser(get_parsed_path(self.storage_path)))
+
+    def _resolve_storage_path(self, file_path: str | Path | None = "") -> Path:
+        root_path = self._storage_root()
+        if file_path is None or not str(file_path).strip():
+            return Path(root_path)
+
+        parsed_path = os.path.expanduser(get_parsed_path(str(file_path)))
+        candidate = (
+            parsed_path if os.path.isabs(parsed_path) else os.path.join(root_path, parsed_path)
+        )
+        # realpath follows symlinks, so a symlink inside the storage root cannot be
+        # used to escape it. The realpath + startswith containment check is the idiom
+        # static analyzers (CodeQL py/path-injection) recognize as a path sanitizer.
+        full_file_path = os.path.realpath(candidate)
+
+        if full_file_path == root_path:
+            return Path(root_path)
+        if not full_file_path.startswith(root_path.rstrip(os.sep) + os.sep):
+            raise ValueError("File path is outside the configured storage root.")
+
+        return Path(full_file_path)
 
     async def store(self, file_path: str, data: BinaryIO | str, overwrite: bool = False) -> str:
         """
@@ -83,25 +119,52 @@ class LocalFileStorage(Storage):
               binary stream.
             - overwrite (bool): If True, overwrite the existing file.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
-        full_file_path = os.path.join(parsed_storage_path, file_path)
-        file_dir_path = os.path.dirname(full_file_path)
+        full_file_path = self._resolve_storage_path(file_path)
+        file_dir_path = full_file_path.parent
 
         await self.ensure_directory_exists(file_dir_path)
 
-        if overwrite or not os.path.exists(full_file_path):
-            if isinstance(data, str):
-                with open(full_file_path, mode="w", encoding="utf-8", newline="\n") as file:
-                    file.write(data)
-            else:
-                with open(full_file_path, mode="wb") as file:
-                    if hasattr(data, "read"):
-                        data.seek(0)
-                        file.write(data.read())
-                    else:
+        if overwrite or not full_file_path.exists():
+            # Write-then-rename: an ``overwrite=True`` write to a key another
+            # reader may hold open (content-addressed keys are shared by
+            # design) must never be observable half-written, which an in-place
+            # truncating open is. ``os.replace`` swaps atomically on the same
+            # filesystem.
+            temp_file_path = full_file_path.with_name(f".{full_file_path.name}.{os.getpid()}.tmp")
+            try:
+                if isinstance(data, str):
+                    with open(temp_file_path, mode="w", encoding="utf-8", newline="\n") as file:
                         file.write(data)
-
-                file.close()
+                else:
+                    with open(temp_file_path, mode="wb") as file:
+                        if hasattr(data, "read"):
+                            # Chunked copy — peak memory is one chunk, not the
+                            # file (parity with S3FileStorage.store).
+                            data.seek(0)
+                            while chunk := data.read(WRITE_CHUNK_SIZE):
+                                file.write(chunk)
+                        else:
+                            file.write(data)
+                try:
+                    os.replace(temp_file_path, full_file_path)
+                except PermissionError:
+                    # Windows: replacing a file another handle holds open needs
+                    # DELETE sharing on that handle, which ordinary open()s do
+                    # not grant. Fall back to the pre-atomic in-place write —
+                    # non-atomic for that reader, but a succeeding store beats
+                    # failing it (and matches the old behavior there). POSIX
+                    # never takes this path.
+                    with (
+                        open(temp_file_path, mode="rb") as written,
+                        open(full_file_path, mode="wb") as target,
+                    ):
+                        while chunk := written.read(WRITE_CHUNK_SIZE):
+                            target.write(chunk)
+            finally:
+                try:
+                    os.unlink(temp_file_path)
+                except OSError:
+                    pass
 
         return Path(full_file_path).as_uri()
 
@@ -127,14 +190,13 @@ class LocalFileStorage(Storage):
 
             The content of the retrieved file as bytes.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
-
-        full_file_path = os.path.join(parsed_storage_path, file_path)
+        parsed_storage_path = Path(self._storage_root())
+        full_file_path = self._resolve_storage_path(file_path)
 
         # Add debug information for Windows path issues
-        if not os.path.exists(full_file_path):
+        if not full_file_path.exists():
             # Try to provide helpful debug information
-            if os.path.exists(parsed_storage_path):
+            if parsed_storage_path.exists():
                 available_files = []
                 try:
                     available_files = os.listdir(parsed_storage_path)
@@ -145,7 +207,7 @@ class LocalFileStorage(Storage):
                     f"File not found: '{full_file_path}'\n"
                     f"Storage path: '{parsed_storage_path}'\n"
                     f"Requested file: '{file_path}'\n"
-                    f"Storage path exists: {os.path.exists(parsed_storage_path)}\n"
+                    f"Storage path exists: {parsed_storage_path.exists()}\n"
                     f"Available files in storage: {available_files[:10]}..."  # Limit to first 10 files
                 )
             else:
@@ -177,9 +239,7 @@ class LocalFileStorage(Storage):
 
             - bool: True if the file exists, otherwise False.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
-
-        return os.path.exists(os.path.join(parsed_storage_path, file_path))
+        return self._resolve_storage_path(file_path).exists()
 
     async def is_file(self, file_path: str) -> bool:
         """
@@ -195,20 +255,13 @@ class LocalFileStorage(Storage):
 
             - bool: True if the file is a regular file, otherwise False.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
-
-        return os.path.isfile(os.path.join(parsed_storage_path, file_path))
+        return self._resolve_storage_path(file_path).is_file()
 
     async def get_size(self, file_path: str) -> int:
-        parsed_storage_path = get_parsed_path(self.storage_path)
+        full_file_path = self._resolve_storage_path(file_path)
+        return full_file_path.stat().st_size if full_file_path.exists() else 0
 
-        return (
-            os.path.getsize(os.path.join(parsed_storage_path, file_path))
-            if self.file_exists(file_path)
-            else 0
-        )
-
-    async def ensure_directory_exists(self, directory_path: str = "") -> None:
+    async def ensure_directory_exists(self, directory_path: str | Path = "") -> None:
         """
         Ensure that the specified directory exists, creating it if necessary.
 
@@ -219,11 +272,10 @@ class LocalFileStorage(Storage):
 
             - directory_path (str): The path of the directory to check or create.
         """
-        if not directory_path.strip():
-            directory_path = get_parsed_path(self.storage_path)
+        full_directory_path = self._resolve_storage_path(directory_path)
 
-        if not os.path.exists(directory_path):
-            os.makedirs(directory_path, exist_ok=True)
+        if not full_directory_path.exists():
+            os.makedirs(full_directory_path, exist_ok=True)
 
     async def copy_file(self, source_file_path: str, destination_file_path: str) -> str:
         """
@@ -241,12 +293,11 @@ class LocalFileStorage(Storage):
 
             - str: The path to the copied file.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
+        source_path = self._resolve_storage_path(source_file_path)
+        destination_path = self._resolve_storage_path(destination_file_path)
+        await self.ensure_directory_exists(destination_path.parent)
 
-        return shutil.copy2(
-            os.path.join(parsed_storage_path, source_file_path),
-            os.path.join(parsed_storage_path, destination_file_path),
-        )
+        return str(shutil.copy2(source_path, destination_path))
 
     async def remove(self, file_path: str) -> None:
         """
@@ -257,11 +308,10 @@ class LocalFileStorage(Storage):
 
             - file_path (str): The path of the file to be removed.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
-        full_file_path = os.path.join(parsed_storage_path, file_path)
+        full_file_path = self._resolve_storage_path(file_path)
 
-        if os.path.exists(full_file_path):
-            os.remove(full_file_path)
+        if full_file_path.exists():
+            full_file_path.unlink()
 
     async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
         """
@@ -276,16 +326,8 @@ class LocalFileStorage(Storage):
         --------
             - list[str]: List of file paths relative to the storage root
         """
-        from pathlib import Path
-
-        parsed_storage_path = get_parsed_path(self.storage_path)
-
-        if directory_path:
-            full_directory_path = os.path.join(parsed_storage_path, directory_path)
-        else:
-            full_directory_path = parsed_storage_path
-
-        directory_pathlib = Path(full_directory_path)
+        parsed_storage_path = Path(self._storage_root())
+        directory_pathlib = self._resolve_storage_path(directory_path)
 
         if not directory_pathlib.exists() or not directory_pathlib.is_dir():
             return []
@@ -297,7 +339,7 @@ class LocalFileStorage(Storage):
             for file_path in directory_pathlib.rglob("*"):
                 if file_path.is_file():
                     # Get relative path from storage root
-                    relative_path = os.path.relpath(str(file_path), parsed_storage_path)
+                    relative_path = str(file_path.relative_to(parsed_storage_path))
                     # Normalize path separators for consistency
                     relative_path = relative_path.replace(os.sep, "/")
                     files.append(relative_path)
@@ -306,7 +348,7 @@ class LocalFileStorage(Storage):
             for file_path in directory_pathlib.iterdir():
                 if file_path.is_file():
                     # Get relative path from storage root
-                    relative_path = os.path.relpath(str(file_path), parsed_storage_path)
+                    relative_path = str(file_path.relative_to(parsed_storage_path))
                     # Normalize path separators for consistency
                     relative_path = relative_path.replace(os.sep, "/")
                     files.append(relative_path)
@@ -327,14 +369,9 @@ class LocalFileStorage(Storage):
 
             - tree_path (str): The root path of the directory tree to be removed.
         """
-        parsed_storage_path = get_parsed_path(self.storage_path)
-
-        if root_path is None:
-            root_path = parsed_storage_path
-        else:
-            root_path = os.path.join(parsed_storage_path, root_path)
+        resolved_root_path = self._resolve_storage_path(root_path)
 
         try:
-            shutil.rmtree(root_path)
+            shutil.rmtree(resolved_root_path)
         except FileNotFoundError:
             pass

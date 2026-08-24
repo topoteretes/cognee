@@ -217,6 +217,23 @@ class TestMem0Source:
     def test_skips_items_without_content(self):
         assert collect(Mem0Source([{"id": "1"}, {"id": "2", "memory": "kept"}])) != []
 
+    def test_empty_wrapper_alias_does_not_shadow_the_populated_one(self):
+        memories = collect(
+            Mem0Source(
+                {
+                    "results": [],
+                    "memories": [
+                        {"id": "1", "memory": "kept"},
+                        {"id": "2", "memory": "also kept"},
+                    ],
+                }
+            )
+        )
+        assert [memory.external_id for memory in memories] == ["1", "2"]
+
+    def test_all_empty_wrapper_aliases_yield_nothing_without_raising(self):
+        assert collect(Mem0Source({"results": [], "memories": []})) == []
+
 
 class TestLettaSource:
     def test_agent_file(self):

@@ -136,12 +136,29 @@ MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
 RecallScope = Literal[
-    "auto", "graph", "session", "trace", "graph_context", "session_context", "all"
+    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools", "code"
 ]
 
 
 _DEPRECATED_SCOPE_ALIASES = {"graph_context": "graph"}
-_VALID_SCOPES = {"auto", "graph", "session", "trace", "graph_context", "session_context", "all"}
+# "tools" is explicit opt-in only: it is valid here but deliberately NOT part
+# of the "all" expansion or the "auto" resolution — recall must never reach an
+# external database unless the caller asked for it by name.
+# "code" is likewise opt-in only: it runs a deterministic code-graph query
+# whose seed is the raw query text, which is only useful when the caller knows
+# the prompt names a code identifier — "auto"/"all" must not pay its snapshot
+# cost (or add noise) on ordinary conversational recalls.
+_VALID_SCOPES = {
+    "auto",
+    "graph",
+    "session",
+    "trace",
+    "graph_context",
+    "session_context",
+    "all",
+    "tools",
+    "code",
+}
 
 
 def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
@@ -176,7 +193,13 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
         scopes = [_DEPRECATED_SCOPE_ALIASES.get(s, s) for s in scopes]
 
     if "all" in scopes:
-        return ["graph", "session", "trace", "session_context"]
+        # "tools" never rides along with "all" — external-database access is
+        # explicit opt-in per call. Preserve it only when the caller combined
+        # it with "all" themselves (e.g. scope=["all", "tools"]).
+        expanded = ["graph", "session", "trace", "session_context"]
+        if "tools" in scopes:
+            expanded.append("tools")
+        return expanded
 
     # Dedupe while preserving order
     seen: set = set()

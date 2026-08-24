@@ -9,6 +9,7 @@ from cognee.tasks.memify.global_context_index import (
     update_global_context_index,
 )
 from cognee.tasks.memify.global_context_index.bucketing_strategy import BucketingStrategyName
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
 def get_global_context_index_memify_tasks(
@@ -45,7 +46,7 @@ def get_global_context_index_memify_tasks(
 
 async def global_context_index_pipeline(
     user: User,
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
     max_bucket_size: int = 20,
     placement_distance_threshold: float = 0.5,

@@ -7,6 +7,8 @@ adapter serves every provider — and construction is pure attribute assignment
 active (possibly per-request) config and builds a fresh adapter.
 """
 
+from functools import lru_cache
+
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
@@ -16,6 +18,51 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_native.native
 # Providers that do not require ``llm_api_key`` (mirrors get_llm_client): Bedrock
 # authenticates with AWS credentials and llama.cpp runs locally.
 _NO_API_KEY_PROVIDERS = {"bedrock", "llama_cpp"}
+
+# cognee keeps provider and model as separate settings, and the instructor path
+# did its own per-provider dispatch. litellm instead routes on a
+# provider-qualified model name, so a config that is perfectly valid for
+# instructor -- LLM_PROVIDER=ollama with LLM_MODEL=phi4 -- reaches litellm as a
+# bare "phi4" and dies with:
+#
+#     litellm.BadRequestError: LLM Provider NOT provided. You passed model=phi4
+#
+# Only providers whose litellm prefix is unambiguous are listed. openai and azure
+# are deliberately absent: litellm already resolves bare OpenAI model names, and
+# azure needs a deployment-specific form we must not guess at.
+_LITELLM_PROVIDER_PREFIX = {
+    "ollama": "ollama",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "mistral": "mistral",
+    "bedrock": "bedrock",
+}
+
+
+@lru_cache(maxsize=256)
+def _qualify_model(model: str, provider: str) -> str:
+    """Prefix ``model`` with its litellm provider only when litellm needs it.
+
+    Deliberately conservative: an already-qualified name ("ollama/phi4") and any
+    bare name litellm can already resolve on its own are returned untouched, so
+    this cannot re-route a configuration that works today. It only rescues the
+    case that currently raises BadRequestError before a request is even sent.
+
+    A slash does not by itself mean the name carries a provider. Ollama accepts
+    namespaced names ("library/phi4") and Hugging Face GGUF paths
+    ("hf.co/user/repo"), so litellm decides instead.
+    """
+    if not model:
+        return model
+
+    import litellm
+
+    try:
+        litellm.get_llm_provider(model=model)
+        return model
+    except Exception:
+        prefix = _LITELLM_PROVIDER_PREFIX.get((provider or "").lower())
+        return f"{prefix}/{model}" if prefix else model
 
 
 def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
@@ -48,7 +95,7 @@ def get_native_client(raise_api_key_error: bool = True) -> NativeLiteLLMAdapter:
 
     return NativeLiteLLMAdapter(
         api_key=api_key or "",
-        model=llm_config.llm_model,
+        model=_qualify_model(llm_config.llm_model, provider),
         max_completion_tokens=max_completion_tokens,
         endpoint=llm_config.llm_endpoint or None,
         api_version=llm_config.llm_api_version,

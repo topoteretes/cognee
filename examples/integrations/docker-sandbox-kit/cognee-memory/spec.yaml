@@ -1,0 +1,112 @@
+# Docker Sandboxes mixin kit: persistent agent memory backed by cognee.
+# Docs: https://docs.docker.com/ai/sandboxes/customize/kits/
+#
+# Usage:
+#   sbx run claude --kit ./cognee-memory
+#
+# Stackable on any agent (claude, opencode, ...). Requires an OpenAI API key
+# bound to the "openai" credential service on first run.
+schemaVersion: "2"
+kind: mixin
+name: cognee-memory
+version: 0.1.0
+displayName: Cognee Memory
+description: Persistent AI memory for sandboxed agents — knowledge graph + vector search via cognee
+sourceURL: https://github.com/topoteretes/cognee
+licenses:
+  - Apache-2.0
+
+environment:
+  variables:
+    # Keep all memory state in one stable place inside the sandbox so it
+    # survives restarts and is easy to inspect or back up.
+    DATA_ROOT_DIRECTORY: /home/agent/.cognee/data
+    SYSTEM_ROOT_DIRECTORY: /home/agent/.cognee/system
+    LLM_MODEL: openai/gpt-5-mini
+    TELEMETRY_DISABLED: "1"
+    # User permissioning: multi-tenant ACLs + per-user+dataset DB isolation.
+    # This is cognee's default; pinned here so the kit is explicit about it.
+    # Supported by the default backends (kuzu/ladybug graph + lancedb vector);
+    # also neo4j, postgres (demo), turso — NOT neptune/ladybug-remote.
+    ENABLE_BACKEND_ACCESS_CONTROL: "true"
+
+# Named cognee-openai (not "openai") on purpose: built-in agent kits (shell,
+# claude, ...) already declare common LLM services, and composition fails if
+# two kits define the same service. required is false so sandbox creation
+# never blocks. Two ways to supply the key (both proxy-side; the real key
+# never enters the sandbox):
+#   1. Bind this service (interactive run, or ~/.config/sbx/credentials.yaml);
+#      the agent then sees LLM_API_KEY=proxy-managed and the inject rule below
+#      rewrites the Authorization header for api.openai.com.
+#   2. Headless: sbx secret set-custom --host api.openai.com \
+#        --env LLM_API_KEY --value <key>
+#      Note the kit's env value ("proxy-managed") wins over the custom
+#      secret's placeholder, so commands must use the printed placeholder:
+#        LLM_API_KEY=<placeholder> cognee-cli remember ...
+credentials:
+  - service: cognee-openai
+    description: OpenAI API key used by cognee for entity extraction and embeddings
+    required: false
+    apiKey:
+      name: LLM_API_KEY
+      proxyManaged: true
+      inject:
+        - domain: api.openai.com
+          scheme: bearer
+
+# Domains below were discovered by running under a deny-all policy and
+# reading `sbx policy log` — the recommended way to derive a kit allowlist.
+permissions:
+  network:
+    allow:
+      - api.openai.com
+      - pypi.org
+      - files.pythonhosted.org
+      # ladybug (cognee's embedded graph DB) fetches its extensions on first use
+      - extension.ladybugdb.com
+      # litellm fetches its model-cost map here
+      - raw.githubusercontent.com
+
+setup:
+  install:
+    - command: "mkdir -p /home/agent/.cognee/data /home/agent/.cognee/system"
+      user: "1000"
+      description: Create memory storage directories
+    # Assumes `uv` in the base image (Docker's default sandbox images ship it;
+    # the spec floor only guarantees sh and curl).
+    - command: "uv tool install cognee"
+      user: "1000"
+      description: Install the cognee CLI (embedded SQLite + LanceDB + Kuzu, no services needed)
+
+agentInstructions:
+  content: |
+    ## Persistent memory (cognee)
+
+    This sandbox has cognee installed: a knowledge-graph memory layer with a
+    CLI. Use it as your long-term memory — it persists across tasks and
+    sandbox restarts (stored under `/home/agent/.cognee`).
+
+    - Store knowledge: `cognee-cli remember "text, a file path, or a URL"`
+    - Query memory:    `cognee-cli recall "your question"`
+    - Enrich/index:    `cognee-cli improve`
+    - Delete:          `cognee-cli forget --all` (no confirmation prompt — use with care)
+
+    Workflow:
+    1. At the start of a task, run `cognee-cli recall` with a question about
+       the task to pull in anything you already learned.
+    2. While working, `remember` durable facts worth keeping: project
+       conventions, decisions and their reasons, gotchas, user preferences.
+    3. Do not store secrets, credentials, or throwaway session details.
+
+    The first `remember` builds a knowledge graph (a few LLM calls), so it
+    takes longer than a plain write; `recall` answers from the graph.
+
+    Multi-agent memory handover (supervisor -> worker): cognee supports
+    per-user datasets with ACLs (read/write/delete/share). A supervisor
+    agent stores a briefing in its own dataset, grants another user read
+    with `authorized_give_permission_on_datasets(...)`, and hands over the
+    dataset UUID — the worker recalls with
+    `cognee.recall(..., dataset_ids=[<uuid>], user=worker)`. Dataset NAMES
+    never cross users (each name maps to a per-user UUID); share by UUID
+    only. Permission management is Python-SDK/REST-only — the CLI has no
+    user/permission commands.

@@ -7,9 +7,22 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
+
+
+def _text_upload_filename(text: str) -> str:
+    """Content-hash filename for raw-text uploads, via local ingestion's namer.
+
+    Delegates to ``TextData`` — the same source ``save_data_to_file`` uses for
+    nameless text (``text_<md5>.txt``). A fixed placeholder here instead makes
+    every text upload for a tenant collide on one remote object, racing
+    concurrent adds against the server's content-hash read-back
+    (FileContentHashingError 409s).
+    """
+    return create_text_data(text).get_metadata()["name"]
 
 
 class CloudClient:
@@ -83,12 +96,22 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
+        # Code repos travel as spec strings in the 'repositories' form field —
+        # the server clones git URLs itself and reads local paths from its own
+        # filesystem (only useful when it shares the caller's filesystem).
+        # Nothing is uploaded.
+        if content_type_kw == "code":
+            specs = data if isinstance(data, list) else [data]
+            for spec in specs:
+                form.add_field("repositories", str(spec))
+            if kwargs.get("index_vectors"):
+                form.add_field("index_vectors", "true")
         # Skills are local SKILL.md files. The server's add_skills() reads
         # paths from its own filesystem — sending the path string verbatim
         # would have the server look for that path on the POD, not the
         # caller. For content_type="skills", read each SKILL.md and upload
         # its bytes so the server can write them to a tempdir.
-        if content_type_kw == "skills" and isinstance(data, (str, Path)):
+        elif content_type_kw == "skills" and isinstance(data, (str, Path)):
             source = Path(data).expanduser()
             if source.is_file():
                 skill_files = [source] if source.name == "SKILL.md" else []
@@ -109,7 +132,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -118,7 +141,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
@@ -128,9 +151,12 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
+        # Code ingestion can block on a clone + whole-repo parse; the archive
+        # timeout (no total cap) fits both. Prefer run_in_background=True for
+        # large repos regardless.
         timeout = (
             self.UPLOAD_TIMEOUT
-            if kwargs.get("content_type") == "cogx-archive"
+            if kwargs.get("content_type") in ("cogx-archive", "code")
             else self.DEFAULT_TIMEOUT
         )
         async with session.post(
@@ -202,6 +228,14 @@ class CloudClient:
             payload["context_profile"] = kwargs["context_profile"]
         if kwargs.get("include_references") is not None:
             payload["include_references"] = kwargs["include_references"]
+        if kwargs.get("response_schema") is not None:
+            payload["response_schema"] = kwargs["response_schema"]
+        if kwargs.get("tool_connections") is not None:
+            payload["tool_connections"] = kwargs["tool_connections"]
+        if kwargs.get("tools_trigger") not in (None, "always"):
+            payload["tools_trigger"] = kwargs["tools_trigger"]
+        if kwargs.get("code_query") is not None:
+            payload["code_query"] = kwargs["code_query"]
 
         async with session.post(
             f"{self.service_url}/api/v1/recall",
@@ -248,7 +282,7 @@ class CloudClient:
             form.add_field(
                 "data",
                 io.BytesIO(data.encode("utf-8")),
-                filename="data.txt",
+                filename=_text_upload_filename(data),
                 content_type="text/plain",
             )
         elif isinstance(data, list):
@@ -257,7 +291,7 @@ class CloudClient:
                     form.add_field(
                         "data",
                         io.BytesIO(item.encode("utf-8")),
-                        filename="data.txt",
+                        filename=_text_upload_filename(item),
                         content_type="text/plain",
                     )
                 elif hasattr(item, "read"):
