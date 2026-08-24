@@ -53,9 +53,16 @@ EVENT_ALLOWLIST = (
     "Pipeline Run Errored",
 )
 
-# The pseudonymous account identity (LLM-key hash, else install user_id).
+# The pseudonymous deployment identity, in decreasing stability order:
+# LLM-key hash (org-stable) -> persistent_id (machine-stable, survives user
+# recreation; emitted since ~Apr 2026) -> user_id (recreated per install/job).
+# This collapses products that mint a fresh user per agent job, so distinct
+# counts approximate deployments rather than throwaway identities.
 # Used strictly inside COUNT(DISTINCT ...) — never selected as a column.
-_IDENT = "coalesce(nullif(json_extract_string(properties, '$.api_key_hash'), ''), user_id)"
+_IDENT = (
+    "coalesce(nullif(json_extract_string(properties, '$.api_key_hash'), ''), "
+    "nullif(json_extract_string(properties, '$.persistent_id'), ''), user_id)"
+)
 # Surface the event came from: 'sdk' (default), 'cloud', 'cli', ... Safe enum.
 _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unknown')"
 # Normalized version: strip the -local suffix so builds compare cleanly.
