@@ -5,6 +5,8 @@ from typing import Any
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 
 class CsvLoader(LoaderInterface):
@@ -44,7 +46,9 @@ class CsvLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, encoding: str = "utf-8", **kwargs: Any) -> str:
+    async def load(
+        self, file_path: str, encoding: str = "utf-8", **kwargs: Any
+    ) -> "str | LoaderResult":
         """
         Load and process the csv file.
 
@@ -89,6 +93,4 @@ class CsvLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, content)
-
-        return full_file_path
+        return await store_derived_text(storage, storage_file_name, content)

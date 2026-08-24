@@ -27,7 +27,6 @@ def __getattr__(name):
 
 
 __all__ = [
-    "BeautifulSoupCrawler",
     "fetch_page_content",
     "cron_web_scraper_task",
     "web_scraper_task",

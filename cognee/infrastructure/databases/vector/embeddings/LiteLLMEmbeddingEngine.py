@@ -38,7 +38,39 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 # BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
 # those by message so the split/pool recovery below can handle them too. Kept
 # narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
-_EMBED_LENGTH_ERROR_RE = re.compile(r"maximum\s+input\s+length", re.IGNORECASE)
+_EMBED_LENGTH_ERROR_RE = re.compile(
+    r"maximum\s+input\s+length|instance\(s\)\s+is\s+allowed\s+per\s+prediction",
+    re.IGNORECASE,
+)
+
+# Providers whose embedding endpoints reject the OpenAI "dimensions" param
+# (used to truncate the native output vector size). litellm will happily
+# forward "dimensions" for these providers, but the underlying API returns a
+# 400 because the actual NIM models don't support arbitrary output resizing.
+# Detected from either the configured `provider` or a "<provider>/model"
+# style model string, since litellm derives the provider from either.
+_PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
+
+
+def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
+    """Whether this engine is actually talking to NVIDIA NIM.
+
+    Note: Cognee's `provider` attribute is metadata used locally (e.g. for
+    tokenizer selection) and is never forwarded to litellm.aembedding(), so it
+    does not determine which provider litellm actually routes to. litellm
+    infers that itself from a "<provider>/model" style prefix on the model
+    string (e.g. "nvidia_nim/nv-embedqa-e5-v5"). Both are checked here so the
+    dimensions param is omitted whichever one signals NVIDIA NIM.
+    """
+    if provider and provider.lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT:
+        return True
+    if (
+        model
+        and "/" in model
+        and model.split("/", 1)[0].lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT
+    ):
+        return True
+    return False
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
@@ -72,6 +104,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         api_version: str = None,
         max_completion_tokens: int = 512,
         batch_size: int = 100,
+        input_type: Optional[str] = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -83,6 +116,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
         self.batch_size = batch_size
+        # Required by some providers (e.g. NVIDIA NIM's nv-embed family) to
+        # distinguish query vs. passage/document embeddings. Has no effect on
+        # providers that don't recognize the field (e.g. plain OpenAI).
+        self.input_type = input_type
+        self._uses_nvidia_nim = _uses_nvidia_nim(self.provider, self.model)
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -181,10 +219,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                     if routed_to_openrouter:
                         embedding_kwargs["encoding_format"] = "float"
 
-                    # Pass through target embedding dimensions when supported
-                    if self.dimensions is not None:
+                    # Pass through target embedding dimensions when supported.
+                    # Some providers (e.g. NVIDIA NIM) reject this param outright,
+                    # so it's omitted for those rather than sent and rejected.
+                    if self.dimensions is not None and not self._uses_nvidia_nim:
                         embedding_kwargs["dimensions"] = self.dimensions
 
+                    # NVIDIA NIM (and similar providers) require an input_type
+                    # field ("query" / "passage") that OpenAI's API doesn't have.
+                    # litellm forwards it via extra_body for providers that
+                    # declare support for it (see litellm's NvidiaNimEmbeddingConfig).
+                    if self.input_type:
+                        embedding_kwargs["input_type"] = self.input_type
+
+                    # Ensure each attempt does not hang indefinitely
                     # Ensure each attempt does not hang indefinitely. The
                     # deadline is TOTAL per attempt and starts before any
                     # network I/O, so under large loads a request can spend
@@ -203,7 +251,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # ContextWindowExceededError subclasses BadRequestError. litellm raises
             # it for chat context-length errors, but the embeddings API returns a
             # plain BadRequestError for over-length input (OpenAI 400: "maximum input
-            # length is 8192 tokens"). Recover (split + pool) for both; re-raise any
+            # length is 8192 tokens"; Vertex AI 400: "2048 instance(s) is allowed per
+            # prediction"). Recover (split + pool) for both; re-raise any
             # other BadRequest unchanged so genuinely bad requests still fail fast.
             if not (
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)

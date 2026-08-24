@@ -1,6 +1,8 @@
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import hashlib
+
 import pytest
 
 from cognee.infrastructure.loaders.core.video_loader import (
@@ -160,7 +162,12 @@ async def test_load_persists_timestamped_transcript(
     with patch("cognee.infrastructure.loaders.core.video_loader.os.remove"):
         result = await loader.load(FIXTURE_PATH)
 
-    assert result == "/fake/root/text_hash123.txt"
+    assert result.file_path == "/fake/root/text_hash123.txt"
+    # The loader describes the text it wrote so ingestion need not read it back.
+    assert (
+        result.file_metadata["content_hash"]
+        == hashlib.md5(EXPECTED_TRANSCRIPT.encode("utf-8")).hexdigest()
+    )
     mock_extract.assert_awaited_once()
     storage_instance.store.assert_awaited_once_with("text_hash123.txt", EXPECTED_TRANSCRIPT)
 

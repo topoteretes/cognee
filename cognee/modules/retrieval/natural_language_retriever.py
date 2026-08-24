@@ -1,6 +1,8 @@
+import json
 from typing import Any, Optional
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -8,6 +10,52 @@ from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
 logger = get_logger("NaturalLanguageRetriever")
+
+
+def _is_internal_schema_row(row: Any) -> bool:
+    """True for a node-schema row that describes internal nodes.
+
+    On backends with per-node property keys (Neo4j), internal nodes are the only
+    ones carrying the ``is_internal`` key, so a schema row whose collected
+    property list contains it describes internal nodes. On backends with a fixed
+    column set (Ladybug/Kuzu) the marker lives inside the serialized
+    ``properties`` blob and never shows up as a key, so this is a no-op there —
+    the fixed columns carry nothing internal-specific to hide.
+    """
+    if isinstance(row, dict):
+        values = row.values()
+    elif isinstance(row, (list, tuple)):
+        values = row
+    else:
+        return False
+    for value in values:
+        if value == INTERNAL_PROPERTY:
+            return True
+        if isinstance(value, (list, tuple, set)) and INTERNAL_PROPERTY in value:
+            return True
+    return False
+
+
+def _contains_internal_node(value: Any) -> bool:
+    """True when a raw query result value contains an internal graph node.
+
+    Handles deserialized node dicts (``is_internal`` at the top level), nested
+    containers, and Ladybug/Kuzu raw rows where node properties come back as a
+    serialized JSON string column.
+    """
+    if isinstance(value, dict):
+        if is_internal_node(value):
+            return True
+        return any(_contains_internal_node(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_internal_node(item) for item in value)
+    if isinstance(value, str) and INTERNAL_PROPERTY in value:
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return False
+        return isinstance(parsed, dict) and is_internal_node(parsed)
+    return False
 
 
 class NaturalLanguageRetriever(BaseRetriever):
@@ -48,6 +96,9 @@ class NaturalLanguageRetriever(BaseRetriever):
             RETURN DISTINCT key;
             """
         )
+        # Internal nodes (e.g. per-user preference state) must never be surfaced,
+        # so keep their labels out of the schema handed to the LLM.
+        node_schemas = [row for row in node_schemas or [] if not _is_internal_schema_row(row)]
         return node_schemas, edge_schemas
 
     async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
@@ -85,6 +136,11 @@ class NaturalLanguageRetriever(BaseRetriever):
                     else cypher_query
                 )
                 context = await graph_engine.query(cypher_query)
+
+                if isinstance(context, list):
+                    # Internal nodes (e.g. per-user preference state) must never
+                    # reach a user; drop any row that contains one.
+                    context = [row for row in context if not _contains_internal_node(row)]
 
                 if context:
                     result_count = len(context) if isinstance(context, list) else 1
