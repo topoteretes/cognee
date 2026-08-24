@@ -453,6 +453,72 @@ async def test_brute_force_triplet_search_passes_top_k_to_importance_calculation
 
 
 @pytest.mark.asyncio
+async def test_brute_force_triplet_search_applies_personal_weights():
+    """personal_weights are handed to the fragment after distance mapping."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
+
+    mock_fragment = AsyncMock(
+        map_vector_distances_to_graph_nodes=AsyncMock(),
+        map_vector_distances_to_graph_edges=AsyncMock(),
+        calculate_top_triplet_importances=AsyncMock(return_value=[]),
+    )
+    # apply_personal_weights is a plain (sync) method on CogneeGraph.
+    mock_fragment.apply_personal_weights = MagicMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=mock_fragment,
+        ),
+    ):
+        await brute_force_triplet_search(
+            query="test", node_name=["node"], personal_weights={"n1": 0.9}
+        )
+
+    mock_fragment.apply_personal_weights.assert_called_once_with({"n1": 0.9})
+    mock_fragment.map_vector_distances_to_graph_nodes.assert_awaited_once()
+    mock_fragment.map_vector_distances_to_graph_edges.assert_awaited_once()
+    mock_fragment.calculate_top_triplet_importances.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_skips_personal_weights_when_absent():
+    """Without personal_weights the fragment is never touched — byte-identical path."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[MockScoredResult("n1", 0.95)])
+
+    mock_fragment = AsyncMock(
+        map_vector_distances_to_graph_nodes=AsyncMock(),
+        map_vector_distances_to_graph_edges=AsyncMock(),
+        calculate_top_triplet_importances=AsyncMock(return_value=[]),
+    )
+    mock_fragment.apply_personal_weights = MagicMock()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=mock_fragment,
+        ),
+    ):
+        await brute_force_triplet_search(query="test", node_name=["node"])
+
+    mock_fragment.apply_personal_weights.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_get_memory_fragment_projects_feedback_weight_only_when_feedback_influence_enabled():
     """Test that feedback_weight properties are projected only when feedback_influence > 0."""
     mock_graph_engine = AsyncMock()

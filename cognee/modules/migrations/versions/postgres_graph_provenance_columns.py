@@ -61,13 +61,13 @@ def _is_postgres_graph(graph_engine) -> bool:
     # extra. On a Ladybug/LanceDB-only install those are absent, so a bare import
     # would raise ModuleNotFoundError and crash the whole migration chain (blocking
     # writes) for a deployment that has no Postgres graph at all. If the adapter
-    # cannot be imported, the engine cannot be a PostgresAdapter -> no-op.
+    # cannot be imported, the engine cannot be a PostgresDemoAdapter -> no-op.
     try:
-        from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+        from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
     except ImportError:
         return False
 
-    return isinstance(graph_engine, PostgresAdapter)
+    return isinstance(graph_engine, PostgresDemoAdapter)
 
 
 async def _run(graph_engine, statements_for: Callable[[str, str], list[str]]) -> None:

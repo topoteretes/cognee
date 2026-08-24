@@ -223,20 +223,14 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
-    tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
-        Task(
-            ingest_data,
-            dataset_name,
-            user,
-            node_set,
-            dataset_id,
-            preferred_loaders,
-            importance_weight,
-        ),
-    ]
-
     await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
 
     import time as _time
 
@@ -251,6 +245,23 @@ async def add(
     user, authorized_dataset = await resolve_authorized_user_dataset(
         dataset_name=dataset_name, dataset_id=dataset_id, user=user
     )
+
+    # The dataset is resolved (created if needed) and write-checked above; hand
+    # its id to the ingestion task so it does not resolve the name again on
+    # every item (the pipeline also passes the dataset via ctx — this keeps the
+    # non-pipeline fallback on the cheap branch too).
+    tasks = [
+        Task(resolve_data_directories, include_subdirectories=True),
+        Task(
+            ingest_data,
+            dataset_name,
+            user,
+            node_set,
+            authorized_dataset.id,
+            preferred_loaders,
+            importance_weight,
+        ),
+    ]
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when

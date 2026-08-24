@@ -6,6 +6,11 @@ import asyncio
 import threading
 import tempfile
 from uuid import UUID, uuid5, NAMESPACE_OID
+
+# Importing this package registers the Windows DLL search path ladybug's native
+# extension needs, so it has to precede the ``ladybug`` imports below. See
+# cognee_db_workers/_windows_openssl.py.
+import cognee_db_workers  # noqa: F401
 from ladybug import Connection
 from ladybug.database import Database
 from datetime import datetime, timezone
@@ -1961,10 +1966,19 @@ class LadybugAdapter(GraphDBInterface):
 
             # Property-map matches (primary-key index seeks) instead of a
             # cartesian MATCH + WHERE, which planned as a scan on large graphs.
+            #
+            # Both endpoints must be matched in ONE comma-separated clause.
+            # Splitting them into two MATCH clauses segfaults ladybug 0.19.x
+            # mid-write (SIGSEGV in the native engine, surfacing through the
+            # subprocess worker as "Subprocess exited unexpectedly (exit code
+            # -11)") — 0.19.0 introduced a row-driven primary-key lookup for
+            # MATCH (LadybugDB/ladybug#722) that this shape lands on. The comma
+            # form keeps the index seeks and is equally fast on 0.17.1, 0.18.2
+            # and 0.19.0 (~80s for 20k edges on all three), and writes an
+            # identical graph. See COG-6185.
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node {id: edge.from_id})
-            MATCH (to:Node {id: edge.to_id})
+            MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})
             MERGE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name
             }]->(to)
@@ -2517,18 +2531,28 @@ class LadybugAdapter(GraphDBInterface):
                 query_str = """
                 MATCH (n)<-[r:EDGE]-(m)
                 WHERE n.id = $id AND r.relationship_name = $edge_label
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id), "edge_label": edge_label}
             else:
                 query_str = """
                 MATCH (n)<-[r:EDGE]-(m)
                 WHERE n.id = $id
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
-            return [row[0] for row in result] if result else []
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get predecessors for node {node_id}: {e}")
             return []
@@ -2561,18 +2585,28 @@ class LadybugAdapter(GraphDBInterface):
                 query_str = """
                 MATCH (n)-[r:EDGE]->(m)
                 WHERE n.id = $id AND r.relationship_name = $edge_label
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id), "edge_label": edge_label}
             else:
                 query_str = """
                 MATCH (n)-[r:EDGE]->(m)
                 WHERE n.id = $id
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
-            return [row[0] for row in result] if result else []
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get successors for node {node_id}: {e}")
             return []
@@ -3336,7 +3370,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = """
         MATCH (n:Node)
-        WHERE NOT EXISTS((n)-[]-())
+        WHERE NOT (n)-[:EDGE]-()
         RETURN n.id
         """
         result = await self.query(query_str)

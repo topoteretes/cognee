@@ -188,6 +188,12 @@ def test_instructor_mode_table_and_adapter_wiring():
     # Table values match the historical per-adapter defaults.
     assert get_instructor_mode("openai") == "json_schema_mode"
     assert get_instructor_mode("anthropic") == "anthropic_tools"
+    # ollama DELIBERATELY diverges from its historical "json_mode" default.
+    # json_mode sends response_format=json_object, so the pydantic schema reaches
+    # the model as prompt text only and never as a decoder constraint. Measured
+    # against llama3.1:8b with max_retries=0: json_mode returned 2/5 valid
+    # KnowledgeGraph objects on the first attempt, json_schema_mode returned 5/5.
+    assert get_instructor_mode("ollama") == "json_schema_mode"
     # An unknown provider fails loudly rather than silently defaulting.
     with pytest.raises(KeyError):
         get_instructor_mode("totally-unknown-provider")
@@ -253,6 +259,72 @@ def test_seed_folds_into_llm_args_and_preserves_existing_keys(monkeypatch):
 
     config = LLMConfig(llm_seed=42, llm_args={"max_tokens": 1024}, _env_file=None)
     assert config.llm_args == {"seed": 42, "max_tokens": 1024}
+
+
+def _build_local(monkeypatch, **kwargs):
+    """Build a config for a local inference server with sampling env cleared."""
+    _clear_sampling_env(monkeypatch)
+    defaults = {
+        "llm_api_key": "test-key",
+        "llm_endpoint": "http://localhost:11434/v1",
+        "_env_file": None,
+    }
+    defaults.update(kwargs)
+    return LLMConfig(**defaults)
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("ollama", "gemma4:e2b-it-qat"),
+        ("llama_cpp", "some-model"),
+        ("custom", "lm_studio/qwen2.5-7b"),
+    ],
+)
+def test_local_provider_folds_unset_temperature(monkeypatch, provider, model):
+    """
+    On a local inference server an unset llm_temperature must still reach the
+    provider. The gpt-5 restriction that gates the fold does not apply there,
+    and without this the model's own default applies (1.0 for several Ollama
+    models) even though docs/ollama_models.md documents 0.0 for extraction.
+    """
+    config = _build_local(monkeypatch, llm_provider=provider, llm_model=model)
+    assert config.llm_args == {"temperature": 0.0}
+
+
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("openai", "openai/gpt-5-mini"),
+        ("custom", "hosted_vllm/meta-llama/Llama-3-70B"),
+        ("custom", "vllm/some-model"),
+    ],
+)
+def test_non_local_provider_still_omits_unset_temperature(monkeypatch, provider, model):
+    """The gpt-5 guard is untouched for hosted providers, vLLM included."""
+    config = _build_local(monkeypatch, llm_provider=provider, llm_model=model)
+    assert config.llm_args is None
+
+
+def test_explicit_temperature_wins_on_local_provider(monkeypatch):
+    config = _build_local(
+        monkeypatch,
+        llm_provider="ollama",
+        llm_model="gemma4:e2b-it-qat",
+        llm_temperature=0.7,
+    )
+    assert config.llm_args == {"temperature": 0.7}
+
+
+def test_llm_args_temperature_wins_over_local_default(monkeypatch):
+    """LLM_ARGS keeps precedence over the folded local default."""
+    config = _build_local(
+        monkeypatch,
+        llm_provider="ollama",
+        llm_model="gemma4:e2b-it-qat",
+        llm_args={"temperature": 0.7, "max_tokens": 1024},
+    )
+    assert config.llm_args == {"temperature": 0.7, "max_tokens": 1024}
 
 
 def test_known_providers_match_enum():

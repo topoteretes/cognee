@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Type, Union
 
 from cognee.modules.observability import OtelStatusCode as StatusCode
 
@@ -132,6 +132,7 @@ async def _get_top_triplet_importances(
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
+    personal_weights: Optional[Dict[str, float]] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
@@ -144,6 +145,8 @@ async def _get_top_triplet_importances(
             instead of projecting the full or ID-filtered graph.
         neighborhood_seed_top_k: Maximum number of seed nodes to use for neighborhood
             extraction. (default 10)
+        personal_weights: Optional per-node ``prefers`` weights (node id -> weight in
+            [0, 1]) applied to matching nodes so the triplet scorer can nudge ranking.
 
     Returns:
         List[Edge]: For single-query mode (query_list_length is None).
@@ -207,6 +210,11 @@ async def _get_top_triplet_importances(
         edge_distances=vector_search.edge_distances, query_list_length=query_list_length
     )
 
+    # After projection and distance mapping so the weights land on the nodes
+    # that actually made it into the fragment.
+    if personal_weights:
+        memory_fragment.apply_personal_weights(personal_weights)
+
     return await memory_fragment.calculate_top_triplet_importances(
         k=top_k,
         query_list_length=query_list_length,
@@ -230,6 +238,7 @@ async def brute_force_triplet_search(
     unified_engine: Optional[UnifiedStoreEngine] = None,
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
+    personal_weights: Optional[Dict[str, float]] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -247,6 +256,8 @@ async def brute_force_triplet_search(
             Ignored in batch mode (always None to project full graph).
         triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
         feedback_influence (float): Weight of feedback influence in range [0, 1]
+        personal_weights (Optional[Dict[str, float]]): Per-node prefers weights
+            (node id -> weight in [0, 1]) that nudge triplet ranking for the active user.
 
     Returns:
         List[Edge]: The top triplet results for single query mode (flat list).
@@ -340,6 +351,7 @@ async def brute_force_triplet_search(
                 graph_engine=graph_engine,
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
+                personal_weights=personal_weights,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)
