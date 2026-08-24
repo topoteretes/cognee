@@ -127,6 +127,8 @@ async def test_create_cognee_style_network_with_logo(tmp_path):
     # Reads preprocessor.stage / edge_class to build a "Source" chain and
     # a "Provenance" section that only shows when any field is set.
     assert "inspectorOverviewLine" in html_output
+    # EntityType membership: incoming Entity → is_a → EntityType (not outgoing structural).
+    assert 'srcNode.type==="Entity"' in html_output
     assert "inspectorSection" in html_output
     assert "inspector-section-body" in html_output
     assert 'data-toggle="provenance"' in html_output or "provenance" in html_output
