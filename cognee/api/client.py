@@ -15,6 +15,9 @@ from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.modules.users.authentication.redact_websocket_query_secrets import (
+    install_websocket_query_param_redaction,
+)
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
@@ -59,6 +62,12 @@ from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTI
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
 logger = get_logger()
+
+# Keeps the WebSocket ?token= auth fallback out of uvicorn's own access/error
+# logs, regardless of how uvicorn was launched (this module is imported
+# either way). See redact_websocket_query_secrets.py for why this can't be
+# left to proxy-side redaction alone.
+install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
 
