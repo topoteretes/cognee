@@ -163,6 +163,23 @@ class TestGetRetrievedObjects:
         # a's distance grows by 1.3: 0.13 > 0.12, so it falls behind b and c.
         assert [chunk.payload["id"] for chunk in result] == ["b", "c"]
 
+    async def test_unset_wide_search_top_k_still_widens_the_fetch(self, monkeypatch):
+        # The search path builds this retriever with wide_search_top_k unset
+        # (get_search_type_retriever_instance reads it with kwargs.get and no
+        # default), so None is the value that actually reaches production.
+        # Left unnormalized, `max(top_k, None or 0)` is top_k, and the wide
+        # fetch that makes personalization change membership never happens:
+        # the re-sort can only permute the chunks top_k would have returned.
+        chunks = [_chunk("a", 0.10), _chunk("b", 0.20), _chunk("e", 0.25)]
+        engine = _patch_engine(monkeypatch, chunks)
+        _patch_lookup(monkeypatch, ("", {"e": 0.95}))
+        _patch_influence(monkeypatch)
+
+        retriever = CompletionRetriever(top_k=2, wide_search_top_k=None)
+        await retriever.get_retrieved_objects("query")
+
+        assert engine.search_calls[0]["limit"] == 100
+
     async def test_entity_only_weights_do_not_widen_the_fetch(self, monkeypatch):
         # Every weight key points at a graph entity that is not a row in
         # DocumentChunk_text, so the wide fetch could never change membership:
