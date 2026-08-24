@@ -712,7 +712,10 @@ async def remember(
             code repository (local path or remote git URL, or a list of
             them) as an architectural code graph via the enola-backed
             pipeline. ``remember()`` does not auto-detect skill paths or
-            repositories.
+            repositories. ``run_in_background=True`` is honored for code:
+            the call returns a ``running`` result with the dataset_id while
+            cloning and graph extraction continue server-side — poll the
+            dataset status for ``code_graph_pipeline`` or await the result.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -1026,6 +1029,7 @@ async def _remember_inner(
                 "dataset_name": dataset_name,
                 "repository_count": len(repo_specs),
                 "index_vectors": bool(index_vectors),
+                "run_in_background": run_in_background,
                 "cognee_version": cognee_version,
             },
         )
@@ -1037,23 +1041,97 @@ async def _remember_inner(
             session_ids=None,
         )
         result.items = []
-        for spec in repo_specs:
+        user = kwargs.get("user")
+        dataset_ref = dataset_id or dataset_name
+
+        def _apply_code_run_info(item: dict, pipeline_result) -> None:
+            # Blocking run_custom_pipeline returns {dataset_id: PipelineRunInfo};
+            # lift the identifiers onto the result so callers can poll
+            # GET /v1/datasets/status?pipeline=code_graph_pipeline, and surface
+            # an errored run as an errored result instead of a false success.
+            if not isinstance(pipeline_result, dict) or not pipeline_result:
+                return
+            ds_id, run_info = next(iter(pipeline_result.items()))
+            result.dataset_id = str(ds_id)
+            run_dataset_name = getattr(run_info, "dataset_name", None)
+            if run_dataset_name:
+                result.dataset_name = run_dataset_name
+            run_id = getattr(run_info, "pipeline_run_id", None)
+            if run_id is not None:
+                item["pipeline_run_id"] = str(run_id)
+                result.pipeline_run_id = str(run_id)
+            if "Errored" in getattr(run_info, "status", ""):
+                item["status"] = "errored"
+                result.status = "errored"
+                if not result.error:
+                    result.error = f"code_graph_pipeline errored for repository '{item['source']}'"
+
+        async def _run_one_repo(spec) -> dict:
             repo_path = await resolve_repo_source(spec)
-            await run_custom_pipeline(
+            item = {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
+            pipeline_result = await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
-                dataset=dataset_id or dataset_name,
-                user=kwargs.get("user"),
+                dataset=dataset_ref,
+                user=user,
                 pipeline_name="code_graph_pipeline",
                 # The default (graph-only) pipeline performs no LLM or embedding
                 # calls, so it must not demand an API key on first run. With
                 # index_vectors=True embeddings are used, so the checks stay on.
                 skip_connection_test=not bool(index_vectors),
             )
-            result.items.append(
-                {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
-            )
-        result.items_processed = len(result.items)
+            _apply_code_run_info(item, pipeline_result)
+            return item
+
+        if run_in_background:
+            # Resolve the dataset before returning so the response carries the
+            # dataset_id callers poll via GET /v1/datasets/status, and so
+            # authorization errors surface at request time instead of inside
+            # the background task.
+            user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
+            dataset = authorized_datasets[0]
+            dataset_ref = dataset.id
+            result.dataset_id = str(dataset.id)
+            result.dataset_name = dataset.name
+            result.status = "running"
+
+            async def _code_graph_background():
+                # One failing repo must not abort the rest of the batch — record
+                # the failure per item and keep going.
+                errors: list = []
+                for spec in repo_specs:
+                    try:
+                        item = await _run_one_repo(spec)
+                    except Exception as exc:
+                        logger.exception("Background code-graph run failed for '%s'", spec)
+                        item = {
+                            "kind": "code_repository",
+                            "source": str(spec),
+                            "status": "errored",
+                            "error": str(exc),
+                        }
+                        errors.append(f"{spec}: {exc}")
+                    result.items.append(item)
+                result.items_processed = len(
+                    [item for item in result.items if item.get("status") != "errored"]
+                )
+                if errors:
+                    result.status = "errored"
+                    result.error = "; ".join(errors)
+                elif result.status == "running":
+                    result.status = "completed"
+                result.elapsed_seconds = time.monotonic() - result._started_at
+
+            result._task = asyncio.create_task(_code_graph_background())
+            _BACKGROUND_REMEMBER_TASKS.add(result._task)
+            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+            return result
+
+        for spec in repo_specs:
+            result.items.append(await _run_one_repo(spec))
+        result.items_processed = len(
+            [item for item in result.items if item.get("status") != "errored"]
+        )
         result.elapsed_seconds = time.monotonic() - result._started_at
         return result
 

@@ -7,6 +7,11 @@ VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
 MIN_CANDIDATE_CONFIDENCE = 0.75
 
+# Gate shared by every downstream consumer of stored guidance (session
+# distillation, preference personalization): an entry is usable only when it
+# was never rated harmful and its confidence clears this threshold.
+MIN_GATE_CONFIDENCE = 0.75
+
 
 class ContextSection(str, Enum):
     """Sections under which active session-context guidance is grouped."""
@@ -58,6 +63,23 @@ def normalize_content(text: str) -> str:
     if not isinstance(text, str):
         raise ValueError("text must be a string")
     return " ".join(text.strip().lower().split())
+
+
+def coerce_rating_or_none(value) -> Optional[int]:
+    """Coerce a 1-5 answer rating to int; anything else degrades to None.
+
+    Malformed values (bools, non-integral floats, non-numbers, out-of-range
+    ints) mean "no signal" rather than raising (non-blocking contract).
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        rating = int(value)
+    except (TypeError, ValueError):
+        return None
+    return rating if 1 <= rating <= 5 else None
 
 
 class ServedContextRating(BaseModel):
@@ -461,6 +483,16 @@ class SessionContextEntry(BaseModel):
         return self
 
 
+def is_context_entry_usable(entry: SessionContextEntry) -> bool:
+    """Shared downstream gate: never rated harmful and confidence clears the threshold.
+
+    Both session distillation and preference personalization consume stored guidance
+    through this one check, so the two features can never drift apart on what counts
+    as a usable entry.
+    """
+    return entry.harmful_count == 0 and entry.confidence >= MIN_GATE_CONFIDENCE
+
+
 class SessionFeedbackEntry(BaseModel):
     """A stored feedback record describing how a turn rated/extended session context."""
 
@@ -468,9 +500,17 @@ class SessionFeedbackEntry(BaseModel):
     created_at: str
     raw_text: str
     referenced_qa_ids: List[str] = Field(default_factory=list)
+    referenced_qa_rating: Optional[int] = None
     influencing_context_ids: List[str] = Field(default_factory=list)
     candidate_context_entries: List[dict] = Field(default_factory=list)
     kind: Literal["feedback"] = "feedback"
+
+    @field_validator("referenced_qa_rating", mode="before")
+    @classmethod
+    def referenced_qa_rating_in_range_or_none(cls, value):
+        """1-5 verdict on the turn named by referenced_qa_ids; anything else
+        coerces to None so a malformed value degrades to "no signal"."""
+        return coerce_rating_or_none(value)
 
     @field_validator("id")
     @classmethod

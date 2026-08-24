@@ -199,7 +199,7 @@ async def test_pgvector_schema_isolation(two_schemas):
 @pytest.mark.asyncio
 async def test_postgres_graph_schema_isolation(two_schemas):
     """Two Postgres graph adapters pinned to different schemas stay isolated."""
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 
     d = _db()
     s1, s2 = two_schemas
@@ -213,8 +213,8 @@ async def test_postgres_graph_schema_isolation(two_schemas):
             password=d["password"],
         )
 
-    a1 = PostgresAdapter(connection_string=_base_url(), schema=s1)
-    a2 = PostgresAdapter(connection_string=_base_url(), schema=s2)
+    a1 = PostgresDemoAdapter(connection_string=_base_url(), schema=s1)
+    a2 = PostgresDemoAdapter(connection_string=_base_url(), schema=s2)
     try:
         await a1.initialize()
         await a2.initialize()
@@ -266,8 +266,8 @@ async def test_shared_handlers_create_and_delete_lifecycle():
         pytest.skip("shared handler lifecycle requires DB_PROVIDER=postgres")
     if get_vectordb_config().vector_db_provider != "pgvector":
         pytest.skip("shared handler lifecycle requires VECTOR_DB_PROVIDER=pgvector")
-    if get_graph_config().graph_database_provider != "postgres":
-        pytest.skip("shared handler lifecycle requires GRAPH_DATABASE_PROVIDER=postgres")
+    if get_graph_config().graph_database_provider not in ("postgres", "postgres_demo"):
+        pytest.skip("shared handler lifecycle requires GRAPH_DATABASE_PROVIDER=postgres_demo")
     if not await _postgres_reachable():
         pytest.skip("Postgres not reachable")
 

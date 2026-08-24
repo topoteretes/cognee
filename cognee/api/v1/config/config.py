@@ -12,6 +12,7 @@ from cognee.infrastructure.llm.config import (
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
 from cognee.tasks.translation.config import get_translation_config
+from cognee.modules.recall.config import get_recall_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
@@ -108,6 +109,26 @@ def _persist_env_var(env_var_name: str, value) -> tuple[str, bool]:
     return path, created
 
 
+def _coerce_float(value, name: str, *, min_value: float | None = None) -> float:
+    """Coerce ``value`` to ``float``, optionally enforcing a minimum. Accepts
+    ints, floats, or numeric strings. Used by setters reachable via the CLI.
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a number, got bool {value!r}")
+    if isinstance(value, (int, float)):
+        result = float(value)
+    elif isinstance(value, str):
+        try:
+            result = float(value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be a number, got {value!r}") from exc
+    else:
+        raise ValueError(f"{name} must be a number, got {type(value).__name__}")
+    if min_value is not None and result < min_value:
+        raise ValueError(f"{name} must be >= {min_value}, got {result}")
+    return result
+
+
 def _coerce_for_field(config_obj, key: str, value):
     """Coerce ``value`` to the declared type of ``config_obj.<key>`` for the
     common ``bool`` and ``int`` cases. Used by ``_update_config`` so bulk
@@ -139,6 +160,8 @@ def _coerce_for_field(config_obj, key: str, value):
         return _coerce_bool(value, key)
     if annotation is int:
         return _coerce_int(value, key)
+    if annotation is float:
+        return _coerce_float(value, key)
     return value
 
 
@@ -705,6 +728,65 @@ class config:
         """
         config._update_config(get_translation_config(), config_dict)
 
+    # Recall configuration methods
+
+    @staticmethod
+    def set_recall_warmup_shortcircuit(recall_warmup_shortcircuit):
+        """Enable/disable the recall graph-lane warm-up short-circuit.
+
+        Enabled by default: recalls against datasets whose knowledge graph
+        has never been built return an instant "memory warming up" marker
+        instead of running graph search plus an LLM call.
+
+        Parameters
+        ----------
+        recall_warmup_shortcircuit : bool | str
+            True/False, or a boolean-like string when set via the CLI.
+        """
+        recall_config = get_recall_config()
+        recall_config.recall_warmup_shortcircuit = _coerce_bool(
+            recall_warmup_shortcircuit, "recall_warmup_shortcircuit"
+        )
+
+    @staticmethod
+    def set_recall_warmup_threshold(recall_warmup_threshold):
+        """Set the minimum datapoint count considered "warm" (default 1).
+
+        Parameters
+        ----------
+        recall_warmup_threshold : int | str
+            Minimum count; values above the probe's cap are clamped.
+        """
+        recall_config = get_recall_config()
+        recall_config.recall_warmup_threshold = _coerce_int(
+            recall_warmup_threshold, "recall_warmup_threshold", min_value=1
+        )
+
+    @staticmethod
+    def set_recall_warmup_cache_ttl(recall_warmup_cache_ttl):
+        """Set how long (seconds) a warm verdict is cached in-process.
+
+        Parameters
+        ----------
+        recall_warmup_cache_ttl : float | str
+            TTL in seconds (default 60).
+        """
+        recall_config = get_recall_config()
+        recall_config.recall_warmup_cache_ttl = _coerce_float(
+            recall_warmup_cache_ttl, "recall_warmup_cache_ttl", min_value=0.0
+        )
+
+    @staticmethod
+    def set_recall_config(config_dict: dict):
+        """Update the recall config with values from a dictionary.
+
+        Parameters
+        ----------
+        config_dict : dict
+            A dictionary of recall config attributes to update.
+        """
+        config._update_config(get_recall_config(), config_dict)
+
     # Map configuration keys to their setter methods. Used by ``set()``.
     _setter_mapping = {
         "llm_provider": "set_llm_provider",
@@ -732,6 +814,9 @@ class config:
         "classification_model": "set_classification_model",
         "summarization_model": "set_summarization_model",
         "graph_model": "set_graph_model",
+        "recall_warmup_shortcircuit": "set_recall_warmup_shortcircuit",
+        "recall_warmup_threshold": "set_recall_warmup_threshold",
+        "recall_warmup_cache_ttl": "set_recall_warmup_cache_ttl",
         "system_root_directory": "system_root_directory",
         "data_root_directory": "data_root_directory",
     }
@@ -767,6 +852,9 @@ class config:
         "classification_model": (get_cognify_config, "classification_model"),
         "summarization_model": (get_cognify_config, "summarization_model"),
         "graph_model": (get_graph_config, "graph_model"),
+        "recall_warmup_shortcircuit": (get_recall_config, "recall_warmup_shortcircuit"),
+        "recall_warmup_threshold": (get_recall_config, "recall_warmup_threshold"),
+        "recall_warmup_cache_ttl": (get_recall_config, "recall_warmup_cache_ttl"),
         "system_root_directory": (get_base_config, "system_root_directory"),
         "data_root_directory": (get_base_config, "data_root_directory"),
     }

@@ -1,6 +1,8 @@
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models.Data import Data
@@ -16,6 +18,7 @@ async def identify_many(
     hashes: list[str],
     user: User,
     dataset_id: UUID,
+    session: Optional[AsyncSession] = None,
 ) -> dict[str, UUID]:
     """Batch version of :func:`identify`: resolve existing ``Data`` rows for
     multiple content hashes in one dataset.
@@ -28,6 +31,11 @@ async def identify_many(
     both functions always agree on which row wins for a given hash.  Large
     inputs are chunked into batches of at most :data:`_CHUNK_SIZE` hashes to
     stay within SQLite's bind-parameter limit.
+
+    Pass ``session`` to run the lookup inside a session the caller already
+    holds instead of opening one: under ``NullPool`` (the cloud pods) every
+    session is a fresh TLS+SCRAM connection, so the add path groups its
+    read-only lookups into one.
     """
     if not hashes:
         return {}
@@ -37,13 +45,12 @@ async def identify_many(
     # old per-user identity semantics and keeping owner_id checks meaningful.
     tenant_filter = Data.tenant_id == user.tenant_id if user.tenant_id else Data.tenant_id.is_(None)
 
-    db_engine = get_relational_engine()
     result: dict[str, UUID] = {}
 
-    async with db_engine.get_async_session() as session:
+    async def _lookup(active_session: AsyncSession) -> None:
         for start in range(0, len(hashes), _CHUNK_SIZE):
             chunk = hashes[start : start + _CHUNK_SIZE]
-            rows = await session.execute(
+            rows = await active_session.execute(
                 select(Data.id, Data.content_hash).filter(
                     Data.dataset_id == dataset_id,
                     Data.content_hash.in_(chunk),
@@ -56,5 +63,12 @@ async def identify_many(
                 # semantics: if duplicate rows exist, we take whichever the DB
                 # returns first rather than silently picking the last one).
                 result.setdefault(content_hash, data_id)
+
+    if session is not None:
+        await _lookup(session)
+        return result
+
+    async with get_relational_engine().get_async_session() as own_session:
+        await _lookup(own_session)
 
     return result

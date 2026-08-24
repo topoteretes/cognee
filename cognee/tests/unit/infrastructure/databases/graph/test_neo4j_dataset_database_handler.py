@@ -9,9 +9,14 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_database_handlers import (
     supported_dataset_database_handlers,
 )
+from cognee.infrastructure.databases.exceptions import (
+    DatabaseCredentialsError,
+    Neo4jMultiDatabaseSupportError,
+)
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.neo4j_driver.Neo4jDatasetDatabaseHandler import (
     NEO4J_DATASET_DATABASE_HANDLER,
+    NEO4J_EDITION_QUERY,
     Neo4jDatasetDatabaseHandler,
 )
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
@@ -130,15 +135,26 @@ async def test_resolve_dataset_connection_info_uses_live_config_credentials(monk
     }
 
 
-@pytest.mark.asyncio
-async def test_create_neo4j_database_uses_system_database(monkeypatch):
-    configure_neo4j(monkeypatch)
-    calls = []
-    closed = []
+class FakeNeo4jError(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def make_fake_driver(calls, closed, edition_rows=None, admin_error=None):
+    """Fake async Neo4j driver for system-database queries.
+
+    The edition probe returns ``edition_rows`` (raising ``admin_error`` instead
+    when no rows are given); any other query raises ``admin_error`` when given,
+    otherwise returns no records.
+    """
 
     class FakeResult:
+        def __init__(self, rows):
+            self._rows = rows
+
         async def data(self):
-            return []
+            return self._rows
 
     class FakeSession:
         def __init__(self, database):
@@ -152,7 +168,11 @@ async def test_create_neo4j_database_uses_system_database(monkeypatch):
 
         async def run(self, query, parameters=None):
             calls.append((self.database, query, parameters))
-            return FakeResult()
+            if query == NEO4J_EDITION_QUERY and edition_rows is not None:
+                return FakeResult(edition_rows)
+            if admin_error is not None:
+                raise admin_error
+            return FakeResult([])
 
     class FakeDriver:
         def session(self, database):
@@ -161,14 +181,31 @@ async def test_create_neo4j_database_uses_system_database(monkeypatch):
         async def close(self):
             closed.append(True)
 
-    async def fake_wait_for_database_online(cls, driver, graph_db_name, timeout_seconds=30):
-        calls.append(("wait", graph_db_name, timeout_seconds))
+    return FakeDriver()
 
+
+def patch_fake_driver(monkeypatch, calls, closed, edition_rows=None, admin_error=None):
     monkeypatch.setattr(
         Neo4jDatasetDatabaseHandler,
         "_create_neo4j_driver",
-        classmethod(lambda cls, **connection_info: FakeDriver()),
+        classmethod(
+            lambda cls, **connection_info: make_fake_driver(
+                calls, closed, edition_rows=edition_rows, admin_error=admin_error
+            )
+        ),
     )
+
+
+@pytest.mark.asyncio
+async def test_create_neo4j_database_uses_system_database(monkeypatch):
+    configure_neo4j(monkeypatch)
+    calls = []
+    closed = []
+
+    async def fake_wait_for_database_online(cls, driver, graph_db_name, timeout_seconds=30):
+        calls.append(("wait", graph_db_name, timeout_seconds))
+
+    patch_fake_driver(monkeypatch, calls, closed, edition_rows=[{"edition": "enterprise"}])
     monkeypatch.setattr(
         Neo4jDatasetDatabaseHandler,
         "_wait_for_database_online",
@@ -180,6 +217,7 @@ async def test_create_neo4j_database_uses_system_database(monkeypatch):
     )
 
     assert calls == [
+        ("system", NEO4J_EDITION_QUERY, {}),
         (
             "system",
             "CREATE DATABASE cognee12345678123456781234567812345678 IF NOT EXISTS",
@@ -188,6 +226,82 @@ async def test_create_neo4j_database_uses_system_database(monkeypatch):
         ("wait", "cognee12345678123456781234567812345678", 30),
     ]
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_create_neo4j_database_fails_actionably_on_community_edition(monkeypatch):
+    configure_neo4j(monkeypatch)
+    calls = []
+    closed = []
+
+    patch_fake_driver(monkeypatch, calls, closed, edition_rows=[{"edition": "community"}])
+
+    with pytest.raises(Neo4jMultiDatabaseSupportError) as error_info:
+        await Neo4jDatasetDatabaseHandler._create_neo4j_database(
+            "cognee12345678123456781234567812345678"
+        )
+
+    message = error_info.value.message
+    assert "'community' edition" in message
+    assert "Enterprise" in message
+    assert "GRAPH_DATASET_DATABASE_HANDLER=neo4j_community" in message
+    assert "ladybug" in message
+    assert "ENABLE_BACKEND_ACCESS_CONTROL=false" in message
+    # Only the edition probe ran; CREATE DATABASE was never issued.
+    assert calls == [("system", NEO4J_EDITION_QUERY, {})]
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_edition_probe_failure_falls_back_to_create_database_translation(monkeypatch):
+    configure_neo4j(monkeypatch)
+    calls = []
+    closed = []
+    admin_error = FakeNeo4jError("Neo.ClientError.Statement.UnsupportedAdministrationCommand")
+
+    patch_fake_driver(monkeypatch, calls, closed, admin_error=admin_error)
+    monkeypatch.setattr(
+        Neo4jDatasetDatabaseHandler,
+        "_is_neo4j_error",
+        classmethod(lambda cls, error: isinstance(error, FakeNeo4jError)),
+    )
+
+    with pytest.raises(Neo4jMultiDatabaseSupportError) as error_info:
+        await Neo4jDatasetDatabaseHandler._create_neo4j_database(
+            "cognee12345678123456781234567812345678"
+        )
+
+    # The restricted edition probe was skipped; CREATE DATABASE itself was
+    # attempted and its rejection translated to the actionable error.
+    assert error_info.value.__cause__ is admin_error
+    assert "GRAPH_DATASET_DATABASE_HANDLER=neo4j_community" in error_info.value.message
+    assert calls == [
+        ("system", NEO4J_EDITION_QUERY, {}),
+        (
+            "system",
+            "CREATE DATABASE cognee12345678123456781234567812345678 IF NOT EXISTS",
+            {},
+        ),
+    ]
+    assert closed == [True]
+
+
+def test_translate_security_error_to_credentials_error():
+    error = FakeNeo4jError("Neo.ClientError.Security.Forbidden")
+
+    translated = Neo4jDatasetDatabaseHandler._translate_neo4j_admin_error(error)
+
+    assert isinstance(translated, DatabaseCredentialsError)
+    assert "database-management privileges" in translated.message
+    assert "Neo.ClientError.Security.Forbidden" in translated.message
+
+
+def test_translate_unknown_neo4j_error_keeps_generic_environment_error():
+    error = FakeNeo4jError("Neo.TransientError.General.SomethingElse")
+
+    translated = Neo4jDatasetDatabaseHandler._translate_neo4j_admin_error(error)
+
+    assert isinstance(translated, EnvironmentError)
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,11 @@ from cognee.context_global_variables import (
     llm_config as llm_config_ctx,
     current_pipeline_stage,
 )
-from cognee.infrastructure.llm.config import LLMConfig, get_llm_context_config
+from cognee.infrastructure.llm.config import (
+    LLMConfig,
+    LOCAL_DEFAULT_RATE_LIMIT_REQUESTS,
+    get_llm_context_config,
+)
 from cognee.infrastructure.llm.LLMGateway import _record_session_usage_after
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
@@ -122,3 +126,67 @@ def test_pipeline_stage_labels_the_current_stage():
     with pipeline_stage("extraction"):
         assert current_pipeline_stage.get() == "extraction"
     assert current_pipeline_stage.get() is None
+
+
+# ===========================================================================
+# Provider-dependent defaults on a stage-routed config
+# ===========================================================================
+
+
+def _clear_llm_env(monkeypatch):
+    for var in (
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "LLM_RATE_LIMIT_REQUESTS",
+        "LLM_TEMPERATURE",
+        "LLM_ARGS",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_stage_routed_to_a_local_provider_gets_the_local_rate_limit_budget(monkeypatch):
+    """
+    Routing extraction to Ollama while the base stays on a cloud provider is the
+    headline use case for stage routing. The stage config must therefore pick up
+    the local RPM budget: model_copy does not re-run validators, so without the
+    recompute the copy keeps the cloud default of 60 and the limiter would flood
+    a serial local server.
+    """
+    _clear_llm_env(monkeypatch)
+    config = _base_config(
+        llm_extraction_provider="ollama",
+        llm_extraction_model="phi4:latest",
+        llm_extraction_endpoint="http://localhost:11434/v1",
+    )
+
+    assert config.llm_rate_limit_requests == 60  # base is a cloud provider
+
+    stage = config.stage_config("extraction")
+    assert stage.llm_provider == "ollama"
+    assert stage.llm_rate_limit_requests == LOCAL_DEFAULT_RATE_LIMIT_REQUESTS
+
+
+def test_explicit_rate_limit_survives_stage_routing(monkeypatch):
+    """An explicitly configured budget still wins over the local default."""
+    _clear_llm_env(monkeypatch)
+    config = _base_config(
+        llm_rate_limit_requests=90,
+        llm_extraction_provider="ollama",
+        llm_extraction_model="phi4:latest",
+        llm_extraction_endpoint="http://localhost:11434/v1",
+    )
+
+    stage = config.stage_config("extraction")
+    assert stage.llm_rate_limit_requests == 90
+
+
+def test_stage_routing_to_a_cloud_provider_keeps_the_regular_budget(monkeypatch):
+    """The recompute must not hand the local budget to a non-local stage."""
+    _clear_llm_env(monkeypatch)
+    config = _base_config(
+        llm_extraction_provider="anthropic",
+        llm_extraction_model="claude-3-5-sonnet",
+    )
+
+    stage = config.stage_config("extraction")
+    assert stage.llm_rate_limit_requests == 60

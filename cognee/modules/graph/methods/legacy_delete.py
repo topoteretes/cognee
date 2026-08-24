@@ -4,6 +4,7 @@ from cognee.api.v1.exceptions.exceptions import DocumentSubgraphNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models import Data
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
 from cognee.shared.logging_utils import get_logger
@@ -62,6 +63,8 @@ async def legacy_delete(data: Data, mode: str = "soft"):
             await vector_engine.delete_data_points(
                 collection, [str(node_id) for node_id in deleted_node_ids]
             )
+
+    return DeletedGraphElements(node_ids={str(node_id) for node_id in deleted_node_ids})
 
 
 async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):

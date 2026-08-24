@@ -136,7 +136,7 @@ MEMORY_ENTRY_TYPES = (QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry)
 
 
 RecallScope = Literal[
-    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools"
+    "auto", "graph", "session", "trace", "graph_context", "session_context", "all", "tools", "code"
 ]
 
 
@@ -144,6 +144,10 @@ _DEPRECATED_SCOPE_ALIASES = {"graph_context": "graph"}
 # "tools" is explicit opt-in only: it is valid here but deliberately NOT part
 # of the "all" expansion or the "auto" resolution — recall must never reach an
 # external database unless the caller asked for it by name.
+# "code" is likewise opt-in only: it runs a deterministic code-graph query
+# whose seed is the raw query text, which is only useful when the caller knows
+# the prompt names a code identifier — "auto"/"all" must not pay its snapshot
+# cost (or add noise) on ordinary conversational recalls.
 _VALID_SCOPES = {
     "auto",
     "graph",
@@ -153,6 +157,7 @@ _VALID_SCOPES = {
     "session_context",
     "all",
     "tools",
+    "code",
 }
 
 

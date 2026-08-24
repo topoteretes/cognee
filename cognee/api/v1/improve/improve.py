@@ -229,6 +229,18 @@ async def improve(
                     if distilled:
                         stages_run.append("distill_sessions")
 
+                    # Stage 2c2: fold rated turns and stated preferences into the
+                    # calling user's preference subgraph (weighted `prefers` edges
+                    # plus the preference node's text). One call for all sessions —
+                    # preferences aggregate across a user's sessions.
+                    preference_result = await _update_user_preferences(
+                        dataset=write_dataset_ref,
+                        session_ids=session_ids,
+                        user=user,
+                    )
+                    if preference_result is not None and preference_result.status == "completed":
+                        stages_run.append("user_preferences")
+
                     # Stage 2d: build the truth subspace from distilled session
                     # learnings (opt-in, default OFF). Runs after distillation so
                     # freshly accepted lessons are available as anchors, and before
@@ -453,6 +465,50 @@ async def _distill_sessions(
                 e,
             )
     return distilled
+
+
+async def _update_user_preferences(
+    dataset: Union[str, UUID],
+    session_ids: List[str],
+    user,
+):
+    """Update the caller's per-dataset preference node and ``prefers`` weights.
+
+    Delegates to ``user_preferences.update_user_preferences`` once for all
+    sessions: rated turns move that user's ``prefers`` edge weights (exactly
+    once per turn), idle edges decay against the per-turn clock and are pruned
+    at neutral, and gated ``preferences`` session-context entries are folded
+    into the preference node's text behind a watermark.
+
+    Best-effort and fail-open like its neighbours: an error here never blocks
+    the rest of ``improve()``. Returns the ``PreferenceUpdateResult`` (or None
+    on error) so the caller can decide whether the stage actually changed
+    anything.
+    """
+    try:
+        from cognee.modules.user_preferences.update import update_user_preferences
+
+        result = await update_user_preferences(
+            session_ids=session_ids,
+            dataset=dataset,
+            user=user,
+        )
+        if result.status == "personalization_disabled":
+            logger.debug("improve: user preference stage skipped (PERSONALIZATION_ENABLED is off)")
+            return result
+        logger.info(
+            "improve: user preferences updated -> status=%s turns=%d edges=%d "
+            "pruned=%d text_lines=%d",
+            result.status,
+            result.turns_applied,
+            result.edges_written,
+            result.edges_pruned,
+            result.text_lines_added,
+        )
+        return result
+    except Exception as e:
+        logger.warning("improve: user preference update failed (non-fatal): %s", e)
+        return None
 
 
 async def _persist_session_traces(

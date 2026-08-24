@@ -29,7 +29,9 @@ from cognee.modules.observability import (
 from cognee.modules.recall.types.RecallResponse import (
     RecallResponse,
     ResponseAgentTraceEntry,
+    ResponseCodeEntry,
     ResponseGraphEntry,
+    ResponseMarkerEntry,
     ResponseQAEntry,
     ResponseSessionContextEntry,
     ResponseToolEntry,
@@ -345,11 +347,14 @@ async def recall(
     system_prompt_path: str = "answer_simple_question.txt",
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
+    # only_context / verbose inspect retriever-specific shapes. Pin query_type:
+    # unspecified hybrid may defer to GRAPH_COMPLETION, and search history
+    # still records the type recall chose, not the deferred one.
     only_context: bool = False,
     session_id: str | None = None,
     context_profile: str = "qa",
-    wide_search_top_k: int | None = 100,
-    triplet_distance_penalty: float | None = 6.5,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
     retriever_specific_config: dict | None = None,
@@ -359,6 +364,7 @@ async def recall(
     include_references: bool = False,
     tool_connections: list[str] | None = None,
     tools_trigger: str = "always",
+    code_query: dict | None = None,
     user: object | None = None,
     llm_config: LLMConfig | None = None,
     embedding_config: EmbeddingConfig | None = None,
@@ -377,7 +383,7 @@ async def recall(
     When ``query_type`` is omitted and ``auto_route`` is True (default),
     a lightweight rule-based classifier picks the best search strategy.
     Set ``auto_route=False`` to skip the classifier and use
-    GRAPH_COMPLETION as the default, or pass ``query_type`` explicitly.
+    HYBRID_COMPLETION as the default, or pass ``query_type`` explicitly.
 
     Args:
         query_text: Natural-language query.
@@ -406,6 +412,14 @@ async def recall(
             (default) or ``"on_empty"`` — go back to the original data source
             only when every other requested source returned nothing, i.e. when
             cognee lacks the context to answer.
+        code_query: Structured operation and arguments for the ``"code"``
+            scope (same dict format as ``search(code_query=...)``, e.g.
+            ``{"operation": "impact_analysis", "seeds": ["UserService"]}``).
+            ``None`` runs the default ``explore`` operation with the query
+            text as seed. Only valid when ``scope`` includes ``"code"``
+            (which is never implied by ``"auto"`` or ``"all"``); results are
+            tagged ``_source="code"``. A seed the code graph cannot resolve
+            contributes nothing rather than failing the recall.
 
     Returns:
         Search results. When searching session-only, returns a list of
@@ -464,6 +478,14 @@ async def recall(
         raise CogneeValidationError(
             message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
             name="InvalidToolsTriggerError",
+        )
+    if code_query is not None and "code" not in sources:
+        raise CogneeValidationError(
+            message=(
+                "code_query requires the 'code' scope — pass scope=['code'] or "
+                "scope=['graph', 'code'] ('code' is never implied by 'auto' or 'all')."
+            ),
+            name="InvalidCodeQueryError",
         )
     # "on_empty" means: go back to the source database only when cognee lacks
     # context — so tools must observe every other source's results first.
@@ -528,6 +550,7 @@ async def recall(
                 ),
                 tool_connections=tool_connections,
                 tools_trigger=tools_trigger,
+                code_query=code_query,
             )
             span.set_attribute(COGNEE_RECALL_SOURCE, "cloud")
             span.set_attribute(COGNEE_RESULT_COUNT, len(results) if results else 0)
@@ -615,7 +638,7 @@ async def recall(
                     result = route_query(query_text)
                     local_query_type = result.search_type
                 else:
-                    local_query_type = SearchType.GRAPH_COMPLETION
+                    local_query_type = SearchType.HYBRID_COMPLETION
 
                 span.set_attribute(
                     COGNEE_SEARCH_TYPE,
@@ -634,6 +657,86 @@ async def recall(
                     ]
                     if not search_dataset_ids:
                         raise DatasetNotFoundError(message="No datasets found.")
+
+                from cognee.modules.recall.config import get_recall_config
+
+                # Warm-up short-circuit. Config errors fail open (skip the
+                # guard) so a malformed RECALL_WARMUP_* value can never take
+                # recall down; only_context callers skip it too because they
+                # expect context, not a marker.
+                recall_config = None
+                try:
+                    recall_config = get_recall_config()
+                except Exception as error:
+                    logger.warning(
+                        "Recall warm-up config failed to load; skipping guard: %s", error
+                    )
+                guard_active = (
+                    recall_config is not None
+                    and recall_config.recall_warmup_shortcircuit
+                    and not only_context
+                )
+                probe_dataset_ids = search_dataset_ids
+                if guard_active and dataset_ids:
+                    from cognee.modules.users.exceptions import PermissionDeniedError
+                    from cognee.modules.users.permissions.methods import (
+                        get_specific_user_permission_datasets,
+                    )
+
+                    # Authorize caller-supplied dataset ids *before* probing —
+                    # the same check authorized_search performs — so the guard
+                    # can neither leak other tenants' processing state nor
+                    # mask the PermissionDeniedError authorized_search would
+                    # raise for unpermitted or nonexistent ids. Infrastructure
+                    # errors fail open (skip the guard): authorized_search
+                    # then performs the authoritative check as before.
+                    try:
+                        probe_dataset_ids = [
+                            dataset.id
+                            for dataset in await get_specific_user_permission_datasets(
+                                user.id, "read", dataset_ids
+                            )
+                        ]
+                    except PermissionDeniedError:
+                        raise
+                    except Exception as error:
+                        logger.warning(
+                            "Recall warm-up pre-probe authorization failed; skipping guard: %s",
+                            error,
+                        )
+                        guard_active = False
+
+                if guard_active:
+                    from cognee.modules.recall.methods.graph_warmup import is_memory_warm
+
+                    warm, datapoint_count = await is_memory_warm(user, probe_dataset_ids)
+                    if not warm:
+                        logger.info(
+                            "Recall warm-up short-circuit: graph has %d datapoints "
+                            "(threshold %d); skipping search.",
+                            datapoint_count,
+                            recall_config.recall_warmup_threshold,
+                        )
+                        span.set_attribute("cognee.recall.warmup_shortcircuit", True)
+                        if sources != ["graph"]:
+                            # Multi-source recall: a cold graph contributes
+                            # nothing, so other lanes — and the tools
+                            # "on_empty" fallback, which fires only when the
+                            # merged result is empty — behave exactly as if
+                            # the graph lane returned no results.
+                            return []
+                        return [
+                            ResponseMarkerEntry(
+                                source="system",
+                                status="memory_warming_up",
+                                text=(
+                                    "Memory is still warming up: no knowledge graph data "
+                                    "exists yet for the requested datasets."
+                                ),
+                                datapoint_count=datapoint_count,
+                                threshold=recall_config.recall_warmup_threshold,
+                            )
+                        ]
 
                 graph_results = await authorized_search(
                     query_text=query_text,
@@ -733,12 +836,77 @@ async def recall(
                     )
                 return entries
 
+            async def _run_code() -> list[RecallResponse]:
+                nonlocal user
+
+                from cognee.modules.recall.methods.normalize_search_payload import (
+                    normalize_search_payload,
+                )
+                from cognee.modules.retrieval.code_retriever import CodeSeedNotFoundError
+                from cognee.modules.search.methods.search import authorized_search
+
+                if user is None:
+                    try:
+                        user = await get_default_user()
+                    except (DatabaseNotCreatedError, UserNotFoundError) as error:
+                        raise CogneeValidationError(
+                            message=(
+                                "Recall prerequisites not met: no database/default user found. "
+                                "Initialize Cognee before recalling by:\n"
+                                "- running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                            ),
+                            name="RecallPreconditionError",
+                        ) from error
+
+                # Dataset UUIDs take precedence over names, matching the graph lane.
+                search_dataset_ids = dataset_ids or None
+                if search_dataset_ids is None and datasets is not None:
+                    search_dataset_ids = [
+                        dataset.id
+                        for dataset in await get_authorized_existing_datasets(
+                            datasets, "read", user
+                        )
+                    ]
+                    if not search_dataset_ids:
+                        raise DatasetNotFoundError(message="No datasets found.")
+
+                try:
+                    code_results = await authorized_search(
+                        query_text=query_text,
+                        query_type=SearchType.CODE,
+                        user=user,
+                        dataset_ids=search_dataset_ids,
+                        top_k=top_k,
+                        retriever_specific_config=code_query,
+                    )
+                except CodeSeedNotFoundError:
+                    # A seed the code graph cannot resolve means "no code facts
+                    # for this prompt", not an error — the lane contributes
+                    # nothing, like an empty session lane. Invalid operations or
+                    # arguments still raise: those are caller bugs.
+                    return []
+
+                tagged: list[RecallResponse] = []
+                for payload in code_results:
+                    completion = getattr(payload, "completion", None)
+                    if isinstance(completion, dict) and completion.get("seed_not_found"):
+                        # Multi-dataset searches soften per-dataset seed misses
+                        # into marker payloads; they carry no facts, so drop
+                        # them here for the same reason as the except above.
+                        continue
+                    items: list[SearchResultItem] = normalize_search_payload(payload)
+                    tagged.extend(
+                        ResponseCodeEntry(**item.model_dump(), source="code") for item in items
+                    )
+                return tagged
+
             runners = {
                 "session": _run_session,
                 "trace": _run_trace,
                 "session_context": _run_session_context,
                 "graph": _run_graph,
                 "tools": _run_tools,
+                "code": _run_code,
             }
 
             session_result_count = 0
