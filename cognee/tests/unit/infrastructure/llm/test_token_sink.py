@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
     get_active_token_sink,
@@ -42,8 +43,12 @@ def _flag(enabled: bool, adapter_streams: bool = True):
             "cognee.infrastructure.llm.config.get_llm_context_config",
             return_value=SimpleNamespace(llm_answer_streaming=enabled),
         ),
-        patch(
-            "cognee.infrastructure.llm.LLMGateway.LLMGateway.supports_answer_streaming",
+        # patch.object, not a string target: the LLMGateway class shadows its
+        # module in the package namespace, and Python 3.10's mock resolves
+        # string targets attribute-first — onto the class instead of the module.
+        patch.object(
+            LLMGateway,
+            "supports_answer_streaming",
             return_value=adapter_streams,
         ),
     ):

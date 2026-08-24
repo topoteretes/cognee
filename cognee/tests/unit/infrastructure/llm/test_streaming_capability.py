@@ -7,6 +7,7 @@ implemented in an adapter no default deployment ever reaches, which no test
 noticed because every test constructed that adapter directly.
 """
 
+import importlib
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -32,7 +33,11 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_native.native
     NativeLiteLLMAdapter,
 )
 
-GATEWAY = "cognee.infrastructure.llm.LLMGateway"
+# The LLMGateway *class* shadows the LLMGateway *module* in the package
+# namespace (cognee/infrastructure/llm/__init__.py re-exports it). String
+# patch targets resolve attribute-first on Python 3.10 and land on the class,
+# so resolve the module explicitly and patch its globals by object.
+_gateway_module = importlib.import_module("cognee.infrastructure.llm.LLMGateway")
 
 
 @pytest.mark.parametrize(
@@ -61,8 +66,9 @@ def test_non_streaming_adapters_declare_no_support(adapter_class):
 
 
 def _config(framework: str):
-    return patch(
-        f"{GATEWAY}.get_llm_config",
+    return patch.object(
+        _gateway_module,
+        "get_llm_config",
         return_value=SimpleNamespace(structured_output_framework=framework),
     )
 
