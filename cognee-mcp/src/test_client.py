@@ -3,6 +3,7 @@
 
 import asyncio
 import os
+import sys
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
@@ -38,8 +39,14 @@ class CogneeTestClient:
     async def mcp_server_session(self):
         """Start the MCP server over stdio and yield an initialized client session."""
         server_script = os.path.join(os.path.dirname(__file__), "server.py")
+        # sys.executable, not a bare "python": the repo root has its own .venv
+        # alongside cognee-mcp/.venv, so a bare name resolves through PATH to
+        # whichever env happens to be activated. Running the server on a
+        # different interpreter than the client loads a different cognee, and
+        # the failure surfaces as an opaque alembic "unable to open database
+        # file" rather than anything pointing at the interpreter.
         server_params = StdioServerParameters(
-            command="python",
+            command=sys.executable,
             args=[server_script, "--transport", "stdio"],
             env=os.environ.copy(),
         )
