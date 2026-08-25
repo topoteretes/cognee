@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -357,7 +358,7 @@ async def test_generate_type_description_single_call_under_threshold():
         describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
     ):
         result = await describe_types.generate_type_description(
-            entity_type, members, "system", "merge-system", "is-a-system"
+            entity_type, members, "system", "merge-system", "is-a-system", asyncio.Semaphore(10)
         )
 
     assert result.description == "This graph has 3 Person entities."
@@ -398,13 +399,58 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
         describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
     ):
         result = await describe_types.generate_type_description(
-            entity_type, members, "batch-system", "merge-system", "is-a-system"
+            entity_type,
+            members,
+            "batch-system",
+            "merge-system",
+            "is-a-system",
+            asyncio.Semaphore(10),
         )
 
     assert result.description == "FINAL MERGED"
     assert len(batch_calls) == 3
     assert len(is_a_calls) == 3
     assert len(result.is_a_texts) == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_type_description_bounds_concurrency_across_batches():
+    # Regression test: a type with more batches than the semaphore allows used
+    # to fire every batch (and later every is_a call) in one unbounded
+    # asyncio.gather, since the semaphore only wrapped process_group - the
+    # whole type, not the individual LLM calls inside it.
+    entity_type = EntityType(name="Person", description="Person")
+    total = describe_types.MAX_MEMBERS_PER_TYPE_PROMPT * 6  # -> 6 batches
+    members = [Entity(name=f"E{i}", description=f"d{i}") for i in range(total)]
+    small_cap = 2
+    semaphore = asyncio.Semaphore(small_cap)
+
+    concurrent = 0
+    max_concurrent = 0
+    lock = asyncio.Lock()
+
+    async def fake_llm(*, text_input, system_prompt, response_model):
+        nonlocal concurrent, max_concurrent
+        async with lock:
+            concurrent += 1
+            max_concurrent = max(max_concurrent, concurrent)
+        await asyncio.sleep(0.01)
+        async with lock:
+            concurrent -= 1
+        if system_prompt == "merge-system":
+            return NodeDescription(description="FINAL MERGED")
+        if system_prompt == "is-a-system":
+            return EntityIsATexts(is_a_texts=[])
+        return NodeDescription(description="partial")
+
+    with patch.object(
+        describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+    ):
+        await describe_types.generate_type_description(
+            entity_type, members, "batch-system", "merge-system", "is-a-system", semaphore
+        )
+
+    assert max_concurrent <= small_cap
 
 
 def test_apply_type_description_shares_one_instance_and_preserves_other_fields():
@@ -423,7 +469,7 @@ def test_apply_type_description_shares_one_instance_and_preserves_other_fields()
     assert anna.is_a is updated
 
 
-def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches():
+def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches(caplog):
     entity_type = EntityType(name="Person", description="Person")
     marco = Entity(name="Marco", is_a=entity_type, description="d1")
     anna = Entity(name="Anna", is_a=entity_type, description="d2")
@@ -431,21 +477,44 @@ def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches():
         MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: the outlier."),
     ]
 
-    describe_types.apply_type_description(
-        entity_type, [marco, anna], "New aggregate description", is_a_texts
-    )
+    with caplog.at_level(logging.WARNING):
+        describe_types.apply_type_description(
+            entity_type, [marco, anna], "New aggregate description", is_a_texts
+        )
 
     marco_edge, marco_type = marco.is_a
     assert marco_edge.relationship_type == "is_a"
     assert marco_edge.edge_text == "Marco is a Person: the outlier."
     assert marco_type.description == "New aggregate description"
 
-    # Anna has no matching text -> falls back to the bare EntityType, no crash.
+    # Anna has no matching text -> falls back to the bare EntityType, no crash -
+    # but the miss must not pass silently: it's counted and logged.
     assert not isinstance(anna.is_a, tuple)
     assert anna.is_a.description == "New aggregate description"
 
     # Both forms still point at the same shared EntityType instance.
     assert marco_type is anna.is_a
+
+    miss_logs = [r for r in caplog.records if "got no is_a line" in r.message]
+    assert len(miss_logs) == 1
+    assert "1 of 2 members" in miss_logs[0].message
+
+
+def test_apply_type_description_logs_nothing_when_every_member_matches(caplog):
+    entity_type = EntityType(name="Person", description="Person")
+    marco = Entity(name="Marco", is_a=entity_type, description="d1")
+    anna = Entity(name="Anna", is_a=entity_type, description="d2")
+    is_a_texts = [
+        MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: the outlier."),
+        MemberIsAText(member_name="Anna", is_a_text="Anna is a Person: the other one."),
+    ]
+
+    with caplog.at_level(logging.WARNING):
+        describe_types.apply_type_description(
+            entity_type, [marco, anna], "New aggregate description", is_a_texts
+        )
+
+    assert not any("got no is_a line" in r.message for r in caplog.records)
 
 
 def test_apply_type_description_updates_one_relations_slot_without_touching_the_other():

@@ -6,8 +6,11 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
+from cognee.shared.logging_utils import get_logger
 
 from .models import EntityIsATexts, EntityTypeDescription, MemberIsAText, NodeDescription
+
+logger = get_logger("consolidate_entity_descriptions")
 
 type_prompt_name = "consolidate_entity_type_details.txt"
 type_merge_prompt_name = "consolidate_entity_type_merge.txt"
@@ -170,6 +173,7 @@ async def generate_type_description(
     system_prompt: str,
     merge_system_prompt: str,
     is_a_system_prompt: str,
+    semaphore: asyncio.Semaphore,
 ) -> EntityTypeDescription:
     """Summarize a type's members, batching and merging the description when
     there are too many for a single prompt. Callers always pass the type's
@@ -186,46 +190,54 @@ async def generate_type_description(
     packages") could be true for that batch and false once every member is
     considered - another reason is_a lines must wait for the final,
     already-merged description before being generated.
+
+    ``semaphore`` bounds every individual LLM call this function makes, not
+    just how many types are processed at once - a type with many batches
+    would otherwise fire all of them (and later all of its is_a calls) in one
+    unbounded asyncio.gather, regardless of how many types are running
+    concurrently.
     """
     total_member_count = len(members)
     batches = batch_members(members, MAX_MEMBERS_PER_TYPE_PROMPT)
 
+    async def limited_type_call(batch: List[Entity]):
+        async with semaphore:
+            return await query_type_LLM(
+                build_entity_type_prompt(
+                    entity_type.name, entity_type.description, batch, total_member_count
+                ),
+                system_prompt,
+            )
+
     if len(batches) == 1:
-        text = build_entity_type_prompt(
-            entity_type.name, entity_type.description, members, total_member_count
-        )
-        result = await query_type_LLM(text, system_prompt)
+        async with semaphore:
+            result = await query_type_LLM(
+                build_entity_type_prompt(
+                    entity_type.name, entity_type.description, members, total_member_count
+                ),
+                system_prompt,
+            )
         final_description = result.description
     else:
-        partial_results = await asyncio.gather(
-            *(
-                query_type_LLM(
-                    build_entity_type_prompt(
-                        entity_type.name, entity_type.description, batch, total_member_count
-                    ),
-                    system_prompt,
-                )
-                for batch in batches
-            )
-        )
+        partial_results = await asyncio.gather(*(limited_type_call(batch) for batch in batches))
         partial_descriptions = [result.description for result in partial_results]
         merge_text = build_type_merge_prompt(
             entity_type.name, total_member_count, partial_descriptions
         )
-        merged = await query_type_merge_LLM(merge_text, merge_system_prompt)
+        async with semaphore:
+            merged = await query_type_merge_LLM(merge_text, merge_system_prompt)
         final_description = merged.description
 
-    is_a_results = await asyncio.gather(
-        *(
-            query_is_a_only_LLM(
+    async def limited_is_a_call(batch: List[Entity]):
+        async with semaphore:
+            return await query_is_a_only_LLM(
                 build_is_a_only_prompt(
                     entity_type.name, final_description, batch, total_member_count
                 ),
                 is_a_system_prompt,
             )
-            for batch in batches
-        )
-    )
+
+    is_a_results = await asyncio.gather(*(limited_is_a_call(batch) for batch in batches))
     is_a_texts = [text for result in is_a_results for text in result.is_a_texts]
 
     return EntityTypeDescription(description=final_description, is_a_texts=is_a_texts)
@@ -250,6 +262,10 @@ def apply_type_description(
     so the text is searchable on the edge. A member with no matching text
     (name mismatch, or none produced) falls back to the bare EntityType rather
     than raising - the entity is still rewritten, just without edge_text.
+    Misses are counted and logged once per type (not raised) so a mismatch is
+    visible instead of silently indistinguishable from a full match - the
+    graph stays populated either way via prepare_edges_for_storage's generic
+    edge_text fallback, so nothing else would ever surface it.
 
     A member with more than one type appears here once per type it belongs to
     (once per call to this function, across different groups - see
@@ -260,9 +276,12 @@ def apply_type_description(
     """
     updated_entity_type = entity_type.model_copy(update={"description": new_description})
     is_a_text_by_name = {item.member_name: item.is_a_text for item in (is_a_texts or [])}
+    missed_count = 0
 
     for member in members:
         is_a_text = is_a_text_by_name.get(member.name)
+        if not is_a_text:
+            missed_count += 1
 
         primary_type = _entity_type_of(member.is_a)
         if primary_type is not None and primary_type.id == entity_type.id:
@@ -289,6 +308,14 @@ def apply_type_description(
                 )
                 break
 
+    if missed_count > 0:
+        logger.warning(
+            "apply_type_description: %d of %d members for %r got no is_a line",
+            missed_count,
+            len(members),
+            entity_type.name,
+        )
+
     return updated_entity_type
 
 
@@ -306,13 +333,17 @@ async def generate_type_descriptions(entities: List[Entity]) -> List[Entity]:
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TYPE_LLM_CALLS)
 
     async def process_group(group: Dict[str, Any]) -> None:
-        async with semaphore:
-            entity_type = group["entity_type"]
-            members = group["members"]
-            result = await generate_type_description(
-                entity_type, members, system_prompt, merge_system_prompt, is_a_system_prompt
-            )
-            apply_type_description(entity_type, members, result.description, result.is_a_texts)
+        entity_type = group["entity_type"]
+        members = group["members"]
+        result = await generate_type_description(
+            entity_type,
+            members,
+            system_prompt,
+            merge_system_prompt,
+            is_a_system_prompt,
+            semaphore,
+        )
+        apply_type_description(entity_type, members, result.description, result.is_a_texts)
 
     await asyncio.gather(*(process_group(group) for group in groups.values()))
 
