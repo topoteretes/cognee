@@ -11,17 +11,15 @@ name: automation | Router Docstring Sync
 # the describe job asks Claude to write descriptions for any parameters the
 # mechanical fix could not source wording for
 # (tools/describe_router_params.py), committing them to the same PR.
+#
+# When the mechanical fix produces content identical to what is already on
+# the fix branch (tracked via the Sync-Content-Hash commit trailer), the
+# push, the Claude call, and the PR update are all skipped — so repeated
+# dev pushes with unchanged drift cost nothing and never clobber
+# previously generated descriptions.
 
 on:
   workflow_dispatch:
-  # Runs on PRs that change the sync machinery itself, so its behavior can
-  # be observed before merge. The job always checks out and fixes dev.
-  pull_request:
-    paths:
-      - "tools/check_router_docstrings.py"
-      - "tools/fix_router_docstrings.py"
-      - "tools/describe_router_params.py"
-      - ".github/workflows/router_docstring_sync.yml"
   # Weekly backstop sweep (runs from the default branch, fixes dev).
   schedule:
     - cron: "0 6 * * 1"
@@ -44,9 +42,11 @@ permissions:
   contents: write
   pull-requests: write
 
+# Queue rather than cancel: a run cancelled between the branch push and the
+# PR update would leave the fix PR half-refreshed.
 concurrency:
   group: router-docstring-sync
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   sync-docstrings:
@@ -57,19 +57,23 @@ jobs:
       changes_made: ${{ steps.commit.outputs.changes_made }}
 
     steps:
-      # The tree being fixed is always dev; the sync machinery (checker,
-      # fixer) is taken from the triggering ref via a second checkout, so a
-      # PR changing the machinery exercises its own version before merge.
+      # The tree being fixed is always dev; the machinery (checker, fixer)
+      # comes from the triggering ref — dev itself on push runs, the default
+      # branch on schedule/dispatch runs. Credentials are never persisted
+      # into the checkouts: this job imports the full cognee app (and its
+      # dependency tree), and nothing that runs there should be able to read
+      # a token off disk. The push/PR steps receive the PAT explicitly.
       - name: Check out dev
         uses: actions/checkout@v6
         with:
           ref: dev
-          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          persist-credentials: false
 
       - name: Check out sync machinery from the triggering ref
         uses: actions/checkout@v6
         with:
           path: automation-src
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -109,6 +113,8 @@ jobs:
       - name: Commit and push fix branch
         id: commit
         if: ${{ steps.check.outputs.drift == 'true' }}
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
           BRANCH_NAME="automation/fix-router-docstrings"
           git config user.name "github-actions[bot]"
@@ -119,8 +125,32 @@ jobs:
             echo "changes_made=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git commit -m "docs: Sync router docstrings with handlers (RES-14)"
-          git push --force origin "${BRANCH_NAME}"
+
+          # Skip the push — and everything downstream (Claude call, PR
+          # update, CI on the fix PR) — when the mechanical fix produced
+          # exactly the content already on the remote fix branch. The
+          # cognee/ subtree hash of each sync commit is recorded as a
+          # Sync-Content-Hash trailer; the describe job commits on top
+          # without changing it, so its generated descriptions survive
+          # every no-change rerun.
+          CONTENT_HASH=$(git rev-parse "$(git write-tree):cognee")
+          PREVIOUS_HASH=""
+          if git fetch origin "${BRANCH_NAME}" 2>/dev/null; then
+            PREVIOUS_HASH=$(git log FETCH_HEAD -n 5 --format=%B \
+              | sed -n 's/^Sync-Content-Hash: //p' | head -1)
+          fi
+          if [ -n "${PREVIOUS_HASH}" ] && [ "${CONTENT_HASH}" = "${PREVIOUS_HASH}" ]; then
+            echo "Fix branch already carries this content (${CONTENT_HASH}) — skipping push."
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit \
+            -m "docs: Sync router docstrings with handlers (RES-14)" \
+            -m "Sync-Content-Hash: ${CONTENT_HASH}"
+          git push --force \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "${BRANCH_NAME}"
           echo "changes_made=true" >> "$GITHUB_OUTPUT"
           echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
 
@@ -136,9 +166,9 @@ jobs:
             echo
             echo "The docstring checker found handlers whose documented parameters"
             echo "no longer match their signatures. The fixes below were generated"
-            echo "from the handlers' own FastAPI/Pydantic metadata — review the"
-            echo "wording, especially bullets marked 'No description provided in"
-            echo "code yet', before merging."
+            echo "from the handlers' own FastAPI/Pydantic metadata; a follow-up"
+            echo "commit fills the remaining descriptions with Claude. Review the"
+            echo "wording before merging."
             echo
             echo '```'
             cat docstring_report.txt
@@ -177,41 +207,65 @@ jobs:
     if: ${{ needs.sync-docstrings.outputs.changes_made == 'true' || github.event_name == 'workflow_dispatch' }}
 
     steps:
-      # The tree being edited is the fix branch the sync job just pushed; the
-      # machinery is taken from the triggering ref via a second checkout, so
-      # a PR changing it exercises its own version before merge.
+      # Dispatch runs may fire when no fix branch exists — degrade to a
+      # no-op instead of failing at checkout.
+      - name: Check the fix branch exists
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/branches/automation/fix-router-docstrings" \
+              --silent 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Fix branch does not exist — nothing to describe."
+          fi
+
       - name: Check out the fix branch
+        if: ${{ steps.branch.outputs.exists == 'true' }}
         uses: actions/checkout@v6
         with:
           ref: automation/fix-router-docstrings
-          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          persist-credentials: false
 
       - name: Check out describe machinery from the triggering ref
+        if: ${{ steps.branch.outputs.exists == 'true' }}
         uses: actions/checkout@v6
         with:
           path: automation-src
+          persist-credentials: false
 
       - name: Install uv
+        if: ${{ steps.branch.outputs.exists == 'true' }}
         uses: astral-sh/setup-uv@v7
 
       # The script works on text and AST only — no cognee environment needed,
-      # just the anthropic SDK in an ephemeral interpreter.
+      # just the anthropic SDK in an ephemeral interpreter. Versions pinned:
+      # the script uses beta API surface, and ruff must match the repo's
+      # pre-commit pin so the bot never fights the formatter.
       - name: Generate descriptions
+        if: ${{ steps.branch.outputs.exists == 'true' }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          uv run --no-project --with anthropic \
+          uv run --no-project --with 'anthropic>=0.75,<1' \
             python automation-src/tools/describe_router_params.py
 
       - name: Commit and push
+        if: ${{ steps.branch.outputs.exists == 'true' }}
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
-          if git diff --quiet -- cognee; then
+          uvx ruff@0.15.11 format cognee/api
+          git add cognee
+          if git diff --cached --quiet; then
             echo "No description changes to commit."
             exit 0
           fi
-          uvx ruff format cognee/api
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add cognee
           git commit -m "docs: Generate parameter descriptions with Claude (RES-14)"
-          git push origin HEAD:automation/fix-router-docstrings
+          git push \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            HEAD:automation/fix-router-docstrings
