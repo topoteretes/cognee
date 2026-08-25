@@ -114,6 +114,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.migrate_command", "StampCommand"),
         ("cognee.cli.commands.push_command", "PushCommand"),
         ("cognee.cli.commands.report_command", "ReportCommand"),
+        ("cognee.cli.commands.doctor_command", "DoctorCommand"),
     ]
 
     for module_path, class_name in command_modules:
@@ -241,6 +242,12 @@ def _silence_teardown_warnings() -> None:
 
 def main() -> int:
     """Main CLI entry point"""
+    # Operations run from this process record origin="cli" in pipeline_runs.
+    # ContextVars set here propagate into every asyncio.run() a command makes.
+    from cognee.modules.operations import ORIGIN_CLI, set_operation_origin
+
+    set_operation_origin(ORIGIN_CLI)
+
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
 

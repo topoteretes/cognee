@@ -8,8 +8,10 @@ from cognee.modules.graph.exceptions import (
     InvalidDimensionsError,
 )
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.engine import is_internal_node
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.modules.user_preferences.weights import personal_factor
 from cognee.base_config import get_base_config
 import heapq
 
@@ -30,6 +32,7 @@ class CogneeGraph(CogneeAbstractGraph):
     directed: bool
     triplet_distance_penalty: float
     feedback_influence: float
+    personal_influence: float
 
     def __init__(self, directed: bool = True):
         self.nodes = {}
@@ -38,6 +41,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.directed = directed
         self.triplet_distance_penalty = 6.5
         self.feedback_influence = get_base_config().default_feedback_influence
+        self.personal_influence = get_base_config().personalization_influence
 
     def add_node(self, node: Node) -> None:
         if node.id in self.nodes:
@@ -177,6 +181,8 @@ class CogneeGraph(CogneeAbstractGraph):
         start_time = time.time()
         # Process nodes
         for node_id, properties in nodes_data:
+            if is_internal_node(properties):
+                continue
             node_attributes = {key: properties.get(key) for key in node_properties_to_project}
             self.add_node(
                 Node(
@@ -255,54 +261,17 @@ class CogneeGraph(CogneeAbstractGraph):
                     adapter, memory_fragment_filter
                 )
 
-            self.triplet_distance_penalty = triplet_distance_penalty
             self.feedback_influence = feedback_influence
 
-            start_time = time.time()
-            # Process nodes
-            for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(
-                    Node(
-                        str(node_id),
-                        node_attributes,
-                        dimension=node_dimension,
-                        node_penalty=triplet_distance_penalty,
-                    )
-                )
-
-            # Process edges
-            for source_id, target_id, relationship_type, properties in edges_data:
-                source_node = self.get_node(str(source_id))
-                target_node = self.get_node(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = {
-                        key: properties.get(key) for key in edge_properties_to_project
-                    }
-                    edge_attributes["relationship_type"] = relationship_type
-
-                    edge = Edge(
-                        source_node,
-                        target_node,
-                        attributes=edge_attributes,
-                        directed=directed,
-                        dimension=edge_dimension,
-                        edge_penalty=triplet_distance_penalty,
-                    )
-                    self.add_edge(edge)
-                else:
-                    # See note at first call-site above and issue #2897.
-                    logger.debug(
-                        "Skipping edge with unprojectable endpoints: %s -> %s",
-                        source_id,
-                        target_id,
-                    )
-                    continue
-
-            # Final statistics
-            projection_time = time.time() - start_time
-            logger.info(
-                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
+            self._process_nodes_and_edges(
+                nodes_data,
+                edges_data,
+                node_properties_to_project,
+                edge_properties_to_project,
+                directed,
+                node_dimension,
+                edge_dimension,
+                triplet_distance_penalty,
             )
 
         except EntityNotFoundError:
@@ -349,53 +318,17 @@ class CogneeGraph(CogneeAbstractGraph):
                 raise EntityNotFoundError(message="Empty neighborhood projected from the database.")
             edges_data = edges_data or []
 
-            self.triplet_distance_penalty = triplet_distance_penalty
             self.feedback_influence = feedback_influence
 
-            start_time = time.time()
-            # Process nodes
-            for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(
-                    Node(
-                        str(node_id),
-                        node_attributes,
-                        dimension=node_dimension,
-                        node_penalty=triplet_distance_penalty,
-                    )
-                )
-
-            # Process edges
-            for source_id, target_id, relationship_type, properties in edges_data:
-                source_node = self.get_node(str(source_id))
-                target_node = self.get_node(str(target_id))
-                if source_node and target_node:
-                    edge_attributes = {
-                        key: properties.get(key) for key in edge_properties_to_project
-                    }
-                    edge_attributes["relationship_type"] = relationship_type
-
-                    edge = Edge(
-                        source_node,
-                        target_node,
-                        attributes=edge_attributes,
-                        directed=directed,
-                        dimension=edge_dimension,
-                        edge_penalty=triplet_distance_penalty,
-                    )
-                    self.add_edge(edge)
-                else:
-                    # See note at first call-site above and issue #2897.
-                    logger.debug(
-                        "Skipping edge with unprojectable endpoints: %s -> %s",
-                        source_id,
-                        target_id,
-                    )
-                    continue
-
-            projection_time = time.time() - start_time
-            logger.info(
-                f"Graph projection completed: {len(self.nodes)} nodes, {len(self.edges)} edges in {projection_time:.2f}s"
+            self._process_nodes_and_edges(
+                nodes_data,
+                edges_data,
+                node_properties_to_project,
+                edge_properties_to_project,
+                directed,
+                node_dimension,
+                edge_dimension,
+                triplet_distance_penalty,
             )
 
         except Exception:
@@ -467,6 +400,20 @@ class CogneeGraph(CogneeAbstractGraph):
                         default_penalty=self.triplet_distance_penalty,
                     )
 
+    def apply_personal_weights(self, weights: Dict[str, float]) -> None:
+        """Set ``personal_weight`` on nodes matched by id; unknown ids are ignored.
+
+        Called after projection and distance mapping. The weight lands in its
+        own attribute rather than ``feedback_weight`` so the personal and
+        global signals stay separable when debugging a ranking change.
+        """
+        if not weights:
+            return
+        for node_id, weight in weights.items():
+            node = self.nodes.get(str(node_id))
+            if node is not None:
+                node.add_attribute("personal_weight", weight)
+
     def _calculate_query_top_triplet_importances(
         self,
         k: int,
@@ -477,6 +424,7 @@ class CogneeGraph(CogneeAbstractGraph):
         active_feedback_influence = (
             self.feedback_influence if feedback_influence is None else feedback_influence
         )
+        active_personal_influence = self.personal_influence
 
         def _effective_distance(distance: float, feedback_weight: Any) -> float:
             if active_feedback_influence <= 0.0:
@@ -501,6 +449,22 @@ class CogneeGraph(CogneeAbstractGraph):
                 active_feedback_influence * (1.0 - normalized_feedback_weight)
             )
             return blended_normalized * 2.0
+
+        def _personal_distance(raw: float, blended: float, element) -> float:
+            if active_personal_influence <= 0.0:
+                return blended
+            # Same eligibility test _effective_distance applies, on the same
+            # input it saw. RAW decides whether, BLENDED decides what: the
+            # blend always returns a value in [0, 2], so testing the returned
+            # value instead would scale fallback penalties like real matches —
+            # and at feedback influence 0 the blend short-circuits without
+            # ever consulting its range guard.
+            if raw >= self.triplet_distance_penalty or raw < 0.0 or raw > 2.0:
+                return blended
+            weight = element.attributes.get("personal_weight")
+            if weight is None:
+                return blended
+            return blended * personal_factor(weight, active_personal_influence, distance_space=True)
 
         def score(edge: Edge) -> float:
             elements = (
@@ -533,7 +497,8 @@ class CogneeGraph(CogneeAbstractGraph):
                     )
                 distance = (2 - importance_weight) * distance
                 feedback_weight = element.attributes.get("feedback_weight", 0.5)
-                importances.append(_effective_distance(distance, feedback_weight))
+                blended = _effective_distance(distance, feedback_weight)
+                importances.append(_personal_distance(distance, blended, element))
 
             return sum(importances)
 

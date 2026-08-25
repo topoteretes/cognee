@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.status import WS_1008_POLICY_VIOLATION, WS_1011_INTERNAL_ERROR
 from uuid import UUID
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.shared.logging_utils import get_logger
@@ -12,7 +13,11 @@ from cognee.modules.visualization.subgraph_data import (
     DEFAULT_NEIGHBORHOOD_DEPTH,
     DEFAULT_SEED_TOP_K,
 )
-from cognee.modules.users.methods import get_authenticated_user, get_user
+from cognee.modules.users.methods import (
+    get_authenticated_user,
+    get_authenticated_websocket_user,
+    get_user,
+)
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
 
@@ -114,7 +119,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/visualize",
                 "dataset_id": str(dataset_id),
@@ -403,6 +408,66 @@ def get_visualize_router() -> APIRouter:
                 content={"error": "Failed to build the brains overview"},
             )
 
+    @router.get("/brains-summary", response_model=None)
+    async def visualize_brains_summary(
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Return every dataset the caller may read, described from relational metadata.
+
+        The cheap counterpart of `GET /visualize/brains`: the same datasets,
+        but only what an overview shows — name, sources, size, colors — built
+        from relational metadata and the per-cognify-run count cache instead
+        of one bounded graph read per dataset. The cost is one count query per
+        cognify run whose count is not cached yet, not a graph fetch per
+        dataset on every call, so a cold cache pays once per run and every
+        later call pays nothing. `/brains` stays the call to make when the
+        node and link arrays themselves are needed.
+
+        ## Response
+        `{dataset_id: {"name", "source_names", "node_count", "node_set_colors"}}`:
+        - **name** (str): the dataset's name
+        - **source_names** (list[str]): its distinct node set names, sorted;
+          empty when the data was ingested without node sets
+        - **node_count** (int): nodes in the dataset's graph as of its latest
+          cognify run — the whole graph, not only entity nodes, and 0 for a
+          dataset that has never been cognified
+        - **node_set_colors** (dict[str, str]): node set colors from the same
+          rule `/brains` uses. Same rule and same node sets give the same
+          colors, but the two endpoints can be looking at different node
+          sets — `/brains` takes them from a bounded graph fetch (and so sees
+          sets that exist only in the graph), this takes them from a full
+          relational scan — and where the sets differ the colors do too
+
+        ## Error Codes
+        - **409 Conflict**: Payload could not be built (generic message; full
+          detail is server-logged, not returned, to avoid leaking internals)
+
+        ## Notes
+        - Only datasets the caller has read permission on are included
+        """
+        send_telemetry(
+            "Visualize Brains Summary API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/visualize/brains-summary",
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.visualize import build_brains_summary_payload
+
+        try:
+            payload = await build_brains_summary_payload(user=user)
+            return JSONResponse(status_code=200, content=payload)
+
+        except Exception:
+            logger.exception("Brains summary payload failed")
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Failed to build the brains summary"},
+            )
+
     @router.get("/live-events", response_model=None)
     async def visualize_live_events(
         dataset_id: UUID = Query(
@@ -477,6 +542,101 @@ def get_visualize_router() -> APIRouter:
                 content={"error": "Failed to fetch live events"},
             )
 
+    @router.websocket("/subscribe/{dataset_id}")
+    async def subscribe_to_dataset_updates(
+        websocket: WebSocket,
+        dataset_id: UUID,
+        since: Optional[datetime] = Query(
+            None,
+            description=(
+                "Cursor from the last live_events frame of a previous "
+                "connection. Omit to start from every available event."
+            ),
+        ),
+        user: Optional[User] = Depends(get_authenticated_websocket_user),
+    ):
+        """
+        Stream one dataset's live events and graph growth over a WebSocket.
+
+        The push replacement for polling `GET /visualize/live-events` and
+        refetching the graph payload to notice a cognify run finished. Frames
+        are JSON objects discriminated by `kind`:
+
+        - `{"kind": "ready", "dataset_id": str, "cursor": str | null}` — sent
+          once the connection is authorized, echoing the cursor it starts from
+        - `{"kind": "live_events", "events": [...], "cursor": str}` — every
+          ~2s, only when the delta is non-empty; the events are exactly what
+          `GET /visualize/live-events` returns
+        - `{"kind": "graph_grew", "pipeline_run_id": str}` — within ~5s of a
+          cognify run for this dataset completing; the run that was already
+          complete at connect time is the baseline and is not announced
+        - `{"kind": "heartbeat", "time": str}` — every ~15s, so a quiet stream
+          is distinguishable from a dead one
+
+        Authentication is the same as every other endpoint (API key header,
+        bearer header or auth cookie, sent with the handshake). Nothing is ever
+        read from client frames.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): the dataset to follow. Gates the connection
+          with the same read-permission check the other visualize routes use;
+          the events themselves are the caller's own, as on `/live-events`.
+
+        ## Query Parameters
+        - **since** (datetime, optional): reconnect cursor
+
+        ## Close Codes
+        - **1008**: not authenticated, or no read permission on this dataset —
+          a retry replays the same rejection, so clients should stop
+        - **1011**: the stream failed server-side; reconnecting is reasonable
+
+        A malformed `since` or a `dataset_id` that is not a UUID fails request
+        validation *before* the connection is accepted, so it carries no close
+        code a client can rely on: depending on the ASGI server the client sees
+        either a 1008 close or a plain HTTP rejection of the handshake. Treat a
+        handshake that never opened as a client-side bug, not a stream error.
+
+        ## Notes
+        - User must have read permissions on the dataset
+        - Permission is re-checked on every poll: access revoked mid-stream
+          closes the connection with 1008
+        """
+        await websocket.accept()
+
+        if user is None:
+            await websocket.close(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+            return
+
+        send_telemetry(
+            "Visualize Subscribe API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "WS /v1/visualize/subscribe/{dataset_id}",
+                "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.visualize import stream_dataset_updates
+
+        try:
+            authorized = await get_authorized_existing_datasets([dataset_id], "read", user)
+            if not authorized:
+                raise PermissionDeniedError(message="Not authorized to read this dataset")
+
+            await stream_dataset_updates(websocket, authorized[0].id, user, since=since)
+
+        except WebSocketDisconnect:
+            logger.debug("Live updates subscriber left dataset %s", dataset_id)
+        except PermissionDeniedError:
+            await websocket.close(
+                code=WS_1008_POLICY_VIOLATION,
+                reason="Not authorized to read this dataset",
+            )
+        except Exception:
+            logger.exception("Live updates stream failed for dataset %s", dataset_id)
+            await websocket.close(code=WS_1011_INTERNAL_ERROR)
+
     @router.post("/multi", response_model=None)
     async def visualize_multi(
         pairs: List[UserDatasetPair],
@@ -508,7 +668,7 @@ def get_visualize_router() -> APIRouter:
         """
         send_telemetry(
             "Visualize Multi API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/visualize/multi",
                 "pair_count": len(pairs),

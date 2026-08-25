@@ -36,6 +36,7 @@ from cognee.modules.observability import (
 )
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.search.types import SearchType
+from cognee.modules.user_preferences import warm_preference_cache
 
 CONCURRENT_MODE = "concurrent"
 MAX_CONVERSATIONAL_QUERY_CHARS = 2000
@@ -199,6 +200,12 @@ async def _retrieve_merged_objects(
     )
 
     if use_conversational_lane:
+        # gather runs each lane in its own task with a *copy* of this context,
+        # so a preference read memoized inside one lane is invisible to its
+        # sibling and to the answer step in this (parent) context. Warm the
+        # cache here first so both lane copies and the later completion-side
+        # read inherit a single graph read. No-op when personalization is off.
+        await warm_preference_cache()
         raw_result, conversational_result = await asyncio.gather(
             retriever.get_retrieved_objects(query=raw_query),
             retriever.get_retrieved_objects(query=conversational_query),

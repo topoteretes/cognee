@@ -66,7 +66,7 @@ def get_improve_router() -> APIRouter:
         """
         send_telemetry(
             "Improve API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/improve",
                 "cognee_version": cognee_version,

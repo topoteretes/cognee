@@ -1,7 +1,7 @@
 """Add composite index on pipeline_runs for the /status latest-run lookup
 
 Revision ID: d1e2f3a4b5c6
-Revises: b8c1d3e5f7a9
+Revises: b3d5f7a9c1e2
 Create Date: 2026-08-17
 
 get_pipeline_status.py / get_pipeline_progress.py both run a ROW_NUMBER()
@@ -19,7 +19,7 @@ from alembic import op
 from sqlalchemy.engine.reflection import Inspector
 
 revision: str = "d1e2f3a4b5c6"
-down_revision: Union[str, None] = "b8c1d3e5f7a9"
+down_revision: Union[str, None] = "b3d5f7a9c1e2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

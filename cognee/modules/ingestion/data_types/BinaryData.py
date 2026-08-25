@@ -28,6 +28,16 @@ class BinaryData(IngestionData):
 
         return self.metadata
 
+    async def aget_identifier(self):
+        metadata = await self.aget_metadata()
+
+        return metadata["content_hash"]
+
+    async def aget_metadata(self):
+        await self.ensure_metadata()
+
+        return self.metadata
+
     async def ensure_metadata(self):
         if self.metadata is None:
             self.metadata = await get_file_metadata(self.data, name=self.name)

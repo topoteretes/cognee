@@ -44,6 +44,6 @@ async def get_cascade_graph_tasks(
             Task(add_data_points, task_config={"batch_size": 10}),
         ]
     except Exception as error:
-        send_telemetry("cognee.cognify DEFAULT TASKS CREATION ERRORED", user.id)
+        send_telemetry("cognee.cognify DEFAULT TASKS CREATION ERRORED", user)
         raise error
     return default_tasks

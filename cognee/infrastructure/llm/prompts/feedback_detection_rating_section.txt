@@ -1,0 +1,16 @@
+## 4. Previous answer rating
+
+A fourth independent signal, in addition to the ones above.
+
+Rate the previous answer 1-5 only when this message gives clear evidence
+about its quality. Otherwise return null.
+
+5 - the user confirms it solved their problem, or acts on it directly.
+4 - the user accepts it and builds on it, with a minor correction or caveat.
+3 - the user's reaction is genuinely mixed: the answer clearly helped in
+    part and clearly fell short in part.
+2 - the user repeats the question, redirects, or corrects a substantive part.
+1 - the user says it was wrong, unusable, or ignored what they asked for.
+
+A new question on the same topic is not evidence. Politeness is not evidence.
+Most turns should return null.
