@@ -255,6 +255,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
+- **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
 
 `recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
 
@@ -703,6 +704,15 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Tuning** (env): `CONTRADICTION_CONFIDENCE_THRESHOLD` (default 0.5, minimum confidence to flag), `CONTRADICTION_MAX_FACTS` (default 500, cap on facts per LLM call).
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
+
+### Skills (Procedural Memory)
+Dataset-scoped `SKILL.md` playbooks agents can discover, load on demand, execute, and improve from run history.
+
+- **Ingest**: `remember(content_type="skills", dataset_name=...)` (folder, file, or inline via `skills_text`/`skill_name`) — requires an explicit dataset; re-ingest upserts (deterministic ids). HTTP: `POST /skills`.
+- **Discover**: `SearchType.SKILLS` — one vector search over the `Skill_search_text` collection, no LLM, **metadata-only results** (never the procedure body; progressive disclosure). Requires exactly one dataset; skills outside that dataset's scope, inactive skills, and empty-scope legacy skills are filtered out. Missing collection returns `[]`, not an error.
+- **Skill gate**: `recall()` runs a deterministic regex gate (`cognee/api/v1/recall/skill_gate.py`); procedural-sounding queries trigger a concurrent SKILLS lookup whose hits are appended tagged `source="skills"`. Additive and fail-safe; only fires when exactly one dataset is targeted. Disable with `SKILL_GATE_ENABLED=false`.
+- **Execute**: `SearchType.AGENTIC_COMPLETION` with `skills=[...]` — LLM sees name+description, loads bodies via the `load_skill` tool (12k char cap).
+- **Improve**: `SkillRun` records (via `remember()` skill-run entries) feed LLM-drafted `SkillImprovementProposal`s; preview then apply by proposal id (`/proposals` router).
 
 ### Code Files (cognify CODE route)
 Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension list lives on `code_loader`) are recognized at add time through the loader system: the code loader claims the file, stores it under its real extension, and `ingest_data` tags the record with `system_metadata = {"source": "code"}`. Cognify then routes such items down the CODE route, which runs the deterministic enola code graph pipeline per file — typed `CodeSymbol`/`CodeModule`/… nodes with `calls`/`imports`/`has_method` edges, **no LLM calls**.

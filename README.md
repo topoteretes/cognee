@@ -198,6 +198,31 @@ A third flag, `DATASET_QUEUE_ENABLED=false`, removes the per-process concurrency
 on datasets; it saves a little latency but risks file-lock leaks and resource
 exhaustion when multiple datasets run in parallel — leave it on for servers.
 
+### Procedural memory (skills)
+
+Beyond facts, cognee stores **skills** — dataset-scoped `SKILL.md` playbooks that
+agents can discover semantically, load on demand, execute, and improve from run
+history:
+
+```python
+# Ingest a folder of SKILL.md files into a dataset
+await cognee.remember("./skills", content_type="skills", dataset_name="ops")
+
+# Discover by meaning — returns name/description/metadata, never the full procedure
+results = await cognee.search("how do I deploy to staging",
+                              query_type=SearchType.SKILLS, datasets=["ops"])
+
+# recall() also runs a deterministic (no-LLM) skill gate: procedural questions
+# automatically get matching skills appended, tagged source="skills"
+results = await cognee.recall("how do I deploy to staging", datasets=["ops"])
+```
+
+Skills are authored as `SKILL.md` files (one directory per skill, frontmatter for
+description/tools/maintainer), scoped to exactly one dataset at ingest time, and
+executed through `SearchType.AGENTIC_COMPLETION`, where the agent loads full
+procedure bodies on demand via the `load_skill` tool. Disable the recall gate with
+`SKILL_GATE_ENABLED=false`.
+
 ## Run with Docker
 
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
