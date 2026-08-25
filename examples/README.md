@@ -63,7 +63,7 @@ features.** See [Contributing](#-contributing-a-new-example) for the precise cat
 | [`custom_tasks_and_pipelines.py`](guides/custom_tasks_and_pipelines.py) | Authoring tasks and composing a pipeline |
 | [`ontology_quickstart.py`](guides/ontology_quickstart.py) | Grounding extraction in an OWL ontology |
 | [`entity_deduplication.py`](guides/entity_deduplication.py) | Merging duplicate entities (dry-run, then real) |
-| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | Merging near-duplicate entity descriptions |
+| [`consolidate_entity_descriptions_example.py`](guides/consolidate_entity_descriptions_example.py) | LLM rewrite of Entity descriptions and EntityType summaries from graph neighborhood |
 | [`low_level_llm.py`](guides/low_level_llm.py) | Direct LLM-gateway structured output |
 
 ### Ingestion
