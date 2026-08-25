@@ -146,9 +146,12 @@ jobs:
             --jq '.[0].number // empty')"
 
           if [ -n "${EXISTING_PR_NUMBER}" ]; then
-            gh pr edit "${EXISTING_PR_NUMBER}" \
-              --title "${PR_TITLE}" \
-              --body-file pr_body.md
+            # REST instead of 'gh pr edit': the edit command needs read:org
+            # for its GraphQL query, which this repo-scoped PAT does not have.
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${EXISTING_PR_NUMBER}" \
+              --method PATCH \
+              --field title="${PR_TITLE}" \
+              --field body="$(cat pr_body.md)"
           else
             gh pr create \
               --base dev \
