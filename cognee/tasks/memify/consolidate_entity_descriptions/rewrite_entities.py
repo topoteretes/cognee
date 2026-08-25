@@ -124,17 +124,17 @@ def build_entity(props: Dict[str, Any], entity_types: List[EntityType], descript
     recomputed from entity_types rather than read off props, since they are
     graph edges, not node properties.
 
-    A single type still goes on is_a, unchanged from before. With more than
-    one type, none is more "correct" than another - is_a can only hold one
-    value, so all of them go on relations as equally-weighted is_a-tagged
-    edges instead of picking one arbitrarily and silently dropping the rest.
+    The first type found always goes on is_a - same convention already used
+    by rdf_ingest.py for ontology individuals with more than one rdf:type.
+    is_a must never be left empty for an entity that has a type: code outside
+    this pipeline (e.g. record_provenance._entity_type_name) reads only is_a
+    and silently falls back to a generic label if it's None. Any additional
+    types go on relations as equally-weighted is_a-tagged edges - not
+    "lesser" than the one on is_a, just not the one exposed on the scalar
+    field code elsewhere already expects to be able to read.
     """
-    is_a = entity_types[0] if len(entity_types) == 1 else None
-    relations = (
-        [(Edge(relationship_type="is_a"), entity_type) for entity_type in entity_types]
-        if len(entity_types) > 1
-        else []
-    )
+    is_a = entity_types[0] if entity_types else None
+    relations = [(Edge(relationship_type="is_a"), entity_type) for entity_type in entity_types[1:]]
     entity_props = {
         **props,
         "description": description,

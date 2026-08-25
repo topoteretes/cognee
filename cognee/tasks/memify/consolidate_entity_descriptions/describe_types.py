@@ -59,17 +59,18 @@ def _is_a_relation_type(relation: Any) -> Optional[EntityType]:
 
 
 def all_entity_types(entity: Entity) -> List[EntityType]:
-    """Every type this entity belongs to - the single one on is_a (the common
-    case), or all of them from relations for an entity with more than one type
-    (is_a is None in that case; see build_entity)."""
+    """Every type this entity belongs to - the one on is_a plus any extras on
+    relations (see build_entity). Must combine both, not treat them as
+    alternatives: is_a is now always populated when the entity has a type, so
+    stopping as soon as it's found would silently drop every extra type for a
+    multi-type entity - the exact bug this pipeline exists to fix."""
     primary = _entity_type_of(entity.is_a)
-    if primary is not None:
-        return [primary]
-    return [
+    from_relations = [
         entity_type
         for relation in entity.relations
         if (entity_type := _is_a_relation_type(relation)) is not None
     ]
+    return ([primary] if primary is not None else []) + from_relations
 
 
 def group_entities_by_type(entities: List[Entity]) -> Dict[str, Dict[str, Any]]:

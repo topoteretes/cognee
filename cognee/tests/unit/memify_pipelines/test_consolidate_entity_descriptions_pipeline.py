@@ -208,7 +208,7 @@ async def test_generate_consolidated_entity_without_type_neighbor_does_not_crash
 
 
 @pytest.mark.asyncio
-async def test_generate_consolidated_entity_with_multiple_types_uses_relations_not_is_a():
+async def test_generate_consolidated_entity_with_multiple_types_keeps_first_as_primary():
     entity_id = str(uuid4())
     person_type_id = str(uuid4())
     author_type_id = str(uuid4())
@@ -241,11 +241,13 @@ async def test_generate_consolidated_entity_with_multiple_types_uses_relations_n
     ):
         entity = await generate_consolidated_entity(node, system_prompt="system")
 
-    # No type is "primary" - is_a stays empty rather than arbitrarily picking one.
-    assert entity.is_a is None
-    assert len(entity.relations) == 2
-    assert {relation[1].name for relation in entity.relations} == {"Person", "Author"}
-    assert all(relation[0].relationship_type == "is_a" for relation in entity.relations)
+    # The first type found (Person) is the primary, on is_a - is_a is never
+    # left empty, since external code (e.g. record_provenance) reads only it.
+    assert entity.is_a is not None
+    assert entity.is_a.name == "Person"
+    assert len(entity.relations) == 1
+    assert entity.relations[0][1].name == "Author"
+    assert entity.relations[0][0].relationship_type == "is_a"
 
 
 @pytest.mark.asyncio
@@ -313,6 +315,25 @@ def test_all_entity_types_reads_from_relations_when_is_a_is_none():
             (Edge(relationship_type="is_a"), person),
             (Edge(relationship_type="is_a"), author),
         ],
+        description="d1",
+    )
+
+    types = describe_types.all_entity_types(marco)
+
+    assert {entity_type.id for entity_type in types} == {person.id, author.id}
+
+
+def test_all_entity_types_combines_is_a_and_relations_when_both_are_set():
+    # Regression test: build_entity() now always puts the first type on is_a
+    # (never leaves it empty), with any extra types on relations. If
+    # all_entity_types() stopped at is_a instead of also checking relations,
+    # every extra type would silently disappear from Phase 2 processing.
+    person = EntityType(name="Person", description="Person")
+    author = EntityType(name="Author", description="Author")
+    marco = Entity(
+        name="Marco",
+        is_a=person,
+        relations=[(Edge(relationship_type="is_a"), author)],
         description="d1",
     )
 
