@@ -1,14 +1,25 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from cognee.memify_pipelines import consolidate_entity_descriptions as ced
+from cognee.exceptions import CogneeValidationError
 from cognee.memify_pipelines.consolidate_entity_descriptions import (
+    consolidate_entity_descriptions_pipeline,
+)
+from cognee.tasks.memify.consolidate_entity_descriptions import describe_types, rewrite_entities
+from cognee.tasks.memify.consolidate_entity_descriptions.models import (
+    EntityIsATexts,
     EntityTypeDescription,
+    MemberIsAText,
     NodeDescription,
+)
+from cognee.tasks.memify.consolidate_entity_descriptions.read_neighborhood import (
     format_connections,
+)
+from cognee.tasks.memify.consolidate_entity_descriptions.rewrite_entities import (
     generate_consolidated_entities,
     generate_consolidated_entity,
 )
@@ -116,7 +127,7 @@ async def test_generate_consolidated_entity_keeps_id_and_uses_edge_text():
     )
 
     with patch.object(
-        ced.LLMGateway,
+        rewrite_entities.LLMGateway,
         "acreate_structured_output",
         new=AsyncMock(
             return_value=NodeDescription(description="Marco works as an engineer in Milan.")
@@ -147,7 +158,7 @@ async def test_generate_consolidated_entity_without_type_neighbor_does_not_crash
     )
 
     with patch.object(
-        ced.LLMGateway,
+        rewrite_entities.LLMGateway,
         "acreate_structured_output",
         new=AsyncMock(return_value=NodeDescription(description="new description")),
     ):
@@ -186,7 +197,7 @@ async def test_generate_consolidated_entity_with_multiple_types_uses_relations_n
     )
 
     with patch.object(
-        ced.LLMGateway,
+        rewrite_entities.LLMGateway,
         "acreate_structured_output",
         new=AsyncMock(return_value=NodeDescription(description="new description")),
     ):
@@ -219,16 +230,18 @@ async def test_generate_consolidated_entities_bounds_llm_concurrency():
         _node(
             str(uuid4()), f"Entity{i}", "old description", edges={}, neighbors=[], entity_types=[]
         )
-        for i in range(ced.MAX_CONCURRENT_ENTITY_LLM_CALLS * 3)
+        for i in range(rewrite_entities.MAX_CONCURRENT_ENTITY_LLM_CALLS * 3)
     ]
 
     with patch.object(
-        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+        rewrite_entities.LLMGateway,
+        "acreate_structured_output",
+        new=AsyncMock(side_effect=fake_llm),
     ):
         results = await generate_consolidated_entities(nodes)
 
     assert len(results) == len(nodes)
-    assert max_concurrent == ced.MAX_CONCURRENT_ENTITY_LLM_CALLS
+    assert max_concurrent == rewrite_entities.MAX_CONCURRENT_ENTITY_LLM_CALLS
 
 
 # region Phase 2: type descriptions
@@ -245,7 +258,7 @@ def test_group_entities_by_type_groups_separate_instances_by_id():
     milano = Entity(name="Milano", is_a=city, description="d3")
     ghost = Entity(name="Ghost", is_a=None, description="d4")
 
-    groups = ced.group_entities_by_type([marco, anna, milano, ghost])
+    groups = describe_types.group_entities_by_type([marco, anna, milano, ghost])
 
     assert set(groups.keys()) == {str(person_a.id), str(city.id)}
     assert groups[str(person_a.id)]["members"] == [marco, anna]
@@ -265,7 +278,7 @@ def test_all_entity_types_reads_from_relations_when_is_a_is_none():
         description="d1",
     )
 
-    types = ced.all_entity_types(marco)
+    types = describe_types.all_entity_types(marco)
 
     assert {entity_type.id for entity_type in types} == {person.id, author.id}
 
@@ -283,7 +296,7 @@ def test_group_entities_by_type_registers_multi_type_entity_in_every_group():
         description="d1",
     )
 
-    groups = ced.group_entities_by_type([marco])
+    groups = describe_types.group_entities_by_type([marco])
 
     assert set(groups.keys()) == {str(person.id), str(author.id)}
     assert groups[str(person.id)]["members"] == [marco]
@@ -293,7 +306,7 @@ def test_group_entities_by_type_registers_multi_type_entity_in_every_group():
 def test_build_entity_type_prompt_reports_total_separately_from_shown_members():
     marco = Entity(name="Marco", description="works in Milan")
 
-    prompt = ced.build_entity_type_prompt(
+    prompt = describe_types.build_entity_type_prompt(
         "Person", "Person", [marco], total_member_count=20, max_named_members=5
     )
 
@@ -308,9 +321,13 @@ def test_build_naming_instruction_names_at_the_boundary_count():
     # when total_member_count exactly equals the threshold, even though the
     # ticket requires "5 or fewer" (i.e. 5 itself) to be named. The fix moves
     # the <= comparison into Python instead of asking the LLM to judge it.
-    assert "MUST name every member" in ced.build_naming_instruction(5, max_named_members=5)
-    assert "MUST name every member" in ced.build_naming_instruction(1, max_named_members=5)
-    assert "MUST NOT name any individual member" in ced.build_naming_instruction(
+    assert "MUST name every member" in describe_types.build_naming_instruction(
+        5, max_named_members=5
+    )
+    assert "MUST name every member" in describe_types.build_naming_instruction(
+        1, max_named_members=5
+    )
+    assert "MUST NOT name any individual member" in describe_types.build_naming_instruction(
         6, max_named_members=5
     )
 
@@ -328,8 +345,8 @@ async def test_generate_type_description_single_call_under_threshold():
             assert "Final type summary: This graph has 3 Person entities." in text_input
             assert "Total member count: 3" in text_input
             is_a_calls.append(text_input)
-            return ced.EntityIsATexts(
-                is_a_texts=[ced.MemberIsAText(member_name="E0", is_a_text="E0 is a Person.")]
+            return EntityIsATexts(
+                is_a_texts=[MemberIsAText(member_name="E0", is_a_text="E0 is a Person.")]
             )
         assert system_prompt == "system"
         assert "Total member count: 3" in text_input
@@ -337,9 +354,9 @@ async def test_generate_type_description_single_call_under_threshold():
         return EntityTypeDescription(description="This graph has 3 Person entities.")
 
     with patch.object(
-        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+        describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
     ):
-        result = await ced.generate_type_description(
+        result = await describe_types.generate_type_description(
             entity_type, members, "system", "merge-system", "is-a-system"
         )
 
@@ -353,7 +370,7 @@ async def test_generate_type_description_single_call_under_threshold():
 @pytest.mark.asyncio
 async def test_generate_type_description_batches_and_merges_when_over_threshold():
     entity_type = EntityType(name="Person", description="Person")
-    total = ced.MAX_MEMBERS_PER_TYPE_PROMPT * 2 + 20  # -> 3 batches: 50, 50, 20
+    total = describe_types.MAX_MEMBERS_PER_TYPE_PROMPT * 2 + 20  # -> 3 batches: 50, 50, 20
     members = [Entity(name=f"E{i}", description=f"d{i}") for i in range(total)]
 
     batch_calls = []
@@ -369,10 +386,8 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
             assert "Final type summary: FINAL MERGED" in text_input
             assert f"Total member count: {total}" in text_input
             is_a_calls.append(text_input)
-            return ced.EntityIsATexts(
-                is_a_texts=[
-                    ced.MemberIsAText(member_name="E0", is_a_text=f"is_a-{len(is_a_calls)}")
-                ]
+            return EntityIsATexts(
+                is_a_texts=[MemberIsAText(member_name="E0", is_a_text=f"is_a-{len(is_a_calls)}")]
             )
         assert f"Total member count: {total}" in text_input
         partial = f"partial-{len(batch_calls)}"
@@ -380,9 +395,9 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
         return EntityTypeDescription(description=partial)
 
     with patch.object(
-        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+        describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
     ):
-        result = await ced.generate_type_description(
+        result = await describe_types.generate_type_description(
             entity_type, members, "batch-system", "merge-system", "is-a-system"
         )
 
@@ -397,7 +412,9 @@ def test_apply_type_description_shares_one_instance_and_preserves_other_fields()
     marco = Entity(name="Marco", is_a=entity_type, description="d1")
     anna = Entity(name="Anna", is_a=entity_type, description="d2")
 
-    updated = ced.apply_type_description(entity_type, [marco, anna], "New aggregate description")
+    updated = describe_types.apply_type_description(
+        entity_type, [marco, anna], "New aggregate description"
+    )
 
     assert updated.description == "New aggregate description"
     assert updated.id == entity_type.id
@@ -411,10 +428,12 @@ def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches():
     marco = Entity(name="Marco", is_a=entity_type, description="d1")
     anna = Entity(name="Anna", is_a=entity_type, description="d2")
     is_a_texts = [
-        ced.MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: the outlier."),
+        MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: the outlier."),
     ]
 
-    ced.apply_type_description(entity_type, [marco, anna], "New aggregate description", is_a_texts)
+    describe_types.apply_type_description(
+        entity_type, [marco, anna], "New aggregate description", is_a_texts
+    )
 
     marco_edge, marco_type = marco.is_a
     assert marco_edge.relationship_type == "is_a"
@@ -443,11 +462,11 @@ def test_apply_type_description_updates_one_relations_slot_without_touching_the_
     )
 
     # Update the Person slot first.
-    ced.apply_type_description(
+    describe_types.apply_type_description(
         person,
         [marco],
         "Person aggregate description",
-        [ced.MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: ...")],
+        [MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: ...")],
     )
 
     person_relation, author_relation = marco.relations
@@ -458,11 +477,11 @@ def test_apply_type_description_updates_one_relations_slot_without_touching_the_
     assert author_relation[1].description == "Author"
 
     # Now update the Author slot - the already-updated Person slot must survive.
-    ced.apply_type_description(
+    describe_types.apply_type_description(
         author,
         [marco],
         "Author aggregate description",
-        [ced.MemberIsAText(member_name="Marco", is_a_text="Marco is an Author: ...")],
+        [MemberIsAText(member_name="Marco", is_a_text="Marco is an Author: ...")],
     )
 
     person_relation, author_relation = marco.relations
@@ -480,15 +499,17 @@ async def test_generate_type_descriptions_produces_is_a_edge_text_end_to_end():
     llm_response = EntityTypeDescription(
         description="Aggregate description",
         is_a_texts=[
-            ced.MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: works in Milan."),
-            ced.MemberIsAText(member_name="Anna", is_a_text="Anna is a Person: works in Rome."),
+            MemberIsAText(member_name="Marco", is_a_text="Marco is a Person: works in Milan."),
+            MemberIsAText(member_name="Anna", is_a_text="Anna is a Person: works in Rome."),
         ],
     )
 
     with patch.object(
-        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(return_value=llm_response)
+        describe_types.LLMGateway,
+        "acreate_structured_output",
+        new=AsyncMock(return_value=llm_response),
     ):
-        await ced.generate_type_descriptions([marco, anna])
+        await describe_types.generate_type_descriptions([marco, anna])
 
     marco_edge, marco_type = marco.is_a
     anna_edge, anna_type = anna.is_a
@@ -506,11 +527,11 @@ async def test_generate_type_descriptions_updates_typed_and_skips_untyped():
     entities = [*typed_members, ghost]
 
     with patch.object(
-        ced.LLMGateway,
+        describe_types.LLMGateway,
         "acreate_structured_output",
         new=AsyncMock(return_value=EntityTypeDescription(description="Aggregate description")),
     ):
-        result = await ced.generate_type_descriptions(entities)
+        result = await describe_types.generate_type_descriptions(entities)
 
     assert result is entities
     assert all(member.is_a.description == "Aggregate description" for member in typed_members)
@@ -545,9 +566,9 @@ async def test_generate_type_descriptions_updates_all_types_for_multi_type_entit
         raise AssertionError(f"Unexpected text_input: {text_input}")
 
     with patch.object(
-        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+        describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
     ):
-        result = await ced.generate_type_descriptions(entities)
+        result = await describe_types.generate_type_descriptions(entities)
 
     assert result is entities
     tool_relation = next(r for r in cognee.relations if r[1].name == "Tool")
@@ -573,16 +594,16 @@ async def test_generate_type_descriptions_bounds_llm_concurrency():
         return EntityTypeDescription(description="d")
 
     entities = []
-    for i in range(ced.MAX_CONCURRENT_TYPE_LLM_CALLS * 3):
+    for i in range(describe_types.MAX_CONCURRENT_TYPE_LLM_CALLS * 3):
         entity_type = EntityType(name=f"Type{i}", description=f"Type{i}")
         entities.append(Entity(name=f"E{i}", is_a=entity_type, description="d"))
 
     with patch.object(
-        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+        describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
     ):
-        await ced.generate_type_descriptions(entities)
+        await describe_types.generate_type_descriptions(entities)
 
-    assert max_concurrent == ced.MAX_CONCURRENT_TYPE_LLM_CALLS
+    assert max_concurrent == describe_types.MAX_CONCURRENT_TYPE_LLM_CALLS
 
 
 # endregion
@@ -607,7 +628,7 @@ async def test_generate_consolidated_entity_preserves_properties_it_does_not_own
     }
 
     with patch.object(
-        ced.LLMGateway,
+        rewrite_entities.LLMGateway,
         "acreate_structured_output",
         new=AsyncMock(return_value=NodeDescription(description="new description")),
     ):
@@ -622,7 +643,7 @@ async def test_generate_consolidated_entity_preserves_properties_it_does_not_own
 
 
 def test_build_node_neighborhood_prompt_caps_neighbor_count():
-    total_neighbors = ced.MAX_NEIGHBORS_IN_PROMPT + 15
+    total_neighbors = rewrite_entities.MAX_NEIGHBORS_IN_PROMPT + 15
     neighbors = [
         {"id": f"n{i}", "name": f"Neighbor{i}", "description": f"d{i}"}
         for i in range(total_neighbors)
@@ -631,24 +652,24 @@ def test_build_node_neighborhood_prompt_caps_neighbor_count():
         "entity-1", "Marco", "old description", edges={}, neighbors=neighbors, entity_types=[]
     )
 
-    prompt = ced.build_node_neighborhood_prompt(node)
+    prompt = rewrite_entities.build_node_neighborhood_prompt(node)
 
-    assert prompt.count("\n- ") == ced.MAX_NEIGHBORS_IN_PROMPT
-    for neighbor in neighbors[ced.MAX_NEIGHBORS_IN_PROMPT :]:
+    assert prompt.count("\n- ") == rewrite_entities.MAX_NEIGHBORS_IN_PROMPT
+    for neighbor in neighbors[rewrite_entities.MAX_NEIGHBORS_IN_PROMPT :]:
         assert neighbor["name"] not in prompt
 
 
 def test_build_node_neighborhood_prompt_truncates_long_neighbor_text():
-    long_description = "x" * (ced.MAX_NEIGHBOR_TEXT_CHARS + 100)
+    long_description = "x" * (rewrite_entities.MAX_NEIGHBOR_TEXT_CHARS + 100)
     neighbors = [{"id": "n1", "name": "Milano", "description": long_description}]
     node = _node(
         "entity-1", "Marco", "old description", edges={}, neighbors=neighbors, entity_types=[]
     )
 
-    prompt = ced.build_node_neighborhood_prompt(node)
+    prompt = rewrite_entities.build_node_neighborhood_prompt(node)
 
     assert long_description not in prompt
-    assert "x" * ced.MAX_NEIGHBOR_TEXT_CHARS + "..." in prompt
+    assert "x" * rewrite_entities.MAX_NEIGHBOR_TEXT_CHARS + "..." in prompt
 
 
 def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
@@ -659,8 +680,62 @@ def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
         "entity-1", "Marco", "old description", edges=edges, neighbors=neighbors, entity_types=[]
     )
 
-    prompt = ced.build_node_neighborhood_prompt(node)
+    prompt = rewrite_entities.build_node_neighborhood_prompt(node)
 
     assert "Marco is mentioned here." in prompt
     assert chunk_text not in prompt
     assert prompt.count("Marco is mentioned here.") == 1
+
+
+# --------------------------------------------------------------------------- #
+# pipeline wiring
+# --------------------------------------------------------------------------- #
+def _make_async_ctx_mock():
+    """A MagicMock that behaves as an async-context-manager factory."""
+    inner = MagicMock()
+    inner.__aenter__ = AsyncMock(return_value=inner)
+    inner.__aexit__ = AsyncMock(return_value=None)
+    return MagicMock(return_value=inner)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_raises_when_user_has_no_write_access():
+    module = "cognee.memify_pipelines.consolidate_entity_descriptions"
+    user = MagicMock()
+    user.id = "u1"
+
+    with (
+        patch(f"{module}.get_default_user", new=AsyncMock(return_value=user)),
+        patch(f"{module}.get_authorized_existing_datasets", new=AsyncMock(return_value=[])),
+    ):
+        with pytest.raises(CogneeValidationError):
+            await consolidate_entity_descriptions_pipeline()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_wires_memify_tasks_dataset_and_user():
+    user = MagicMock()
+    user.id = "u1"
+    dataset = SimpleNamespace(id="ds-1", owner_id="owner-1", name="main_dataset")
+
+    module = "cognee.memify_pipelines.consolidate_entity_descriptions"
+    with (
+        patch(f"{module}.get_default_user", new=AsyncMock(return_value=user)),
+        patch(
+            f"{module}.get_authorized_existing_datasets",
+            new=AsyncMock(return_value=[dataset]),
+        ),
+        patch(f"{module}.set_database_global_context_variables", new=_make_async_ctx_mock()) as ctx,
+        patch(f"{module}.memify", new=AsyncMock(return_value={"status": "ok"})) as memify_mock,
+    ):
+        result = await consolidate_entity_descriptions_pipeline()
+
+    assert result == {"status": "ok"}
+    ctx.assert_called_once_with("ds-1", "owner-1")
+
+    kwargs = memify_mock.call_args.kwargs
+    assert kwargs["data"] == [{}]
+    assert kwargs["dataset"] == "ds-1"
+    assert kwargs["user"] is user
+    assert len(kwargs["extraction_tasks"]) == 1
+    assert len(kwargs["enrichment_tasks"]) == 3
