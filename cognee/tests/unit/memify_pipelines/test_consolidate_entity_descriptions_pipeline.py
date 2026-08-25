@@ -59,10 +59,12 @@ def test_format_connections_extracts_edge_text_and_entity_type():
     entity_types, edges, neighbors = format_connections(node_id, connections)
 
     assert [entity_type["id"] for entity_type in entity_types] == [type_id]
-    assert edges[neighbor_id] == {
-        "relationship_name": "works_at",
-        "edge_text": "Marco works in Milan",
-    }
+    assert edges[neighbor_id] == [
+        {
+            "relationship_name": "works_at",
+            "edge_text": "Marco works in Milan",
+        }
+    ]
     assert any(neighbor["id"] == neighbor_id for neighbor in neighbors)
 
 
@@ -101,8 +103,39 @@ def test_format_connections_omits_edge_text_when_absent():
 
     _, edges, _ = format_connections(node_id, connections)
 
-    assert edges[neighbor_id]["relationship_name"] == "is_a"
-    assert edges[neighbor_id]["edge_text"] is None
+    assert edges[neighbor_id][0]["relationship_name"] == "is_a"
+    assert edges[neighbor_id][0]["edge_text"] is None
+
+
+def test_format_connections_keeps_every_edge_between_the_same_pair():
+    # Regression test: two distinct relationships connecting the same pair of
+    # nodes used to collapse into one - the second overwrote the first in the
+    # edges dict, and the neighbor was listed twice in filtered_neighbors
+    # (duplicating a stale line while the first relationship vanished).
+    node_id = "marco-id"
+    neighbor_id = "milano-id"
+
+    connections = [
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "works_at", "edge_text": "Marco works in Milan."},
+            {"id": neighbor_id, "name": "Milano", "description": "A city", "type": "Entity"},
+        ),
+        (
+            {"id": node_id, "name": "Marco", "type": "Entity"},
+            {"relationship_name": "visited", "edge_text": "Marco visited Milan in 2019."},
+            {"id": neighbor_id, "name": "Milano", "description": "A city", "type": "Entity"},
+        ),
+    ]
+
+    entity_types, edges, neighbors = format_connections(node_id, connections)
+
+    assert edges[neighbor_id] == [
+        {"relationship_name": "works_at", "edge_text": "Marco works in Milan."},
+        {"relationship_name": "visited", "edge_text": "Marco visited Milan in 2019."},
+    ]
+    # Milano is listed once, not once per edge that reaches it.
+    assert len([neighbor for neighbor in neighbors if neighbor["id"] == neighbor_id]) == 1
 
 
 @pytest.mark.asyncio
@@ -114,7 +147,7 @@ async def test_generate_consolidated_entity_keeps_id_and_uses_edge_text():
         "Marco",
         "old description",
         edges={
-            "neighbor-1": {"relationship_name": "works_at", "edge_text": "Marco works in Milan"}
+            "neighbor-1": [{"relationship_name": "works_at", "edge_text": "Marco works in Milan"}]
         },
         neighbors=[{"id": "neighbor-1", "name": "Milano", "description": "A city"}],
         entity_types=[
@@ -744,7 +777,9 @@ def test_build_node_neighborhood_prompt_truncates_long_neighbor_text():
 def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
     chunk_text = "The full raw text of a document chunk mentioning Marco."
     neighbors = [{"id": "chunk-1", "text": chunk_text}]
-    edges = {"chunk-1": {"relationship_name": "contains", "edge_text": "Marco is mentioned here."}}
+    edges = {
+        "chunk-1": [{"relationship_name": "contains", "edge_text": "Marco is mentioned here."}]
+    }
     node = _node(
         "entity-1", "Marco", "old description", edges=edges, neighbors=neighbors, entity_types=[]
     )
@@ -754,6 +789,29 @@ def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
     assert "Marco is mentioned here." in prompt
     assert chunk_text not in prompt
     assert prompt.count("Marco is mentioned here.") == 1
+
+
+def test_build_node_neighborhood_prompt_emits_one_line_per_edge_to_the_same_neighbor():
+    # Regression test: a neighbor reached by two distinct edges used to
+    # collapse to a single (duplicated) line showing only the last
+    # relationship - the other relationship's text was silently dropped.
+    neighbors = [{"id": "milano-id", "name": "Milano", "description": "A city"}]
+    edges = {
+        "milano-id": [
+            {"relationship_name": "works_at", "edge_text": "Marco works in Milan."},
+            {"relationship_name": "visited", "edge_text": "Marco visited Milan in 2019."},
+        ]
+    }
+    node = _node(
+        "entity-1", "Marco", "old description", edges=edges, neighbors=neighbors, entity_types=[]
+    )
+
+    prompt = rewrite_entities.build_node_neighborhood_prompt(node)
+
+    assert "works_at: Milano" in prompt
+    assert "visited: Milano" in prompt
+    assert "Marco works in Milan." in prompt
+    assert "Marco visited Milan in 2019." in prompt
 
 
 # --------------------------------------------------------------------------- #

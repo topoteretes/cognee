@@ -39,7 +39,7 @@ def format_connections(
     node_id: str,
     connections: List[Any],
     node_fields: Optional[Set[str]] = None,
-) -> tuple[List[Dict[str, Any]], Dict[str, Dict[str, Optional[str]]], List[Dict[str, Any]]]:
+) -> tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Optional[str]]]], List[Dict[str, Any]]]:
     """Split get_connections() triples into EntityType neighbors, edge info, and other neighbors.
 
     get_connections(node_id) returns (source, edge, target) triples where node_id
@@ -51,13 +51,22 @@ def format_connections(
     differently across separate ingestions of the same (name-deduped) entity -
     so entity_types is a list, not a single value that would silently drop all
     but the last one found.
+
+    Two distinct edges can also connect this node to the SAME neighbor (e.g.
+    "works_at" and "visited" both linking the same pair) - edges maps each
+    neighbor id to a list of every edge found, not a single dict, so a later
+    edge to an already-seen neighbor never overwrites an earlier one.
+    filtered_neighbors lists each distinct neighbor once regardless of how
+    many edges connect to it; build_node_neighborhood_prompt is what expands
+    a multi-edge neighbor back into one line per edge.
     """
     if node_fields is None:
         node_fields = {"id", "name", "description", "text", "type"}
 
     entity_types: List[Dict[str, Any]] = []
-    edges: Dict[str, Dict[str, Optional[str]]] = {}
+    edges: Dict[str, List[Dict[str, Optional[str]]]] = {}
     filtered_neighbors: List[Dict[str, Any]] = []
+    seen_neighbor_ids: Set[str] = set()
 
     for connection in connections:
         if not isinstance(connection, (list, tuple)) or len(connection) != 3:
@@ -67,17 +76,21 @@ def format_connections(
         neighbor = target if str(source.get("id")) == str(node_id) else source
         neighbor_id = str(neighbor.get("id", ""))
 
-        edges[neighbor_id] = {
-            "relationship_name": str(edge_info.get("relationship_name") or "related to"),
-            "edge_text": str(edge_info["edge_text"]) if edge_info.get("edge_text") else None,
-        }
+        edges.setdefault(neighbor_id, []).append(
+            {
+                "relationship_name": str(edge_info.get("relationship_name") or "related to"),
+                "edge_text": str(edge_info["edge_text"]) if edge_info.get("edge_text") else None,
+            }
+        )
 
         if neighbor.get("type") == "EntityType":
             entity_types.append(neighbor)
 
-        filtered_neighbor = {k: v for k, v in neighbor.items() if k in node_fields}
-        if len(filtered_neighbor) > 1:
-            filtered_neighbors.append(filtered_neighbor)
+        if neighbor_id not in seen_neighbor_ids:
+            seen_neighbor_ids.add(neighbor_id)
+            filtered_neighbor = {k: v for k, v in neighbor.items() if k in node_fields}
+            if len(filtered_neighbor) > 1:
+                filtered_neighbors.append(filtered_neighbor)
 
     return entity_types, edges, filtered_neighbors
 

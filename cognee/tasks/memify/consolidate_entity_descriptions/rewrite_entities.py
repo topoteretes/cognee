@@ -62,23 +62,28 @@ def build_node_neighborhood_prompt(node):
         )
 
     for neighbor in neighbors[:MAX_NEIGHBORS_IN_PROMPT]:
-        edge_info = node.get("edges", {}).get(neighbor.get("id"), {})
-        relationship_name = edge_info.get("relationship_name", "related to")
-        edge_text = edge_info.get("edge_text")
+        # A neighbor can be linked by more than one distinct edge (e.g.
+        # "works_at" and "visited" both connecting the same pair) - emit one
+        # line per edge rather than only the last one found.
+        edge_infos = node.get("edges", {}).get(neighbor.get("id"), []) or [{}]
         neighbor_name = neighbor.get("name", "")
         neighbor_desc = neighbor.get("description", "")
 
-        if neighbor_desc:
-            text += f"\n- {relationship_name}: {neighbor_name} - {_truncate(neighbor_desc)}"
-            if edge_text:
-                text += f" (relationship detail: {_truncate(edge_text)})"
-        elif edge_text:
-            # No description on this neighbor (e.g. a DocumentChunk) - edge_text
-            # is already a summary of its content, so use it instead of the raw
-            # text rather than including both.
-            text += f"\n- {relationship_name} - {_truncate(edge_text)}"
-        else:
-            text += f"\n- {relationship_name} - {_truncate(neighbor.get('text', ''))}"
+        for edge_info in edge_infos:
+            relationship_name = edge_info.get("relationship_name", "related to")
+            edge_text = edge_info.get("edge_text")
+
+            if neighbor_desc:
+                text += f"\n- {relationship_name}: {neighbor_name} - {_truncate(neighbor_desc)}"
+                if edge_text:
+                    text += f" (relationship detail: {_truncate(edge_text)})"
+            elif edge_text:
+                # No description on this neighbor (e.g. a DocumentChunk) - edge_text
+                # is already a summary of its content, so use it instead of the raw
+                # text rather than including both.
+                text += f"\n- {relationship_name} - {_truncate(edge_text)}"
+            else:
+                text += f"\n- {relationship_name} - {_truncate(neighbor.get('text', ''))}"
 
     return text
 
