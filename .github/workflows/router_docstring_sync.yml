@@ -1,0 +1,143 @@
+name: automation | Router Docstring Sync
+
+# Keeps route-handler docstrings in sync with what the handlers actually
+# accept. The published cognee_openapi_spec.json is generated straight from
+# the FastAPI app (tools/sync_release_docs.py -> app.openapi()), so these
+# docstrings are what keeps the spec's endpoint descriptions honest.
+#
+# When drift is detected, this workflow does not fail a build — it fixes the
+# docstrings (tools/fix_router_docstrings.py) and opens/updates a PR against
+# dev with the corrections for human review.
+
+on:
+  workflow_dispatch:
+  # Weekly backstop sweep (runs from the default branch, fixes dev).
+  schedule:
+    - cron: "0 6 * * 1"
+  # Run whenever something lands on dev that can move the API schema:
+  # handlers and DTOs anywhere under cognee/, or dependency bumps (a
+  # FastAPI/Pydantic upgrade can change what the handlers expose).
+  push:
+    branches:
+      - dev
+    paths:
+      - "cognee/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "tools/check_router_docstrings.py"
+      - "tools/fix_router_docstrings.py"
+      - ".github/workflows/router_docstring_sync.yml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: router-docstring-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-docstrings:
+    name: Detect and fix router docstring drift
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      # Imports the same FastAPI app the published OpenAPI spec is generated
+      # from and compares each handler's documented parameters against the
+      # parameters it actually takes.
+      - name: Detect docstring drift
+        id: check
+        run: |
+          set +e
+          uv run python tools/check_router_docstrings.py > docstring_report.txt
+          code=$?
+          set -e
+          cat docstring_report.txt
+          cat docstring_report.txt >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -eq 2 ]; then
+            echo "Checker failed to import the app" >&2
+            exit 2
+          fi
+          echo "drift=$([ "$code" -eq 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Fix docstrings
+        if: ${{ steps.check.outputs.drift == 'true' }}
+        run: |
+          uv run python tools/fix_router_docstrings.py
+          uv run ruff format cognee
+          # The fix must fully converge — fail loudly if anything is left.
+          uv run python tools/check_router_docstrings.py
+
+      - name: Commit and push fix branch
+        id: commit
+        if: ${{ steps.check.outputs.drift == 'true' }}
+        run: |
+          BRANCH_NAME="automation/fix-router-docstrings"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${BRANCH_NAME}"
+          git add cognee
+          if git diff --cached --quiet; then
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "docs: Sync router docstrings with handlers (RES-14)"
+          git push --force origin "${BRANCH_NAME}"
+          echo "changes_made=true" >> "$GITHUB_OUTPUT"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update fix PR
+        if: ${{ steps.commit.outputs.changes_made == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          HEAD_BRANCH: ${{ steps.commit.outputs.branch_name }}
+        run: |
+          PR_TITLE="docs: Sync router docstrings with handlers (RES-14)"
+          {
+            echo "Automated router docstring sync."
+            echo
+            echo "The docstring checker found handlers whose documented parameters"
+            echo "no longer match their signatures. The fixes below were generated"
+            echo "from the handlers' own FastAPI/Pydantic metadata — review the"
+            echo "wording, especially bullets marked 'No description provided in"
+            echo "code yet', before merging."
+            echo
+            echo '```'
+            cat docstring_report.txt
+            echo '```'
+          } > pr_body.md
+
+          EXISTING_PR_NUMBER="$(gh pr list \
+            --head "${HEAD_BRANCH}" \
+            --base dev \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "${EXISTING_PR_NUMBER}" ]; then
+            gh pr edit "${EXISTING_PR_NUMBER}" \
+              --title "${PR_TITLE}" \
+              --body-file pr_body.md
+          else
+            gh pr create \
+              --base dev \
+              --head "${HEAD_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body-file pr_body.md
+          fi
