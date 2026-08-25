@@ -7,7 +7,7 @@ from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
 
-from .models import EntityIsATexts, EntityTypeDescription, MemberIsAText
+from .models import EntityIsATexts, EntityTypeDescription, MemberIsAText, NodeDescription
 
 type_prompt_name = "consolidate_entity_type_details.txt"
 type_merge_prompt_name = "consolidate_entity_type_merge.txt"
@@ -104,7 +104,7 @@ async def query_type_LLM(text_input, system_prompt):
     return await LLMGateway.acreate_structured_output(
         text_input=text_input,
         system_prompt=system_prompt,
-        response_model=EntityTypeDescription,
+        response_model=NodeDescription,
     )
 
 
@@ -135,7 +135,7 @@ async def query_type_merge_LLM(text_input, merge_system_prompt):
     return await LLMGateway.acreate_structured_output(
         text_input=text_input,
         system_prompt=merge_system_prompt,
-        response_model=EntityTypeDescription,
+        response_model=NodeDescription,
     )
 
 

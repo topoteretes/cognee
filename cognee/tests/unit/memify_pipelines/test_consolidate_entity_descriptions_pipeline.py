@@ -351,7 +351,7 @@ async def test_generate_type_description_single_call_under_threshold():
         assert system_prompt == "system"
         assert "Total member count: 3" in text_input
         description_calls.append(text_input)
-        return EntityTypeDescription(description="This graph has 3 Person entities.")
+        return NodeDescription(description="This graph has 3 Person entities.")
 
     with patch.object(
         describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
@@ -381,7 +381,7 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
             assert len(batch_calls) == 3
             for partial in batch_calls:
                 assert partial in text_input
-            return EntityTypeDescription(description="FINAL MERGED")
+            return NodeDescription(description="FINAL MERGED")
         if system_prompt == "is-a-system":
             assert "Final type summary: FINAL MERGED" in text_input
             assert f"Total member count: {total}" in text_input
@@ -392,7 +392,7 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
         assert f"Total member count: {total}" in text_input
         partial = f"partial-{len(batch_calls)}"
         batch_calls.append(partial)
-        return EntityTypeDescription(description=partial)
+        return NodeDescription(description=partial)
 
     with patch.object(
         describe_types.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
