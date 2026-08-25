@@ -12,6 +12,58 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("LexicalRetriever")
 
 
+def nodeset_tags(payload: dict) -> list[str]:
+    """Return a node payload's ``belongs_to_set`` tags as NodeSet names.
+
+    Graph serialization already reduces the field to names, and keeps it as a node
+    property rather than only as edges precisely so node sets can be filtered on
+    (see ``get_graph_from_model``). A tag can still reach the graph as a mapping or
+    a DataPoint from another writer, so each shape is reduced to the same string
+    key the vector payloads carry.
+    """
+    value = payload.get("belongs_to_set")
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        value = [value]
+
+    tags: list[str] = []
+    for item in value:
+        if item is None:
+            continue
+        if isinstance(item, str):
+            tag: Any = item
+        elif isinstance(item, dict):
+            tag = item.get("name") or item.get("id")
+        else:
+            tag = getattr(item, "name", None) or getattr(item, "id", None)
+        if tag is not None:
+            tags.append(str(tag))
+    return tags
+
+
+def matches_node_set(
+    payload: dict,
+    node_name: Optional[List[str]],
+    node_name_filter_operator: str = "OR",
+) -> bool:
+    """Whether a chunk payload belongs to the requested node sets.
+
+    Mirrors what the vector adapters apply to the same field: "OR" keeps a chunk
+    tagged with any of the requested sets, "AND" only one tagged with all of them.
+    An empty ``node_name`` applies no filter, exactly as it does on the vector path.
+    """
+    if not node_name:
+        return True
+
+    tags = set(nodeset_tags(payload))
+    wanted = {str(name) for name in node_name}
+
+    if node_name_filter_operator == "AND":
+        return wanted.issubset(tags)
+    return bool(tags & wanted)
+
+
 def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str]:
     """Lowercase, split on word characters, and drop any stop words.
 
@@ -25,17 +77,27 @@ def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str
 
 class LexicalRetriever(BaseRetriever):
     def __init__(
-        self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
+        self,
+        tokenizer: Callable,
+        scorer: Callable,
+        top_k: int = 15,
+        with_scores: bool = False,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         if not callable(tokenizer) or not callable(scorer):
             raise TypeError("tokenizer and scorer must be callables")
         if not isinstance(top_k, int) or top_k <= 0:
             raise ValueError("top_k must be a positive integer")
+        if node_name is not None and not isinstance(node_name, (list, tuple)):
+            raise TypeError("node_name must be a list of node set names")
 
         self.tokenizer = tokenizer
         self.scorer = scorer
         self.top_k = top_k
         self.with_scores = bool(with_scores)
+        self.node_name = list(node_name) if node_name else None
+        self.node_name_filter_operator = node_name_filter_operator
 
         # Cache keyed by dataset context
         self.chunks: dict[str, Any] = {}  # {chunk_id: tokens}
@@ -59,6 +121,7 @@ class LexicalRetriever(BaseRetriever):
                 raise NoDataError("Graph engine initialization failed") from e
 
             chunk_count = 0
+            document_chunk_count = 0
             for node in nodes:
                 try:
                     chunk_id, document = node
@@ -67,6 +130,14 @@ class LexicalRetriever(BaseRetriever):
                     continue
 
                 if document.get("type") == "DocumentChunk" and document.get("text"):
+                    document_chunk_count += 1
+                    # Filter before tokenizing so a scoped search neither pays to
+                    # tokenize chunks it will not rank, nor lets them influence
+                    # corpus statistics a subclass derives from what was loaded.
+                    if not matches_node_set(
+                        document, self.node_name, self.node_name_filter_operator
+                    ):
+                        continue
                     try:
                         tokens = self.tokenizer(document["text"])
                         if not tokens:
@@ -82,6 +153,17 @@ class LexicalRetriever(BaseRetriever):
                         logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
 
             if chunk_count == 0:
+                if self.node_name and document_chunk_count:
+                    # There is data, the requested node sets are simply empty. The
+                    # vector chunk search returns nothing in that case rather than
+                    # reporting that the system holds no data, so this does too.
+                    logger.info(
+                        "No chunks matched node sets %s out of %d document chunks",
+                        self.node_name,
+                        document_chunk_count,
+                    )
+                    self._initialized = True
+                    return
                 logger.error("Initialization completed but no valid chunks were loaded.")
                 raise NoDataError("No valid chunks loaded during initialization.")
 

@@ -119,3 +119,133 @@ async def test_no_match_query_returns_zero_scored_chunks():
     # LexicalRetriever still returns top_k payloads for a no-match query; all score 0.0.
     assert len(results) == 2
     assert all(score == 0.0 for _, score in results)
+
+
+def _patch_graph_nodes(nodes: list[tuple[str, dict]]):
+    """Patch the graph engine with fully formed node payloads.
+
+    Node sets are carried on the chunk payload itself: graph serialization keeps
+    ``belongs_to_set`` as a property, reduced to NodeSet names, so it can be
+    filtered on the same way the vector payloads are.
+    """
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, {}))
+    return patch(
+        "cognee.modules.retrieval.lexical_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    )
+
+
+def _chunk(chunk_id: str, text: str, node_sets=None) -> tuple[str, dict]:
+    payload = {"id": chunk_id, "type": "DocumentChunk", "text": text}
+    if node_sets is not None:
+        payload["belongs_to_set"] = node_sets
+    return (chunk_id, payload)
+
+
+TAGGED_CORPUS = [
+    _chunk("chunk_a", "alpha project", ["set_a"]),
+    _chunk("chunk_b", "alpha project", ["set_b"]),
+    _chunk("chunk_ab", "alpha project", ["set_a", "set_b"]),
+    _chunk("chunk_untagged", "alpha project"),
+]
+
+
+@pytest.mark.asyncio
+async def test_node_name_scopes_the_corpus_with_or():
+    retriever = BM25ChunksRetriever(top_k=10, node_name=["set_a"])
+
+    with _patch_graph_nodes(TAGGED_CORPUS):
+        results = await retriever.get_retrieved_objects("project")
+
+    assert {payload["id"] for payload in results} == {"chunk_a", "chunk_ab"}
+
+
+@pytest.mark.asyncio
+async def test_node_name_or_matches_any_requested_set():
+    retriever = BM25ChunksRetriever(top_k=10, node_name=["set_a", "set_b"])
+
+    with _patch_graph_nodes(TAGGED_CORPUS):
+        results = await retriever.get_retrieved_objects("project")
+
+    assert {payload["id"] for payload in results} == {"chunk_a", "chunk_b", "chunk_ab"}
+
+
+@pytest.mark.asyncio
+async def test_node_name_and_requires_every_requested_set():
+    retriever = BM25ChunksRetriever(
+        top_k=10, node_name=["set_a", "set_b"], node_name_filter_operator="AND"
+    )
+
+    with _patch_graph_nodes(TAGGED_CORPUS):
+        results = await retriever.get_retrieved_objects("project")
+
+    # Only the chunk carrying both tags qualifies; a chunk in one of the two does not.
+    assert {payload["id"] for payload in results} == {"chunk_ab"}
+
+
+@pytest.mark.asyncio
+async def test_no_node_name_searches_every_chunk():
+    retriever = BM25ChunksRetriever(top_k=10)
+
+    with _patch_graph_nodes(TAGGED_CORPUS):
+        results = await retriever.get_retrieved_objects("project")
+
+    assert len(results) == len(TAGGED_CORPUS)
+
+
+@pytest.mark.asyncio
+async def test_node_set_tags_stored_as_objects_are_matched_by_name():
+    class _NodeSet:
+        name = "set_a"
+
+    corpus = [
+        _chunk("chunk_mapping", "alpha project", [{"name": "set_a"}]),
+        _chunk("chunk_object", "alpha project", [_NodeSet()]),
+        _chunk("chunk_other", "alpha project", ["set_b"]),
+    ]
+    retriever = BM25ChunksRetriever(top_k=10, node_name=["set_a"])
+
+    with _patch_graph_nodes(corpus):
+        results = await retriever.get_retrieved_objects("project")
+
+    assert {payload["id"] for payload in results} == {"chunk_mapping", "chunk_object"}
+
+
+@pytest.mark.asyncio
+async def test_corpus_statistics_are_built_from_the_scoped_chunks_only():
+    corpus = [
+        _chunk("chunk_a", "alpha shared", ["set_a"]),
+        _chunk("chunk_b", "beta shared outsideterm", ["set_b"]),
+    ]
+    retriever = BM25ChunksRetriever(top_k=10, node_name=["set_a"])
+
+    with _patch_graph_nodes(corpus):
+        await retriever.get_retrieved_objects("shared")
+
+    # A term that only exists outside the scope must not reach the corpus stats,
+    # otherwise IDF would describe a corpus the search cannot return.
+    assert "outsideterm" not in retriever.idf
+    assert set(retriever.chunks) == {"chunk_a"}
+
+
+@pytest.mark.asyncio
+async def test_empty_node_set_returns_no_results_instead_of_reporting_no_data():
+    retriever = BM25ChunksRetriever(top_k=10, node_name=["set_missing"])
+
+    with _patch_graph_nodes(TAGGED_CORPUS):
+        results = await retriever.get_retrieved_objects("project")
+
+    # The system holds data, the requested node set is simply empty. The vector
+    # chunk search returns nothing here rather than raising, so this does too.
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_genuinely_empty_corpus_still_raises_no_data():
+    from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+
+    retriever = BM25ChunksRetriever(top_k=10, node_name=["set_a"])
+
+    with _patch_graph_nodes([]), pytest.raises(NoDataError):
+        await retriever.get_retrieved_objects("project")

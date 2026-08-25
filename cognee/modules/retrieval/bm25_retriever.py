@@ -22,6 +22,8 @@ class BM25ChunksRetriever(LexicalRetriever):
         stop_words: Optional[list[str]] = None,
         k1: float = 1.5,
         b: float = 0.75,
+        node_name: Optional[list[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Parameters
@@ -37,6 +39,12 @@ class BM25ChunksRetriever(LexicalRetriever):
             BM25 term-frequency saturation parameter.
         b : float
             BM25 length-normalization parameter.
+        node_name : list[str], optional
+            Node set names to scope the corpus to. Defaults to None, which searches
+            every chunk.
+        node_name_filter_operator : str
+            "OR" keeps a chunk tagged with any of the requested node sets, "AND"
+            only one tagged with all of them.
         """
         if stop_words is None:
             self.stop_words = set(DEFAULT_STOP_WORDS)
@@ -51,7 +59,12 @@ class BM25ChunksRetriever(LexicalRetriever):
         self._stats_built = False
 
         super().__init__(
-            tokenizer=self._tokenizer, scorer=self._scorer, top_k=top_k, with_scores=with_scores
+            tokenizer=self._tokenizer,
+            scorer=self._scorer,
+            top_k=top_k,
+            with_scores=with_scores,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
         )
 
     def _tokenizer(self, text: str) -> list[str]:
@@ -71,7 +84,12 @@ class BM25ChunksRetriever(LexicalRetriever):
         self._stats_built = True
 
     def _build_corpus_stats(self):
-        """Compute average chunk length and per-token IDF from the tokenized chunks."""
+        """Compute average chunk length and per-token IDF from the tokenized chunks.
+
+        When the retriever is scoped to node sets, only those chunks are loaded, so
+        IDF and average length describe the corpus actually being ranked rather than
+        the whole graph.
+        """
         total_chunks = len(self.chunks)
         document_frequency: Counter = Counter()
         total_length = 0
