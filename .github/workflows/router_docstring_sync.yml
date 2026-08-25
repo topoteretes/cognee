@@ -5,9 +5,12 @@ name: automation | Router Docstring Sync
 # the FastAPI app (tools/sync_release_docs.py -> app.openapi()), so these
 # docstrings are what keeps the spec's endpoint descriptions honest.
 #
-# When drift is detected, this workflow does not fail a build — it fixes the
-# docstrings (tools/fix_router_docstrings.py) and opens/updates a PR against
-# dev with the corrections for human review.
+# When drift is detected, this workflow does not fail a build — it runs a
+# two-stage fix: the sync job corrects parameter drift mechanically
+# (tools/fix_router_docstrings.py) and opens/updates a PR against dev, then
+# the describe job asks Claude to write descriptions for any parameters the
+# mechanical fix could not source wording for
+# (tools/describe_router_params.py), committing them to the same PR.
 
 on:
   workflow_dispatch:
@@ -33,6 +36,7 @@ on:
       - "uv.lock"
       - "tools/check_router_docstrings.py"
       - "tools/fix_router_docstrings.py"
+      - "tools/describe_router_params.py"
       - ".github/workflows/router_docstring_sync.yml"
 
 permissions:
@@ -48,6 +52,8 @@ jobs:
     name: Detect and fix router docstring drift
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    outputs:
+      changes_made: ${{ steps.commit.outputs.changes_made }}
 
     steps:
       # The tree being fixed is always dev; the sync machinery (checker,
@@ -159,3 +165,52 @@ jobs:
               --title "${PR_TITLE}" \
               --body-file pr_body.md
           fi
+
+  describe-params:
+    name: Generate missing parameter descriptions with Claude
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    needs: sync-docstrings
+    # Runs whenever the sync job pushed fresh fixes; also on manual dispatch,
+    # to fill placeholders on an already-existing fix branch.
+    if: ${{ needs.sync-docstrings.outputs.changes_made == 'true' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      # The tree being edited is the fix branch the sync job just pushed; the
+      # machinery is taken from the triggering ref via a second checkout, so
+      # a PR changing it exercises its own version before merge.
+      - name: Check out the fix branch
+        uses: actions/checkout@v6
+        with:
+          ref: automation/fix-router-docstrings
+          token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+
+      - name: Check out describe machinery from the triggering ref
+        uses: actions/checkout@v6
+        with:
+          path: automation-src
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # The script works on text and AST only — no cognee environment needed,
+      # just the anthropic SDK in an ephemeral interpreter.
+      - name: Generate descriptions
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          uv run --no-project --with anthropic \
+            python automation-src/tools/describe_router_params.py
+
+      - name: Commit and push
+        run: |
+          if git diff --quiet -- cognee; then
+            echo "No description changes to commit."
+            exit 0
+          fi
+          uvx ruff format cognee/api
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cognee
+          git commit -m "docs: Generate parameter descriptions with Claude (RES-14)"
+          git push origin HEAD:automation/fix-router-docstrings
