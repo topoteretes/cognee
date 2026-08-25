@@ -38,6 +38,27 @@ def test_remove_skeleton_neighbor():
     assert node2 not in node1.skeleton_neighbours
 
 
+def test_add_skeleton_neighbor_deduplicates_by_id():
+    """Neighbours are deduplicated by id (a repeated add is a no-op)."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    node1.add_skeleton_neighbor(node2)
+    node1.add_skeleton_neighbor(node2)  # same object again
+    node1.add_skeleton_neighbor(Node("node2"))  # distinct object, same id
+    assert node1.skeleton_neighbours == [node2]
+
+
+def test_skeleton_neighbor_remove_then_readd():
+    """After removal a neighbour can be added again (id index stays in sync)."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    node1.add_skeleton_neighbor(node2)
+    node1.remove_skeleton_neighbor(node2)
+    assert node2 not in node1.skeleton_neighbours
+    node1.add_skeleton_neighbor(node2)
+    assert node1.skeleton_neighbours == [node2]
+
+
 def test_add_skeleton_edge():
     """Test adding an edge updates both skeleton_edges and skeleton_neighbours."""
     node1 = Node("node1")
