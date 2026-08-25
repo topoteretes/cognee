@@ -68,13 +68,20 @@ def render_context_for_prompt(context: Any) -> Any:
     return context
 
 
-async def load_read_only_session_prompt(retriever, raw_query: str) -> str:
+async def load_read_only_session_prompt(
+    retriever, raw_query: str, *, session_id: Optional[str] = None
+) -> str:
     """Rebuild the session layer of the prompt without writing or calling an LLM.
 
     Mirrors ``generate_session_answer``: the guidance block leads, the conversation
     history follows, and durable preferences render through the same owner whether or
     not automatic feedback is on. Fails open to ``""`` — a missing session layer must
     never take a retrieval-only call down.
+
+    ``session_id`` is the one the caller passed to ``search()``. It takes precedence
+    over the retriever's own attribute because not every retriever keeps one:
+    ``ChunksRetriever`` and the other non-generative types drop it, and falling back to
+    the default session there would report the wrong conversation.
     """
     try:
         from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -97,7 +104,10 @@ async def load_read_only_session_prompt(retriever, raw_query: str) -> str:
             return ""
 
         user_id = str(user_uuid)
-        session_id = session_manager.resolve_session_id(getattr(retriever, "session_id", None))
+        requested_session_id = (
+            session_id if session_id is not None else getattr(retriever, "session_id", None)
+        )
+        session_id = session_manager.resolve_session_id(requested_session_id)
 
         history = await select_session_history(
             session_manager,
@@ -128,9 +138,11 @@ async def load_read_only_session_prompt(retriever, raw_query: str) -> str:
         return ""
 
 
-async def build_context_preview(retriever, *, query: str, context: Any) -> ContextPreview:
+async def build_context_preview(
+    retriever, *, query: str, context: Any, session_id: Optional[str] = None
+) -> ContextPreview:
     """Assemble the session layer and the rendered prompts for one ``only_context`` call."""
-    session_context = await load_read_only_session_prompt(retriever, query)
+    session_context = await load_read_only_session_prompt(retriever, query, session_id=session_id)
 
     user_prompt_path = getattr(retriever, "user_prompt_path", None)
     system_prompt_path = getattr(retriever, "system_prompt_path", None)

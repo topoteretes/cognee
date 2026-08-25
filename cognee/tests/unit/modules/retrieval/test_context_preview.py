@@ -50,9 +50,11 @@ class _PromptRetriever:
 
 
 class _NonGenerativeRetriever:
-    """CHUNKS/SUMMARIES/CODE shape: no prompt templates at all."""
+    """CHUNKS/SUMMARIES/CODE shape: no prompt templates, and no ``session_id`` attribute.
 
-    session_id = "session-1"
+    ``ChunksRetriever.__init__`` does not keep the session id it is constructed with, so
+    the preview has to take the caller's id explicitly rather than read it back here.
+    """
 
 
 class _FakeSessionManager:
@@ -85,7 +87,8 @@ class _FakeSessionManager:
 def patched_session(session_manager, *, block="", preference_lines=None, history=None):
     """Stub the read-only session primitives the preview imports lazily.
 
-    Yields the ``build_active_context_block`` mock, the one collaborator tests assert on.
+    Yields the mocks tests assert on: ``build_block`` (the guidance-block builder) and
+    ``select_history`` (the conversation-history loader).
     """
     history_text = session_manager.history if history is None else history
     with (
@@ -99,7 +102,7 @@ def patched_session(session_manager, *, block="", preference_lines=None, history
             "select_session_history",
             new_callable=AsyncMock,
             return_value=history_text,
-        ),
+        ) as select_history,
         patch.object(
             session_turn_module,
             "load_preference_lines_safe",
@@ -113,7 +116,7 @@ def patched_session(session_manager, *, block="", preference_lines=None, history
             return_value=(block, ["entry-1"]),
         ) as build_block,
     ):
-        yield build_block
+        yield SimpleNamespace(build_block=build_block, select_history=select_history)
 
 
 @pytest.fixture
@@ -149,22 +152,46 @@ async def test_session_prompt_puts_guidance_ahead_of_history(as_user):
 async def test_session_prompt_performs_no_session_writes(as_user):
     """The guidance block must be built with stamp_served=False."""
     manager = _FakeSessionManager()
-    with patched_session(manager, block="## Active session guidance\n- x") as build_block:
+    with patched_session(manager, block="## Active session guidance\n- x") as mocks:
         await load_read_only_session_prompt(_PromptRetriever(), "why?")
 
-    assert build_block.await_args.kwargs["stamp_served"] is False
+    assert mocks.build_block.await_args.kwargs["stamp_served"] is False
     assert manager.updated_entries == []
     assert manager.added_qas == []
+
+
+@pytest.mark.asyncio
+async def test_session_prompt_prefers_the_callers_session_id(as_user):
+    """The id passed to search() wins over whatever the retriever happens to hold."""
+    manager = _FakeSessionManager()
+    with patched_session(manager, block="## Active session guidance\n- x") as mocks:
+        await load_read_only_session_prompt(
+            _PromptRetriever(), "why?", session_id="explicit-session"
+        )
+
+    # select_session_history(session_manager, user_id, session_id, query_text=...)
+    assert mocks.select_history.await_args.args[2] == "explicit-session"
+    assert mocks.build_block.await_args.kwargs["session_id"] == "explicit-session"
+
+
+@pytest.mark.asyncio
+async def test_session_prompt_falls_back_to_the_retrievers_session_id(as_user):
+    manager = _FakeSessionManager()
+    with patched_session(manager, block="## Active session guidance\n- x") as mocks:
+        await load_read_only_session_prompt(_PromptRetriever(), "why?")
+
+    assert mocks.select_history.await_args.args[2] == _PromptRetriever.session_id
+    assert mocks.build_block.await_args.kwargs["session_id"] == _PromptRetriever.session_id
 
 
 @pytest.mark.asyncio
 async def test_session_prompt_renders_preferences_when_auto_feedback_is_off(as_user):
     """Mirrors generate_session_answer: preferences still reach the prompt."""
     manager = _FakeSessionManager(auto_feedback=False)
-    with patched_session(manager, preference_lines=["Answer in Portuguese"]) as build_block:
+    with patched_session(manager, preference_lines=["Answer in Portuguese"]) as mocks:
         prompt = await load_read_only_session_prompt(_PromptRetriever(), "why?")
 
-    build_block.assert_not_awaited()
+    mocks.build_block.assert_not_awaited()
     assert "Answer in Portuguese" in prompt
 
 
@@ -235,16 +262,26 @@ async def test_preview_never_calls_an_llm(as_user):
 
 @pytest.mark.asyncio
 async def test_preview_omits_prompts_for_non_generative_retrievers(as_user):
+    """CHUNKS-shaped retriever: no prompt fields, but the *requested* session's layer.
+
+    Regression guard for the real ChunksRetriever, which has no ``session_id``
+    attribute: without the explicit id the preview read the default session and
+    reported an empty layer for a session that had history.
+    """
     manager = _FakeSessionManager()
-    with patched_session(manager, block="## Active session guidance\n- x"):
+    with patched_session(manager, block="## Active session guidance\n- x") as mocks:
         preview = await build_context_preview(
-            _NonGenerativeRetriever(), query="why?", context=["chunk-a", "chunk-b"]
+            _NonGenerativeRetriever(),
+            query="why?",
+            context=["chunk-a", "chunk-b"],
+            session_id="callers-session",
         )
 
     assert preview.user_prompt is None
     assert preview.system_prompt is None
     # The session layer is still reported — it exists independently of a prompt template.
     assert "## Active session guidance" in preview.session_context
+    assert mocks.select_history.await_args.args[2] == "callers-session"
 
 
 @pytest.mark.asyncio

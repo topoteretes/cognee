@@ -302,6 +302,7 @@ async def test_only_context_prompt_format_populates_the_envelope():
     assert preview.await_args.kwargs == {
         "query": "why?",
         "context": "node1 -- rel -- node2",
+        "session_id": None,
     }
     assert result.question == "why?"
     assert result.session_context == "## Active session guidance\n- be terse"

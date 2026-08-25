@@ -84,7 +84,14 @@ async def get_retriever_output(
     context_format = kwargs.get("context_format") or CONTEXT_FORMAT_CONTEXT
     preview = ContextPreview()
     if only_context and context_format == CONTEXT_FORMAT_PROMPT:
-        preview = await build_context_preview(retriever_instance, query=query_text, context=context)
+        # The caller's session_id is passed explicitly: non-generative retrievers do not
+        # keep one, and the preview must describe the session that was asked about.
+        preview = await build_context_preview(
+            retriever_instance,
+            query=query_text,
+            context=context,
+            session_id=kwargs.get("session_id"),
+        )
 
     return SearchResultPayload(
         result_object=retrieved_objects,
