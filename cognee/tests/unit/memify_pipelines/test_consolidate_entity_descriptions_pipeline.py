@@ -586,3 +586,36 @@ async def test_generate_type_descriptions_bounds_llm_concurrency():
 
 
 # endregion
+
+
+@pytest.mark.asyncio
+async def test_generate_consolidated_entity_preserves_properties_it_does_not_own():
+    entity_id = str(uuid4())
+    node = {
+        "properties": {
+            "id": entity_id,
+            "name": "Alice",
+            "description": "old description",
+            "belongs_to_set": ["main_dataset"],
+            "feedback_weight": 0.93,
+            "importance_weight": 0.8,
+            "ontology_uri": "http://x/Person",
+        },
+        "edges": {},
+        "neighbors": [],
+        "entity_types": [],
+    }
+
+    with patch.object(
+        ced.LLMGateway,
+        "acreate_structured_output",
+        new=AsyncMock(return_value=NodeDescription(description="new description")),
+    ):
+        entity = await generate_consolidated_entity(node, system_prompt="system")
+
+    assert str(entity.id) == entity_id
+    assert entity.description == "new description"
+    assert entity.belongs_to_set == ["main_dataset"]
+    assert entity.feedback_weight == 0.93
+    assert entity.importance_weight == 0.8
+    assert entity.ontology_uri == "http://x/Person"

@@ -3,7 +3,7 @@ import logging
 from uuid import UUID
 
 import cognee
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union, cast
 
 import json
 from pydantic import BaseModel
@@ -55,11 +55,17 @@ async def get_all_entity_nodes(graph_engine):
 async def get_entity_neighborhood(
     node_id: str, props: Dict[str, Any], graph_engine
 ) -> Dict[str, Any]:
-    """Fetch and format data for a single entity node."""
+    """Fetch and format data for a single entity node.
+
+    Keeps the node's full stored properties (not a hand-picked subset) -
+    build_entity() needs them all to rebuild the Entity without dropping
+    feedback_weight, importance_weight, belongs_to_set, and every other field
+    this pipeline has no opinion about.
+    """
     connections = await graph_engine.get_connections(node_id)
 
     entity_types, edges, filtered_neighbors = format_connections(node_id, connections)
-    entity_props = get_entity_properties(props)
+    entity_props = dict(props)
     if "id" not in entity_props:
         entity_props["id"] = str(node_id)
     return {
@@ -68,15 +74,6 @@ async def get_entity_neighborhood(
         "neighbors": filtered_neighbors,
         "entity_types": entity_types,
     }
-
-
-def get_entity_properties(
-    props: Dict[str, Any], properties: Optional[Set[str]] = None
-) -> Dict[str, Any]:
-    """Keep only relevant entity properties."""
-    if properties is None:
-        properties = {"id", "description", "name"}
-    return {k: v for k, v in props.items() if k in properties}
 
 
 def format_connections(
@@ -198,8 +195,15 @@ def build_entity_type(entity_type_node):
     return entity_type
 
 
-def build_entity(id, name, entity_types: List[EntityType], description):
-    """Build an Entity from its (possibly empty) list of EntityType nodes.
+def build_entity(props: Dict[str, Any], entity_types: List[EntityType], description: str) -> Entity:
+    """Rebuild an Entity from its full stored properties and (possibly empty) list of EntityType nodes.
+
+    Rebuilt from the full stored props - not a hand-picked subset - because
+    add_data_points()'s upsert replaces a node's whole property blob instead
+    of merging into it: any field missing from the rebuilt Entity is gone
+    from the graph afterward, not left as it was. is_a/relations are always
+    recomputed from entity_types rather than read off props, since they are
+    graph edges, not node properties.
 
     A single type still goes on is_a, unchanged from before. With more than
     one type, none is more "correct" than another - is_a can only hold one
@@ -212,13 +216,19 @@ def build_entity(id, name, entity_types: List[EntityType], description):
         if len(entity_types) > 1
         else []
     )
-    return Entity(
-        id=UUID(id),
-        name=name,
-        is_a=is_a,
-        description=description,
-        relations=relations,
-    )
+    entity_props = {
+        **props,
+        "description": description,
+        "metadata": load_metadata_to_dict(props.get("metadata")),
+    }
+    entity_props.pop("is_a", None)
+    entity_props.pop("relations", None)
+    entity = cast(Entity, Entity.from_dict(entity_props))
+    entity_id = props["id"]
+    entity.id = entity_id if isinstance(entity_id, UUID) else UUID(str(entity_id))
+    entity.is_a = is_a
+    entity.relations = relations
+    return entity
 
 
 async def generate_consolidated_entity(node, system_prompt) -> Entity:
@@ -226,7 +236,7 @@ async def generate_consolidated_entity(node, system_prompt) -> Entity:
     text = build_node_neighborhood_prompt(node)
     result = await query_LLM(text, system_prompt)
     entity_types = [build_entity_type(entity_type) for entity_type in node["entity_types"]]
-    entity = build_entity(props["id"], props["name"], entity_types, result.description)
+    entity = build_entity(props, entity_types, result.description)
     return entity
 
 
