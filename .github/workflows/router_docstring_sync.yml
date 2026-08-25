@@ -19,7 +19,6 @@ name: automation | Router Docstring Sync
 # previously generated descriptions.
 
 on:
-  pull_request: 
   workflow_dispatch:
   # Weekly backstop sweep (runs from the default branch, fixes dev).
   schedule:
