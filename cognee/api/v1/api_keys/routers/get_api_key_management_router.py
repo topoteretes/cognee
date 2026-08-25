@@ -65,7 +65,8 @@ def get_api_key_management_router():
         """Create api key for user — POST /api/v1/auth/api-keys.
 
         ## Request Parameters
-        - **name** (Optional[str]): No description provided in code yet.
+        - **name** (Optional[str]): Human-readable name stored with the generated API key
+          and returned in the response.
         """
         send_telemetry(
             "Api Key Management API Endpoint Invoked",

@@ -109,7 +109,8 @@ def get_slack_channels_router():
         working everywhere, exactly as before this feature existed.
 
         ## Request Parameters
-        - **channelIds** (List[str]): No description provided in code yet.
+        - **channelIds** (List[str]): Slack channel IDs that slash commands are limited to;
+          an empty list leaves them unrestricted.
         """
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
@@ -134,7 +135,8 @@ def get_slack_channels_router():
         the invoking Slack member should be linked to.
 
         ## Request Parameters
-        - **code** (str): No description provided in code yet.
+        - **code** (str): Magic-link code issued by the /cognee-link Slack command,
+          confirmed against the authenticated account.
         """
         linked = await confirm_link(payload.code, user.id)
         if not linked:

@@ -76,7 +76,8 @@ def get_agents_router() -> APIRouter:
         """Create agent endpoint — POST /api/v1/agents/create.
 
         ## Query Parameters
-        - **name** (str): No description provided in code yet.
+        - **name** (str): Display name for the new agent; a conflict is returned if an agent
+          with this name already exists.
         """
         try:
             agent_user, api_key = await create_agent(name, user)
@@ -117,10 +118,12 @@ def get_agents_router() -> APIRouter:
         """List agents connections — GET /api/v1/agents/connections.
 
         ## Query Parameters
-        - **active_only** (bool): No description provided in code yet. Defaults to True.
+        - **active_only** (bool): When true, limits results to connections that are
+          currently active. Defaults to True.
         - **agent_id** (Optional[UUID]): Filter connections by agent user ID. Only returns
           connections belonging to this specific agent.
-        - **include_sources** (bool): No description provided in code yet. Defaults to True.
+        - **include_sources** (bool): When true, includes the source breakdown for each
+          returned connection. Defaults to True.
         - **limit** (int): Maximum number of rows to return. Defaults to 50.
         - **offset** (int): Number of rows to skip for pagination. Defaults to 0.
         - **range** (Literal['24h', '7d', '30d', 'all']): One of: '24h', '7d', '30d', 'all'.
@@ -202,17 +205,20 @@ def get_agents_router() -> APIRouter:
         - **agent_session_name** (str): A unique name for this agent connection. Combined with the
           authenticated user's ID to identify the connection.
         - **dataset_ids** (List[str]): UUIDs of the datasets (from GET /api/v1/datasets).
-        - **dataset_names** (List[str]): No description provided in code yet.
+        - **dataset_names** (List[str]): Names of the datasets to associate with the
+          registered agent connection.
         - **memory_mode** (Literal['session', 'cognee', 'hybrid', 'none', 'unknown']): One of:
           'session', 'cognee', 'hybrid', 'none', 'unknown'. Defaults to 'unknown'.
         - **metadata** (Dict[str, Any]): Free-form metadata object.
-        - **origin_function** (Optional[str]): No description provided in code yet.
+        - **origin_function** (Optional[str]): Name of the calling function that triggered
+          the registration, recorded on the connection.
         - **session_id** (Optional[str]): Client-supplied session identifier — the same value passed
           as session_id to POST /api/v1/remember.
         - **source** (Literal['agent_memory', 'session_trace', 'serve', 'api_key', 'mcp', 'api']):
           One of: 'agent_memory', 'session_trace', 'serve', 'api_key', 'mcp', 'api'. Defaults to
           'api'.
-        - **type** (str): No description provided in code yet. Defaults to 'api'.
+        - **type** (str): Connection type label stored with the registered agent connection.
+          Defaults to 'api'.
         """
         connection = await register_agent(user, request)
         return jsonable_encoder(connection)
