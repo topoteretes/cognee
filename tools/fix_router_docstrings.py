@@ -50,24 +50,104 @@ TRAILING_HEADINGS = ("response", "error", "notes", "note", "example", "next step
 
 FALLBACK_DESCRIPTION = "No description provided in code yet."
 
+# Wording for parameter names that recur across cognee routers with a fixed
+# meaning. Used only when the parameter declares no description of its own.
+KNOWN_DESCRIPTIONS = {
+    "dataset_id": "UUID of the dataset (from GET /api/v1/datasets).",
+    "dataset_ids": "UUIDs of the datasets (from GET /api/v1/datasets).",
+    "dataset_name": "Name of the target dataset.",
+    "data_id": "UUID of the data item (from GET /api/v1/datasets/{dataset_id}/data).",
+    "session_id": "Client-supplied session identifier — the same value passed as "
+    "session_id to POST /api/v1/remember.",
+    "agent_id": "The agent's user ID (from GET /api/v1/agents/list).",
+    "agent_session_name": "Name of the agent connection.",
+    "api_key_id": "UUID of the API key (from GET /api/v1/auth/api-keys).",
+    "provider": "Key of a registered OAuth provider (see GET /api/v1/integrations/status).",
+    "plugin_key": "Key of a known plugin (see GET /api/v1/integrations/status).",
+    "skill_id": "ID of the skill (from GET /api/v1/skills/).",
+    "proposal_id": "ID of the skill-improvement proposal.",
+    "email": "Email address of the user.",
+    "limit": "Maximum number of rows to return.",
+    "offset": "Number of rows to skip for pagination.",
+    "order_by": "Column to sort by.",
+    "descending": "Sort in descending order.",
+    "metadata": "Free-form metadata object.",
+    "node_set": "Named node sets to tag the data with, for filtered retrieval.",
+    "node_name": "Restrict the operation to these named node sets.",
+    "top_k": "Maximum number of results to return.",
+    "run_in_background": "Return immediately and continue processing server-side.",
+}
+KNOWN_DESCRIPTIONS = {normalize(key): value for key, value in KNOWN_DESCRIPTIONS.items()}
+
+
+def _literal_values(annotation) -> list:
+    """Values of any typing.Literal found inside the annotation."""
+    if typing.get_origin(annotation) is typing.Literal:
+        return list(typing.get_args(annotation))
+    values: list = []
+    for arg in typing.get_args(annotation):
+        values.extend(_literal_values(arg))
+    return values
+
+
+def _describe(name: str, annotation, explicit: str | None, default) -> str:
+    """Best mechanical description: code first, then vocabulary, then the type."""
+    from pydantic_core import PydanticUndefined
+
+    if explicit and explicit.strip():
+        text = explicit.strip()
+    elif normalize(name) in KNOWN_DESCRIPTIONS:
+        text = KNOWN_DESCRIPTIONS[normalize(name)]
+    else:
+        literals = _literal_values(annotation)
+        if literals:
+            rendered = ", ".join(repr(value) for value in literals)
+            text = f"One of: {rendered}."
+        else:
+            text = FALLBACK_DESCRIPTION
+
+    has_default = default is not None and default is not ... and default is not PydanticUndefined
+    if has_default and "default" not in text.lower():
+        text = f"{text} Defaults to {default!r}."
+    return text
+
 
 def format_annotation(annotation) -> str:
-    """Compact, readable type string for a parameter annotation."""
+    """Compact, readable type string for a parameter annotation.
+
+    Recursively strips Annotated metadata (which can contain schema objects)
+    and module paths, keeping only class names and type structure.
+    """
     if annotation is inspect.Parameter.empty or annotation is None:
         return "Any"
-    if typing.get_origin(annotation) is typing.Annotated:
-        annotation = typing.get_args(annotation)[0]
-    text = inspect.formatannotation(annotation)
-    for prefix in ("typing.", "uuid.", "datetime.", "pydantic.", "fastapi."):
-        text = text.replace(prefix, "")
-    # Strip module paths from cognee-internal classes: keep the class name.
-    parts = []
-    for token in text.replace("[", " [ ").replace("]", " ] ").replace(",", " , ").split():
-        parts.append(token.rsplit(".", 1)[-1] if "." in token else token)
-    joined = " ".join(parts)
-    return re.sub(
-        r"\s*([\[\],])\s*", lambda m: m.group(1) + (" " if m.group(1) == "," else ""), joined
-    ).strip()
+    if annotation is type(None):
+        return "None"
+
+    origin = typing.get_origin(annotation)
+    if origin is typing.Annotated:
+        return format_annotation(typing.get_args(annotation)[0])
+    if origin is typing.Literal:
+        rendered = ", ".join(repr(value) for value in typing.get_args(annotation))
+        return f"Literal[{rendered}]"
+    if origin is typing.Union or str(origin) == "types.UnionType":
+        args = list(typing.get_args(annotation))
+        if type(None) in args and len(args) == 2:
+            other = args[0] if args[1] is type(None) else args[1]
+            return f"Optional[{format_annotation(other)}]"
+        rendered = ", ".join(format_annotation(arg) for arg in args)
+        return f"Union[{rendered}]"
+    if origin is not None:
+        origin_name = getattr(origin, "__name__", str(origin)).capitalize()
+        origin_name = {"List": "List", "Dict": "Dict", "Set": "Set", "Tuple": "Tuple"}.get(
+            origin_name, origin_name
+        )
+        rendered = ", ".join(format_annotation(arg) for arg in typing.get_args(annotation))
+        return f"{origin_name}[{rendered}]"
+
+    name = getattr(annotation, "__name__", None)
+    if name:
+        return name
+    return re.sub(r"\w+(\.\w+)+\.", "", str(annotation))
 
 
 @dataclass
@@ -100,7 +180,7 @@ def _param_metadata(parameter: inspect.Parameter):
     if typing.get_origin(parameter.annotation) is typing.Annotated:
         candidates.extend(typing.get_args(parameter.annotation)[1:])
     for candidate in candidates:
-        if isinstance(candidate, fastapi_params.Param):
+        if isinstance(candidate, (fastapi_params.Param, fastapi_params.Body)):
             return candidate
     return None
 
@@ -162,21 +242,27 @@ def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
                         name=wire_name,
                         section=REQUEST_SECTION,
                         type_text=format_annotation(model_field.annotation),
-                        description=(model_field.description or FALLBACK_DESCRIPTION).strip(),
+                        description=_describe(
+                            wire_name,
+                            model_field.annotation,
+                            model_field.description,
+                            model_field.default,
+                        ),
                     )
             continue
 
         meta = _param_metadata(parameter)
         alias = meta.alias if isinstance(meta, fastapi_params.Param) and meta.alias else None
         wire_name = alias or name
-        description = None
-        if meta is not None and getattr(meta, "description", None):
-            description = meta.description
+        description = getattr(meta, "description", None) if meta is not None else None
+        default = meta.default if meta is not None else parameter.default
+        if default is inspect.Parameter.empty:
+            default = ...
         docs[normalize(wire_name)] = ParamDoc(
             name=wire_name,
             section=_section_for(parameter, route_path, name),
             type_text=format_annotation(annotation),
-            description=(description or FALLBACK_DESCRIPTION).strip(),
+            description=_describe(wire_name, annotation, description, default),
         )
     return docs
 
