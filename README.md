@@ -41,7 +41,6 @@ Cognee is the open-source AI memory platform that gives AI agents persistent lon
 
   <p align="center">
   🌐 This README is also available in:
-  :
   <!-- Keep these links. Translations will automatically update with the README. -->
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
