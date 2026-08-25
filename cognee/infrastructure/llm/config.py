@@ -1,5 +1,4 @@
 import json
-import os
 from functools import lru_cache
 from typing import Any, ClassVar
 
@@ -335,29 +334,28 @@ class LLMConfig(BaseSettings):
             # Skip checks unless provider is "ollama"
             return self
 
-        def is_env_set(var_name: str) -> bool:
-            """
-            Check if a given environment variable is set and non-empty.
+        # Judge the resolved config, not os.environ. pydantic-settings has
+        # already merged env vars and constructor kwargs into these fields by
+        # the time an "after" validator runs, so checking os.environ here
+        # would ignore a config built entirely from kwargs (as every test in
+        # test_llm_config.py does) and would also stay fooled by a caller's
+        # ambient .env that has nothing to do with the config under
+        # construction. See COG-6293.
+        #
+        # llm_endpoint/llm_api_key default to blank ("" / None), so "has a
+        # non-blank value" alone tells us whether they were configured.
+        # llm_model defaults to a real model id ("openai/gpt-5-mini"), so the
+        # same non-blank check can't tell "configured, happens to match the
+        # default" from "left unset" - that also needs `model_fields_set`
+        # (populated by pydantic-settings whether the value came from a kwarg
+        # or an env var, even when it matches the default).
+        def _is_configured(value: str | None) -> bool:
+            return isinstance(value, str) and value.strip() != ""
 
-            Parameters:
-            -----------
-
-                - var_name (str): The name of the environment variable to check.
-
-            Returns:
-            --------
-
-                - bool: True if the environment variable exists and is not empty, otherwise False.
-            """
-            val = os.environ.get(var_name)
-            return val is not None and val.strip() != ""
-
-        # Only LLM env vars are validated here; embedding env vars are
-        # EmbeddingConfig's responsibility, not LLMConfig's.
         llm_env_vars = {
-            "LLM_MODEL": is_env_set("LLM_MODEL"),
-            "LLM_ENDPOINT": is_env_set("LLM_ENDPOINT"),
-            "LLM_API_KEY": is_env_set("LLM_API_KEY"),
+            "LLM_MODEL": "llm_model" in self.model_fields_set and _is_configured(self.llm_model),
+            "LLM_ENDPOINT": _is_configured(self.llm_endpoint),
+            "LLM_API_KEY": _is_configured(self.llm_api_key),
         }
         if any(llm_env_vars.values()) and not all(llm_env_vars.values()):
             missing_llm = [key for key, is_set in llm_env_vars.items() if not is_set]
@@ -366,12 +364,11 @@ class LLMConfig(BaseSettings):
                 f"for LLM usage (LLM_MODEL, LLM_ENDPOINT, LLM_API_KEY). Missing: {missing_llm}"
             )
 
-        # Check model support matrix if LLM_MODEL is configured
-        model_name = os.environ.get("LLM_MODEL") or self.llm_model
-        if model_name:
+        # Check model support matrix if a model is configured
+        if self.llm_model:
             from cognee.infrastructure.llm.ollama_support import check_model_support
 
-            check_model_support(model_name)
+            check_model_support(self.llm_model)
 
         return self
 

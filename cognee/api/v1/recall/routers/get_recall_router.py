@@ -46,7 +46,11 @@ class RecallPayloadDTO(InDTO):
             "when both are provided. Leave empty to resolve by name."
         ),
     )
-    query: str = Field(default="What is in the document?")
+    query: str = Field(
+        ...,
+        examples=["What is in the document?"],
+        description="The question to answer. Required; there is no default query.",
+    )
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
