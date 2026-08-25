@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from uuid import UUID
 
 import cognee
@@ -16,6 +15,9 @@ from cognee.modules.engine.models.Entity import Entity
 from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.engine.models import EntityType
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger("consolidate_entity_descriptions")
 
 prompt_name = "consolidate_entity_details.txt"
 type_prompt_name = "consolidate_entity_type_details.txt"
@@ -25,6 +27,8 @@ MAX_CONCURRENT_ENTITY_LLM_CALLS = 10
 MAX_CONCURRENT_TYPE_LLM_CALLS = 10
 MAX_NAMED_MEMBERS = 5
 MAX_MEMBERS_PER_TYPE_PROMPT = 50
+MAX_NEIGHBORS_IN_PROMPT = 20
+MAX_NEIGHBOR_TEXT_CHARS = 500
 
 
 class NodeDescription(BaseModel):
@@ -150,8 +154,15 @@ def load_metadata_to_dict(value: Any) -> Dict[str, Any]:
     return value
 
 
+def _truncate(text: str, max_chars: int = MAX_NEIGHBOR_TEXT_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "..."
+
+
 def build_node_neighborhood_prompt(node):
     props = node["properties"]
+    neighbors = node["neighbors"]
 
     text = (
         "This node's description is the following: "
@@ -160,18 +171,35 @@ def build_node_neighborhood_prompt(node):
         + props["description"]
         + ". It is connected to it's neighbors in the following way:"
     )
-    for neighbor in node["neighbors"]:
+
+    dropped_count = len(neighbors) - MAX_NEIGHBORS_IN_PROMPT
+    if dropped_count > 0:
+        logger.warning(
+            "build_node_neighborhood_prompt: dropping %d of %d neighbors for entity %r (cap is %d)",
+            dropped_count,
+            len(neighbors),
+            props.get("name"),
+            MAX_NEIGHBORS_IN_PROMPT,
+        )
+
+    for neighbor in neighbors[:MAX_NEIGHBORS_IN_PROMPT]:
         edge_info = node.get("edges", {}).get(neighbor.get("id"), {})
         relationship_name = edge_info.get("relationship_name", "related to")
         edge_text = edge_info.get("edge_text")
         neighbor_name = neighbor.get("name", "")
         neighbor_desc = neighbor.get("description", "")
+
         if neighbor_desc:
-            text += f"\n- {relationship_name}: {neighbor_name} - {neighbor_desc}"
+            text += f"\n- {relationship_name}: {neighbor_name} - {_truncate(neighbor_desc)}"
+            if edge_text:
+                text += f" (relationship detail: {_truncate(edge_text)})"
+        elif edge_text:
+            # No description on this neighbor (e.g. a DocumentChunk) - edge_text
+            # is already a summary of its content, so use it instead of the raw
+            # text rather than including both.
+            text += f"\n- {relationship_name} - {_truncate(edge_text)}"
         else:
-            text += f"\n- {relationship_name} - {neighbor.get('text', '')}"
-        if edge_text:
-            text += f" (relationship detail: {edge_text})"
+            text += f"\n- {relationship_name} - {_truncate(neighbor.get('text', ''))}"
 
     return text
 

@@ -619,3 +619,48 @@ async def test_generate_consolidated_entity_preserves_properties_it_does_not_own
     assert entity.feedback_weight == 0.93
     assert entity.importance_weight == 0.8
     assert entity.ontology_uri == "http://x/Person"
+
+
+def test_build_node_neighborhood_prompt_caps_neighbor_count():
+    total_neighbors = ced.MAX_NEIGHBORS_IN_PROMPT + 15
+    neighbors = [
+        {"id": f"n{i}", "name": f"Neighbor{i}", "description": f"d{i}"}
+        for i in range(total_neighbors)
+    ]
+    node = _node(
+        "entity-1", "Marco", "old description", edges={}, neighbors=neighbors, entity_types=[]
+    )
+
+    prompt = ced.build_node_neighborhood_prompt(node)
+
+    assert prompt.count("\n- ") == ced.MAX_NEIGHBORS_IN_PROMPT
+    for neighbor in neighbors[ced.MAX_NEIGHBORS_IN_PROMPT :]:
+        assert neighbor["name"] not in prompt
+
+
+def test_build_node_neighborhood_prompt_truncates_long_neighbor_text():
+    long_description = "x" * (ced.MAX_NEIGHBOR_TEXT_CHARS + 100)
+    neighbors = [{"id": "n1", "name": "Milano", "description": long_description}]
+    node = _node(
+        "entity-1", "Marco", "old description", edges={}, neighbors=neighbors, entity_types=[]
+    )
+
+    prompt = ced.build_node_neighborhood_prompt(node)
+
+    assert long_description not in prompt
+    assert "x" * ced.MAX_NEIGHBOR_TEXT_CHARS + "..." in prompt
+
+
+def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
+    chunk_text = "The full raw text of a document chunk mentioning Marco."
+    neighbors = [{"id": "chunk-1", "text": chunk_text}]
+    edges = {"chunk-1": {"relationship_name": "contains", "edge_text": "Marco is mentioned here."}}
+    node = _node(
+        "entity-1", "Marco", "old description", edges=edges, neighbors=neighbors, entity_types=[]
+    )
+
+    prompt = ced.build_node_neighborhood_prompt(node)
+
+    assert "Marco is mentioned here." in prompt
+    assert chunk_text not in prompt
+    assert prompt.count("Marco is mentioned here.") == 1
