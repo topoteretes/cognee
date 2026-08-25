@@ -11,6 +11,13 @@ name: automation | Router Docstring Sync
 
 on:
   workflow_dispatch:
+  # Runs on PRs that change the sync machinery itself, so its behavior can
+  # be observed before merge. The job always checks out and fixes dev.
+  pull_request:
+    paths:
+      - "tools/check_router_docstrings.py"
+      - "tools/fix_router_docstrings.py"
+      - ".github/workflows/router_docstring_sync.yml"
   # Weekly backstop sweep (runs from the default branch, fixes dev).
   schedule:
     - cron: "0 6 * * 1"
