@@ -19,19 +19,6 @@ Rules:
 - Output one paragraph of plain prose for the type description itself. No
   bullet points, no headers.
 
-Also produce, for every member card shown to you, one short "is_a" line in
-the form:
-    {EntityName} is a {Type}: {short blend of that member's own facts, placed
-    in the context of the type summary you just wrote}
-
-Rules for these lines:
-- Start with the member's name, exactly as given, and "is a {Type}".
-- Add one or two facts specific to that member, phrased in relation to the
-  type summary (typical / outlier / the minimum / the maximum / the one
-  that...), using only facts from that member's own card and the aggregate
-  you derived - never facts about other members.
-- Do not restate the type's aggregate facts on their own (for example, do not
-  repeat the total member count) - only use them to place this one member.
-- Keep each line short - a sentence, not a paragraph.
-- Produce exactly one such line per member card shown to you, matching its
-  name exactly.
+Produce only the type description. Do not produce anything about individual
+members beyond what the naming instruction allows within that paragraph -
+per-member lines are generated separately, in a different call.

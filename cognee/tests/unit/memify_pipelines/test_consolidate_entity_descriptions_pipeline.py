@@ -320,21 +320,34 @@ async def test_generate_type_description_single_call_under_threshold():
     entity_type = EntityType(name="Person", description="Person")
     members = [Entity(name=f"E{i}", description=f"d{i}") for i in range(3)]
 
+    description_calls = []
+    is_a_calls = []
+
+    async def fake_llm(*, text_input, system_prompt, response_model):
+        if system_prompt == "is-a-system":
+            assert "Final type summary: This graph has 3 Person entities." in text_input
+            assert "Total member count: 3" in text_input
+            is_a_calls.append(text_input)
+            return ced.EntityIsATexts(
+                is_a_texts=[ced.MemberIsAText(member_name="E0", is_a_text="E0 is a Person.")]
+            )
+        assert system_prompt == "system"
+        assert "Total member count: 3" in text_input
+        description_calls.append(text_input)
+        return EntityTypeDescription(description="This graph has 3 Person entities.")
+
     with patch.object(
-        ced.LLMGateway,
-        "acreate_structured_output",
-        new=AsyncMock(
-            return_value=EntityTypeDescription(description="This graph has 3 Person entities.")
-        ),
-    ) as llm_mock:
+        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+    ):
         result = await ced.generate_type_description(
             entity_type, members, "system", "merge-system", "is-a-system"
         )
 
     assert result.description == "This graph has 3 Person entities."
-    llm_mock.assert_awaited_once()
-    assert llm_mock.call_args.kwargs["system_prompt"] == "system"
-    assert "Total member count: 3" in llm_mock.call_args.kwargs["text_input"]
+    assert len(description_calls) == 1
+    assert len(is_a_calls) == 1
+    assert len(result.is_a_texts) == 1
+    assert result.is_a_texts[0].is_a_text == "E0 is a Person."
 
 
 @pytest.mark.asyncio
@@ -503,6 +516,44 @@ async def test_generate_type_descriptions_updates_typed_and_skips_untyped():
     assert all(member.is_a.description == "Aggregate description" for member in typed_members)
     assert ghost.is_a is None
     assert len({id(member.is_a) for member in typed_members}) == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_type_descriptions_updates_all_types_for_multi_type_entity():
+    # Reproduces a bug report: an entity with more than one type had only ONE
+    # of its types updated when run through the real, concurrent orchestrator
+    # (generate_type_descriptions), even though calling apply_type_description
+    # twice manually and sequentially (see the test above) works correctly.
+    tool_type = EntityType(name="Tool", description="Tool")
+    org_type = EntityType(name="Organization", description="Organization")
+    cognee = Entity(
+        name="Cognee",
+        is_a=None,
+        relations=[
+            (Edge(relationship_type="is_a"), tool_type),
+            (Edge(relationship_type="is_a"), org_type),
+        ],
+        description="d",
+    )
+    entities = [cognee]
+
+    async def fake_llm(*, text_input, system_prompt, response_model):
+        if "Entity type: Tool" in text_input:
+            return EntityTypeDescription(description="Tool aggregate description")
+        if "Entity type: Organization" in text_input:
+            return EntityTypeDescription(description="Organization aggregate description")
+        raise AssertionError(f"Unexpected text_input: {text_input}")
+
+    with patch.object(
+        ced.LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=fake_llm)
+    ):
+        result = await ced.generate_type_descriptions(entities)
+
+    assert result is entities
+    tool_relation = next(r for r in cognee.relations if r[1].name == "Tool")
+    org_relation = next(r for r in cognee.relations if r[1].name == "Organization")
+    assert tool_relation[1].description == "Tool aggregate description"
+    assert org_relation[1].description == "Organization aggregate description"
 
 
 @pytest.mark.asyncio

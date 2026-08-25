@@ -388,48 +388,55 @@ async def generate_type_description(
     merge_system_prompt: str,
     is_a_system_prompt: str,
 ) -> EntityTypeDescription:
-    """Summarize a type's members, batching and merging when there are too many
-    for a single prompt. Callers always pass the type's full member list here -
-    batching is an internal detail, not something the caller decides.
+    """Summarize a type's members, batching and merging the description when
+    there are too many for a single prompt. Callers always pass the type's
+    full member list here - batching is an internal detail, not something the
+    caller decides.
 
-    Below the batching threshold, one call produces both the description and
-    every member's is_a line together, since that single call already sees
-    every member. Above the threshold, is_a lines are NOT produced alongside
-    the per-batch partial descriptions - a partial only sees a fraction of the
-    members, so a comparative claim ("handles the most packages") could be
-    true for that batch and false once every member is considered. Instead,
-    is_a lines are generated in a second round, after the merge, once a single
-    final description exists for every batch to be judged against.
+    is_a lines are ALWAYS generated in their own call, separate from the
+    description, never alongside it. The two jobs need contradictory naming
+    rules whenever there are more than MAX_NAMED_MEMBERS members: the
+    description must not name anyone, while every is_a line must start with a
+    member's name - one response can't honor both at once. Beyond that
+    correctness issue, a per-batch partial description also only sees a
+    fraction of the members, so a comparative claim ("handles the most
+    packages") could be true for that batch and false once every member is
+    considered - another reason is_a lines must wait for the final,
+    already-merged description before being generated.
     """
     total_member_count = len(members)
+    batches = batch_members(members, MAX_MEMBERS_PER_TYPE_PROMPT)
 
-    if total_member_count <= MAX_MEMBERS_PER_TYPE_PROMPT:
+    if len(batches) == 1:
         text = build_entity_type_prompt(
             entity_type.name, entity_type.description, members, total_member_count
         )
-        return await query_type_LLM(text, system_prompt)
-
-    batches = batch_members(members, MAX_MEMBERS_PER_TYPE_PROMPT)
-    partial_results = await asyncio.gather(
-        *(
-            query_type_LLM(
-                build_entity_type_prompt(
-                    entity_type.name, entity_type.description, batch, total_member_count
-                ),
-                system_prompt,
+        result = await query_type_LLM(text, system_prompt)
+        final_description = result.description
+    else:
+        partial_results = await asyncio.gather(
+            *(
+                query_type_LLM(
+                    build_entity_type_prompt(
+                        entity_type.name, entity_type.description, batch, total_member_count
+                    ),
+                    system_prompt,
+                )
+                for batch in batches
             )
-            for batch in batches
         )
-    )
-    partial_descriptions = [result.description for result in partial_results]
-    merge_text = build_type_merge_prompt(entity_type.name, total_member_count, partial_descriptions)
-    merged = await query_type_merge_LLM(merge_text, merge_system_prompt)
+        partial_descriptions = [result.description for result in partial_results]
+        merge_text = build_type_merge_prompt(
+            entity_type.name, total_member_count, partial_descriptions
+        )
+        merged = await query_type_merge_LLM(merge_text, merge_system_prompt)
+        final_description = merged.description
 
     is_a_results = await asyncio.gather(
         *(
             query_is_a_only_LLM(
                 build_is_a_only_prompt(
-                    entity_type.name, merged.description, batch, total_member_count
+                    entity_type.name, final_description, batch, total_member_count
                 ),
                 is_a_system_prompt,
             )
@@ -438,7 +445,7 @@ async def generate_type_description(
     )
     is_a_texts = [text for result in is_a_results for text in result.is_a_texts]
 
-    return EntityTypeDescription(description=merged.description, is_a_texts=is_a_texts)
+    return EntityTypeDescription(description=final_description, is_a_texts=is_a_texts)
 
 
 def apply_type_description(
