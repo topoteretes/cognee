@@ -177,6 +177,10 @@ async def test_generate_consolidated_entity_keeps_id_and_uses_edge_text():
 
     prompt_text = llm_mock.call_args.kwargs["text_input"]
     assert "Marco works in Milan" in prompt_text
+    assert (
+        llm_mock.call_args.kwargs["max_completion_tokens"]
+        == rewrite_entities.PARAGRAPH_MAX_COMPLETION_TOKENS
+    )
 
 
 @pytest.mark.asyncio
@@ -250,7 +254,7 @@ async def test_generate_consolidated_entities_bounds_llm_concurrency():
     max_concurrent = 0
     lock = asyncio.Lock()
 
-    async def fake_llm(*, text_input, system_prompt, response_model):
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
         nonlocal concurrent, max_concurrent
         async with lock:
             concurrent += 1
@@ -350,6 +354,40 @@ def test_build_entity_type_prompt_reports_total_separately_from_shown_members():
     assert "Member cards shown below (1 of 20)" in prompt
 
 
+def test_build_entity_type_prompt_truncates_long_member_cards():
+    long_description = "x" * (describe_types.MAX_TYPE_TEXT_CHARS + 100)
+    members = [Entity(name=f"E{i}", description=long_description) for i in range(50)]
+
+    prompt = describe_types.build_entity_type_prompt(
+        "Person", "Person", members, total_member_count=50, max_named_members=5
+    )
+
+    assert long_description not in prompt
+    truncated = "x" * describe_types.MAX_TYPE_TEXT_CHARS + "..."
+    assert prompt.count(truncated) == len(members)
+
+
+def test_build_is_a_only_prompt_truncates_long_member_cards():
+    long_description = "x" * (describe_types.MAX_TYPE_TEXT_CHARS + 100)
+    members = [Entity(name="E0", description=long_description)]
+
+    prompt = describe_types.build_is_a_only_prompt("Person", "Final summary", members, 1)
+
+    assert long_description not in prompt
+    assert "x" * describe_types.MAX_TYPE_TEXT_CHARS + "..." in prompt
+
+
+def test_build_type_merge_prompt_truncates_long_partials():
+    long_partial = "y" * (describe_types.MAX_TYPE_TEXT_CHARS + 100)
+    partials = [long_partial, "a short partial"]
+
+    prompt = describe_types.build_type_merge_prompt("Person", 70, partials)
+
+    assert long_partial not in prompt
+    assert "y" * describe_types.MAX_TYPE_TEXT_CHARS + "..." in prompt
+    assert "a short partial" in prompt
+
+
 def test_build_naming_instruction_names_at_the_boundary_count():
     # Regression test: a real run showed the LLM sometimes fails to list names
     # when total_member_count exactly equals the threshold, even though the
@@ -374,16 +412,18 @@ async def test_generate_type_description_single_call_under_threshold():
     description_calls = []
     is_a_calls = []
 
-    async def fake_llm(*, text_input, system_prompt, response_model):
+    async def fake_llm(*, text_input, system_prompt, response_model, **kwargs):
         if system_prompt == "is-a-system":
             assert "Final type summary: This graph has 3 Person entities." in text_input
             assert "Total member count: 3" in text_input
+            assert kwargs["max_completion_tokens"] == 3 * describe_types.TOKENS_PER_IS_A_LINE
             is_a_calls.append(text_input)
             return EntityIsATexts(
                 is_a_texts=[MemberIsAText(member_name="E0", is_a_text="E0 is a Person.")]
             )
         assert system_prompt == "system"
         assert "Total member count: 3" in text_input
+        assert kwargs["max_completion_tokens"] == describe_types.PARAGRAPH_MAX_COMPLETION_TOKENS
         description_calls.append(text_input)
         return NodeDescription(description="This graph has 3 Person entities.")
 
@@ -410,20 +450,26 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
     batch_calls = []
     is_a_calls = []
 
-    async def fake_llm(*, text_input, system_prompt, response_model):
+    async def fake_llm(*, text_input, system_prompt, response_model, **kwargs):
         if system_prompt == "merge-system":
             assert len(batch_calls) == 3
             for partial in batch_calls:
                 assert partial in text_input
+            assert kwargs["max_completion_tokens"] == describe_types.PARAGRAPH_MAX_COMPLETION_TOKENS
             return NodeDescription(description="FINAL MERGED")
         if system_prompt == "is-a-system":
             assert "Final type summary: FINAL MERGED" in text_input
             assert f"Total member count: {total}" in text_input
+            batch_size = sum(1 for line in text_input.splitlines() if line.startswith("- E"))
+            assert (
+                kwargs["max_completion_tokens"] == batch_size * describe_types.TOKENS_PER_IS_A_LINE
+            )
             is_a_calls.append(text_input)
             return EntityIsATexts(
                 is_a_texts=[MemberIsAText(member_name="E0", is_a_text=f"is_a-{len(is_a_calls)}")]
             )
         assert f"Total member count: {total}" in text_input
+        assert kwargs["max_completion_tokens"] == describe_types.PARAGRAPH_MAX_COMPLETION_TOKENS
         partial = f"partial-{len(batch_calls)}"
         batch_calls.append(partial)
         return NodeDescription(description=partial)
@@ -462,7 +508,7 @@ async def test_generate_type_description_bounds_concurrency_across_batches():
     max_concurrent = 0
     lock = asyncio.Lock()
 
-    async def fake_llm(*, text_input, system_prompt, response_model):
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
         nonlocal concurrent, max_concurrent
         async with lock:
             concurrent += 1
@@ -531,6 +577,20 @@ def test_apply_type_description_builds_is_a_edge_tuple_when_text_matches(caplog)
     miss_logs = [r for r in caplog.records if "got no is_a line" in r.message]
     assert len(miss_logs) == 1
     assert "1 of 2 members" in miss_logs[0].message
+
+
+def test_apply_type_description_truncates_long_is_a_text_before_persisting():
+    entity_type = EntityType(name="Person", description="Person")
+    marco = Entity(name="Marco", is_a=entity_type, description="d1")
+    long_is_a_text = "x" * (describe_types.MAX_TYPE_TEXT_CHARS + 100)
+    is_a_texts = [MemberIsAText(member_name="Marco", is_a_text=long_is_a_text)]
+
+    describe_types.apply_type_description(
+        entity_type, [marco], "New aggregate description", is_a_texts
+    )
+
+    marco_edge, _ = marco.is_a
+    assert marco_edge.edge_text == "x" * describe_types.MAX_TYPE_TEXT_CHARS + "..."
 
 
 def test_apply_type_description_logs_nothing_when_every_member_matches(caplog):
@@ -660,7 +720,7 @@ async def test_generate_type_descriptions_updates_all_types_for_multi_type_entit
     )
     entities = [cognee]
 
-    async def fake_llm(*, text_input, system_prompt, response_model):
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
         if "Entity type: Tool" in text_input:
             return EntityTypeDescription(description="Tool aggregate description")
         if "Entity type: Organization" in text_input:
@@ -685,7 +745,7 @@ async def test_generate_type_descriptions_bounds_llm_concurrency():
     max_concurrent = 0
     lock = asyncio.Lock()
 
-    async def fake_llm(*, text_input, system_prompt, response_model):
+    async def fake_llm(*, text_input, system_prompt, response_model, **_kwargs):
         nonlocal concurrent, max_concurrent
         async with lock:
             concurrent += 1

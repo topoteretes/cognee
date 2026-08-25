@@ -18,6 +18,24 @@ is_a_only_prompt_name = "consolidate_entity_is_a_only.txt"
 MAX_CONCURRENT_TYPE_LLM_CALLS = 10
 MAX_NAMED_MEMBERS = 5
 MAX_MEMBERS_PER_TYPE_PROMPT = 50
+# Same cap as rewrite_entities.MAX_NEIGHBOR_TEXT_CHARS - a member card or a
+# merge partial is the same kind of content (a compact description paragraph)
+# shown the same way (one item per line), just in a different phase of the
+# pipeline.
+MAX_TYPE_TEXT_CHARS = 500
+# Same reasoning as rewrite_entities.PARAGRAPH_MAX_COMPLETION_TOKENS - both
+# query_type_LLM and query_type_merge_LLM produce a single short paragraph.
+PARAGRAPH_MAX_COMPLETION_TOKENS = 250
+# query_is_a_only_LLM produces one short is_a line per member in the batch,
+# not a single paragraph - the budget scales with how many members are in
+# that specific call rather than being a single fixed constant.
+TOKENS_PER_IS_A_LINE = 60
+
+
+def _truncate(text: str, max_chars: int = MAX_TYPE_TEXT_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "..."
 
 
 def _entity_type_of(is_a: Optional[Union[EntityType, tuple]]) -> Optional[EntityType]:
@@ -99,7 +117,7 @@ def build_entity_type_prompt(
         f"Member cards shown below ({len(members)} of {total_member_count}):",
     ]
     for member in members:
-        lines.append(f"- {member.name}: {member.description}")
+        lines.append(f"- {member.name}: {_truncate(member.description)}")
     return "\n".join(lines)
 
 
@@ -108,6 +126,7 @@ async def query_type_LLM(text_input, system_prompt):
         text_input=text_input,
         system_prompt=system_prompt,
         response_model=NodeDescription,
+        max_completion_tokens=PARAGRAPH_MAX_COMPLETION_TOKENS,
     )
 
 
@@ -130,7 +149,7 @@ def build_type_merge_prompt(
         "Partial summaries:",
     ]
     for index, partial in enumerate(partial_descriptions, start=1):
-        lines.append(f"{index}. {partial}")
+        lines.append(f"{index}. {_truncate(partial)}")
     return "\n".join(lines)
 
 
@@ -139,6 +158,7 @@ async def query_type_merge_LLM(text_input, merge_system_prompt):
         text_input=text_input,
         system_prompt=merge_system_prompt,
         response_model=NodeDescription,
+        max_completion_tokens=PARAGRAPH_MAX_COMPLETION_TOKENS,
     )
 
 
@@ -155,15 +175,16 @@ def build_is_a_only_prompt(
         f"Member cards shown below ({len(members)} of {total_member_count}):",
     ]
     for member in members:
-        lines.append(f"- {member.name}: {member.description}")
+        lines.append(f"- {member.name}: {_truncate(member.description)}")
     return "\n".join(lines)
 
 
-async def query_is_a_only_LLM(text_input, is_a_system_prompt):
+async def query_is_a_only_LLM(text_input, is_a_system_prompt, member_count: int):
     return await LLMGateway.acreate_structured_output(
         text_input=text_input,
         system_prompt=is_a_system_prompt,
         response_model=EntityIsATexts,
+        max_completion_tokens=member_count * TOKENS_PER_IS_A_LINE,
     )
 
 
@@ -235,6 +256,7 @@ async def generate_type_description(
                     entity_type.name, final_description, batch, total_member_count
                 ),
                 is_a_system_prompt,
+                len(batch),
             )
 
     is_a_results = await asyncio.gather(*(limited_is_a_call(batch) for batch in batches))
@@ -259,9 +281,11 @@ def apply_type_description(
 
     When a member has a matching is_a_text, is_a becomes the
     (Edge(relationship_type="is_a", edge_text=...), updated_entity_type) tuple
-    so the text is searchable on the edge. A member with no matching text
-    (name mismatch, or none produced) falls back to the bare EntityType rather
-    than raising - the entity is still rewritten, just without edge_text.
+    so the text is searchable on the edge - truncated to MAX_TYPE_TEXT_CHARS
+    before it's persisted, regardless of what the LLM call's own output
+    budget let through. A member with no matching text (name mismatch, or
+    none produced) falls back to the bare EntityType rather than raising -
+    the entity is still rewritten, just without edge_text.
     Misses are counted and logged once per type (not raised) so a mismatch is
     visible instead of silently indistinguishable from a full match - the
     graph stays populated either way via prepare_edges_for_storage's generic
@@ -280,7 +304,12 @@ def apply_type_description(
 
     for member in members:
         is_a_text = is_a_text_by_name.get(member.name)
-        if not is_a_text:
+        if is_a_text:
+            # Bounds what actually gets persisted, independent of the output
+            # token budget on the LLM call that produced it - that budget caps
+            # generation, this caps what's written to the graph afterward.
+            is_a_text = _truncate(is_a_text)
+        else:
             missed_count += 1
 
         primary_type = _entity_type_of(member.is_a)

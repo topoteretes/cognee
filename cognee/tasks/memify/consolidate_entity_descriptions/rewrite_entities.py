@@ -20,6 +20,12 @@ prompt_name = "consolidate_entity_details.txt"
 MAX_CONCURRENT_ENTITY_LLM_CALLS = 10
 MAX_NEIGHBORS_IN_PROMPT = 20
 MAX_NEIGHBOR_TEXT_CHARS = 500
+# The response is one short paragraph - this call never needs more than the
+# model deciding to ramble, and MAX_NEIGHBOR_TEXT_CHARS (~500 chars, ~125
+# tokens) is already the target length once this description gets reused
+# elsewhere as a compact card. A little headroom above that keeps the model
+# from being cut off mid-sentence without paying for an unbounded response.
+PARAGRAPH_MAX_COMPLETION_TOKENS = 250
 
 
 def load_metadata_to_dict(value: Any) -> Dict[str, Any]:
@@ -93,6 +99,7 @@ async def query_LLM(text_input, system_prompt):
         text_input=text_input,
         system_prompt=system_prompt,  # no format()
         response_model=NodeDescription,
+        max_completion_tokens=PARAGRAPH_MAX_COMPLETION_TOKENS,
     )
 
 
