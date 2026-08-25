@@ -66,6 +66,7 @@ class RememberKwargs(TypedDict, total=False):
     content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
     index_vectors: bool
+    repo_credentials: str
     skills_text: str
     skill_name: str
     primary_key: str
@@ -957,6 +958,13 @@ async def _remember_inner(
             **kwargs,
         )
 
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
+
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
@@ -974,8 +982,12 @@ async def _remember_inner(
     # normal remember), so they must be consumed here regardless of content_type.
     skills_text = kwargs.pop("skills_text", None)
     skill_name = kwargs.pop("skill_name", None)
-    # code-only kwarg, consumed here for the same reason as the skills ones.
+    # code-only kwargs, consumed here for the same reason as the skills ones.
     index_vectors = kwargs.pop("index_vectors", None)
+    # Out-of-band auth token for private https remotes (e.g. a GitHub App
+    # installation token). Kept out of the repo URLs so no secret ever rides
+    # a loggable string — see resolve_repo_source.
+    repo_credentials = kwargs.pop("repo_credentials", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -993,6 +1005,8 @@ async def _remember_inner(
         )
     if index_vectors is not None and content_type != "code":
         raise ValueError("index_vectors is supported only for content_type='code'.")
+    if repo_credentials is not None and content_type != "code":
+        raise ValueError("repo_credentials is supported only for content_type='code'.")
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1006,7 +1020,7 @@ async def _remember_inner(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
-        from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
+        from cognee.tasks.code_graph.resolve_repo import redact_repo_spec, resolve_repo_source
 
         repo_specs = data if isinstance(data, list) else [data]
         if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
@@ -1060,8 +1074,14 @@ async def _remember_inner(
                     result.error = f"code_graph_pipeline errored for repository '{item['source']}'"
 
         async def _run_one_repo(spec) -> dict:
-            repo_path = await resolve_repo_source(spec)
-            item = {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
+            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
+            # redact: connector-supplied URLs may carry a token in the
+            # userinfo, which must not surface in results or logs.
+            item = {
+                "kind": "code_repository",
+                "source": redact_repo_spec(spec),
+                "path": str(repo_path),
+            }
             pipeline_result = await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
@@ -1096,14 +1116,15 @@ async def _remember_inner(
                     try:
                         item = await _run_one_repo(spec)
                     except Exception as exc:
-                        logger.exception("Background code-graph run failed for '%s'", spec)
+                        source = redact_repo_spec(spec)
+                        logger.exception("Background code-graph run failed for '%s'", source)
                         item = {
                             "kind": "code_repository",
-                            "source": str(spec),
+                            "source": source,
                             "status": "errored",
                             "error": str(exc),
                         }
-                        errors.append(f"{spec}: {exc}")
+                        errors.append(f"{source}: {exc}")
                     result.items.append(item)
                 result.items_processed = len(
                     [item for item in result.items if item.get("status") != "errored"]

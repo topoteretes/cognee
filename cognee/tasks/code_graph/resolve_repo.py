@@ -7,11 +7,13 @@ calls; an existing clone is refreshed with a best-effort ``git pull``.
 """
 
 import asyncio
+import base64
 import os
 import re
 import shutil
 from pathlib import Path
 from typing import Optional, Union
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import status
 
@@ -44,6 +46,24 @@ def is_remote_repo(spec) -> bool:
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
 
 
+def redact_repo_spec(spec: Union[str, Path]) -> str:
+    """The spec with any URL-embedded credentials removed.
+
+    Connectors pass short-lived tokens in the URL userinfo
+    (``https://x-access-token:<token>@github.com/...``); anything persisted
+    or logged — clone slugs, the stored git remote, result items, error
+    messages — must use this form instead of the raw spec.
+    """
+    url = str(spec)
+    if "://" not in url:
+        return url
+    parts = urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    host = parts.netloc.rsplit("@", 1)[1]
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+
+
 def _clone_slug(url: str) -> str:
     """A stable directory name for a remote URL, e.g. 'github.com-org-repo'."""
     tail = url.split("://")[-1].replace(":", "/").rstrip("/")
@@ -52,7 +72,23 @@ def _clone_slug(url: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
 
 
-async def _run_git(args, cwd: Optional[Path] = None) -> tuple:
+def _credential_env(token: str) -> dict:
+    """Auth for git over https, injected as environment-level git config.
+
+    The environment channel (git >= 2.31) keeps the token out of argv (which
+    any local process can read from the process listing), out of every
+    URL-shaped string (so nothing derived from the URL can leak it into
+    logs or error messages), and out of the on-disk remote config.
+    """
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.extraHeader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+    }
+
+
+async def _run_git(args, cwd: Optional[Path] = None, env: Optional[dict] = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
@@ -62,6 +98,7 @@ async def _run_git(args, cwd: Optional[Path] = None) -> tuple:
         git_binary,
         *args,
         cwd=str(cwd) if cwd else None,
+        env={**os.environ, **env} if env else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -79,6 +116,7 @@ async def _run_git(args, cwd: Optional[Path] = None) -> tuple:
 async def resolve_repo_source(
     spec: Union[str, Path],
     clones_dir: Optional[Path] = None,
+    credentials: Optional[str] = None,
 ) -> Path:
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
@@ -86,6 +124,13 @@ async def resolve_repo_source(
     ``--depth 1`` into ``clones_dir`` (default ``~/.cognee/repos``); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
     Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
+
+    ``credentials`` is the preferred way to authenticate against a private
+    https remote (e.g. a GitHub App installation token): it reaches git only
+    through environment-level config (see :func:`_credential_env`), so the
+    URL — and everything derived from it (slug, remote, logs, errors) —
+    never carries a secret. Embedding credentials in the URL userinfo still
+    works but is the legacy path.
     """
     if not is_remote_repo(spec):
         path = Path(spec).expanduser()
@@ -103,22 +148,42 @@ async def resolve_repo_source(
         )
 
     url = str(spec)
+    # Slug, remote, logs, and errors all use the credential-free URL: tokens
+    # in the userinfo are short-lived, so persisting one anywhere would both
+    # leak it and (via the slug) mint a new clone dir per sync.
+    clean_url = redact_repo_spec(url)
+    has_credentials = clean_url != url
+
+    def _scrub(text: str) -> str:
+        # git error output often echoes the URL, token included.
+        return text.replace(url, clean_url) if has_credentials else text
+
+    auth_env = _credential_env(credentials) if credentials else None
+
     target = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
-    target = target / _clone_slug(url)
+    target = target / _clone_slug(clean_url)
 
     if (target / ".git").is_dir():
-        returncode, stderr = await _run_git(["pull", "--ff-only"], cwd=target)
+        # Legacy URL-embedded credentials: fetch from the explicit URL
+        # instead of the stored remote (which is deliberately
+        # credential-free). Out-of-band credentials ride the environment.
+        pull_args = ["pull", "--ff-only"] + ([url] if has_credentials else [])
+        returncode, stderr = await _run_git(pull_args, cwd=target, env=auth_env)
         if returncode != 0:
             # A stale clone is still indexable; the caller asked for the repo,
             # not for freshness guarantees.
             logger.warning(
-                "Reusing existing clone at %s (git pull failed: %s)", target, stderr[-500:]
+                "Reusing existing clone at %s (git pull failed: %s)", target, _scrub(stderr[-500:])
             )
         return target
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("Cloning %s into %s", url, target)
-    returncode, stderr = await _run_git(["clone", "--depth", "1", url, str(target)])
+    logger.info("Cloning %s into %s", clean_url, target)
+    returncode, stderr = await _run_git(["clone", "--depth", "1", url, str(target)], env=auth_env)
     if returncode != 0:
-        raise CodeRepositoryError(message=f"Failed to clone '{url}': {stderr[-1000:]}")
+        raise CodeRepositoryError(
+            message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"
+        )
+    if has_credentials:
+        await _run_git(["remote", "set-url", "origin", clean_url], cwd=target)
     return target
