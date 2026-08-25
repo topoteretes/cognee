@@ -26,6 +26,11 @@ def build_completion_prompts(
     resolved_system_prompt = (
         system_prompt if system_prompt else read_query_prompt(system_prompt_path)
     )
+    if resolved_system_prompt is None:
+        # read_query_prompt logs and returns None on a missing file. Surfacing that here
+        # keeps the Tuple[str, str] contract honest and stops a typo in a prompt path
+        # from masquerading as "this retriever has no prompt template" downstream.
+        raise FileNotFoundError(f"System prompt template {system_prompt_path!r} could not be read.")
 
     if conversation_history:
         resolved_system_prompt = conversation_history + "\nTASK:" + resolved_system_prompt

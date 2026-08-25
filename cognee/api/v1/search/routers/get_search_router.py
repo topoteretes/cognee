@@ -10,9 +10,8 @@ from pydantic import Field
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
 from cognee.exceptions import CogneeApiError
-from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_CONTEXT
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
@@ -65,14 +64,23 @@ class SearchPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
-    context_format: str = Field(
-        default=CONTEXT_FORMAT_CONTEXT,
-        examples=[CONTEXT_FORMAT_CONTEXT],
+    context_format: ContextFormat = Field(
+        default=ContextFormat.CONTEXT,
+        examples=[ContextFormat.CONTEXT.value],
         description=(
             "Shape of an only_context result. 'context' returns the bare retrieval"
             " context; 'prompt' returns the full envelope a completion would have"
             " received — session guidance, conversation history, and the rendered"
-            " user and system prompts. Ignored unless only_context is true."
+            " user and system prompts. The session layer comes from session_id"
+            " (the default session when omitted). Ignored unless only_context is true."
+        ),
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Session whose history and guidance feed the completion (or the"
+            " only_context prompt preview). Omit to use the default session."
         ),
     )
     verbose: bool = Field(
@@ -202,6 +210,7 @@ def get_search_router() -> APIRouter:
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
         - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
+        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the prompt preview; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -239,6 +248,7 @@ def get_search_router() -> APIRouter:
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
                 "context_format": payload.context_format,
+                "session_id": payload.session_id,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
                 "tools": payload.tools,
@@ -266,6 +276,7 @@ def get_search_router() -> APIRouter:
                 verbose=payload.verbose,
                 only_context=payload.only_context,
                 context_format=payload.context_format,
+                session_id=payload.session_id,
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,

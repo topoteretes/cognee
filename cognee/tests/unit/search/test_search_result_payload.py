@@ -1,9 +1,6 @@
 import pytest
-from pydantic import BaseModel
-from cognee.modules.retrieval.context_preview import (
-    CONTEXT_FORMAT_CONTEXT,
-    CONTEXT_FORMAT_PROMPT,
-)
+from pydantic import BaseModel, ValidationError
+from cognee.modules.search.types import ContextFormat
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types.SearchType import SearchType
 
@@ -59,7 +56,7 @@ def test_search_result_payload_only_context_default_format_is_unchanged():
         user_prompt="The question is: `why?`",
         search_type=SearchType.GRAPH_COMPLETION,
     )
-    assert payload.context_format == CONTEXT_FORMAT_CONTEXT
+    assert payload.context_format == ContextFormat.CONTEXT
     assert payload.result == "Some context here"
 
 
@@ -67,7 +64,7 @@ def test_search_result_payload_prompt_format_returns_the_envelope():
     payload = SearchResultPayload(
         context="Some context here",
         only_context=True,
-        context_format=CONTEXT_FORMAT_PROMPT,
+        context_format=ContextFormat.PROMPT,
         question="why?",
         session_context="## Active session guidance\n- be terse",
         user_prompt="The question is: `why?`",
@@ -88,7 +85,7 @@ def test_search_result_payload_prompt_format_ignored_without_only_context():
     payload = SearchResultPayload(
         completion=["answer"],
         context="Some context here",
-        context_format=CONTEXT_FORMAT_PROMPT,
+        context_format=ContextFormat.PROMPT,
         search_type=SearchType.GRAPH_COMPLETION,
     )
     assert payload.result == ["answer"]
@@ -113,3 +110,16 @@ def test_search_result_payload_model_json_round_trip():
     payload = SearchResultPayload(completion=deal, search_type=SearchType.GRAPH_COMPLETION)
     dumped = json.loads(payload.model_dump_json())
     assert dumped["completion"] == {"deal_name": "Acme Corp", "health": "Good"}
+
+
+def test_search_result_payload_coerces_context_format_strings_to_the_enum():
+    payload = SearchResultPayload(
+        context="ctx", only_context=True, context_format="prompt", search_type=SearchType.CHUNKS
+    )
+    assert payload.context_format is ContextFormat.PROMPT
+
+
+def test_search_result_payload_rejects_invalid_context_format():
+    """Typed as the enum, so a bad value can never be stored and echoed back."""
+    with pytest.raises(ValidationError):
+        SearchResultPayload(context="ctx", context_format="Prompt", search_type=SearchType.CHUNKS)

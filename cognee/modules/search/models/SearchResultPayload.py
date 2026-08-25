@@ -2,10 +2,7 @@ from uuid import UUID
 from typing import Optional, Any, List, Union
 from pydantic import BaseModel, ConfigDict, field_serializer
 from pydantic.alias_generators import to_camel
-from cognee.modules.retrieval.context_preview import (
-    CONTEXT_FORMAT_CONTEXT,
-    CONTEXT_FORMAT_PROMPT,
-)
+from cognee.modules.search.types.ContextFormat import ContextFormat
 from cognee.modules.search.types.SearchType import SearchType
 
 
@@ -32,10 +29,10 @@ class SearchResultPayload(BaseModel):
     # question was framed around the context instead of leaving the caller to guess.
     question: Optional[str] = None
 
-    # Shape of the only_context result. CONTEXT_FORMAT_CONTEXT (default) returns the
-    # bare context, as it always has; CONTEXT_FORMAT_PROMPT returns the whole envelope
-    # a completion would have received. Only populated on only_context calls.
-    context_format: str = CONTEXT_FORMAT_CONTEXT
+    # Shape of the only_context result. CONTEXT (default) returns the bare context, as
+    # it always has; PROMPT returns the whole envelope a completion would have received.
+    # Typed as the enum so an invalid value cannot be stored and echoed back.
+    context_format: ContextFormat = ContextFormat.CONTEXT
     session_context: Optional[str] = None
     user_prompt: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -103,7 +100,7 @@ class SearchResultPayload(BaseModel):
         """Function used to determine search_result for users request.
         Return context if only_context is True, else return completion if it exists, else return result_object."""
         if self.only_context:
-            if self.context_format == CONTEXT_FORMAT_PROMPT:
+            if self.context_format == ContextFormat.PROMPT:
                 return self.prompt_envelope
             return self.context
         elif self.completion:

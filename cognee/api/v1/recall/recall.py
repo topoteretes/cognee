@@ -37,12 +37,8 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
-from cognee.modules.retrieval.context_preview import (
-    CONTEXT_FORMAT_CONTEXT,
-    CONTEXT_FORMATS,
-)
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -356,7 +352,7 @@ async def recall(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and search history
     # still records the type recall chose, not the deferred one.
     only_context: bool = False,
-    context_format: str = CONTEXT_FORMAT_CONTEXT,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     context_profile: str = "qa",
     wide_search_top_k: int | None = None,
@@ -485,14 +481,7 @@ async def recall(
             message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
             name="InvalidToolsTriggerError",
         )
-    if context_format not in CONTEXT_FORMATS:
-        raise CogneeValidationError(
-            message=(
-                f"Invalid context_format '{context_format}'. "
-                f"Valid values: {sorted(CONTEXT_FORMATS)}."
-            ),
-            name="InvalidContextFormatError",
-        )
+    context_format = ContextFormat.parse(context_format)
     if code_query is not None and "code" not in sources:
         raise CogneeValidationError(
             message=(

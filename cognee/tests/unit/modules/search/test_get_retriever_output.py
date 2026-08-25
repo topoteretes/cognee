@@ -6,13 +6,10 @@ import pytest
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.retrieval.context_preview import (
-    CONTEXT_FORMAT_PROMPT,
-    ContextPreview,
-)
+from cognee.modules.retrieval.context_preview import ContextPreview
 from cognee.modules.retrieval.session_aware_completion import count_retrieved_objects
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import ContextFormat, SearchType
 
 # Resolve the module object explicitly. The package __init__ re-exports the
 # `get_retriever_output` function under the same name as this submodule, so a
@@ -296,13 +293,14 @@ async def test_only_context_prompt_format_populates_the_envelope():
             SearchType.GRAPH_COMPLETION,
             "why?",
             only_context=True,
-            context_format=CONTEXT_FORMAT_PROMPT,
+            context_format=ContextFormat.PROMPT,
         )
 
     assert preview.await_args.kwargs == {
         "query": "why?",
         "context": "node1 -- rel -- node2",
         "session_id": None,
+        "shared_history": None,
     }
     assert result.question == "why?"
     assert result.session_context == "## Active session guidance\n- be terse"
@@ -327,7 +325,7 @@ async def test_prompt_format_is_ignored_when_only_context_is_off():
         ) as preview,
     ):
         result = await get_retriever_output(
-            SearchType.CODE, "Checkout", context_format=CONTEXT_FORMAT_PROMPT
+            SearchType.CODE, "Checkout", context_format=ContextFormat.PROMPT
         )
 
     preview.assert_not_awaited()
@@ -335,10 +333,25 @@ async def test_prompt_format_is_ignored_when_only_context_is_off():
 
 
 @pytest.mark.asyncio
-async def test_unknown_context_format_degrades_to_the_context_shape():
-    """A retrieval that already succeeded must not fail on a bad output knob."""
+async def test_unknown_context_format_is_rejected_before_retrieval():
+    """One shared rule at every entry point: the same error, and no wasted retrieval."""
     retriever = _OnlyContextRetriever()
     graph_patch, retriever_patch = _only_context_patches(retriever)
+    with graph_patch, retriever_patch as factory:
+        with pytest.raises(CogneeValidationError) as excinfo:
+            await get_retriever_output(
+                SearchType.GRAPH_COMPLETION, "why?", only_context=True, context_format="bogus"
+            )
+
+    assert excinfo.value.name == "InvalidContextFormatError"
+    factory.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prompt_preview_receives_the_fan_outs_shared_history():
+    retriever = _OnlyContextRetriever()
+    graph_patch, retriever_patch = _only_context_patches(retriever)
+    shared = object()
     with (
         graph_patch,
         retriever_patch,
@@ -346,14 +359,20 @@ async def test_unknown_context_format_degrades_to_the_context_shape():
             get_retriever_output_module,
             "build_context_preview",
             new_callable=AsyncMock,
+            return_value=ContextPreview(),
         ) as preview,
     ):
-        result = await get_retriever_output(
-            SearchType.GRAPH_COMPLETION, "why?", only_context=True, context_format="bogus"
+        await get_retriever_output(
+            SearchType.GRAPH_COMPLETION,
+            "why?",
+            only_context=True,
+            context_format="prompt",
+            session_id="s1",
+            shared_history=shared,
         )
 
-    preview.assert_not_awaited()
-    assert result.result == "node1 -- rel -- node2"
+    assert preview.await_args.kwargs["session_id"] == "s1"
+    assert preview.await_args.kwargs["shared_history"] is shared
 
 
 def test_count_retrieved_objects_counts_structured_lists():

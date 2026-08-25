@@ -6,11 +6,7 @@ from cognee.modules.engine.models import Skill
 from cognee.modules.users.models import User
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
-from cognee.modules.retrieval.context_preview import (
-    CONTEXT_FORMAT_CONTEXT,
-    CONTEXT_FORMATS,
-)
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.base_config import get_base_config
 from cognee.modules.operations import record_operation
@@ -58,7 +54,7 @@ async def search(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and this return value
     # does not include the effective type.
     only_context: bool = False,
-    context_format: str = CONTEXT_FORMAT_CONTEXT,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = None,
     triplet_distance_penalty: Optional[float] = None,
@@ -75,13 +71,7 @@ async def search(
     embedding_config: Optional[EmbeddingConfig] = None,
     code_query: Optional[dict[str, Any]] = None,
 ) -> List[SearchResult]:
-    if context_format not in CONTEXT_FORMATS:
-        raise CogneeValidationError(
-            message=(
-                f"context_format must be one of {sorted(CONTEXT_FORMATS)}; got {context_format!r}."
-            ),
-            name="InvalidContextFormat",
-        )
+    context_format = ContextFormat.parse(context_format)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
     ):

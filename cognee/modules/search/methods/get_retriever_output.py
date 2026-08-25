@@ -1,10 +1,5 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.retrieval.context_preview import (
-    CONTEXT_FORMAT_CONTEXT,
-    CONTEXT_FORMAT_PROMPT,
-    ContextPreview,
-    build_context_preview,
-)
+from cognee.modules.retrieval.context_preview import ContextPreview, build_context_preview
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
@@ -15,7 +10,7 @@ from cognee.modules.search.methods.hybrid_deferral import (
 )
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import ContextFormat, SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -57,6 +52,10 @@ def _dataset_fields(kwargs: dict) -> dict:
 async def get_retriever_output(
     query_type: SearchType, query_text: str, **kwargs
 ) -> SearchResultPayload:
+    # Validate the output knob before any retrieval runs, through the same parse the
+    # API layer uses, so every entry point raises the same error for the same input.
+    context_format = ContextFormat.parse(kwargs.get("context_format"))
+
     graph_engine = await get_graph_engine()
     graph_is_empty = await graph_engine.is_empty()
     if graph_is_empty:
@@ -79,18 +78,18 @@ async def get_retriever_output(
         search_type_for_spans=effective_query_type,
     )
 
-    # An unknown format degrades to the historical shape rather than failing a retrieval
-    # that already succeeded; search()/recall() reject bad values at their boundary.
-    context_format = kwargs.get("context_format") or CONTEXT_FORMAT_CONTEXT
     preview = ContextPreview()
-    if only_context and context_format == CONTEXT_FORMAT_PROMPT:
+    if only_context and context_format is ContextFormat.PROMPT:
         # The caller's session_id is passed explicitly: non-generative retrievers do not
         # keep one, and the preview must describe the session that was asked about.
+        # shared_history is the fan-out's single conversation-history read, when the
+        # caller made one.
         preview = await build_context_preview(
             retriever_instance,
             query=query_text,
             context=context,
             session_id=kwargs.get("session_id"),
+            shared_history=kwargs.get("shared_history"),
         )
 
     return SearchResultPayload(

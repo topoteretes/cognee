@@ -15,9 +15,9 @@ from cognee.modules.recall.types.SearchResultItem import (
     SearchResultItem,
     SearchResultKind,
 )
-from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_PROMPT
+from cognee.modules.retrieval.context_preview import render_context_for_prompt
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import ContextFormat, SearchType
 
 _KIND_BY_SEARCH_TYPE: dict[SearchType, SearchResultKind] = {
     SearchType.GRAPH_COMPLETION: SearchResultKind.GRAPH_COMPLETION,
@@ -157,17 +157,26 @@ def normalize_search_payload(payload: SearchResultPayload) -> list[SearchResultI
     """Normalize one dataset's retriever payload into SearchResultItems."""
     kind = _KIND_BY_SEARCH_TYPE.get(payload.search_type, SearchResultKind.UNKNOWN)
 
-    if payload.only_context and payload.context_format == CONTEXT_FORMAT_PROMPT:
+    if payload.only_context and payload.context_format == ContextFormat.PROMPT:
+        # Retrievers report a miss as None, "" or [] — all of them mean "nothing found".
+        context_entries = [entry for entry in _flatten(payload.context) if entry]
+        if not context_entries:
+            # The item count must keep meaning "did retrieval find anything": recall's
+            # on_empty tools fallback and the session short-circuit both read it, and a
+            # wrapper around an empty context would read as a hit.
+            return []
         # One item, not one per context entry: the caller asked for the prompt a
         # completion would receive, and that is a single artifact. The parts stay on
         # `raw` so a consumer can still take just the context or just the history.
+        # `text` stays readable for retrievers with no prompt template: the context
+        # itself, never a JSON dump of the envelope.
         envelope = payload.prompt_envelope
         return [
             _build_item(
                 envelope,
                 payload,
                 kind,
-                text_override=payload.user_prompt or _text_from_dict(envelope),
+                text_override=payload.user_prompt or render_context_for_prompt(context_entries),
             )
         ]
 

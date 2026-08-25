@@ -11,9 +11,8 @@ from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeApiError
-from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_CONTEXT
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -65,9 +64,9 @@ class RecallPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
-    context_format: str = Field(
-        default=CONTEXT_FORMAT_CONTEXT,
-        examples=[CONTEXT_FORMAT_CONTEXT],
+    context_format: ContextFormat = Field(
+        default=ContextFormat.CONTEXT,
+        examples=[ContextFormat.CONTEXT.value],
         description=(
             "Shape of an only_context result. 'context' returns the bare retrieval"
             " context; 'prompt' returns the full envelope a completion would have"

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 from cognee.modules.recall.methods.normalize_search_payload import normalize_search_payload
-from cognee.modules.retrieval.context_preview import CONTEXT_FORMAT_PROMPT
+from cognee.modules.search.types import ContextFormat
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import SearchType
@@ -134,7 +134,7 @@ def test_only_context_prompt_format_yields_one_item_carrying_the_parts():
     payload = SearchResultPayload(
         context=["triplet-a", "triplet-b"],
         only_context=True,
-        context_format=CONTEXT_FORMAT_PROMPT,
+        context_format=ContextFormat.PROMPT,
         question="why?",
         session_context="## Active session guidance\n- be terse",
         user_prompt="The question is: `why?` ... triplet-a\n---\ntriplet-b",
@@ -152,3 +152,38 @@ def test_only_context_prompt_format_yields_one_item_carrying_the_parts():
     assert item.raw["context"] == ["triplet-a", "triplet-b"]
     assert item.raw["session_context"] == "## Active session guidance\n- be terse"
     assert item.raw["system_prompt"] == "history\nTASK:answer"
+
+
+def test_only_context_prompt_format_with_empty_context_yields_no_items():
+    """An empty retrieval must stay empty: recall's on_empty tools fallback reads the count."""
+    for empty in (None, "", []):
+        payload = SearchResultPayload(
+            context=empty,
+            only_context=True,
+            context_format=ContextFormat.PROMPT,
+            question="why?",
+            session_context="## Active session guidance\n- be terse",
+            search_type=SearchType.GRAPH_COMPLETION,
+        )
+        assert normalize_search_payload(payload) == []
+
+
+def test_only_context_prompt_format_without_a_prompt_keeps_text_readable():
+    """CHUNKS has no template: text is the context itself, never a JSON dump of the envelope."""
+    payload = SearchResultPayload(
+        context=["chunk-a", "chunk-b"],
+        only_context=True,
+        context_format=ContextFormat.PROMPT,
+        question="why?",
+        session_context="## Active session guidance\n- be terse",
+        user_prompt=None,
+        system_prompt=None,
+        search_type=SearchType.CHUNKS,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert len(items) == 1
+    assert items[0].text == "chunk-a\n---\nchunk-b"
+    assert not items[0].text.startswith("{")
+    assert items[0].raw["session_context"] == "## Active session guidance\n- be terse"
