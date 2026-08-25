@@ -713,7 +713,11 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/schema", response_model=dict)
     async def get_dataset_schema(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        """Return the stored graph schema and custom prompt for a dataset."""
+        """Return the stored graph schema and custom prompt for a dataset.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+        """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 
@@ -739,7 +743,15 @@ def get_datasets_router() -> APIRouter:
         payload: DatasetSchemaPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
-        """Store or update the graph schema and custom prompt for a dataset."""
+        """Store or update the graph schema and custom prompt for a dataset.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+
+        ## Request Parameters
+        - **customPrompt** (Optional[str]): No description provided in code yet.
+        - **graphSchema** (Optional[Dict[str, Any]]): No description provided in code yet.
+        """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 

@@ -13,6 +13,7 @@ def get_checks_router():
     async def get_connection_check_endpoint(
         request: Request, user: User = Depends(get_authenticated_user)
     ):
+        """Get connection check endpoint — POST /api/v1/checks/connection."""
         api_token = request.headers.get("X-Api-Key")
 
         if api_token is None:

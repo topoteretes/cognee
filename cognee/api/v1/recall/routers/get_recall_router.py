@@ -210,6 +210,13 @@ def get_recall_router() -> APIRouter:
         - **response_schema** (Optional[dict]): JSON Schema for structured
           completion output; validated results land in each result's
           ``structured`` field. 422 on schemas outside the supported subset.
+        - **contextProfile** (str): Profile to render for the 'session_context' scope: 'qa'
+          (conversational) or 'agent' (tool/workflow). Ignored by other scopes. Defaults to 'qa'.
+        - **toolConnections** (Optional[List[str]]): Names of authorized external database
+          connections for the 'tools' scope. Omit to use every connection visible to the caller.
+        - **toolsTrigger** (str): When the 'tools' scope runs: 'always', or 'on_empty' to query the
+          external database only when every other requested source returned nothing. Defaults to
+          'always'.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission
