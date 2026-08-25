@@ -115,9 +115,12 @@ _OPERATIONS: List[Dict[str, Any]] = [
         "kind": "pipeline",
         "scope": "whole",
         "pipeline_name": "memify_pipeline",
-        "summary": "Rewrites Entity descriptions from their neighborhood.",
+        "summary": "Rewrites Entity descriptions from their neighborhood, summarizes each "
+        "EntityType from its members, and writes is_a edge text.",
         "effects": [
             {"effect": "modifies", "target_type": "Entity", "property": "description"},
+            {"effect": "modifies", "target_type": "EntityType", "property": "description"},
+            {"effect": "modifies", "target_type": "EntityType", "property": "is_a.edge_text"},
         ],
     },
     {
