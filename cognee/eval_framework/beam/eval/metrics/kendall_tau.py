@@ -61,6 +61,53 @@ def _kendall_tau_b(x: List[int], y: List[int]) -> float:
     return tau_b
 
 
+def _build_rank_vectors(
+    n_reference: int, n_system: int, alignment: Dict[int, int]
+) -> Tuple[List[int], List[int]]:
+    """Build the reference and system rank vectors over their shared event union.
+
+    Both sequences are ranked against the same union of events, and events absent
+    from a sequence all collapse onto a single shared tie rank. This mirrors
+    `to_rank()` in the upstream BEAM implementation: system-only events (typically
+    hallucinated steps) are missing from the reference, so they must tie there
+    rather than receive an ascending reference rank.
+
+    Returns a `(ref_ranks, sys_ranks)` pair, aligned element-wise with the union.
+    """
+
+    def _matched_reference_index(system_index: int) -> Optional[int]:
+        """Return the aligned reference index, or None when the event is system-only.
+
+        An alignment entry only counts as a match when it points inside the
+        reference list. Anything else -- the `-1` sentinel or a malformed index
+        past the end of the list -- is a system-only event. This is the same
+        predicate the F1 computation uses, so a hallucinated index cannot be
+        counted as unmatched there while silently vanishing from the union here.
+        """
+        reference_index = alignment.get(system_index, -1)
+        return reference_index if 0 <= reference_index < n_reference else None
+
+    # Union of all events (reference order first, then unmatched system)
+    union = list(range(n_reference))
+    for i in range(n_system):
+        if _matched_reference_index(i) is None:
+            union.append(n_reference + i)
+
+    tie_rank = len(union) + 1
+
+    ref_ranks = [u if u < n_reference else tie_rank for u in union]
+
+    sys_rank_map = {}
+    for sys_pos in range(n_system):
+        matched = _matched_reference_index(sys_pos)
+        union_member = matched if matched is not None else n_reference + sys_pos
+        sys_rank_map[union_member] = sys_pos
+
+    sys_ranks = [sys_rank_map.get(u, tie_rank) for u in union]
+
+    return ref_ranks, sys_ranks
+
+
 _ALIGN_SYSTEM_PROMPT = """You are comparing two lists of events to find matches.
 For each event in the SYSTEM list, determine if it matches an event in the REFERENCE list
 (same event described differently). Return a JSON object mapping system indices to reference
@@ -228,30 +275,9 @@ class KendallTauMetric:
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
             f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
-            # Build rank vectors for matched events
-            # Union of all events (reference order first, then unmatched system)
-            union = list(range(len(reference_events)))
-            for i in range(len(system_events)):
-                if alignment.get(i, -1) < 0:
-                    union.append(len(reference_events) + i)
-
-            tie_rank = len(union) + 1
-
-            # Reference ranks: natural order 0, 1, 2, ...
-            ref_ranks = list(range(len(union)))
-
-            # System ranks: based on alignment
-            sys_rank_map = {}
-            sys_pos = 0
-            for i in range(len(system_events)):
-                ref_idx = alignment.get(i, -1)
-                if ref_idx >= 0 and ref_idx < len(reference_events):
-                    sys_rank_map[ref_idx] = sys_pos
-                else:
-                    sys_rank_map[len(reference_events) + i] = sys_pos
-                sys_pos += 1
-
-            sys_ranks = [sys_rank_map.get(u, tie_rank) for u in union]
+            ref_ranks, sys_ranks = _build_rank_vectors(
+                len(reference_events), len(system_events), alignment
+            )
 
             tau_b = _kendall_tau_b(ref_ranks, sys_ranks)
             tau_b_norm = (tau_b + 1) / 2  # Normalize from [-1,1] to [0,1]
