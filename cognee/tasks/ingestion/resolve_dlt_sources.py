@@ -726,8 +726,23 @@ async def _delete_dlt_orphans(
                 # skip graphs whose provenance is stamped in-graph instead of the
                 # relational ledger (the function handles both paths and no-ops
                 # when nothing is related).
-                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+                deleted_elements = await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
                 await delete_data(orphan, dataset.id)
+                # Invalidate session answers that used the orphan's graph
+                # elements (best-effort; must not fail the cleanup).
+                try:
+                    from cognee.modules.session_lifecycle.invalidate_sessions import (
+                        invalidate_sessions_for_deleted_data,
+                    )
+
+                    await invalidate_sessions_for_deleted_data(
+                        dataset.id, deleted_elements.node_ids, deleted_elements.edge_ids
+                    )
+                except Exception:
+                    logger.warning(
+                        "Session invalidation after orphan cleanup failed (non-fatal).",
+                        exc_info=True,
+                    )
             except Exception:
                 failed.append(orphan.id)
                 logger.warning(

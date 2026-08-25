@@ -66,6 +66,14 @@ _TABLE: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         "path to an .owl / .ttl file, or drop the flag to use the built-in "
         "resolver.",
     ),
+    (
+        # Real error: ProviderConfigMismatchError raised by the config
+        # preflight in add()/remember(); its message names the exact env vars.
+        ("providerconfigmismatch", "silently default to openai"),
+        "The LLM and embedding provider settings are inconsistent. Run "
+        "`cognee-cli doctor` for a full diagnosis, or set the env vars named "
+        "in the error above.",
+    ),
 )
 
 

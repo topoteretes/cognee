@@ -662,7 +662,7 @@ class TursoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
-        """Compute graph metrics matching the PostgresAdapter output schema."""
+        """Compute graph metrics matching the PostgresDemoAdapter output schema."""
         async with self._session() as session:
             n_result = await session.execute(text("SELECT count(*) FROM graph_node"))
             num_nodes = n_result.scalar()

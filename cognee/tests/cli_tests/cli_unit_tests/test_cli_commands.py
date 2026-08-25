@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, ANY
 import cognee
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
+from cognee.cli.commands.recall_command import RecallCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
@@ -144,7 +145,7 @@ class TestSearchCommand:
         assert "output_format" in actions
 
         # Check default values
-        assert actions["query_type"].default == "GRAPH_COMPLETION"
+        assert actions["query_type"].default == "HYBRID_COMPLETION"
         assert actions["top_k"].default == 10
         assert actions["output_format"].default == "pretty"
 
@@ -202,6 +203,86 @@ class TestSearchCommand:
 
         with pytest.raises(CliCommandException):
             command.execute(args)
+
+
+class TestRecallCommand:
+    def test_configure_parser_accepts_hybrid_and_omits_query_type_by_default(self):
+        command = RecallCommand()
+        parser = argparse.ArgumentParser()
+        command.configure_parser(parser)
+        actions = {action.dest: action for action in parser._actions}
+
+        assert actions["query_type"].default is None
+        assert "HYBRID_COMPLETION" in actions["query_type"].choices
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_session_only_when_query_type_is_omitted(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(
+            return_value=[{"_source": "session", "question": "q", "answer": "a"}]
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type=None,
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        mock_cognee.recall.assert_awaited_once()
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert "query_type" not in kwargs
+        assert kwargs["session_id"] == "sess"
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_explicit_hybrid_with_session_is_not_session_only(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="HYBRID_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert kwargs["query_type"].name == "HYBRID_COMPLETION"
+        assert kwargs["session_id"] == "sess"
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_explicit_graph_completion_with_session_is_not_session_only(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="GRAPH_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert kwargs["query_type"].name == "GRAPH_COMPLETION"
+        assert kwargs["session_id"] == "sess"
 
 
 class TestCognifyCommand:
