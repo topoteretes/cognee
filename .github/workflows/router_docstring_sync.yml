@@ -50,11 +50,19 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # The tree being fixed is always dev; the sync machinery (checker,
+      # fixer) is taken from the triggering ref via a second checkout, so a
+      # PR changing the machinery exercises its own version before merge.
       - name: Check out dev
         uses: actions/checkout@v6
         with:
           ref: dev
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+
+      - name: Check out sync machinery from the triggering ref
+        uses: actions/checkout@v6
+        with:
+          path: automation-src
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -72,7 +80,7 @@ jobs:
         id: check
         run: |
           set +e
-          uv run python tools/check_router_docstrings.py > docstring_report.txt
+          uv run python automation-src/tools/check_router_docstrings.py > docstring_report.txt
           code=$?
           set -e
           cat docstring_report.txt
@@ -86,10 +94,10 @@ jobs:
       - name: Fix docstrings
         if: ${{ steps.check.outputs.drift == 'true' }}
         run: |
-          uv run python tools/fix_router_docstrings.py
+          uv run python automation-src/tools/fix_router_docstrings.py
           uv run ruff format cognee
           # The fix must fully converge — fail loudly if anything is left.
-          uv run python tools/check_router_docstrings.py
+          uv run python automation-src/tools/check_router_docstrings.py
 
       - name: Commit and push fix branch
         id: commit
