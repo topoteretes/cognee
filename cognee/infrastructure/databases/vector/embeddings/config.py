@@ -83,6 +83,13 @@ class EmbeddingConfig(BaseSettings):
     # Total data points allowed in flight to the embedding engine during indexing.
     # Concurrent embedding requests = max(1, this // embedding_batch_size).
     embedding_max_concurrent_data_points: int = 150
+    #: Skip re-embedding a data point whose indexed field already matches what the
+    #: vector store holds. A redundant write costs an embedding call and produces
+    #: a byte-identical row; on stores that version on write (LanceDB upserts via
+    #: merge_insert) it also creates a table version and data fragment that
+    #: accumulate until something compacts them. Set to False to restore the
+    #: previous unconditional behaviour.
+    skip_unchanged_vector_writes: bool = True
     huggingface_tokenizer: Optional[str] = None
     # Some providers (e.g. NVIDIA NIM's nv-embed family) require an
     # "input_type" field in the embedding request body (typically "query" or
@@ -142,6 +149,7 @@ class EmbeddingConfig(BaseSettings):
             "embedding_input_type": self.embedding_input_type,
             "embedding_batch_size": self.embedding_batch_size,
             "embedding_max_concurrent_data_points": self.embedding_max_concurrent_data_points,
+            "skip_unchanged_vector_writes": self.skip_unchanged_vector_writes,
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,

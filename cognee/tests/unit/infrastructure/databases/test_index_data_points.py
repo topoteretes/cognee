@@ -112,3 +112,120 @@ async def test_index_data_points_does_not_mutate_metadata():
         await index_data_points([data_point])
 
     assert data_point.metadata["index_fields"] == original_index_fields
+
+
+# --- skipping re-indexing of unchanged data points ---------------------------
+
+
+def _engine_with_stored(stored_rows, *, retrieve_raises=False):
+    """A vector engine whose store already holds ``stored_rows``."""
+    engine = AsyncMock()
+    engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
+    if retrieve_raises:
+        engine.retrieve = AsyncMock(side_effect=RuntimeError("store unavailable"))
+    else:
+        engine.retrieve = AsyncMock(return_value=stored_rows)
+    return engine
+
+
+def _indexed_names(engine):
+    """Names the engine was actually asked to index."""
+    names = []
+    for call in engine.index_data_points.await_args_list:
+        for point in call.args[2]:
+            names.append(point.name)
+    return names
+
+
+async def _run(points, engine, *, skip=True):
+    for point in points:
+        point.metadata["index_fields"] = ["name"]
+
+    async def _get_vector_engine():
+        return engine
+
+    with patch.dict(
+        index_data_points.__globals__,
+        {
+            "get_vector_engine_async": _get_vector_engine,
+            "get_embedding_context_config": lambda: SimpleNamespace(
+                embedding_max_concurrent_data_points=150,
+                skip_unchanged_vector_writes=skip,
+            ),
+        },
+    ):
+        await index_data_points(points, vector_engine=engine)
+
+
+@pytest.mark.asyncio
+async def test_unchanged_point_is_not_reindexed():
+    """The whole point: an identical value must not be re-embedded or rewritten."""
+    point = TestDataPoint(name="unchanged")
+    engine = _engine_with_stored(
+        [SimpleNamespace(id=point.id, payload={"name": "unchanged"})]
+    )
+    await _run([point], engine)
+    assert engine.index_data_points.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_changed_point_is_reindexed():
+    point = TestDataPoint(name="new value")
+    engine = _engine_with_stored(
+        [SimpleNamespace(id=point.id, payload={"name": "old value"})]
+    )
+    await _run([point], engine)
+    assert _indexed_names(engine) == ["new value"]
+
+
+@pytest.mark.asyncio
+async def test_point_the_store_does_not_know_is_indexed():
+    point = TestDataPoint(name="brand new")
+    engine = _engine_with_stored([])
+    await _run([point], engine)
+    assert _indexed_names(engine) == ["brand new"]
+
+
+@pytest.mark.asyncio
+async def test_payload_without_the_indexed_field_is_indexed():
+    """Absent evidence is not evidence of sameness."""
+    point = TestDataPoint(name="value")
+    engine = _engine_with_stored(
+        [SimpleNamespace(id=point.id, payload={"something_else": "value"})]
+    )
+    await _run([point], engine)
+    assert _indexed_names(engine) == ["value"]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_failure_indexes_everything():
+    """Fail open. A store that cannot answer must never cause a skip."""
+    point = TestDataPoint(name="value")
+    engine = _engine_with_stored(None, retrieve_raises=True)
+    await _run([point], engine)
+    assert _indexed_names(engine) == ["value"]
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_indexes_only_the_changed_ones():
+    same = TestDataPoint(name="same")
+    different = TestDataPoint(name="different now")
+    engine = _engine_with_stored(
+        [
+            SimpleNamespace(id=same.id, payload={"name": "same"}),
+            SimpleNamespace(id=different.id, payload={"name": "different before"}),
+        ]
+    )
+    await _run([same, different], engine)
+    assert _indexed_names(engine) == ["different now"]
+
+
+@pytest.mark.asyncio
+async def test_disabling_the_flag_restores_unconditional_indexing():
+    point = TestDataPoint(name="unchanged")
+    engine = _engine_with_stored(
+        [SimpleNamespace(id=point.id, payload={"name": "unchanged"})]
+    )
+    await _run([point], engine, skip=False)
+    assert _indexed_names(engine) == ["unchanged"]
+    assert engine.retrieve.await_count == 0, "the flag must skip the lookup entirely"

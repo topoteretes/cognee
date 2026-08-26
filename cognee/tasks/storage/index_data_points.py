@@ -8,6 +8,56 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("index_data_points")
 
 
+def _embeddable_value(data_point, field_name: str):
+    """The exact value that would be embedded for ``field_name``."""
+    return getattr(data_point, field_name, None)
+
+
+async def _drop_unchanged(vector_engine, type_name: str, field_name: str, points: list):
+    """Return only the points whose indexed field differs from what is stored.
+
+    Re-embedding and upserting a point whose indexed text has not changed costs
+    an embedding call and a write, and produces a byte-identical row. On stores
+    that version on write (LanceDB upserts via ``merge_insert``) each redundant
+    write also creates a new table version and data fragment, which accumulate
+    until something compacts them.
+
+    Fails OPEN in the direction of doing the work: any error, any point the
+    store does not know, and any payload that does not carry the field is
+    indexed as before. Skipping is only ever chosen on positive evidence that
+    the stored value is identical, so this can never leave a vector stale.
+    """
+    ids = [str(point.id) for point in points if getattr(point, "id", None) is not None]
+    if not ids:
+        return points
+    try:
+        stored_rows = await vector_engine.retrieve(type_name, ids)
+
+        stored_by_id: dict[str, dict] = {}
+        for row in stored_rows or []:
+            row_id = getattr(row, "id", None)
+            payload = getattr(row, "payload", None)
+            if row_id is None and isinstance(row, dict):
+                row_id, payload = row.get("id"), row.get("payload")
+            if row_id is not None and isinstance(payload, dict):
+                stored_by_id[str(row_id)] = payload
+
+        changed = []
+        for point in points:
+            payload = stored_by_id.get(str(getattr(point, "id", "")))
+            if payload is None or field_name not in payload:
+                changed.append(point)
+                continue
+            if payload[field_name] != _embeddable_value(point, field_name):
+                changed.append(point)
+        return changed
+    except Exception:  # noqa: BLE001
+        # ANY failure means index as before. A store that cannot answer, an
+        # adapter without retrieve, a mocked engine returning something
+        # unexpected: all of them must index, never skip.
+        return points
+
+
 async def index_data_points(data_points: list[DataPoint], vector_engine=None):
     """Index data points in the vector engine by creating embeddings for specified fields.
 
@@ -62,9 +112,24 @@ async def index_data_points(data_points: list[DataPoint], vector_engine=None):
         async with semaphore:
             await vector_engine.index_data_points(type_name, field_name, batch)
 
+    skip_unchanged = getattr(
+        get_embedding_context_config(), "skip_unchanged_vector_writes", True
+    )
+
     tasks = []
     for type_name, fields in data_points_by_type.items():
         for field_name, points in fields.items():
+            if skip_unchanged:
+                before = len(points)
+                points = await _drop_unchanged(vector_engine, type_name, field_name, points)
+                if len(points) != before:
+                    logger.debug(
+                        "index_data_points: %s.%s skipped %d unchanged of %d",
+                        type_name,
+                        field_name,
+                        before - len(points),
+                        before,
+                    )
             for i in range(0, len(points), batch_size):
                 batch = points[i : i + batch_size]
                 tasks.append(asyncio.create_task(_index_batch(type_name, field_name, batch)))
