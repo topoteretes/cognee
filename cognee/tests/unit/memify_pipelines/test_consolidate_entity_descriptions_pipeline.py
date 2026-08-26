@@ -879,9 +879,25 @@ def test_build_node_neighborhood_prompt_truncates_long_neighbor_text():
     assert "x" * rewrite_entities.MAX_NEIGHBOR_TEXT_CHARS + "..." in prompt
 
 
-def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
+def test_build_node_neighborhood_prompt_prefers_chunk_text_over_contains_edge_text():
     chunk_text = "The full raw text of a document chunk mentioning Marco."
-    neighbors = [{"id": "chunk-1", "text": chunk_text}]
+    neighbors = [{"id": "chunk-1", "type": "DocumentChunk", "text": chunk_text}]
+    edges = {
+        "chunk-1": [{"relationship_name": "contains", "edge_text": "Marco is mentioned here."}]
+    }
+    node = _node(
+        "entity-1", "Marco", "old description", edges=edges, neighbors=neighbors, entity_types=[]
+    )
+
+    prompt = rewrite_entities.build_node_neighborhood_prompt(node)
+
+    assert chunk_text in prompt
+    assert "Marco is mentioned here." not in prompt
+    assert prompt.count(chunk_text) == 1
+
+
+def test_build_node_neighborhood_prompt_falls_back_to_contains_edge_text_when_chunk_has_no_text():
+    neighbors = [{"id": "chunk-1", "type": "DocumentChunk", "text": ""}]
     edges = {
         "chunk-1": [{"relationship_name": "contains", "edge_text": "Marco is mentioned here."}]
     }
@@ -892,8 +908,6 @@ def test_build_node_neighborhood_prompt_prefers_edge_text_over_raw_chunk_text():
     prompt = rewrite_entities.build_node_neighborhood_prompt(node)
 
     assert "Marco is mentioned here." in prompt
-    assert chunk_text not in prompt
-    assert prompt.count("Marco is mentioned here.") == 1
 
 
 def test_build_node_neighborhood_prompt_emits_one_line_per_edge_to_the_same_neighbor():

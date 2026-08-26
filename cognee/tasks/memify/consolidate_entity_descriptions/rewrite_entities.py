@@ -86,6 +86,7 @@ def build_node_neighborhood_prompt(
         for edge_info in edge_infos:
             relationship_name = edge_info.get("relationship_name", "related to")
             edge_text = edge_info.get("edge_text")
+            chunk_text = neighbor.get("text", "")
 
             if neighbor_desc:
                 text += (
@@ -96,15 +97,18 @@ def build_node_neighborhood_prompt(
                     text += (
                         f" (relationship detail: {_truncate(edge_text, max_neighbor_text_chars)})"
                     )
+            elif neighbor.get("type") == "DocumentChunk" and chunk_text:
+                # Use the chunk's source text, not contains edge_text ("Document chunk
+                # mentions …") - that meta label makes the LLM echo provenance instead
+                # of the underlying facts.
+                text += (
+                    f"\n- {relationship_name} - {_truncate(chunk_text, max_neighbor_text_chars)}"
+                )
             elif edge_text:
-                # No description on this neighbor (e.g. a DocumentChunk) - edge_text
-                # is already a summary of its content, so use it instead of the raw
-                # text rather than including both.
                 text += f"\n- {relationship_name} - {_truncate(edge_text, max_neighbor_text_chars)}"
             else:
                 text += (
-                    f"\n- {relationship_name} - "
-                    f"{_truncate(neighbor.get('text', ''), max_neighbor_text_chars)}"
+                    f"\n- {relationship_name} - {_truncate(chunk_text, max_neighbor_text_chars)}"
                 )
 
     return text
