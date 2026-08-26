@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
     get_active_token_sink,
@@ -372,6 +373,10 @@ async def test_the_turn_answer_is_the_call_a_listening_client_watches():
                 "cognee.modules.retrieval.utils.completion.generate_completion",
                 new=AsyncMock(side_effect=_completion_that_looks_around),
             ),
+            # Pin the adapter capability: unpinned it reads the ambient LLM
+            # config, so whether this test promotes at all would depend on
+            # whatever provider the host happens to have configured.
+            patch.object(LLMGateway, "supports_answer_streaming", return_value=True),
         ):
             answer = await complete_turn(
                 snapshot=SessionTurnContext(raw_message="question"),
@@ -417,6 +422,10 @@ async def test_a_turn_does_not_stream_when_nobody_asked():
             "cognee.modules.retrieval.utils.completion.generate_completion",
             new=AsyncMock(side_effect=_completion_that_looks_around),
         ),
+        # Pin the adapter capability: unpinned it reads the ambient LLM
+        # config, so whether this test promotes at all would depend on
+        # whatever provider the host happens to have configured.
+        patch.object(LLMGateway, "supports_answer_streaming", return_value=True),
     ):
         answer = await complete_turn(
             snapshot=SessionTurnContext(raw_message="question"),
