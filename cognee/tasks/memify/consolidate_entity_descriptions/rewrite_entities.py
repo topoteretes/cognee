@@ -12,6 +12,7 @@ from cognee.modules.engine.models import EntityType
 from cognee.modules.engine.models.Entity import Entity
 from cognee.shared.logging_utils import get_logger
 
+from .constants import REASONING_HEADROOM_TOKENS
 from .models import NodeDescription
 
 logger = get_logger("consolidate_entity_descriptions")
@@ -23,9 +24,12 @@ MAX_NEIGHBOR_TEXT_CHARS = 500
 # The response is one short paragraph - this call never needs more than the
 # model deciding to ramble, and MAX_NEIGHBOR_TEXT_CHARS (~500 chars, ~125
 # tokens) is already the target length once this description gets reused
-# elsewhere as a compact card. A little headroom above that keeps the model
-# from being cut off mid-sentence without paying for an unbounded response.
-PARAGRAPH_MAX_COMPLETION_TOKENS = 250
+# elsewhere as a compact card. REASONING_HEADROOM_TOKENS covers the rest:
+# reasoning models spend hidden reasoning tokens out of this same budget
+# (see constants.py), so a little slack above the content target isn't
+# enough on its own - confirmed empirically against cognee's own default
+# model, where 250 with no headroom intermittently returned empty content.
+PARAGRAPH_MAX_COMPLETION_TOKENS = REASONING_HEADROOM_TOKENS + 250
 
 
 def load_metadata_to_dict(value: Any) -> Dict[str, Any]:

@@ -10,6 +10,7 @@ from .constants import (
     MAX_NAMED_MEMBERS,
     MAX_TYPE_TEXT_CHARS,
     PARAGRAPH_MAX_COMPLETION_TOKENS,
+    REASONING_HEADROOM_TOKENS,
     TOKENS_PER_IS_A_LINE,
 )
 from .models import EntityIsATexts, EntityTypeDescription, NodeDescription
@@ -129,7 +130,7 @@ async def query_is_a_only_LLM(
         text_input=text_input,
         system_prompt=is_a_system_prompt,
         response_model=EntityIsATexts,
-        max_completion_tokens=member_count * tokens_per_is_a_line,
+        max_completion_tokens=member_count * tokens_per_is_a_line + REASONING_HEADROOM_TOKENS,
     )
 
 

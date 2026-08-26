@@ -447,7 +447,10 @@ async def test_generate_type_description_single_call_under_threshold():
         if system_prompt == "is-a-system":
             assert "Final type summary: This graph has 3 Person entities." in text_input
             assert "Total member count: 3" in text_input
-            assert kwargs["max_completion_tokens"] == 3 * constants.TOKENS_PER_IS_A_LINE
+            assert (
+                kwargs["max_completion_tokens"]
+                == 3 * constants.TOKENS_PER_IS_A_LINE + constants.REASONING_HEADROOM_TOKENS
+            )
             is_a_calls.append(text_input)
             return EntityIsATexts(
                 is_a_texts=[MemberIsAText(member_name="E0", is_a_text="E0 is a Person.")]
@@ -494,7 +497,10 @@ async def test_generate_type_description_batches_and_merges_when_over_threshold(
             assert "Final type summary: FINAL MERGED" in text_input
             assert f"Total member count: {total}" in text_input
             batch_size = sum(1 for line in text_input.splitlines() if line.startswith("- E"))
-            assert kwargs["max_completion_tokens"] == batch_size * constants.TOKENS_PER_IS_A_LINE
+            assert (
+                kwargs["max_completion_tokens"]
+                == batch_size * constants.TOKENS_PER_IS_A_LINE + constants.REASONING_HEADROOM_TOKENS
+            )
             is_a_calls.append(text_input)
             return EntityIsATexts(
                 is_a_texts=[MemberIsAText(member_name="E0", is_a_text=f"is_a-{len(is_a_calls)}")]
