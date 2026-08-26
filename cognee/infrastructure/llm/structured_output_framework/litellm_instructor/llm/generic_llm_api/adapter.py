@@ -33,6 +33,7 @@ from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
     is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
@@ -223,6 +224,13 @@ class GenericAPIAdapter(LLMInterface):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
+            # Budget exhaustion arrives wrapped in InstructorRetryException, so it has to
+            # be classified here: the handler further down is unreachable once this clause
+            # matches. Checked before the content-policy branch because the model's partial
+            # completion is rendered into str(error), so a budget rejection whose completion
+            # happens to mention a content policy would otherwise be misrouted to fallback.
+            raise_if_budget_exhausted(error)
+
             if (
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
@@ -262,6 +270,8 @@ class GenericAPIAdapter(LLMInterface):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -272,8 +282,8 @@ class GenericAPIAdapter(LLMInterface):
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     ) from error
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error path above.
+            raise_if_budget_exhausted(e)
             raise
 
     @observe(as_type="transcription")
