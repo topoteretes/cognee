@@ -89,7 +89,15 @@ def should_retry_llm_exception(error: BaseException) -> bool:
 
 
 def raise_if_quota_error(error: BaseException) -> None:
-    """Re-raise quota/billing exhaustion as the actionable ``LLMQuotaExceededError``."""
+    """Re-raise quota/billing exhaustion as the actionable ``LLMQuotaExceededError``.
+
+    Returns normally when *error* is not a quota problem, leaving the caller to
+    re-raise it. Already-typed errors pass through unchanged: an
+    ``LLMQuotaExceededError`` is re-raised as-is, and so is an
+    ``LLMPaymentRequiredError`` — budget exhaustion is the more specific 402 and
+    must not be downgraded to the 422 quota error just because it also reads as
+    a spend problem.
+    """
     if isinstance(error, LLMQuotaExceededError):
         raise error
     # Budget exhaustion is already the more specific 402; do not downgrade it to

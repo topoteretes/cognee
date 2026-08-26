@@ -112,7 +112,7 @@ def is_budget_exhausted_error(e: BaseException) -> bool:
 
     Four signals are checked per link: HTTP 402, ``litellm.BudgetExceededError``,
     the LiteLLM proxy's ``error.type == "budget_exceeded"`` body, and finally the
-    message wording (see ``_BUDGET_MESSAGE_SIGNATURES``).
+    message wording (see ``_BUDGET_SENTENCE_RE``).
     """
     seen: set[int] = set()
     current: BaseException | None = e
