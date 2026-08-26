@@ -36,7 +36,7 @@ The request emits one coherent answer and still returns the complete list.
 
 **Who closes the sink.** The creator does — whoever set ``requested_token_sink``
 owns terminating it, because only they know when the whole request is finished.
-:func:`stream_answer_tokens` closes early *when its answer streamed*, so a
+:func:`answer_scope` closes early *when its answer streamed*, so a
 consumer sees the answer end without waiting for persistence; every other exit
 leaves the sink open because a later call in the same request may still stream.
 A consumer that iterates a sink nobody closes waits forever, which is why the
@@ -278,18 +278,28 @@ active_token_sink: ContextVar[Optional[TokenSink]] = ContextVar("active_token_si
 def get_active_token_sink() -> Optional[TokenSink]:
     """The sink the *current task* may stream into, if any.
 
-    Returns ``None`` everywhere except inside :func:`stream_answer_tokens`, which
+    Returns ``None`` everywhere except inside :func:`answer_scope`, which
     is what keeps every other LLM call in the request out of the user's stream.
     """
     return active_token_sink.get()
 
 
 @asynccontextmanager
-async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[None]:
-    """Promote the requested sink to active for this task only.
+async def answer_scope(stage: Optional[str] = None) -> AsyncIterator[None]:
+    """Mark this task as the one completion a listening client may watch.
 
-    Wrap the answer-generating call and nothing else. This is also where the
-    feature switch is read — in one place, so a request cannot promote a sink
+    A scope, not a verb: entering it usually promotes nothing. It yields without
+    promoting when no sink was requested, when the feature switch is off, or when
+    an earlier lane already closed the sink — so the caller cannot tell from the
+    name whether tokens will flow, and must not care.
+
+    Do not call this directly from a request or session path. The one production
+    caller is :func:`cognee.modules.retrieval.utils.completion.generate_answer`;
+    choosing that function over ``generate_completion`` *is* the decision to
+    stream, and keeping the decision there is what stops unrelated layers from
+    having to import this module.
+
+    This is also where the feature switch is read — in one place, so a request cannot promote a sink
     that the adapter below will then refuse to stream into.
 
     On the way out it ends the stream **when this lane actually streamed**:
