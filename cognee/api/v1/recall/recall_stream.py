@@ -90,7 +90,16 @@ def _encode_stream_event(event: StreamEvent) -> Optional[str]:
     if event.type == "answer_done":
         return encode_sse("answer_done", {})
     if event.type == "error":
-        return encode_sse("error", {"message": event.error or "streaming failed"})
+        # Same shape as _error_payload: both error paths must look alike to a
+        # client, and after the first byte the status can only travel as data.
+        # 409 is the fallback the route's catch-all uses.
+        return encode_sse(
+            "error",
+            {
+                "message": event.error or "streaming failed",
+                "status": event.status if event.status is not None else 409,
+            },
+        )
     return None
 
 
