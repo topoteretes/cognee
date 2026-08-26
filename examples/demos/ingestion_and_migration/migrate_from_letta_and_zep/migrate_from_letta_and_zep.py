@@ -30,12 +30,12 @@ Concept mapping (COGX record kinds):
     fact / relation edge       COGXFact
 
 Usage:
-    uv run python examples/tutorials/migrate_from_letta_and_zep_tutorial.py
+    uv run python examples/demos/ingestion_and_migration/migrate_from_letta_and_zep/migrate_from_letta_and_zep.py
 
 Requires:
     LLM_API_KEY set in .env (needed for re-derive mode and recall).
 
-Sample dumps live at ``examples/tutorials/data/``.
+Sample dumps live at ``examples/demos/ingestion_and_migration/migrate_from_letta_and_zep/data/``.
 """
 
 import asyncio
