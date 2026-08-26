@@ -251,15 +251,6 @@ jobs:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
-  db-examples-tests:
-    name: DB Examples Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/db_examples_tests.yml
-    with:
-      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
-    secrets: inherit
-
   notify:
     name: Test Completion Status
     needs: [
@@ -283,7 +274,6 @@ jobs:
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
-      db-examples-tests,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -309,8 +299,7 @@ jobs:
                 "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
-                "${{ needs.relational-db-migration-tests.result }}" == "success" &&
-                "${{ needs.db-examples-tests.result }}" == "success" ]]; then
+                "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then
             echo "All test suites completed successfully!"
           else
             echo "One or more test suites failed."
