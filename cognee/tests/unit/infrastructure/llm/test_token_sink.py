@@ -248,10 +248,14 @@ async def test_one_lane_owns_the_stream_and_the_others_are_dropped():
 
 @pytest.mark.asyncio
 async def test_a_lane_that_cannot_stream_does_not_starve_one_that_can():
-    """Whether a call *can* stream is unknown until it reaches the adapter — a
-    structured response_model never streams, and not every adapter has a
-    plain-text path. Claiming on entry would let such a lane lock out a
-    streamable one and the request would emit nothing."""
+    """Whether a call *can* stream is not always knowable on entry: a multi-dataset
+    fan-out runs one answer call per authorised dataset and any of them may turn
+    out to emit nothing. Claiming on entry would let such a lane lock out a
+    streamable one and the request would emit nothing.
+
+    (The structured-response_model case used to be the example here. It is no
+    longer unknowable — generate_answer passes can_stream=False for it — but the
+    fan-out still is, which is why ownership is settled on the first delta.)"""
     sink = TokenSink()
 
     async def _cannot_stream():
@@ -366,3 +370,81 @@ async def test_flag_off_emits_nothing_at_all():
 
     sink.close()
     assert await _drain(sink) == []
+
+
+@pytest.mark.asyncio
+async def test_a_lane_that_declares_it_cannot_stream_is_not_promoted():
+    """The structured-response_model case, gated at the one place that knows it.
+
+    Promotion would emit `stage: generating` and then nothing — and because that
+    stage frame is the sink's first event, the transport commits HTTP 200 before
+    the answer call has even run. So the lane must emit *nothing at all*, not
+    merely no deltas.
+    """
+    sink = TokenSink()
+    with _flag(True), _requested(sink):
+        async with answer_scope(stage="generating", can_stream=False):
+            assert get_active_token_sink() is None
+
+    sink.close()
+    assert await _drain(sink) == []
+
+
+@pytest.mark.asyncio
+async def test_a_closed_sink_is_not_promoted_again():
+    """Once a lane has finished the answer, a later lane must not take the
+    streaming path for output nobody can receive.
+
+    The guard is one `if sink.is_closed` and `is_closed` has a single consumer,
+    so nothing else in the suite fails if it is deleted. This is that test.
+    """
+    sink = TokenSink()
+    with _flag(True), _requested(sink):
+        async with answer_scope():
+            sink.put_delta("done")
+        assert sink.is_closed is True
+
+        async with answer_scope(stage="generating"):
+            # The only discriminating line: without the guard this is the sink.
+            assert get_active_token_sink() is None
+
+
+@pytest.mark.asyncio
+async def test_a_failure_carries_the_status_the_json_path_would_have_used():
+    """The status line is already 200 by the time an answer call fails, so the
+    HTTP status the same failure would have produced has to travel in the frame.
+    A client that reads it can still tell credit exhaustion from a server fault.
+    """
+
+    class Boom(Exception):
+        def __init__(self):
+            super().__init__("no credit")
+            self.status_code = 402
+
+    sink = TokenSink()
+    with _flag(True), _requested(sink):
+        with pytest.raises(Boom):
+            async with answer_scope(stage="generating"):
+                sink.put_delta("partial")
+                raise Boom()
+
+    errors = [e for e in await _drain(sink) if e.type == "error"]
+    assert len(errors) == 1
+    assert errors[0].status == 402
+    # and the provider detail never reaches the consumer
+    assert "no credit" not in (errors[0].error or "")
+
+
+@pytest.mark.asyncio
+async def test_a_failure_without_a_status_still_reports_the_error():
+    """Not every exception carries one; the frame degrades to no status rather
+    than inventing one."""
+    sink = TokenSink()
+    with _flag(True), _requested(sink):
+        with pytest.raises(RuntimeError):
+            async with answer_scope(stage="generating"):
+                sink.put_delta("partial")
+                raise RuntimeError("boom")
+
+    errors = [e for e in await _drain(sink) if e.type == "error"]
+    assert len(errors) == 1 and errors[0].status is None
