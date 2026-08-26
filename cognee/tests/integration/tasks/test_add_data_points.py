@@ -1,4 +1,6 @@
 import pathlib
+from typing import Any
+
 import pytest
 import pytest_asyncio
 
@@ -142,3 +144,86 @@ async def test_add_data_points_comprehensive(clean_test_environment):
     final_nodes, final_edges = await graph_engine.get_graph_data()
     assert len(final_nodes) == 14
     assert len(final_edges) == 5
+
+
+class TeamWrapper(DataPoint):
+    """Container the LLM needs to return one object; not a fact about the domain."""
+
+    members: list[Person]
+    metadata: dict = {"index_fields": [], "transparent": True}
+
+
+@pytest.mark.asyncio
+async def test_add_data_points_resolves_transparent_wrapper(clean_test_environment):
+    """A transparent top-level wrapper stores its children as top-level nodes."""
+
+    alice = Person(name="Alice", age=30)
+    bob = Person(name="Bob", age=25)
+    wrapper = TeamWrapper(members=[alice, bob])
+
+    graph_engine = await get_graph_engine()
+    baseline_nodes, baseline_edges = await graph_engine.get_graph_data()
+    baseline_ids = {str(node[0]) for node in baseline_nodes}
+
+    result = await add_data_points([wrapper], graph_only=True)
+
+    assert result == [wrapper]
+
+    nodes, edges = await graph_engine.get_graph_data()
+    added_ids = {str(node[0]) for node in nodes} - baseline_ids
+
+    # Only the effective descendants are persisted; the container is not a node,
+    # and it cannot be an edge endpoint because it does not exist.
+    assert added_ids == {str(alice.id), str(bob.id)}
+    assert all(str(wrapper.id) not in (str(source), str(target)) for source, target, *_ in edges)
+
+    # The graph engine synthesizes a SELF edge per node, so compare real relationships.
+    def _relationships(graph_edges):
+        return [edge for edge in graph_edges if edge[2] != "SELF"]
+
+    assert _relationships(edges) == _relationships(baseline_edges)
+
+
+class AttachmentChunk(DataPoint):
+    """A DocumentChunk-shaped node, so the real walk mints the contains edges."""
+
+    text: str
+    contains: Any = None
+    metadata: dict = {"index_fields": ["text"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chunk_attachment", [None, "all"])
+async def test_chunk_attachment_persists_expected_contains_edges(
+    clean_test_environment, chunk_attachment
+):
+    """Transparent wrapper + attachment, end to end through the graph store."""
+    from cognee.modules.graph.utils import collect_stored_data_points
+    from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
+
+    alice = Person(name="Alice", age=30)
+    bob = Person(name="Bob", age=25)
+    wrapper = TeamWrapper(members=[alice, bob])
+    chunk = AttachmentChunk(text="Alice is 30. Bob is 25.")
+
+    await integrate_chunk_graphs(
+        [chunk], [wrapper], TeamWrapper, None, chunk_attachment=chunk_attachment
+    )
+    await add_data_points([chunk], graph_only=True)
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_graph_data()
+
+    stored_ids = {str(node[0]) for node in nodes}
+    assert str(wrapper.id) not in stored_ids
+
+    # Scope to this chunk: setup() seeds nodes that carry contains edges of their own.
+    contains = {
+        str(target)
+        for source, target, name, *_ in edges
+        if name == "contains" and str(source) == str(chunk.id)
+    }
+    if chunk_attachment == "all":
+        assert contains == {str(node.id) for node in await collect_stored_data_points(wrapper)}
+    else:
+        assert contains == {str(alice.id), str(bob.id)}
