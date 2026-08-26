@@ -13,6 +13,7 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
@@ -54,7 +55,7 @@ logger = get_logger("cognify")
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    graph_model: Optional[type[BaseModel]] = None,
     chunker=TextChunker,
     chunk_size: int = None,
     chunks_per_batch: int = None,
@@ -115,8 +116,8 @@ async def cognify(
             - Multiple datasets: ["docs", "research", "reports"]
             - None: Process all datasets for the user
         user: User context for authentication and data access. Uses default if None.
-        graph_model: Pydantic model defining the knowledge graph structure.
-                    Defaults to KnowledgeGraph for general-purpose processing.
+        graph_model: Pydantic model defining the knowledge graph structure. If omitted, uses
+                    the configured graph model, which defaults to KnowledgeGraph.
         chunker: Text chunking strategy (TextChunker, LangchainChunker).
                 - TextChunker: Paragraph-based chunking (default, most reliable)
                 - LangchainChunker: Recursive character splitting with overlap
@@ -239,6 +240,9 @@ async def cognify(
             run_in_background=run_in_background,
         )
 
+    if graph_model is None:
+        graph_model = get_graph_config().graph_model
+
     import time as _time
 
     _cognify_start_ns = _time.monotonic_ns()
@@ -350,7 +354,7 @@ async def cognify(
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    graph_model: type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: int = None,
     config: Config = None,

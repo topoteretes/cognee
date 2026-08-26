@@ -110,7 +110,7 @@ def datapoint_model_to_basemodel(
     return _to_base_model(model, {})
 
 
-def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
+def graph_schema_to_graph_model(pydantic_json_schema: dict) -> type[BaseModel]:
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(
         input_file_type=InputFileType.JsonSchema,
