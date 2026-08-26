@@ -62,7 +62,11 @@ async def generate_answer(
     Callers do not need a sink, a session, or the feature enabled. With none of
     those the call behaves exactly like ``generate_completion``.
     """
-    async with answer_scope(stage="generating"):
+    # A structured response_model never reaches the adapters' streaming path, so
+    # say so here rather than announcing a stream that emits nothing. This is the
+    # natural home for the check: generate_answer is the only place that holds
+    # both the response model and the decision to stream.
+    async with answer_scope(stage="generating", can_stream=response_model is str):
         return await generate_completion(
             query=query,
             context=context,

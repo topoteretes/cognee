@@ -93,6 +93,10 @@ class StreamEvent:
     text: Optional[str] = None
     stage: Optional[str] = None
     error: Optional[str] = None
+    # Set on ``error`` only. The status line was already committed as 200 when
+    # the first frame went out, so this is the one place a caller can still
+    # learn that the failure was, say, 402 rather than a generic server error.
+    status: Optional[int] = None
 
 
 _SENTINEL = object()
@@ -199,14 +203,20 @@ class TokenSink:
         """The last token has been generated; work after this is persistence."""
         self._put(StreamEvent(type="answer_done"))
 
-    def fail(self, message: str) -> None:
+    def fail(self, message: str, status: Optional[int] = None) -> None:
         """Report a failure to the consumer, then terminate the stream.
 
         Takes an already-safe message rather than an exception: provider errors
         embed the rendered prompt (and therefore the retrieved graph context),
         endpoints and request bodies, none of which may reach an HTTP client.
+
+        ``status`` is the HTTP status the same failure would have produced on the
+        JSON path. It travels in the frame because it can no longer travel in the
+        status line: by the time an answer call fails, the response is committed
+        to 200. A client that only reads the status code cannot be helped, but one
+        that reads the frame can still tell a 402 from a 500.
         """
-        self._put(StreamEvent(type="error", error=message))
+        self._put(StreamEvent(type="error", error=message, status=status))
         self.close()
 
     def close(self) -> None:
@@ -285,7 +295,9 @@ def get_active_token_sink() -> Optional[TokenSink]:
 
 
 @asynccontextmanager
-async def answer_scope(stage: Optional[str] = None) -> AsyncIterator[None]:
+async def answer_scope(
+    stage: Optional[str] = None, *, can_stream: bool = True
+) -> AsyncIterator[None]:
     """Mark this task as the one completion a listening client may watch.
 
     A scope, not a verb: entering it usually promotes nothing. It yields without
@@ -319,6 +331,18 @@ async def answer_scope(stage: Optional[str] = None) -> AsyncIterator[None]:
         # send this call down the streaming path for output nobody can receive.
         yield
         return
+    if not can_stream:
+        # The caller knows something the sink cannot see — in practice a
+        # structured ``response_model``, which both adapters route past the
+        # plain-text door that reaches stream_text_completion
+        # (native_adapter.py, generic_llm_api/adapter.py: ``if response_model is
+        # str``). Promoting would emit ``stage: generating`` and then nothing at
+        # all, which is strictly worse than never announcing a stream: the
+        # consumer waits for tokens that are not coming, and — because that
+        # stage frame is the sink's first event — the transport commits HTTP 200
+        # before the answer call has even run.
+        yield
+        return
 
     producer = object()
     sink_token = active_token_sink.set(sink)
@@ -339,7 +363,10 @@ async def answer_scope(stage: Optional[str] = None) -> AsyncIterator[None]:
         # provider errors embed the rendered prompt and connection details.
         logger.error("Answer streaming failed: %s", error, exc_info=True)
         if sink.owns(producer):
-            sink.fail(f"{type(error).__name__} during answer generation")
+            sink.fail(
+                f"{type(error).__name__} during answer generation",
+                status=getattr(error, "status_code", None),
+            )
         raise
     else:
         if sink.owns(producer) and sink.emitted_any:
