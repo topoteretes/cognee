@@ -13,7 +13,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from cognee.infrastructure.llm.streaming.token_sink import stream_answer_tokens
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_context_builder import render_preference_block
@@ -26,7 +25,7 @@ from cognee.infrastructure.session.session_turn import (
     load_served_context_payload,
     select_session_history,
 )
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import generate_answer
 from cognee.modules.session_lifecycle import track_session_usage
 from cognee.shared.logging_utils import get_logger
 
@@ -201,7 +200,7 @@ async def complete_turn(
     prompts: TurnPrompts,
 ) -> Any:
     """Generate the turn's answer from retrieval context and session prompt history."""
-    completion_call = generate_completion(
+    completion_call = generate_answer(
         query=snapshot.raw_message,
         context=context,
         user_prompt_path=prompts.user_prompt_path,
@@ -214,17 +213,16 @@ async def complete_turn(
         response_model=prompts.response_model,
     )
 
-    # The only place a token sink goes active. This turn runs the answer call
-    # concurrently with turn analysis (see run_concurrent_session_turn), and
-    # asyncio.gather snapshots the context per task — so promoting here, inside
-    # the answer task, is what keeps SessionTurnAnalysis output from interleaving
-    # into the user's stream. A request-scoped flag could not make that
-    # distinction. No-op unless a caller installed a sink.
-    async with stream_answer_tokens(stage="generating"):
-        if isinstance(user_id, UUID):
-            async with track_session_usage(session_id, user_id):
-                return await completion_call
-        return await completion_call
+    # generate_answer rather than generate_completion: this call *is* the turn's
+    # answer, so it is the one a listening client may watch. That is the entire
+    # distinction, and it lives in the name — this module neither imports nor
+    # needs to know about streaming. Turn analysis runs concurrently via
+    # asyncio.gather, which snapshots the context per task, so the analysis lane
+    # cannot inherit the answer lane's stream.
+    if isinstance(user_id, UUID):
+        async with track_session_usage(session_id, user_id):
+            return await completion_call
+    return await completion_call
 
 
 async def commit_turn(
