@@ -843,8 +843,10 @@ def get_datasets_router() -> APIRouter:
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
 
         ## Request Parameters
-        - **customPrompt** (Optional[str]): No description provided in code yet.
-        - **graphSchema** (Optional[Dict[str, Any]]): No description provided in code yet.
+        - **customPrompt** (Optional[str]): Custom extraction prompt to store for the
+          dataset; omitting it leaves any existing prompt unchanged.
+        - **graphSchema** (Optional[Dict[str, Any]]): JSON graph schema to store for the
+          dataset; omitting it leaves any existing schema unchanged.
         """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
