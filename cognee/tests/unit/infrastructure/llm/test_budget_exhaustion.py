@@ -35,8 +35,10 @@ from tenacity import Future as TenacityFuture
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,
     LLMQuotaExceededError,
+    _redact_budget_identifiers,
     budget_exhaustion_detail,
     is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import (
     is_quota_or_billing_error,
@@ -202,6 +204,33 @@ class TestNoFalsePositives:
         assert is_budget_exhausted_error(exc) is False, f"false positive: {prose}"
         assert should_retry_llm_exception(exc) is True
 
+    def test_fragments_far_apart_are_not_budget_exhaustion(self):
+        """Detection matches a whole sentence, not fragments anywhere in the text.
+
+        ``str(InstructorRetryException)`` concatenates every failed attempt's
+        partial completion, so a document mentioning an exceeded budget in one
+        paragraph and a maximum several KB later must not be classified.
+        """
+        doc = "the marketing budget has been exceeded! " + "x" * 4000 + " Our max budget: 40000 EUR"
+        exc = Exception("validation failed, completion=" + doc)
+        assert is_budget_exhausted_error(exc) is False
+        assert should_retry_llm_exception(exc) is True
+
+    def test_per_model_wording_requires_the_litellm_prefix(self):
+        """Shape 3's distinguishing fragment is short enough to occur in prose,
+        so the ``LiteLLM Virtual Key:`` / ``End User:`` prefix is required."""
+        exc = Exception("the CI job exceeded budget for model=trained last sprint")
+        assert is_budget_exhausted_error(exc) is False
+        assert should_retry_llm_exception(exc) is True
+
+    def test_detection_and_extraction_agree(self):
+        """A positive classification must always yield a detail. Disagreement
+        would mean the two used different rules again."""
+        for message in LITELLM_BUDGET_MESSAGES:
+            exc = _wrapped_budget_error(message)
+            assert is_budget_exhausted_error(exc) is True
+            assert budget_exhaustion_detail(exc) is not None
+
     def test_known_limitation_verbatim_provider_message_in_a_document(self):
         """Documents the one residual false positive, deliberately accepted.
 
@@ -316,10 +345,68 @@ class TestDetailExtraction:
     def test_detail_is_none_when_absent(self):
         assert budget_exhaustion_detail(Exception("something else")) is None
 
+    def test_detail_is_bounded_against_an_unbroken_token(self):
+        """The per-model shape ends in a bare token; without a length bound a
+        100 KB model name would land verbatim in the 402 response body."""
+        exc = Exception("LiteLLM Virtual Key: k, exceeded budget for model=" + "A" * 100_000)
+        detail = budget_exhaustion_detail(exc)
+        assert detail is None or len(detail) < 300
+
+    def test_identifiers_are_redacted(self):
+        """The sentence can carry the virtual-key hash, key alias and tenant
+        IDs, and the detail is returned to API callers in the 402 body."""
+        exc = Exception(
+            "LiteLLM Virtual Key: sk-abc123secret, key_alias: prod-key, "
+            "exceeded budget for model=gpt-4o"
+        )
+        detail = budget_exhaustion_detail(exc)
+        assert detail is not None
+        assert "sk-abc123secret" not in detail
+        assert "prod-key" not in detail
+        assert "<redacted>" in detail
+        # The model is not an identifier and stays: it is the actionable part.
+        assert "gpt-4o" in detail
+
+    def test_scope_ids_are_redacted_but_figures_kept(self):
+        detail = budget_exhaustion_detail(
+            Exception(
+                "Budget has been exceeded! Team=acme-corp Current cost: 70.0, Max budget: 70.0"
+            )
+        )
+        assert detail is not None
+        assert "acme-corp" not in detail
+        assert "70.0" in detail
+
+    def test_detail_walks_the_cause_chain(self):
+        """Classification can succeed on a link below the outermost exception,
+        so extraction has to walk too or the 402 loses its detail."""
+        inner = Exception(LITELLM_BUDGET_MESSAGES[0])
+        outer = Exception("wrapper with no budget wording")
+        outer.__cause__ = inner
+        assert is_budget_exhausted_error(outer) is True
+        assert budget_exhaustion_detail(outer) is not None
+
+    def test_detail_survives_a_raising_str(self):
+        """``budget_exhaustion_detail`` runs inside ``raise_if_budget_exhausted``;
+        a raising ``__str__`` must not replace the 402 with an unrelated error."""
+
+        class Hostile(Exception):
+            status_code = 402
+
+            def __str__(self):
+                raise RuntimeError("boom")
+
+        exc = Hostile()
+        assert is_budget_exhausted_error(exc) is True
+        assert budget_exhaustion_detail(exc) is None
+        with pytest.raises(LLMPaymentRequiredError):
+            raise_if_budget_exhausted(exc)
+
     @pytest.mark.parametrize("message", LITELLM_BUDGET_MESSAGES)
     def test_detail_extracted_for_every_scope(self, message):
         detail = budget_exhaustion_detail(_wrapped_budget_error(message))
         assert detail is not None, f"no detail extracted for: {message}"
         assert len(detail) < 300
-        # The extracted sentence must come from the provider message itself.
-        assert detail.lower() in message.lower()
+        # The detail is the provider sentence with identifiers masked -- nothing
+        # invented, nothing pulled in from the surrounding wrapper noise.
+        assert detail.lower() in _redact_budget_identifiers(message).lower()

@@ -23,44 +23,45 @@ class LLMPaymentRequiredError(CogneeValidationError):
 # ``litellm.BudgetExceededError``, and one whose response body has already been
 # consumed, so the structured ``error.type`` check below cannot fire.
 #
-# LiteLLM raises ``BudgetExceededError`` with three distinct wordings, each
-# covering several scopes:
+# LiteLLM raises ``BudgetExceededError`` with three distinct sentence shapes,
+# between them covering every budget scope:
 #   1. "Budget has been exceeded! [Scope=...] Current cost: X, Max budget: Y"
 #      -- virtual key, team member, team, project, organization, tag
 #   2. "ExceededBudget: [End ]User=<id> over budget. Spend=X, Budget=Y"
 #      -- internal-user and end-user budgets
 #   3. "LiteLLM {Virtual Key|End User}: <id>, exceeded budget for model=<m>"
 #      -- per-model budget caps
-# In wordings 1 and 2 a variable scope segment sits mid-sentence, so no single
-# contiguous substring spans them; each signature is therefore a set of
-# fragments that must ALL be present.
 #
-# Conjunctive matching is what keeps this safe: ``str(InstructorRetryException)``
-# embeds the model's own partial completion, so a single natural-language phrase
-# would misclassify an ordinary validation-retry failure on any document that
-# happens to discuss an exceeded budget.
-_BUDGET_MESSAGE_SIGNATURES = (
-    ("budget has been exceeded!", "max budget:"),
-    ("exceededbudget:", "over budget."),
-    ("exceeded budget for model=",),
-)
-
-# Isolates just the provider sentence, skipping the surrounding wrapper noise.
-# Bounded repetition keeps the detail short and the scan linear.
+# One regex both detects and extracts, so a positive match always yields a
+# detail. Matching the WHOLE sentence — rather than checking for fragments
+# anywhere in the text — is what keeps this safe: ``str(InstructorRetryException)``
+# concatenates the model's own partial completions, so loose fragment matching
+# fires on any document that merely mentions an exceeded budget and a maximum
+# somewhere in several KB of unrelated prose. The bounded ``.{0,200}?`` spans
+# only the variable scope segment, keeps the scan linear, and caps the detail.
 _BUDGET_SENTENCE_RE = re.compile(
     r"Budget has been exceeded!.{0,200}?Max budget:\s*[\d.]+"
     r"|ExceededBudget:.{0,200}?Budget=[\d.]+"
-    r"|LiteLLM (?:Virtual Key|End User):.{0,200}?exceeded budget for model=\S+",
+    r"|LiteLLM (?:Virtual Key|End User):.{0,200}?exceeded budget for model=\S{1,100}",
     re.IGNORECASE | re.DOTALL,
 )
 
+# The sentence can carry the virtual-key hash, key alias, and end-user / team /
+# organization IDs, and the detail is returned to API callers in the 402 body.
+# Spend and budget figures are kept — they are the caller's own, and are the
+# actionable part — but identifiers are masked.
+_BUDGET_IDENTIFIER_RE = re.compile(
+    r"\b(Virtual Key|End User|User|Team|Project|Organization|Tag|key_alias)(\s*[:=]\s*)([^\s,]+)",
+    re.IGNORECASE,
+)
+
+
+def _redact_budget_identifiers(sentence: str) -> str:
+    return _BUDGET_IDENTIFIER_RE.sub(r"\1\2<redacted>", sentence)
+
 
 def _has_budget_message(text: str) -> bool:
-    lowered = text.lower()
-    return any(
-        all(fragment in lowered for fragment in signature)
-        for signature in _BUDGET_MESSAGE_SIGNATURES
-    )
+    return _BUDGET_SENTENCE_RE.search(text) is not None
 
 
 def _is_budget_exhausted_link(e: BaseException) -> bool:
@@ -127,10 +128,25 @@ def budget_exhaustion_detail(e: BaseException) -> str | None:
     """Pull the provider's own budget sentence out of a wrapped exception.
 
     ``str(e)`` on an ``InstructorRetryException`` is long and embeds the model's
-    partial completions, so the sentence is extracted rather than passed whole.
+    partial completions, so the sentence is extracted rather than passed whole,
+    and identifiers within it are masked before it reaches an API response.
+
+    Walks the ``__cause__`` chain like ``is_budget_exhausted_error``, since a
+    positive classification may come from a link below the outermost exception.
     """
-    match = _BUDGET_SENTENCE_RE.search(str(e))
-    return match.group(0).strip() if match else None
+    seen: set[int] = set()
+    current: BaseException | None = e
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        try:
+            text = str(current)
+        except Exception:
+            text = ""
+        match = _BUDGET_SENTENCE_RE.search(text)
+        if match:
+            return _redact_budget_identifiers(match.group(0).strip())
+        current = current.__cause__
+    return None
 
 
 def raise_if_budget_exhausted(error: BaseException) -> None:
