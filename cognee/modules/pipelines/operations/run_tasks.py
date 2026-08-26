@@ -275,7 +275,15 @@ async def run_tasks(
                     data_ingestion_info=results,
                 )
 
-            except Exception as error:
+            except (Exception, asyncio.CancelledError) as error:
+                # asyncio.CancelledError is a BaseException (not an Exception)
+                # since Python 3.8, so a bare `except Exception` misses it —
+                # a cancelled run (deploy/restart, or a future disconnect-
+                # triggered cancel) would otherwise never reach
+                # log_pipeline_run_error below and stay stuck at
+                # DATASET_PROCESSING_STARTED forever (CLO-365). Re-raised at
+                # the end of this block either way, so cooperative
+                # cancellation still propagates once cleanup is done.
                 if callable(rollback_handler):
                     try:
                         await rollback_handler(
