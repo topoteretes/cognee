@@ -26,6 +26,7 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
     log_pipeline_run_complete,
     log_pipeline_run_error,
+    log_pipeline_run_progress,
 )
 from .run_tasks_data_item import run_tasks_data_item
 from ..tasks.task import Task
@@ -118,29 +119,93 @@ async def run_tasks(
                 # but at most data_per_batch run concurrently at any time.
                 semaphore = asyncio.Semaphore(data_per_batch)
 
-                async def _run_item(data_item, item_tasks):
-                    async with semaphore:
-                        return await run_tasks_data_item(
-                            data_item,
-                            dataset,
-                            item_tasks,
-                            pipeline_name,
-                            pipeline_id,
-                            pipeline_run_id,
-                            PipelineContext(
-                                user=user,
-                                data_item=data_item,
-                                dataset=dataset,
-                                pipeline_run_id=pipeline_run_id,
-                                pipeline_name=pipeline_name,
-                                # Copy per item: a shared dict would let one item's
-                                # ctx.extras mutations leak into every other item.
-                                extras=dict(extras) if isinstance(extras, dict) else {},
-                            ),
-                            user,
-                            incremental_loading,
-                            data_cache,
+                # Item-level progress ("N of M files done"): a single counter shared
+                # across all concurrently-gathered items, guarded by a lock since
+                # multiple _run_item calls finish interleaved under the semaphore.
+                total_items = len(work_items)
+                completed_items = 0
+                completed_items_lock = asyncio.Lock()
+
+                # Throttle the DB write, not just the in-memory count: one insert
+                # per item would mean one extra write transaction per item, on top
+                # of the pipeline's own writes — real contention on the default
+                # SQLite relational backend, which serializes writers behind a
+                # file lock. Capping at ~20 ticks per run keeps /status fresh
+                # enough without adding write pressure proportional to batch size.
+                # The first and last item always persist, so progress starts and
+                # ends visible regardless of how coarse the throttle is.
+                progress_log_every = max(1, total_items // 20)
+
+                # Stage-level progress ("currently: graph extraction"): a shared
+                # dict every item's stage ticks write current_stage into (see
+                # _push_stage_progress in run_tasks_data_item.py). Items run
+                # concurrently through the same task chain, so this is a
+                # best-effort "what stage are things at" signal, not a per-item
+                # value — good enough to answer /status without adding one DB
+                # write per stage per item.
+                progress_state = {"current_stage": None}
+
+                async def _record_item_progress():
+                    # An item that hard-raised (e.g. incremental loading with
+                    # RAISE_INCREMENTAL_LOADING_ERRORS=true, the default) never
+                    # reaches _run_item's `return` — this is called from `finally`
+                    # instead, so completed_items reaches total_items regardless of
+                    # how the item ended. The error/success split itself still
+                    # happens after gather() below; this only tracks "done", not
+                    # outcome.
+                    nonlocal completed_items
+                    async with completed_items_lock:
+                        completed_items += 1
+                        progress_count = completed_items
+
+                    is_first_or_last = progress_count == 1 or progress_count == total_items
+                    if not (is_first_or_last or progress_count % progress_log_every == 0):
+                        return
+
+                    try:
+                        await log_pipeline_run_progress(
+                            pipeline_run_id=pipeline_run_id,
+                            pipeline_id=pipeline_id,
+                            pipeline_name=pipeline_name,
+                            dataset_id=dataset.id,
+                            completed_items=progress_count,
+                            total_items=total_items,
+                            current_stage=progress_state["current_stage"],
                         )
+                    except Exception as progress_error:
+                        # Progress reporting must never fail the pipeline run.
+                        logger.error(
+                            f"Failed to log pipeline run progress: {progress_error}",
+                            exc_info=True,
+                        )
+
+                async def _run_item(data_item, item_tasks):
+                    try:
+                        async with semaphore:
+                            return await run_tasks_data_item(
+                                data_item,
+                                dataset,
+                                item_tasks,
+                                pipeline_name,
+                                pipeline_id,
+                                pipeline_run_id,
+                                PipelineContext(
+                                    user=user,
+                                    data_item=data_item,
+                                    dataset=dataset,
+                                    pipeline_run_id=pipeline_run_id,
+                                    pipeline_name=pipeline_name,
+                                    # Copy per item: a shared dict would let one item's
+                                    # ctx.extras mutations leak into every other item.
+                                    extras=dict(extras) if isinstance(extras, dict) else {},
+                                ),
+                                user,
+                                incremental_loading,
+                                data_cache,
+                                progress_state,
+                            )
+                    finally:
+                        await _record_item_progress()
 
                 gathered = await asyncio.gather(
                     *[
