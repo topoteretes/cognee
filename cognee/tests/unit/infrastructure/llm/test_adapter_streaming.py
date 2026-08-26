@@ -27,7 +27,7 @@ from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
     active_token_sink,
     requested_token_sink,
-    stream_answer_tokens,
+    answer_scope,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
@@ -261,7 +261,7 @@ async def test_a_retry_tells_the_consumer_to_discard_the_partial_answer():
         _requested(sink),
         patch(f"{STREAM_MODULE}.litellm.acompletion", new=_streaming_completion(chunks)),
     ):
-        async with stream_answer_tokens():
+        async with answer_scope():
             sink.put_delta("partial from the first attempt")
             await _stream(sink, chunks)
 

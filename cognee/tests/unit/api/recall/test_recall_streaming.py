@@ -29,7 +29,7 @@ from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.llm.streaming.token_sink import (
     get_active_token_sink,
-    stream_answer_tokens,
+    answer_scope,
 )
 from cognee.modules.recall.types.RecallResponse import ResponseGraphEntry
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
@@ -78,7 +78,7 @@ def _flag(enabled: bool = True, adapter_streams: bool = True):
 
 async def _recall_that_streams(**_kwargs):
     """Stand-in for recall(): streams through the real promotion helper."""
-    async with stream_answer_tokens(stage="generating"):
+    async with answer_scope(stage="generating"):
         sink = get_active_token_sink()
         for token in ANSWER:
             if sink:
@@ -245,7 +245,7 @@ def test_a_retry_tells_the_client_to_discard_the_partial_answer(client, monkeypa
     """Tenacity re-runs the whole call, which re-streams from the beginning."""
 
     async def _retried(**_kwargs):
-        async with stream_answer_tokens(stage="generating"):
+        async with answer_scope(stage="generating"):
             sink = get_active_token_sink()
             sink.put_delta("partial")
             sink.begin_attempt()  # what a retry does
@@ -269,7 +269,7 @@ def test_keepalives_cover_the_silent_persistence_phase(client, monkeypatch):
     proxy's idle timeout and `final` — the authoritative payload — is lost."""
 
     async def _slow_persistence(**_kwargs):
-        async with stream_answer_tokens(stage="generating"):
+        async with answer_scope(stage="generating"):
             get_active_token_sink().put_delta("answer")
         await asyncio.sleep(0.25)  # persistence, emitting nothing
         return PAYLOAD
@@ -328,7 +328,7 @@ def test_a_failure_after_output_arrives_as_a_single_error_event(client, monkeypa
     `error` as terminal has already stopped reading."""
 
     async def _fails_mid_answer(**_kwargs):
-        async with stream_answer_tokens(stage="generating"):
+        async with answer_scope(stage="generating"):
             get_active_token_sink().put_delta("half an ans")
             raise RuntimeError("graph unavailable")
 
@@ -345,13 +345,67 @@ def test_a_failure_after_output_arrives_as_a_single_error_event(client, monkeypa
     assert kinds[-1] == "error"
 
 
+def test_a_failure_after_output_still_reports_the_status_it_would_have_had(
+    client, monkeypatch
+):
+    """Credit exhaustion is the failure this most needs to survive the transport.
+
+    The 200 is already committed by the time the answer call runs, so a client
+    that reads only the status line cannot be helped — but the frame can still
+    say 402, and it must, because "top up your credits" and "transient fault"
+    need different handling. Both error paths carry `status` for that reason;
+    this pins the sink one, which is the path a mid-answer failure takes.
+    """
+
+    class NoCredit(Exception):
+        def __init__(self):
+            super().__init__("insufficient credit")
+            self.status_code = 402
+
+    async def _runs_out_of_credit(**_kwargs):
+        async with answer_scope(stage="generating"):
+            get_active_token_sink().put_delta("half an ans")
+            raise NoCredit()
+
+    monkeypatch.setattr(recall_pkg, "recall", _runs_out_of_credit)
+    with _flag():
+        response = client.post(
+            "/recall", json={"query": "q"}, headers={"Accept": "text/event-stream"}
+        )
+
+    assert response.status_code == 200
+    errors = [json.loads(data) for event, data in _frames(response.text) if event == "error"]
+    assert len(errors) == 1
+    assert errors[0]["status"] == 402
+    assert "insufficient credit" not in errors[0]["message"]
+
+
+def test_a_failure_with_no_status_falls_back_to_the_catch_all(client, monkeypatch):
+    """A bare exception carries no status, so the frame uses the same 409 the
+    route's catch-all would — the shape never varies."""
+
+    async def _plain_failure(**_kwargs):
+        async with answer_scope(stage="generating"):
+            get_active_token_sink().put_delta("half an ans")
+            raise RuntimeError("graph unavailable")
+
+    monkeypatch.setattr(recall_pkg, "recall", _plain_failure)
+    with _flag():
+        response = client.post(
+            "/recall", json={"query": "q"}, headers={"Accept": "text/event-stream"}
+        )
+
+    errors = [json.loads(data) for event, data in _frames(response.text) if event == "error"]
+    assert len(errors) == 1 and errors[0]["status"] == 409
+
+
 def test_the_error_event_does_not_leak_provider_detail(client, monkeypatch):
     """Provider errors embed the rendered prompt — the whole retrieved graph
     context — plus endpoints and request bodies."""
     secret = "ContentPolicy: <entire graph context, api_base=https://internal>"
 
     async def _leaky(**_kwargs):
-        async with stream_answer_tokens(stage="generating"):
+        async with answer_scope(stage="generating"):
             get_active_token_sink().put_delta("x")
             raise RuntimeError(secret)
 
@@ -382,7 +436,7 @@ async def test_a_disconnect_detaches_the_sink_and_lets_the_recall_finish():
     finished = asyncio.Event()
 
     async def _long_recall(**_kwargs):
-        async with stream_answer_tokens(stage="generating"):
+        async with answer_scope(stage="generating"):
             sink = get_active_token_sink()
             sink.put_delta("first")
             await asyncio.sleep(0.05)
@@ -408,7 +462,7 @@ async def test_dropped_preview_frames_are_signalled_before_final():
     the client needs telling to stop trusting what it drew."""
 
     async def _floods(**_kwargs):
-        async with stream_answer_tokens(stage="generating"):
+        async with answer_scope(stage="generating"):
             sink = get_active_token_sink()
             for index in range(50):
                 sink.put_delta(f"token{index}")

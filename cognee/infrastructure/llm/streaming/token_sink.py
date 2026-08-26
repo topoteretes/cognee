@@ -36,7 +36,7 @@ The request emits one coherent answer and still returns the complete list.
 
 **Who closes the sink.** The creator does — whoever set ``requested_token_sink``
 owns terminating it, because only they know when the whole request is finished.
-:func:`stream_answer_tokens` closes early *when its answer streamed*, so a
+:func:`answer_scope` closes early *when its answer streamed*, so a
 consumer sees the answer end without waiting for persistence; every other exit
 leaves the sink open because a later call in the same request may still stream.
 A consumer that iterates a sink nobody closes waits forever, which is why the
@@ -93,6 +93,10 @@ class StreamEvent:
     text: Optional[str] = None
     stage: Optional[str] = None
     error: Optional[str] = None
+    # Set on ``error`` only. The status line was already committed as 200 when
+    # the first frame went out, so this is the one place a caller can still
+    # learn that the failure was, say, 402 rather than a generic server error.
+    status: Optional[int] = None
 
 
 _SENTINEL = object()
@@ -199,14 +203,20 @@ class TokenSink:
         """The last token has been generated; work after this is persistence."""
         self._put(StreamEvent(type="answer_done"))
 
-    def fail(self, message: str) -> None:
+    def fail(self, message: str, status: Optional[int] = None) -> None:
         """Report a failure to the consumer, then terminate the stream.
 
         Takes an already-safe message rather than an exception: provider errors
         embed the rendered prompt (and therefore the retrieved graph context),
         endpoints and request bodies, none of which may reach an HTTP client.
+
+        ``status`` is the HTTP status the same failure would have produced on the
+        JSON path. It travels in the frame because it can no longer travel in the
+        status line: by the time an answer call fails, the response is committed
+        to 200. A client that only reads the status code cannot be helped, but one
+        that reads the frame can still tell a 402 from a 500.
         """
-        self._put(StreamEvent(type="error", error=message))
+        self._put(StreamEvent(type="error", error=message, status=status))
         self.close()
 
     def close(self) -> None:
@@ -278,19 +288,32 @@ active_token_sink: ContextVar[Optional[TokenSink]] = ContextVar("active_token_si
 def get_active_token_sink() -> Optional[TokenSink]:
     """The sink the *current task* may stream into, if any.
 
-    Returns ``None`` everywhere except inside :func:`stream_answer_tokens`, which
+    Returns ``None`` everywhere except inside :func:`answer_scope`, which
     is what keeps every other LLM call in the request out of the user's stream.
     """
     return active_token_sink.get()
 
 
 @asynccontextmanager
-async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[None]:
-    """Promote the requested sink to active for this task only.
+async def answer_scope(
+    stage: Optional[str] = None, *, can_stream: bool = True
+) -> AsyncIterator[None]:
+    """Mark this task as the one completion a listening client may watch.
 
-    Wrap the answer-generating call and nothing else. This is also where both
-    preconditions are checked — the feature switch, and whether the configured
-    adapter can stream at all — in one place, so a request cannot promote a sink
+    A scope, not a verb: entering it usually promotes nothing. It yields without
+    promoting when no sink was requested, when the feature switch is off, when the
+    configured adapter cannot stream at all, when the caller declares this call
+    cannot (a structured ``response_model``), or when an earlier lane already
+    closed the sink — so the caller cannot tell from the name whether tokens will
+    flow, and must not care.
+
+    Do not call this directly from a request or session path. The one production
+    caller is :func:`cognee.modules.retrieval.utils.completion.generate_answer`;
+    choosing that function over ``generate_completion`` *is* the decision to
+    stream, and keeping the decision there is what stops unrelated layers from
+    having to import this module.
+
+    Every precondition is checked here, in one place, so a request cannot promote a sink
     that the adapter below will then refuse to stream into.
 
     On the way out it ends the stream **when this lane actually streamed**:
@@ -318,6 +341,18 @@ async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[Non
         # send this call down the streaming path for output nobody can receive.
         yield
         return
+    if not can_stream:
+        # The caller knows something the sink cannot see — in practice a
+        # structured ``response_model``, which both adapters route past the
+        # plain-text door that reaches stream_text_completion
+        # (native_adapter.py, generic_llm_api/adapter.py: ``if response_model is
+        # str``). Promoting would emit ``stage: generating`` and then nothing at
+        # all, which is strictly worse than never announcing a stream: the
+        # consumer waits for tokens that are not coming, and — because that
+        # stage frame is the sink's first event — the transport commits HTTP 200
+        # before the answer call has even run.
+        yield
+        return
 
     producer = object()
     sink_token = active_token_sink.set(sink)
@@ -338,7 +373,10 @@ async def stream_answer_tokens(stage: Optional[str] = None) -> AsyncIterator[Non
         # provider errors embed the rendered prompt and connection details.
         logger.error("Answer streaming failed: %s", error, exc_info=True)
         if sink.owns(producer):
-            sink.fail(f"{type(error).__name__} during answer generation")
+            sink.fail(
+                f"{type(error).__name__} during answer generation",
+                status=getattr(error, "status_code", None),
+            )
         raise
     else:
         if sink.owns(producer) and sink.emitted_any:
