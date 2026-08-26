@@ -146,6 +146,7 @@ Every demo lives in a topic folder.
 | [`simple_relational_database_migration_example/`](demos/ingestion_and_migration/simple_relational_database_migration_example/) | SQL → knowledge graph (small schema) |
 | [`complex_relational_database_migration_example/`](demos/ingestion_and_migration/complex_relational_database_migration_example/) | SQL → knowledge graph (richer schema, optional ontology) |
 | [`migrate_from_mem0/`](demos/ingestion_and_migration/migrate_from_mem0/) | Importing mem0 memories into cognee |
+| [`migrate_from_letta_and_zep/`](demos/ingestion_and_migration/migrate_from_letta_and_zep/) | Importing Letta (MemGPT) agent files and Zep / Graphiti exports into cognee |
 
 ### [`custom_pipelines/`](demos/custom_pipelines/) — pipeline composition
 | Script | Demonstrates |
