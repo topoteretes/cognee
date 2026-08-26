@@ -39,13 +39,17 @@ def load_metadata_to_dict(value: Any) -> Dict[str, Any]:
     return value
 
 
-def _truncate(text: str, max_chars: int = MAX_NEIGHBOR_TEXT_CHARS) -> str:
+def _truncate(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "..."
 
 
-def build_node_neighborhood_prompt(node):
+def build_node_neighborhood_prompt(
+    node,
+    max_neighbors: int = MAX_NEIGHBORS_IN_PROMPT,
+    max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+):
     props = node["properties"]
     neighbors = node["neighbors"]
 
@@ -57,17 +61,17 @@ def build_node_neighborhood_prompt(node):
         + ". It is connected to it's neighbors in the following way:"
     )
 
-    dropped_count = len(neighbors) - MAX_NEIGHBORS_IN_PROMPT
+    dropped_count = len(neighbors) - max_neighbors
     if dropped_count > 0:
         logger.warning(
             "build_node_neighborhood_prompt: dropping %d of %d neighbors for entity %r (cap is %d)",
             dropped_count,
             len(neighbors),
             props.get("name"),
-            MAX_NEIGHBORS_IN_PROMPT,
+            max_neighbors,
         )
 
-    for neighbor in neighbors[:MAX_NEIGHBORS_IN_PROMPT]:
+    for neighbor in neighbors[:max_neighbors]:
         # A neighbor can be linked by more than one distinct edge (e.g.
         # "works_at" and "visited" both connecting the same pair) - emit one
         # line per edge rather than only the last one found.
@@ -80,26 +84,36 @@ def build_node_neighborhood_prompt(node):
             edge_text = edge_info.get("edge_text")
 
             if neighbor_desc:
-                text += f"\n- {relationship_name}: {neighbor_name} - {_truncate(neighbor_desc)}"
+                text += (
+                    f"\n- {relationship_name}: {neighbor_name} - "
+                    f"{_truncate(neighbor_desc, max_neighbor_text_chars)}"
+                )
                 if edge_text:
-                    text += f" (relationship detail: {_truncate(edge_text)})"
+                    text += (
+                        f" (relationship detail: {_truncate(edge_text, max_neighbor_text_chars)})"
+                    )
             elif edge_text:
                 # No description on this neighbor (e.g. a DocumentChunk) - edge_text
                 # is already a summary of its content, so use it instead of the raw
                 # text rather than including both.
-                text += f"\n- {relationship_name} - {_truncate(edge_text)}"
+                text += f"\n- {relationship_name} - {_truncate(edge_text, max_neighbor_text_chars)}"
             else:
-                text += f"\n- {relationship_name} - {_truncate(neighbor.get('text', ''))}"
+                text += (
+                    f"\n- {relationship_name} - "
+                    f"{_truncate(neighbor.get('text', ''), max_neighbor_text_chars)}"
+                )
 
     return text
 
 
-async def query_LLM(text_input, system_prompt):
+async def query_LLM(
+    text_input, system_prompt, max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS
+):
     return await LLMGateway.acreate_structured_output(
         text_input=text_input,
         system_prompt=system_prompt,  # no format()
         response_model=NodeDescription,
-        max_completion_tokens=PARAGRAPH_MAX_COMPLETION_TOKENS,
+        max_completion_tokens=max_completion_tokens,
     )
 
 
@@ -150,22 +164,36 @@ def build_entity(props: Dict[str, Any], entity_types: List[EntityType], descript
     return entity
 
 
-async def generate_consolidated_entity(node, system_prompt) -> Entity:
+async def generate_consolidated_entity(
+    node,
+    system_prompt,
+    max_neighbors: int = MAX_NEIGHBORS_IN_PROMPT,
+    max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+    max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
+) -> Entity:
     props = node["properties"]
-    text = build_node_neighborhood_prompt(node)
-    result = await query_LLM(text, system_prompt)
+    text = build_node_neighborhood_prompt(node, max_neighbors, max_neighbor_text_chars)
+    result = await query_LLM(text, system_prompt, max_completion_tokens)
     entity_types = [build_entity_type(entity_type) for entity_type in node["entity_types"]]
     entity = build_entity(props, entity_types, result.description)
     return entity
 
 
-async def generate_consolidated_entities(nodes) -> List[DataPoint]:
+async def generate_consolidated_entities(
+    nodes,
+    max_concurrent_calls: int = MAX_CONCURRENT_ENTITY_LLM_CALLS,
+    max_neighbors: int = MAX_NEIGHBORS_IN_PROMPT,
+    max_neighbor_text_chars: int = MAX_NEIGHBOR_TEXT_CHARS,
+    max_completion_tokens: int = PARAGRAPH_MAX_COMPLETION_TOKENS,
+) -> List[DataPoint]:
     system_prompt = render_prompt(prompt_name, {})
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_ENTITY_LLM_CALLS)
+    semaphore = asyncio.Semaphore(max_concurrent_calls)
 
     async def generate_with_limit(node):
         async with semaphore:
-            return await generate_consolidated_entity(node, system_prompt)
+            return await generate_consolidated_entity(
+                node, system_prompt, max_neighbors, max_neighbor_text_chars, max_completion_tokens
+            )
 
     consolidate_entity_descriptions_tasks = (generate_with_limit(node) for node in nodes)
 
