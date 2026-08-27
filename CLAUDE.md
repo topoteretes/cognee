@@ -400,6 +400,50 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
+#### only_context and `context_format`
+
+`only_context=True` returns the retrieval context instead of an LLM completion. By
+default that is the bare context string and nothing else — no session guidance, no
+conversation history, no rendered prompt — which is less than a real completion
+receives. Pass `context_format="prompt"` to get the full envelope instead:
+
+```python
+result = await cognee.recall(
+    "why did the migration stall?",
+    query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
+    session_id="s1",                         # session_id a session hit would
+    only_context=True,                       # short-circuit it (see recall vs search)
+    context_format="prompt",                 # default: "context"
+)
+```
+
+The `"prompt"` shape returns `question`, `context`, `session_context` (the guidance
+block plus conversation history), `user_prompt`, and `system_prompt` — the exact
+strings `generate_completion` would have sent, built by the same code
+(`build_session_prompt` in read-only mode plus `build_completion_prompts`). It makes no
+LLM completion or turn-analysis call, writes nothing to the session, and records no QA
+turn. It does make **one embedding call** — the conversation-history vector recall —
+once per search, shared across the dataset fan-out. With `CACHING=false` the
+`system_prompt` still carries the durable preference block, exactly as the real
+sessionless completion does.
+
+Search types that never send a single prompt from their template pair report the
+session layer and leave `user_prompt`/`system_prompt` empty: the non-generative types
+(`CHUNKS`, `SUMMARIES`, `CODE`, …) have no template, and `CYPHER` and
+`AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False` (Cypher never
+prompts; the agentic loop answers through other templates). For `recall()`, an empty
+retrieval yields zero items in either format, so the `on_empty` tools fallback still
+fires.
+
+Caveats. `context_format` only affects `only_context` calls. `POST /api/v1/search`
+accepts `session_id`; without one the session layer is the default session's. And the
+preview is knowingly unfaithful in one place: a real sequential turn first rewrites the
+question (`effective_query`), and that rewrite fills `{{ question }}`, drives history
+selection, and ranks the guidance block — concurrent mode also merges a second
+retrieval lane. Producing the rewrite is an LLM call, so the preview uses the raw query
+for all of them: it reports the prompt for the context actually retrieved, not a
+replay of a full turn.
+
 ### Memory & Performance Tuning Flags
 
 Four flags trade memory features for speed. Know what each turns off before flipping it:
@@ -462,10 +506,14 @@ HUGGINGFACE_TOKENIZER="nomic-ai/nomic-embed-text-v1.5"
 #### Custom / OpenRouter / vLLM
 ```bash
 LLM_PROVIDER="custom"
-LLM_MODEL="openrouter/google/gemini-2.0-flash-lite-preview-02-05:free"
+LLM_MODEL="openrouter/deepseek/deepseek-r1"
 LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
+OpenRouter model ids change over time (the `:free` tier especially) — check
+`https://openrouter.ai/api/v1/models` for a current slug. Embeddings are a
+separate catalogue at `https://openrouter.ai/api/v1/embeddings/models` and
+must be configured separately; see the OpenRouter block in `.env.template`.
 
 #### AWS Bedrock (requires aws extra)
 ```bash
