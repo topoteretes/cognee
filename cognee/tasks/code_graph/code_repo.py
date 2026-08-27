@@ -166,6 +166,14 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
     skipped: List[Path] = []
 
     for file_path in sorted(directory.rglob("*")):
+        # is_file() follows symlinks, and read_bytes() below would then pull the
+        # TARGET's contents into the manifest. A repo (cloned or local) containing
+        # 'creds.py -> ~/.aws/credentials' would otherwise be indexed verbatim.
+        # Clones are written with core.symlinks=false, so this covers local paths
+        # and any pre-existing clone made before that landed.
+        if file_path.is_symlink():
+            skipped.append(file_path)
+            continue
         if not file_path.is_file():
             continue
         relative = file_path.relative_to(directory)

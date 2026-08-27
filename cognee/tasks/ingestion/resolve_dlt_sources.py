@@ -67,10 +67,27 @@ async def resolve_dlt_sources(
         from dlt.extract import DltResource, SourceFactory
         from dlt.extract.source import DltSource
     except ImportError:
-        # dlt not installed — nothing to resolve. Warn when inputs would have
-        # matched the auto-detection below: they silently degrade to plain
-        # (LLM-processed) document ingestion otherwise.
-        _log_structured_inputs_without_dlt(data if isinstance(data, list) else [data])
+        # dlt not installed — nothing to resolve. Inputs that would have matched the
+        # auto-detection below otherwise degrade to plain document ingestion.
+        #
+        # For a connection string that degradation is a credential leak, not just a
+        # loss of function: the DSN is returned unchanged, ingested as a text
+        # document, and written verbatim to disk by LocalFileStorage.store(). A DSN
+        # like postgresql://user:pw@host/db -- the form .env.template itself uses --
+        # lands in clear text on the filesystem, and the user does not get the table
+        # contents they asked for either. Refuse instead.
+        items = data if isinstance(data, list) else [data]
+        _log_structured_inputs_without_dlt(items)
+        if any(isinstance(item, str) and is_connection_string(item) for item in items):
+            from cognee.exceptions import CogneeValidationError
+
+            raise CogneeValidationError(
+                message="A database connection string was passed but the 'dlt' extra is "
+                "not installed, so it cannot be read. Install it with "
+                "`pip install cognee[dlt]`. Refusing to ingest the connection string "
+                "as a plain document: it would be stored on disk in clear text.",
+                name="DltExtraNotInstalled",
+            )
         return data, None
 
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
