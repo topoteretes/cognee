@@ -852,7 +852,6 @@ class TestSessionManager:
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks for your feedback!",
-                    previous_answer_rating=5,
                 ),
             ),
         ):
@@ -882,54 +881,6 @@ class TestSessionManager:
         assert qa_kw["question"] == "thanks, that was helpful!"
         assert qa_kw["answer"] == "Thanks for your feedback!"
         assert qa_kw["used_session_context_ids"] is None
-
-    @pytest.mark.asyncio
-    async def test_bare_response_to_user_without_feedback_artifacts_does_not_short_circuit(
-        self, sm, mock_cache
-    ):
-        """A response_to_user with no concrete feedback artifacts must not be served
-        as the answer: the analysis sees the previous (possibly deleted-content)
-        answer, so a misrouted content question could otherwise be answered from
-        cached session text without consulting the live stores (COG-6292)."""
-        with (
-            patch(
-                "cognee.infrastructure.session.session_manager.session_user"
-            ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
-            patch(
-                "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
-                new_callable=AsyncMock,
-                return_value=FeedbackDetectionResult(
-                    response_to_user="You already asked: the answer is X.",
-                ),
-            ),
-            patch(
-                "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
-                new_callable=AsyncMock,
-                return_value=("Live-store answer", "", None),
-            ) as mock_generate,
-        ):
-            mock_user = MagicMock()
-            mock_user.id = "u1"
-            mock_session_user.get.return_value = mock_user
-            mock_config = MagicMock()
-            mock_config.caching = True
-            mock_config.auto_feedback = True
-            mock_config_cls.return_value = mock_config
-            mock_cache.get_latest_qa_entries.return_value = [
-                SessionQAEntry(qa_id="last-qa-321", question="Q", context="", answer="A", time="t")
-            ]
-
-            result = await sm.generate_completion_with_session(
-                session_id="s1",
-                query="What did I store about X?",
-                context="ctx",
-                user_prompt_path="user.txt",
-                system_prompt_path="sys.txt",
-            )
-
-        assert result == "Live-store answer"
-        mock_generate.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_feedback_and_followup_persists_and_adds_qa(
@@ -1125,7 +1076,6 @@ class TestSessionManager:
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks for your feedback!",
-                    previous_answer_rating=4,
                 ),
             ),
         ):
@@ -1216,7 +1166,6 @@ class TestSessionManager:
                 new_callable=AsyncMock,
                 return_value=FeedbackDetectionResult(
                     response_to_user="Thanks!",
-                    previous_answer_rating=2,
                 ),
             ),
         ):

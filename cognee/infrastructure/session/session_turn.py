@@ -445,19 +445,14 @@ async def prepare_session_turn(
 
     query_to_answer = (analysis.query_to_answer or "").strip()
     response_to_user = (analysis.response_to_user or "").strip() or None
-    # A turn may only skip retrieval when the analysis produced concrete feedback
-    # artifacts to apply (context updates, served-context ratings, or a rating of
-    # the previous answer). A bare response_to_user is not enough: the analysis
-    # sees the previous answer, so a misrouted content question could be answered
-    # from cached session text without ever consulting the live stores — after a
-    # delete, that surfaces deleted-content-derived text (COG-6292).
-    has_feedback_artifacts = bool(
-        analysis.candidate_context_updates
+    has_analysis_signal = bool(
+        query_to_answer
+        or response_to_user
+        or analysis.candidate_context_updates
         or analysis.served_context_ratings
-        or analysis.previous_answer_rating is not None
     )
     has_previous_answer = bool(previous_qa_id)
-    should_answer = bool(query_to_answer or not has_feedback_artifacts or not has_previous_answer)
+    should_answer = bool(query_to_answer or not has_analysis_signal or not has_previous_answer)
     effective_query = query_to_answer or query
     if not should_answer and not response_to_user:
         response_to_user = "Got it."
