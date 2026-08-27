@@ -551,6 +551,13 @@ def get_datasets_router() -> APIRouter:
         status — a dedicated endpoint rather than a flag on /status, so neither
         endpoint's response shape ever depends on how it was called.
 
+        ## Query Parameters
+        - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
+          status for all datasets you can read.
+        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or
+          'code_graph_pipeline' (code ingestion via remember content_type='code'). Omit to default
+          to cognify_pipeline.
+
         ## Response
         - Single pipeline (default): {dataset_id: {status, progress}}
         - Multiple pipelines: {dataset_id: {pipeline_name: {status, progress}}}
@@ -800,7 +807,11 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/schema", response_model=dict)
     async def get_dataset_schema(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        """Return the stored graph schema and custom prompt for a dataset."""
+        """Return the stored graph schema and custom prompt for a dataset.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+        """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 
@@ -826,7 +837,15 @@ def get_datasets_router() -> APIRouter:
         payload: DatasetSchemaPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
-        """Store or update the graph schema and custom prompt for a dataset."""
+        """Store or update the graph schema and custom prompt for a dataset.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+
+        ## Request Parameters
+        - **customPrompt** (Optional[str]): No description provided in code yet.
+        - **graphSchema** (Optional[Dict[str, Any]]): No description provided in code yet.
+        """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 

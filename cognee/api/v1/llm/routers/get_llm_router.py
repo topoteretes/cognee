@@ -212,6 +212,10 @@ def get_llm_router() -> APIRouter:
     ):
         """
         Generate a custom extraction prompt from a provided graph model schema JSON.
+
+        ## Request Parameters
+        - **graphModel** (Dict[str, Any]): Graph model schema as JSON object.
+        - **parameters** (Dict[str, Any]): Additional kwargs forwarded to LLMGateway.
         """
         send_telemetry(
             "LLM Custom Prompt Endpoint Invoked",
@@ -276,6 +280,12 @@ def get_llm_router() -> APIRouter:
         Analyze sample text and/or uploaded files, and propose a JSON Schema describing the entity types
         and relationships present. The returned schema can be passed directly to
         ``/v1/llm/custom-prompt`` or ``/v1/cognify``.
+
+        ## Request Parameters
+        - **data** (List[UploadFile]): No description provided in code yet.
+        - **parameters** (str): JSON string of additional kwargs forwarded to LLMGateway. Defaults
+          to '{}'.
+        - **text** (str): No description provided in code yet.
         """
         send_telemetry(
             "LLM Infer Schema Endpoint Invoked",
