@@ -309,6 +309,17 @@ def get_visualize_router() -> APIRouter:
 
         ## Query Parameters
         Same as `GET /visualize/json`.
+        - **dataset_id** (UUID): UUID of the dataset to visualize. List your datasets via GET
+          /api/v1/datasets to find it.
+        - **full** (bool): Include the entire graph instead of a bounded subgraph. Defaults to
+          False.
+        - **max_nodes** (int): Hard cap on rendered nodes after expansion. Defaults to 500.
+        - **neighborhood_depth** (int): k-hop neighborhood depth for subgraph expansion. Defaults to
+          2.
+        - **neighborhood_seed_top_k** (int): Maximum number of seed nodes. Defaults to 10.
+        - **query** (Optional[str]): Query string whose nearest vector hits seed the subgraph.
+        - **seed_node_ids** (Optional[List[str]]): Explicit seed node ids for subgraph neighborhood
+          expansion.
 
         ## Response
         A JSON object with `semantic_positions` and `semantic_clusters`,
