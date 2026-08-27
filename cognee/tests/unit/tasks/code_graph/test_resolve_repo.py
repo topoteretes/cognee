@@ -64,7 +64,9 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
     assert resolved == tmp_path / "github.com-org-repo"
     assert len(git_calls) == 1
     args, _cwd = git_calls[0]
-    assert args[:3] == ["clone", "--depth", "1"]
+    # core.symlinks=false is a security requirement, not incidental: without it a
+    # symlink committed in the remote is materialized and later written through.
+    assert args[:5] == ["clone", "-c", "core.symlinks=false", "--depth", "1"]
     assert "https://github.com/org/repo" in args
 
 

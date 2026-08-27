@@ -83,6 +83,8 @@ async def _ensure_user(user_payload: Dict[str, Any]):
         record.is_superuser = user_payload.get("is_superuser", False)
         record.is_verified = user_payload.get("is_verified", False)
         await session.commit()
+    # CALLERS MUST GATE: this writes hashed_password and is_superuser straight from
+    # the archive. Both current callers go through _require_social_layer_superuser.
     # The payload carries credentials (hashed password, email) — log nothing from it.
     logger.info("Restored a user account from the archive social layer.")
     return created
@@ -104,10 +106,35 @@ async def _resolve_import_user(source: MemorySource, user):
     the /v1/remember archive-upload endpoint.
     """
     social_layer = getattr(source, "social_layer", None)
-    owner_payload = (social_layer or {}).get("owner")
-    if owner_payload is None:
+    if not social_layer:
         return user
 
+    # Gate on the social layer EXISTING, not on it carrying an "owner". Both
+    # consumers of the layer create accounts through _ensure_user, and checking
+    # owner_payload first let an archive whose permissions.json carried "grants"
+    # but no "owner" return here before the check ever ran.
+    await _require_social_layer_superuser(user)
+
+    owner_payload = social_layer.get("owner")
+    if owner_payload is None:
+        # Nothing to reassign ownership to; the import runs as the caller, and the
+        # grants are replayed later by _apply_social_grants under the same gate.
+        return user
+    return await _ensure_user(owner_payload)
+
+
+async def _require_social_layer_superuser(user):
+    """Resolve the importing identity and require it to be a superuser.
+
+    The archive supplies emails, password hashes and account flags verbatim, and
+    every path that consumes a social layer mints accounts through ``_ensure_user``,
+    which writes ``hashed_password`` and ``is_superuser`` straight from the payload.
+    So this must gate the layer as a whole: gating only the owner-restore path left
+    the grant-replay path reachable by any caller, which is privilege escalation to
+    superuser with an attacker-chosen password hash.
+
+    Returns the resolved importer so callers do not resolve the default user twice.
+    """
     importer = user
     if importer is None:
         from cognee.modules.users.methods import get_default_user
@@ -120,7 +147,7 @@ async def _resolve_import_user(source: MemorySource, user):
             message="Importing an archive that carries a social layer (permissions.json) "
             "requires a superuser: it restores user accounts and credentials."
         )
-    return await _ensure_user(owner_payload)
+    return importer
 
 
 async def _apply_social_grants(source: MemorySource, dataset_name: str, owner, importer) -> None:
@@ -135,6 +162,11 @@ async def _apply_social_grants(source: MemorySource, dataset_name: str, owner, i
     social_layer = getattr(source, "social_layer", None)
     if not social_layer:
         return
+
+    # Re-asserted here rather than trusted from the caller: this function creates
+    # accounts through _ensure_user independently of the owner-restore path, and it
+    # is reached from import_source() on any truthy social layer.
+    importer = await _require_social_layer_superuser(importer)
 
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.users.permissions.methods import give_permission_on_dataset
@@ -152,10 +184,6 @@ async def _apply_social_grants(source: MemorySource, dataset_name: str, owner, i
         for permission_name in grant.get("permissions", []):
             await give_permission_on_dataset(principal, dataset_id, permission_name)
 
-    if importer is None:
-        from cognee.modules.users.methods import get_default_user
-
-        importer = await get_default_user()
     if importer.id != owner.id:
         await give_permission_on_dataset(importer, dataset_id, "read")
 
