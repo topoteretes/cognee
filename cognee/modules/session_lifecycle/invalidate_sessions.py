@@ -21,9 +21,8 @@ Known limits (documented, deliberate): agent-trace entries carry context text
 without element ids and are not matched; the tapes cache backend is
 append-only and never sees deletes; sessions predating dataset attribution are
 only found through the ``{default_session_id}_{dataset_id}`` naming. Data-level
-deletes additionally scan the deleting user's dataset-unattributed sessions
-(COG-6292), but unattributed sessions of *other* users sharing the dataset are
-still missed.
+deletes also scan every dataset-unattributed session (``dataset_id IS NULL``);
+element-id matching keeps that scan precise (COG-6292).
 """
 
 from uuid import UUID
@@ -36,7 +35,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.shared.logging_utils import get_logger
 
-from .metrics import list_sessions_for_dataset, list_unattributed_sessions_for_user
+from .metrics import list_sessions_for_dataset, list_unattributed_sessions
 
 logger = get_logger("invalidate_sessions")
 
@@ -90,11 +89,11 @@ async def invalidate_sessions_for_deleted_data(
     turns that consumed a contaminated lesson (``used_session_context_ids``),
     iterated to a fixpoint.
 
-    Alongside the dataset-attributed sessions, ``user_id`` (the user issuing
-    the delete) widens the scan to that user's dataset-unattributed sessions:
-    an unscoped search runs in the plain default session, which carries no
-    dataset attribution and would otherwise keep replaying the deleted
-    content (COG-6292). Element-id matching keeps the wider scan precise.
+    Dataset-attributed sessions are unioned with every dataset-unattributed
+    session (``dataset_id IS NULL``). An unscoped search runs in the plain
+    default session, which carries no dataset attribution. Element-id matching
+    keeps the wider scan precise (COG-6292). ``user_id`` is accepted for
+    callers and does not filter the unattributed query.
     """
     totals = {"sessions_considered": 0, "qa_entries_deleted": 0, "context_entries_deleted": 0}
     if not deleted_node_ids and not deleted_edge_ids:
@@ -105,11 +104,10 @@ async def invalidate_sessions_for_deleted_data(
         return totals
 
     sessions = list(await list_sessions_for_dataset(dataset_id))
-    if user_id is not None:
-        seen = {(str(session_user_id), session_id) for session_user_id, session_id in sessions}
-        for candidate in await list_unattributed_sessions_for_user(user_id):
-            if (str(candidate[0]), candidate[1]) not in seen:
-                sessions.append(candidate)
+    seen = {(str(session_user_id), session_id) for session_user_id, session_id in sessions}
+    for candidate in await list_unattributed_sessions():
+        if (str(candidate[0]), candidate[1]) not in seen:
+            sessions.append(candidate)
     totals["sessions_considered"] = len(sessions)
 
     for user_id, session_id in sessions:
