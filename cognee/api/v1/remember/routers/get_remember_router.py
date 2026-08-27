@@ -615,11 +615,13 @@ def get_remember_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): UUID of an existing writable dataset. Takes precedence
           over dataset_name and is required to target a shared dataset by ID.
         - **dataset_name** (str): Name of the target dataset. Defaults to 'main_dataset'.
-        - **entry** (Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]): No description
-          provided in code yet.
+        - **entry** (Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]): Typed memory
+          entry to store, discriminated by its type field: qa, trace, feedback, or
+          skill_run.
         - **session_id** (Optional[str]): Required for qa/trace/feedback entries; optional for
           skill_run entries.
-        - **skill_improvement** (Optional[dict]): No description provided in code yet.
+        - **skill_improvement** (Optional[dict]): Skill improvement details passed through
+          to remember when storing the entry.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and

@@ -282,10 +282,12 @@ def get_llm_router() -> APIRouter:
         ``/v1/llm/custom-prompt`` or ``/v1/cognify``.
 
         ## Request Parameters
-        - **data** (List[UploadFile]): No description provided in code yet.
+        - **data** (List[UploadFile]): Files whose loaded content is sampled for schema
+          inference; required when no text is sent.
         - **parameters** (str): JSON string of additional kwargs forwarded to LLMGateway. Defaults
           to '{}'.
-        - **text** (str): No description provided in code yet.
+        - **text** (str): Sample text analyzed for schema inference; required when no files
+          are uploaded.
         """
         send_telemetry(
             "LLM Infer Schema Endpoint Invoked",

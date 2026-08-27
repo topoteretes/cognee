@@ -87,8 +87,10 @@ def get_responses_router() -> APIRouter:
         - **tools** (Optional[List[Dict]]): Available tools for function calling
         - **tool_choice** (Any): Tool selection strategy (default: "auto")
         - **temperature** (float): Response randomness (default: 1.0)
-        - **maxCompletionTokens** (Optional[int]): No description provided in code yet.
-        - **user** (Optional[str]): No description provided in code yet.
+        - **maxCompletionTokens** (Optional[int]): Accepted for OpenAI API compatibility;
+          not used when generating the response.
+        - **user** (Optional[str]): Accepted for OpenAI API compatibility; not used when
+          generating the response.
 
         ## Response
         Returns an OpenAI-compatible response body with function call results.
