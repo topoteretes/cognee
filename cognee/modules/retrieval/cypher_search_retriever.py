@@ -19,6 +19,10 @@ class CypherSearchRetriever(BaseRetriever):
     - get_completion: Returns the graph connections context.
     """
 
+    # Runs a Cypher query and returns rows; the prompt paths it accepts are never sent
+    # to an LLM, so an only_context preview must not render a prompt for it.
+    supports_prompt_preview = False
+
     def __init__(
         self,
         user_prompt_path: str = "context_for_question.txt",

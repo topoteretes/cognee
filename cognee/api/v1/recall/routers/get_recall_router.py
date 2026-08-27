@@ -12,7 +12,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -64,6 +64,16 @@ class RecallPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    context_format: ContextFormat = Field(
+        default=ContextFormat.CONTEXT,
+        examples=[ContextFormat.CONTEXT.value],
+        description=(
+            "Shape of an only_context result. 'context' returns the bare retrieval"
+            " context; 'prompt' returns the full envelope a completion would have"
+            " received — session guidance, conversation history, and the rendered"
+            " user and system prompts. Ignored unless only_context is true."
+        ),
+    )
     verbose: bool = Field(default=False)
     include_references: bool = Field(
         default=False,
@@ -194,6 +204,10 @@ def get_recall_router() -> APIRouter:
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return only the LLM context
+        - **context_format** (str): Shape of an only_context result — "context"
+          (default, the bare retrieval context) or "prompt" (the full envelope a
+          completion would receive: session guidance, conversation history, and the
+          rendered user and system prompts)
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)
@@ -210,6 +224,13 @@ def get_recall_router() -> APIRouter:
         - **response_schema** (Optional[dict]): JSON Schema for structured
           completion output; validated results land in each result's
           ``structured`` field. 422 on schemas outside the supported subset.
+        - **contextProfile** (str): Profile to render for the 'session_context' scope: 'qa'
+          (conversational) or 'agent' (tool/workflow). Ignored by other scopes. Defaults to 'qa'.
+        - **toolConnections** (Optional[List[str]]): Names of authorized external database
+          connections for the 'tools' scope. Omit to use every connection visible to the caller.
+        - **toolsTrigger** (str): When the 'tools' scope runs: 'always', or 'on_empty' to query the
+          external database only when every other requested source returned nothing. Defaults to
+          'always'.
 
         ## Error Codes
         - **402/403/404/409/422**: Cognee errors (payment required, permission
@@ -248,6 +269,7 @@ def get_recall_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                context_format=payload.context_format,
                 session_id=payload.session_id,
                 scope=payload.scope,
                 context_profile=payload.context_profile,
@@ -264,8 +286,21 @@ def get_recall_router() -> APIRouter:
             raise
         except ValueError as error:
             # normalize_scope rejects unknown scope names with ValueError;
-            # surface it as a 422 with the valid values instead of an opaque 409.
-            return JSONResponse(status_code=422, content={"error": str(error)})
+            # surface it as a 422 with the valid values instead of an opaque
+            # 409. The message is rebuilt here rather than echoed from the
+            # exception: any ValueError raised deeper in the recall path lands
+            # in this handler too, and its text must not reach the client.
+            from cognee.memory.entries import _VALID_SCOPES
+
+            logger = get_logger()
+            logger.warning("Recall request validation failed: %s", error)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "Invalid recall request. If a scope was given, valid values are: "
+                    f"{sorted(_VALID_SCOPES)}."
+                },
+            )
         except Exception as error:
             logger = get_logger()
             logger.error("Recall endpoint error: %s", error, exc_info=True)
