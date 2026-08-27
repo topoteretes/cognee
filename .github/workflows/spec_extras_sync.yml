@@ -52,9 +52,13 @@ on:
         required: false
         type: boolean
         default: false
-  # Weekly, Monday 06:00 UTC — an hour after router_docstring_sync.yml, so the
-  # two land their PRs in one review session and this run gets the uv cache that
-  # one leaves warm (a cold install here is ~6 minutes, a warm one ~45 seconds).
+  # Weekly, Wednesday 06:00 UTC — an hour after router_docstring_sync.yml, so
+  # the two land their PRs in one review session and this run gets the uv cache
+  # that one leaves warm (a cold install here is ~6 minutes, a warm one ~45
+  # seconds). Wednesday puts both PRs in front of a release with a working day
+  # to review them: 35 of the last 50 stable releases went out Thursday through
+  # Sunday. It is also the slot the docs repo's deleted generate-api-docs.yml
+  # cron used, for the same reason.
   #
   # Second, not first, because the data flows that way: the docstring sync
   # rewrites handler docstrings, which become the endpoint descriptions this
@@ -69,7 +73,7 @@ on:
   # renders a bare sidebar group; it is never incorrect, so it does not warrant
   # watching every commit. Dispatch manually if a release is imminent.
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "0 6 * * 3"
 
 permissions:
   contents: write

@@ -20,20 +20,28 @@ name: automation | Router Docstring Sync
 
 on:
   workflow_dispatch:
-  # Weekly, Monday 05:00 UTC. Paired with spec_extras_sync.yml an hour later:
-  # both make the published API reference match the code, so they land their
-  # PRs in the same review session, and the second run reuses the uv cache this
-  # one leaves warm.
+  # Weekly, Wednesday 05:00 UTC — chosen to sit just ahead of a release with a
+  # working day left to review and merge the PR. Of the last 50 stable
+  # releases, 35 went out Thursday through Sunday and Friday was the single
+  # most common day, so a Wednesday sweep is in front of roughly 70% of them.
+  # (Monday, the previous setting, was ahead of more releases but staler by
+  # several days for the ones that matter.) A release cut Monday to Wednesday
+  # is still working from the prior week's sweep — closing that gap needs a
+  # per-PR check, which is tracked separately.
+  #
+  # Paired with spec_extras_sync.yml an hour later: both make the published API
+  # reference match the code, so they land their PRs in the same review
+  # session, and the second run reuses the uv cache this one leaves warm.
   #
   # This ran on every push to dev touching cognee/** until it became clear how
   # little that bought: 594 of the last 791 commits to dev would have fired it,
   # roughly 20 runs a day, against drift that appears a handful of times a
   # month. Worse, each run force-pushed the fix branch and rewrote the PR body,
   # so a review in progress moved under the reviewer. The trade is that drift
-  # merged on a Tuesday now waits until the following Monday; dispatch this
-  # manually if a release is going out before then.
+  # merged on a Thursday now waits until the following Wednesday; dispatch
+  # this manually if a release is going out before then.
   schedule:
-    - cron: "0 5 * * 1"
+    - cron: "0 5 * * 3"
 
 permissions:
   contents: write
