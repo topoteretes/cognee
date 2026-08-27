@@ -79,6 +79,11 @@ class AgenticRetriever(GraphCompletionRetriever):
       used inside the loop (distinct from the parent's graph-completion prompts).
     """
 
+    # Answers through a multi-step loop on the agentic templates; the inherited
+    # (user_prompt_path, system_prompt_path) pair is only the budget-exhausted fallback,
+    # so a single rendered prompt would misrepresent what this retriever sends.
+    supports_prompt_preview = False
+
     def __init__(
         self,
         skills: Optional[Sequence[Union[str, Skill]]] = None,
