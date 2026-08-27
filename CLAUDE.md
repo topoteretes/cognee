@@ -15,7 +15,7 @@ Cognee is an open-source AI memory platform that transforms raw data into persis
 # Create virtual environment (recommended: uv)
 uv venv && source .venv/bin/activate
 
-# Install with pip, poetry, or uv
+# Install with pip or uv
 uv pip install -e .
 
 # Install with dev dependencies
@@ -462,10 +462,14 @@ HUGGINGFACE_TOKENIZER="nomic-ai/nomic-embed-text-v1.5"
 #### Custom / OpenRouter / vLLM
 ```bash
 LLM_PROVIDER="custom"
-LLM_MODEL="openrouter/google/gemini-2.0-flash-lite-preview-02-05:free"
+LLM_MODEL="openrouter/deepseek/deepseek-r1"
 LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
+OpenRouter model ids change over time (the `:free` tier especially) — check
+`https://openrouter.ai/api/v1/models` for a current slug. Embeddings are a
+separate catalogue at `https://openrouter.ai/api/v1/embeddings/models` and
+must be configured separately; see the OpenRouter block in `.env.template`.
 
 #### AWS Bedrock (requires aws extra)
 ```bash
