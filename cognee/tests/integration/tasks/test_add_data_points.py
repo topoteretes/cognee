@@ -1,4 +1,6 @@
 import pathlib
+import re
+import shutil
 from typing import Any
 
 import pytest
@@ -25,11 +27,29 @@ class Company(DataPoint):
 
 
 @pytest_asyncio.fixture
-async def clean_test_environment():
-    """Set up a clean test environment for add_data_points tests."""
+async def clean_test_environment(request):
+    """Set up a clean test environment for add_data_points tests.
+
+    Each test gets its own directories. Two tests cannot share one, because the
+    graph database is a file the engine locks exclusively and the previous test's
+    engine can still hold that lock: its close is deferred until the last handle
+    is released, which may not happen before the next test opens the same path.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
-    system_directory_path = str(base_dir / ".cognee_system/test_add_data_points_integration")
-    data_directory_path = str(base_dir / ".data_storage/test_add_data_points_integration")
+    test_slug = re.sub(r"[^0-9A-Za-z]+", "_", request.node.name)
+    system_directory_path = str(
+        base_dir / ".cognee_system/test_add_data_points_integration" / test_slug
+    )
+    data_directory_path = str(
+        base_dir / ".data_storage/test_add_data_points_integration" / test_slug
+    )
+
+    # Start from nothing on disk: with access control on, ``prune_system`` prunes
+    # per-dataset databases only, so a graph written straight through
+    # ``add_data_points`` outlives it and the counts below would be read against
+    # a previous run's leftovers.
+    shutil.rmtree(system_directory_path, ignore_errors=True)
+    shutil.rmtree(data_directory_path, ignore_errors=True)
 
     cognee.config.system_root_directory(system_directory_path)
     cognee.config.data_root_directory(data_directory_path)
