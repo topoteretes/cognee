@@ -83,7 +83,7 @@ class TursoGraphDatasetDatabaseHandler:
         # state in "<file>-wal"/"<file>-shm" until a clean close checkpoints
         # them into the main file -- leaving them behind risks stale data
         # surviving under a same-name recreate.
-        if dataset_url.startswith("/") and os.path.exists(dataset_url):
+        if dataset_url and os.path.isabs(dataset_url) and os.path.exists(dataset_url):
             os.remove(dataset_url)
             for suffix in ("-wal", "-shm"):
                 companion_path = dataset_url + suffix
