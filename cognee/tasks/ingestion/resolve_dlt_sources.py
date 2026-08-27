@@ -736,7 +736,10 @@ async def _delete_dlt_orphans(
                     )
 
                     await invalidate_sessions_for_deleted_data(
-                        dataset.id, deleted_elements.node_ids, deleted_elements.edge_ids
+                        dataset.id,
+                        deleted_elements.node_ids,
+                        deleted_elements.edge_ids,
+                        user_id=user.id,
                     )
                 except Exception:
                     logger.warning(

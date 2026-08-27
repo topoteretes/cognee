@@ -376,6 +376,9 @@ def get_integrations_router():
         returns the same agent but rotates the key (old keys are revoked —
         re-provision *is* the rotation flow). The returned key is shown once
         and never retrievable again.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.provision") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
@@ -439,6 +442,9 @@ def get_integrations_router():
         disconnect would be surprising; full removal stays on
         ``DELETE /api/v1/agents/{agent_id}``. Re-provisioning later revives
         the same identity with a fresh key.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.disconnect") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
@@ -462,7 +468,12 @@ def get_integrations_router():
     async def authorize(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> AuthorizeUrlDTO:
-        """Mint the provider's authorize URL for the requesting user."""
+        """Mint the provider's authorize URL for the requesting user.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
@@ -576,7 +587,12 @@ def get_integrations_router():
     async def connection_status(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> ConnectionStatusDTO:
-        """Connection state for the Integrations page."""
+        """Connection state for the Integrations page.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         integration = _integration_or_404(provider)
         credential = await get_active_credential_for_user(user.id, integration.provider)
         if credential is None:
@@ -602,6 +618,10 @@ def get_integrations_router():
         of each adapter's own best-effort handling — a third-party
         integration that doesn't honor the "never raise" contract on
         ``revoke_remote`` still must not block the local disconnect.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
