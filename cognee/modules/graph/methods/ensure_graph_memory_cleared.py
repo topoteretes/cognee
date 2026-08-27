@@ -37,7 +37,20 @@ control it.
 Databases that are NOT isolated (``ENABLE_BACKEND_ACCESS_CONTROL=false``) get
 no reset — nothing here is safe to wipe when other datasets could share the
 same store — but they still get one narrow, cheap, read-only honesty check:
-see ``_UNPROVENANCED_PIPELINE_NAME`` below.
+see ``_UNPROVENANCED_PIPELINE_NAMES`` below.
+
+An empty graph is not proof the isolated store is fully clear, either:
+``remember(content_type="code", index_vectors=True)`` writes real vector
+embeddings alongside the graph nodes, and the code-graph pipeline's own
+stale-content sweep (``_sweep_stale_code_graph``) only removes graph nodes
+and edges — it never touches the vector side. So a dataset can end up with an
+empty graph and a non-empty vector store (most plausibly after an earlier
+reset that reached the graph but not the vector store, or any other path that
+empties the graph without the vector store also emptying). The same
+``_UNPROVENANCED_PIPELINE_NAMES`` signal used for the non-isolated honesty
+check doubles as the cheap, read-only trigger for that case below: an
+otherwise-empty isolated graph with a code-graph run on record still routes
+into the same reset path, so the vector store gets wiped too.
 """
 
 from dataclasses import dataclass
@@ -52,6 +65,8 @@ from cognee.infrastructure.databases.utils.delete_isolated_dataset_storage impor
 from cognee.infrastructure.databases.utils.get_or_create_dataset_database import (
     get_existing_dataset_database,
 )
+from cognee.modules.engine.utils import generate_edge_object_id
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
 from cognee.shared.logging_utils import get_logger
 
@@ -66,9 +81,14 @@ _SELF_HEALING_DATASET_DATABASE_HANDLERS = frozenset(
     {"ladybug", "kuzu", "lancedb", "turso_graph", "turso"}
 )
 
-# The one pipeline that writes graph content with no deletion provenance today
-# (see cognee/tasks/code_graph/extract_code_graph.py, which every
-# remember(content_type="code") call runs under this pipeline_name).
+# Pipelines that write graph content with no deletion provenance today (see
+# cognee/tasks/code_graph/extract_code_graph.py, which every
+# remember(content_type="code") call runs under pipeline_name
+# "code_graph_pipeline"). A frozenset (not a single constant) so a future
+# unprovenanced pipeline is a one-line addition here — otherwise it would
+# silently miss detection on non-isolated deployments and skip the
+# empty-graph-but-maybe-not-vector-empty check on isolated ones.
+#
 # run_tasks calls log_pipeline_run_start unconditionally at the top of every
 # run — use_pipeline_cache (always False for this pipeline; see
 # run_pipeline_per_dataset) only gates whether an existing PipelineRun row is
@@ -77,7 +97,16 @@ _SELF_HEALING_DATASET_DATABASE_HANDLERS = frozenset(
 # (dataset_id, pipeline_name is a covered index) that such content was
 # written at some point. It is not a certainty: an errored run could exist
 # with no content ever having been written.
-_UNPROVENANCED_PIPELINE_NAME = "code_graph_pipeline"
+_UNPROVENANCED_PIPELINE_NAMES = frozenset({"code_graph_pipeline"})
+
+
+async def _unprovenanced_pipeline_run(dataset_id: UUID):
+    """First on-record PipelineRun for a pipeline in ``_UNPROVENANCED_PIPELINE_NAMES``, or None."""
+    for pipeline_name in _UNPROVENANCED_PIPELINE_NAMES:
+        run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
+        if run is not None:
+            return run
+    return None
 
 
 @dataclass
@@ -86,11 +115,17 @@ class GraphMemoryStatus:
 
     ``cleared`` is only ``True`` when this call is confident nothing
     memory-relevant remains. ``note`` explains why when it is not, or how the
-    dataset ended up cleared when a fallback reset was needed.
+    dataset ended up cleared when a fallback reset was needed. ``deleted_elements``
+    carries the node/edge identities a fallback reset physically removed (read
+    from the graph immediately before the reset, since nothing survives the
+    reset to read them from afterward) — ``None`` when no reset ran. Callers
+    fold this into their own provenance-driven delete result so reported
+    counts and session invalidation both see what the reset removed.
     """
 
     cleared: bool
     note: Optional[str] = None
+    deleted_elements: Optional[DeletedGraphElements] = None
 
 
 async def ensure_graph_memory_cleared(dataset_id: UUID, user: Any) -> GraphMemoryStatus:
@@ -104,7 +139,7 @@ async def ensure_graph_memory_cleared(dataset_id: UUID, user: Any) -> GraphMemor
     """
     try:
         if not backend_access_control_enabled():
-            code_run = await get_pipeline_run_by_dataset(dataset_id, _UNPROVENANCED_PIPELINE_NAME)
+            code_run = await _unprovenanced_pipeline_run(dataset_id)
             if code_run is not None:
                 return GraphMemoryStatus(
                     cleared=False,
@@ -133,12 +168,29 @@ async def ensure_graph_memory_cleared(dataset_id: UUID, user: Any) -> GraphMemor
         # process-wide default. get_graph_context_config() is what reads that
         # ContextVar; get_graph_engine() builds its cache key from it.
         graph_engine = await get_graph_engine()
-        if await graph_engine.is_empty():
-            return GraphMemoryStatus(cleared=True)
+        graph_empty = await graph_engine.is_empty()
 
-        # Non-empty. See the module docstring: in an isolated store, nothing
-        # left after the provenance-driven step ran can belong to any other
-        # dataset, so it is safe to remove regardless of what that step found.
+        if graph_empty:
+            # See the module docstring: an empty graph alone does not prove
+            # the vector store is empty too. Only route into a reset here
+            # when the cheap unprovenanced-pipeline signal says content that
+            # bypasses deletion provenance was ever written for this dataset.
+            code_run = await _unprovenanced_pipeline_run(dataset_id)
+            if code_run is None:
+                return GraphMemoryStatus(cleared=True)
+            reset_reason = (
+                "its graph reads empty, but a remember(content_type='code') run "
+                "is on record and any vector embeddings it wrote "
+                "(index_vectors=True) are never swept by the code-graph "
+                "pipeline's own stale-content sweep"
+            )
+        else:
+            reset_reason = "its graph is not empty"
+
+        # Non-empty (or empty-but-unprovenanced, see above). See the module
+        # docstring: in an isolated store, nothing left after the
+        # provenance-driven step ran can belong to any other dataset, so it
+        # is safe to remove regardless of what that step found.
         graph_handler_name = dataset_database.graph_dataset_database_handler
         vector_handler_name = dataset_database.vector_dataset_database_handler
         if (
@@ -148,14 +200,42 @@ async def ensure_graph_memory_cleared(dataset_id: UUID, user: Any) -> GraphMemor
             return GraphMemoryStatus(
                 cleared=False,
                 note=(
-                    "This dataset's graph is not empty, but a full per-dataset "
-                    f"store reset is not yet supported for the '{graph_handler_name}'/"
-                    f"'{vector_handler_name}' backend, so its remaining content "
-                    "(e.g. from remember(content_type='code')) was left in place."
+                    f"This dataset needs a full per-dataset store reset ({reset_reason}), "
+                    "but that is not yet supported for the "
+                    f"'{graph_handler_name}'/'{vector_handler_name}' backend, so its "
+                    "remaining content (e.g. from remember(content_type='code')) was "
+                    "left in place."
                 ),
             )
 
+        # Capture what the reset is about to remove BEFORE wiping the store —
+        # nothing survives the reset to read this from afterward. Callers use
+        # this to report accurate nodes_deleted/edges_deleted and to widen
+        # session invalidation to dataset-unattributed sessions that used this
+        # content (see forget.py's _forget_dataset_memory).
+        nodes, edges = await graph_engine.get_graph_data()
+        deleted_elements = DeletedGraphElements(
+            node_ids={str(node_id) for node_id, _properties in nodes},
+            edge_ids={
+                str(generate_edge_object_id(str(source_id), str(target_id), relationship_name))
+                for source_id, target_id, relationship_name, _properties in edges
+            },
+        )
+
         await delete_isolated_dataset_storage(dataset_database)
+
+        # The reset just wiped whatever the CODE search snapshot cache may
+        # have parsed from this dataset's graph — drop it too, or a
+        # SearchType.CODE query inside the cache's TTL can still return
+        # results from the store that was just reset. Local import mirrors
+        # extract_code_graph.py's own invalidation call (avoids importing the
+        # retrieval layer at module load time).
+        from cognee.modules.retrieval.code_retriever import (
+            invalidate_code_graph_snapshot_cache,
+        )
+
+        invalidate_code_graph_snapshot_cache(dataset_id=dataset_id)
+
         logger.info(
             "forget: reset isolated graph+vector store for dataset=%s "
             "(content had no deletion provenance)",
@@ -165,16 +245,18 @@ async def ensure_graph_memory_cleared(dataset_id: UUID, user: Any) -> GraphMemor
             cleared=True,
             note=(
                 "Cleared by resetting this dataset's isolated graph and vector "
-                "store: its remaining content had no deletion provenance to "
-                "remove it by (e.g. it was ingested via remember(content_type="
-                "'code'))."
+                f"store ({reset_reason}): remaining content had no deletion "
+                "provenance to remove it by (e.g. it was ingested via "
+                "remember(content_type='code'))."
             ),
+            deleted_elements=deleted_elements,
         )
     except Exception as error:
         logger.warning(
             "forget: could not verify graph memory was cleared for dataset=%s (non-fatal): %s",
             dataset_id,
             error,
+            exc_info=True,
         )
         return GraphMemoryStatus(
             cleared=False,

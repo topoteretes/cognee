@@ -177,3 +177,87 @@ class TestUserIdHeader:
         call_kwargs = MockClient.call_args
         headers = call_kwargs.kwargs.get("headers") or call_kwargs[1].get("headers", {})
         assert "X-User-Id" not in headers
+
+
+class TestForgetDispatch:
+    """Finding 8 (COG-6335 review): --memory-only must reach the API client,
+    and a --dataset value must reach it too (args.dataset, not the
+    never-set args.dataset_name the dispatcher used to read)."""
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_memory_only_and_dataset_forwarded_to_client(self, MockClient):
+        mock_instance = MagicMock()
+        mock_instance.forget.return_value = {
+            "status": "success",
+            "dataset_id": "ds-id",
+            "graph_memory_cleared": True,
+        }
+        MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+        args = argparse.Namespace(
+            api_url="http://localhost:8000",
+            command="forget",
+            user_id=None,
+            dataset="my_dataset",
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=True,
+        )
+        dispatch(args)
+
+        mock_instance.forget.assert_called_once_with(
+            dataset="my_dataset",
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=True,
+        )
+
+    @patch("cognee.cli.api_dispatch.fmt.warning")
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_incomplete_memory_only_clear_prints_warning(self, MockClient, mock_warning):
+        mock_instance = MagicMock()
+        mock_instance.forget.return_value = {
+            "status": "success",
+            "dataset_id": "ds-id",
+            "graph_memory_cleared": False,
+            "graph_memory_note": "content had no deletion provenance",
+        }
+        MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+        args = argparse.Namespace(
+            api_url="http://localhost:8000",
+            command="forget",
+            user_id=None,
+            dataset=None,
+            dataset_id="11111111-1111-1111-1111-111111111111",
+            data_id=None,
+            everything=False,
+            memory_only=True,
+        )
+        dispatch(args)
+
+        mock_warning.assert_called_once_with("content had no deletion provenance")
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_missing_forget_target_does_not_call_client(self, MockClient):
+        mock_instance = MagicMock()
+        MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+        args = argparse.Namespace(
+            api_url="http://localhost:8000",
+            command="forget",
+            user_id=None,
+            dataset=None,
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+        )
+        dispatch(args)
+
+        mock_instance.forget.assert_not_called()

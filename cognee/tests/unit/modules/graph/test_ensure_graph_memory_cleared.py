@@ -25,12 +25,25 @@ carries no deletion provenance (e.g. remember(content_type="code")):
   no backing database until something re-issues CREATE)
 - get_graph_engine() resolves the dataset-scoped engine active in the
   caller's context, not some other dataset's or the process default
-- unexpected error -> NOT cleared instead of raising
+- unexpected error -> NOT cleared instead of raising, and logged with a
+  traceback (exc_info=True)
+- isolated + self-healing backend + EMPTY graph + a code_graph_pipeline run
+  on record -> still resets (an empty graph does not prove the vector store
+  is empty: index_vectors=True embeddings are never swept by the code-graph
+  pipeline's own stale-content sweep)
+- isolated + non-self-healing backend + empty graph + a code_graph_pipeline
+  run on record -> NOT cleared, no reset attempted (same honesty behavior as
+  the non-empty case)
+- a reset captures the node/edge ids it is about to remove (via
+  get_graph_data()) BEFORE wiping the store, and returns them as
+  GraphMemoryStatus.deleted_elements
+- a reset invalidates the CODE search snapshot cache for this dataset
+- _UNPROVENANCED_PIPELINE_NAMES is a frozenset, not a single hardcoded string
 """
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -40,6 +53,7 @@ graph_engine_module = importlib.import_module(
     "cognee.infrastructure.databases.graph.get_graph_engine"
 )
 pipelines_methods_module = importlib.import_module("cognee.modules.pipelines.methods")
+code_retriever_module = importlib.import_module("cognee.modules.retrieval.code_retriever")
 
 pytestmark = pytest.mark.asyncio
 
@@ -57,8 +71,9 @@ def _dataset_database(graph_handler="ladybug", vector_handler="lancedb"):
 class _FakeGraphEngine:
     """Minimal in-memory stand-in with just what this module touches."""
 
-    def __init__(self, nodes=None):
+    def __init__(self, nodes=None, edges=None):
         self.nodes = dict(nodes or {})
+        self.edges = list(edges or [])
 
     async def is_empty(self) -> bool:
         return not self.nodes
@@ -66,8 +81,12 @@ class _FakeGraphEngine:
     async def get_node(self, node_id):
         return self.nodes.get(str(node_id))
 
+    async def get_graph_data(self):
+        return list(self.nodes.items()), list(self.edges)
+
     def wipe(self) -> None:
         self.nodes.clear()
+        self.edges.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -149,12 +168,19 @@ async def test_already_empty_graph_reports_cleared_without_reset(monkeypatch):
         module, "get_existing_dataset_database", AsyncMock(return_value=_dataset_database())
     )
     monkeypatch.setattr(module, "get_graph_engine", AsyncMock(return_value=_FakeGraphEngine()))
+    query = AsyncMock(return_value=None)
+    monkeypatch.setattr(module, "get_pipeline_run_by_dataset", query)
     reset = AsyncMock()
     monkeypatch.setattr(module, "delete_isolated_dataset_storage", reset)
 
     status = await module.ensure_graph_memory_cleared(DATASET_ID, USER)
 
     assert status.cleared is True
+    assert status.deleted_elements is None
+    # Finding 6: an empty graph alone is not trusted -- the same cheap
+    # unprovenanced-pipeline signal used for the non-isolated honesty check
+    # is consulted here too, before short-circuiting to cleared=True.
+    query.assert_awaited_once_with(DATASET_ID, "code_graph_pipeline")
     reset.assert_not_called()
 
 
@@ -172,22 +198,48 @@ async def test_isolated_self_healing_backend_resets_even_when_provenance_found_c
     relevant here any more, because isolation means whatever is left in the
     store afterward cannot belong to any other dataset either way, so it is
     always safe to reset once the store is confirmed isolated and self-healing.
+
+    Also covers Findings 2/9 (deleted_elements captured before the wipe) and 7
+    (CODE snapshot cache invalidated after a reset).
     """
+    from cognee.modules.engine.utils import generate_edge_object_id
+
     monkeypatch.setattr(module, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(
         module, "get_existing_dataset_database", AsyncMock(return_value=_dataset_database())
     )
     monkeypatch.setattr(
-        module, "get_graph_engine", AsyncMock(return_value=_FakeGraphEngine({"n1": {}}))
+        module,
+        "get_graph_engine",
+        AsyncMock(
+            return_value=_FakeGraphEngine(
+                nodes={"n1": {}, "n2": {}},
+                edges=[("n1", "n2", "calls", {})],
+            )
+        ),
     )
     reset = AsyncMock()
     monkeypatch.setattr(module, "delete_isolated_dataset_storage", reset)
+    query = AsyncMock(return_value=None)
+    monkeypatch.setattr(module, "get_pipeline_run_by_dataset", query)
+    invalidate_mock = MagicMock()
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
+    )
 
     status = await module.ensure_graph_memory_cleared(DATASET_ID, USER)
 
     assert status.cleared is True
     assert "reset" in status.note
     reset.assert_awaited_once()
+    # The graph was already non-empty, so the extra unprovenanced-pipeline
+    # check (only needed for an empty graph — see Finding 6) never runs.
+    query.assert_not_called()
+
+    assert status.deleted_elements is not None
+    assert status.deleted_elements.node_ids == {"n1", "n2"}
+    assert status.deleted_elements.edge_ids == {str(generate_edge_object_id("n1", "n2", "calls"))}
+    invalidate_mock.assert_called_once_with(dataset_id=DATASET_ID)
 
 
 async def test_unsupported_backend_reports_not_cleared_and_never_resets(monkeypatch):
@@ -227,6 +279,25 @@ async def test_unexpected_error_reports_not_cleared_instead_of_raising(monkeypat
 
     assert status.cleared is False
     assert status.note
+
+
+async def test_unexpected_error_is_logged_with_a_traceback(monkeypatch):
+    """Finding 12 (COG-6335 review): the broad except block must log with
+    exc_info=True so a traceback reaches the logs, instead of only str(error)."""
+    monkeypatch.setattr(module, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(
+        module,
+        "get_existing_dataset_database",
+        AsyncMock(side_effect=RuntimeError("relational engine unavailable")),
+    )
+    mock_warning = MagicMock()
+    monkeypatch.setattr(module.logger, "warning", mock_warning)
+
+    await module.ensure_graph_memory_cleared(DATASET_ID, USER)
+
+    mock_warning.assert_called_once()
+    _, kwargs = mock_warning.call_args
+    assert kwargs.get("exc_info") is True
 
 
 async def test_isolated_self_healing_backend_resets_and_clears_snapshot_marker(monkeypatch):
@@ -284,6 +355,7 @@ async def test_get_graph_engine_resolves_the_active_per_dataset_context(monkeypa
     monkeypatch.setattr(
         module, "get_existing_dataset_database", AsyncMock(return_value=_dataset_database())
     )
+    monkeypatch.setattr(module, "get_pipeline_run_by_dataset", AsyncMock(return_value=None))
 
     seen_graph_database_name = None
 
@@ -302,3 +374,99 @@ async def test_get_graph_engine_resolves_the_active_per_dataset_context(monkeypa
         graph_db_config.reset(token)
 
     assert seen_graph_database_name == this_dataset_marker
+
+
+# ---------------------------------------------------------------------------
+# Finding 6 (COG-6335 review): an empty graph does not prove the isolated
+# vector store is empty too (remember(content_type="code", index_vectors=True)
+# writes vector embeddings the code-graph pipeline's own stale-sweep never
+# touches) — a code_graph_pipeline run on record routes an otherwise-empty
+# graph into the same reset path used for a non-empty one.
+# ---------------------------------------------------------------------------
+
+
+async def test_isolated_self_healing_backend_resets_when_graph_empty_but_code_run_on_record(
+    monkeypatch,
+):
+    monkeypatch.setattr(module, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(
+        module, "get_existing_dataset_database", AsyncMock(return_value=_dataset_database())
+    )
+    monkeypatch.setattr(module, "get_graph_engine", AsyncMock(return_value=_FakeGraphEngine()))
+    monkeypatch.setattr(
+        module,
+        "get_pipeline_run_by_dataset",
+        AsyncMock(return_value=SimpleNamespace(pipeline_name="code_graph_pipeline")),
+    )
+    reset = AsyncMock()
+    monkeypatch.setattr(module, "delete_isolated_dataset_storage", reset)
+    monkeypatch.setattr(code_retriever_module, "invalidate_code_graph_snapshot_cache", MagicMock())
+
+    status = await module.ensure_graph_memory_cleared(DATASET_ID, USER)
+
+    assert status.cleared is True
+    assert "vector" in status.note
+    reset.assert_awaited_once()
+    # Nothing was in the graph to capture, but the reset still ran (for the
+    # vector store's sake) — deleted_elements reflects that: present, empty.
+    assert status.deleted_elements is not None
+    assert status.deleted_elements.node_ids == set()
+    assert status.deleted_elements.edge_ids == set()
+
+
+async def test_isolated_non_self_healing_backend_with_graph_empty_and_code_run_reports_not_cleared(
+    monkeypatch,
+):
+    monkeypatch.setattr(module, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(
+        module,
+        "get_existing_dataset_database",
+        AsyncMock(return_value=_dataset_database(graph_handler="neo4j")),
+    )
+    monkeypatch.setattr(module, "get_graph_engine", AsyncMock(return_value=_FakeGraphEngine()))
+    monkeypatch.setattr(
+        module,
+        "get_pipeline_run_by_dataset",
+        AsyncMock(return_value=SimpleNamespace(pipeline_name="code_graph_pipeline")),
+    )
+    reset = AsyncMock()
+    monkeypatch.setattr(module, "delete_isolated_dataset_storage", reset)
+
+    status = await module.ensure_graph_memory_cleared(DATASET_ID, USER)
+
+    assert status.cleared is False
+    assert "neo4j" in status.note
+    assert status.deleted_elements is None
+    reset.assert_not_called()
+
+
+async def test_isolated_reset_skips_snapshot_cache_invalidation_when_no_reset_ran(monkeypatch):
+    """invalidate_code_graph_snapshot_cache is only called in the branch where
+    a reset actually happened — not on every call (would be wasted work on
+    the far more common already-cleared path)."""
+    monkeypatch.setattr(module, "backend_access_control_enabled", lambda: True)
+    monkeypatch.setattr(
+        module, "get_existing_dataset_database", AsyncMock(return_value=_dataset_database())
+    )
+    monkeypatch.setattr(module, "get_graph_engine", AsyncMock(return_value=_FakeGraphEngine()))
+    monkeypatch.setattr(module, "get_pipeline_run_by_dataset", AsyncMock(return_value=None))
+    invalidate_mock = MagicMock()
+    monkeypatch.setattr(
+        code_retriever_module, "invalidate_code_graph_snapshot_cache", invalidate_mock
+    )
+
+    status = await module.ensure_graph_memory_cleared(DATASET_ID, USER)
+
+    assert status.cleared is True
+    invalidate_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Finding 13 (COG-6335 review): a frozenset, not a single hardcoded string, so
+# a future unprovenanced pipeline is a one-line addition.
+# ---------------------------------------------------------------------------
+
+
+async def test_unprovenanced_pipeline_names_is_a_frozenset_containing_code_graph_pipeline():
+    assert isinstance(module._UNPROVENANCED_PIPELINE_NAMES, frozenset)
+    assert "code_graph_pipeline" in module._UNPROVENANCED_PIPELINE_NAMES

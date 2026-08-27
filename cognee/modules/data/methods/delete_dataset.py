@@ -2,11 +2,8 @@ from cognee.modules.users.models import DatasetDatabase
 from sqlalchemy import select, text
 
 from cognee.modules.data.models import Dataset, Data
-from cognee.infrastructure.databases.utils.get_vector_dataset_database_handler import (
-    get_vector_dataset_database_handler,
-)
-from cognee.infrastructure.databases.utils.get_graph_dataset_database_handler import (
-    get_graph_dataset_database_handler,
+from cognee.infrastructure.databases.utils.delete_isolated_dataset_storage import (
+    delete_isolated_dataset_storage,
 )
 from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -25,14 +22,7 @@ async def delete_dataset(dataset: Dataset):
         )
         dataset_database: DatasetDatabase = await session.scalar(stmt)
         if dataset_database:
-            graph_dataset_database_handler = get_graph_dataset_database_handler(dataset_database)
-            vector_dataset_database_handler = get_vector_dataset_database_handler(dataset_database)
-            await graph_dataset_database_handler["handler_instance"].delete_dataset(
-                dataset_database
-            )
-            await vector_dataset_database_handler["handler_instance"].delete_dataset(
-                dataset_database
-            )
+            await delete_isolated_dataset_storage(dataset_database)
 
         # Rows are dataset-scoped: deleting the dataset deletes its documents.
         # (Stale pipeline_status can't survive because the rows themselves go.)

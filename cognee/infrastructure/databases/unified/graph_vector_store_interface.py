@@ -1,4 +1,5 @@
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
+from .provenance_delete_planner import SourceRefRemovalResult
 
 
 class GraphVectorStoreInterface:
@@ -24,7 +25,7 @@ class GraphVectorStoreInterface:
         """
         raise UnsupportedProvenanceCapability()
 
-    async def delete_by_dataset_id(self, dataset_id: str):
+    async def delete_by_dataset_id(self, dataset_id: str) -> "SourceRefRemovalResult":
         """
         Delete artifacts owned only by the given dataset.
 

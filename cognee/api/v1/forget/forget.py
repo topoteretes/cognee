@@ -322,6 +322,15 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
         # that safe); otherwise just report honestly what is known to remain.
         graph_memory_status = await ensure_graph_memory_cleared(dataset_id, user)
 
+        # Fold in anything a fallback reset removed (real graph/vector content
+        # with no deletion provenance) so both the reported counts below and
+        # the session-invalidation call right after this see it too —
+        # otherwise a fallback reset stays invisible in nodes_deleted/
+        # edges_deleted, and dataset-unattributed sessions referencing that
+        # wiped content never get cleaned up.
+        if graph_memory_status.deleted_elements is not None:
+            deleted_elements.merge(graph_memory_status.deleted_elements)
+
         # 1c. Drop sessions attributed to this dataset, then remove tagged
         # QAs from dataset-unattributed sessions (non-fatal).
         try:
@@ -367,11 +376,16 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
 
             await session.commit()
 
-        # 3. Reset dataset-level pipeline run status so cached cognify runs can execute again.
+        # 3. Reset dataset-level pipeline run status so cached cognify runs can
+        # execute again. code_graph_pipeline is included unconditionally —
+        # reset_dataset_pipeline_run_status no-ops safely for a pipeline name
+        # with no matching rows, and a dataset that ever ran
+        # remember(content_type="code") must not keep showing that pipeline
+        # as "completed" in the dataset-status API after this call wiped it.
         await reset_dataset_pipeline_run_status(
             dataset_id=dataset_id,
             user=user,
-            pipeline_names=["cognify_pipeline"],
+            pipeline_names=["cognify_pipeline", "code_graph_pipeline"],
         )
 
     logger.info(
@@ -409,6 +423,17 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     - Pipeline status (for this data item): reset for cognify only
     - Relational DB (data record): preserved
     - Raw file: preserved
+
+    Returns a dict with ``nodes_deleted``/``edges_deleted`` (from
+    ``delete_data_nodes_and_edges``), for consistency with
+    ``_forget_dataset_memory``. Unlike the dataset-level path, this response
+    has no ``graph_memory_cleared`` field: that flag exists to warn about
+    unprovenanced content (e.g. ``remember(content_type="code")``) a
+    provenance-driven delete cannot see, and that content is never reachable
+    from this per-item path in the first place — it carries no persisted
+    ``data_id`` to key a single-item delete on. A ``graph_memory_cleared=True``
+    here would always be true and would carry no information, so it is
+    omitted rather than added as noise.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import attributes as orm_attributes
@@ -479,6 +504,8 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
     return {
         "data_id": str(data_id),
         "dataset_id": str(dataset_id),
+        "nodes_deleted": len(deleted_elements.node_ids),
+        "edges_deleted": len(deleted_elements.edge_ids),
         "status": "success",
     }
 

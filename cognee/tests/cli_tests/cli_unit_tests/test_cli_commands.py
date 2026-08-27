@@ -15,6 +15,7 @@ from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.recall_command import RecallCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
+from cognee.cli.commands.forget_command import ForgetCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
@@ -611,6 +612,140 @@ class TestDeleteCommand:
         args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=True)
 
         mock_asyncio_run.side_effect = Exception("Delete error")
+
+        with pytest.raises(CliCommandException):
+            command.execute(args)
+
+
+class TestForgetCommand:
+    """Test the ForgetCommand class"""
+
+    def test_command_properties(self):
+        command = ForgetCommand()
+        assert command.command_string == "forget"
+        assert "Remove data" in command.help_string
+        assert command.docs_url is not None
+
+    def test_configure_parser(self):
+        command = ForgetCommand()
+        parser = argparse.ArgumentParser()
+
+        command.configure_parser(parser)
+
+        actions = {action.dest: action for action in parser._actions}
+        assert "dataset" in actions
+        assert "dataset_id" in actions
+        assert "data_id" in actions
+        assert "everything" in actions
+        assert "memory_only" in actions
+        assert actions["memory_only"].default is False
+
+    @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_threads_memory_only_flag(self, mock_asyncio_run):
+        """--memory-only must reach cognee.forget(memory_only=True)."""
+        mock_cognee = MagicMock()
+        mock_cognee.forget = AsyncMock(
+            return_value={
+                "status": "success",
+                "dataset_id": "ds",
+                "graph_memory_cleared": True,
+                "graph_memory_note": None,
+            }
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = ForgetCommand()
+            args = argparse.Namespace(
+                dataset="my_dataset",
+                dataset_id=None,
+                data_id=None,
+                everything=False,
+                memory_only=True,
+            )
+            command.execute(args)
+
+        mock_cognee.forget.assert_awaited_once_with(
+            data_id=None,
+            dataset="my_dataset",
+            dataset_id=None,
+            everything=False,
+            memory_only=True,
+        )
+
+    @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_memory_only_incomplete_clear_prints_warning(self, mock_asyncio_run):
+        """graph_memory_cleared=False must surface graph_memory_note as a
+        readable warning, not just a buried dict key."""
+        mock_cognee = MagicMock()
+        mock_cognee.forget = AsyncMock(
+            return_value={
+                "status": "success",
+                "dataset_id": "ds",
+                "graph_memory_cleared": False,
+                "graph_memory_note": "content had no deletion provenance",
+            }
+        )
+
+        with (
+            patch.dict(sys.modules, {"cognee": mock_cognee}),
+            patch("cognee.cli.commands.forget_command.fmt.warning") as mock_warning,
+        ):
+            command = ForgetCommand()
+            args = argparse.Namespace(
+                dataset="my_dataset",
+                dataset_id=None,
+                data_id=None,
+                everything=False,
+                memory_only=True,
+            )
+            command.execute(args)
+
+        mock_warning.assert_called_once_with("content had no deletion provenance")
+
+    @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_memory_only_cleared_skips_warning(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.forget = AsyncMock(
+            return_value={"status": "success", "dataset_id": "ds", "graph_memory_cleared": True}
+        )
+
+        with (
+            patch.dict(sys.modules, {"cognee": mock_cognee}),
+            patch("cognee.cli.commands.forget_command.fmt.warning") as mock_warning,
+        ):
+            command = ForgetCommand()
+            args = argparse.Namespace(
+                dataset="my_dataset",
+                dataset_id=None,
+                data_id=None,
+                everything=False,
+                memory_only=True,
+            )
+            command.execute(args)
+
+        mock_warning.assert_not_called()
+
+    def test_execute_no_forget_target(self):
+        command = ForgetCommand()
+        args = argparse.Namespace(
+            dataset=None, dataset_id=None, data_id=None, everything=False, memory_only=False
+        )
+
+        # Should not raise, just print an error and return.
+        command.execute(args)
+
+    @patch("cognee.cli.commands.forget_command.asyncio.run")
+    def test_execute_with_exception(self, mock_asyncio_run):
+        mock_asyncio_run.side_effect = Exception("Forget error")
+
+        command = ForgetCommand()
+        args = argparse.Namespace(
+            dataset="my_dataset",
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+        )
 
         with pytest.raises(CliCommandException):
             command.execute(args)
