@@ -31,11 +31,27 @@ name: automation | OpenAPI Spec Extras Sync
 #
 # There is deliberately no pull_request trigger. Adding one temporarily to test
 # router_docstring_sync from its own PR is what opened #4668 against dev before
-# that workflow had even merged.
+# that workflow had even merged. To test this workflow before it is merged,
+# dispatch it with `ref` set to the feature branch: a non-dev ref is always
+# forced to a dry run, so it can never push a bot branch or open a PR.
+#
+# The job operates on a single tree — the scripts and the data file they rewrite
+# come from the same checkout. That is why `ref` selects both, and why a run
+# against a ref that does not carry the scripts fails immediately rather than
+# after the multi-minute dependency install.
 
 on:
-  pull_request: 
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to run against (default: dev). Any non-dev ref is forced to a dry run."
+        required: false
+        default: "dev"
+      dry_run:
+        description: "Run the checker and fixer, then show the diff instead of pushing or opening a PR."
+        required: false
+        type: boolean
+        default: false
   # Weekly sweep, ahead of any release cut later in the week.
   schedule:
     - cron: "0 5 * * 1"
@@ -58,6 +74,11 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  # `inputs` is empty outside workflow_dispatch, so schedule and push runs always
+  # get dev.
+  TARGET_REF: ${{ inputs.ref || 'dev' }}
+
 # Queue rather than cancel: a run cancelled between the push and the PR update
 # would leave the fix PR half-refreshed.
 concurrency:
@@ -74,19 +95,57 @@ jobs:
       # Credentials are never persisted into the checkout: this job imports the
       # full cognee app and its dependency tree, and nothing that runs there
       # should be able to read a token off disk. The push and PR steps get the
-      # PAT explicitly. Unlike router_docstring_sync there is only one checkout —
-      # the scripts and the data file they rewrite are the same tree, so taking
-      # them from different refs would only invite confusion.
-      - name: Check out dev
+      # PAT explicitly.
+      - name: Check out the target ref
         uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Record the tree being fixed
         id: base
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Before the install, not after: `uv sync --all-extras` prepares ~490
+      # packages and takes minutes on a cold cache, and a run pointed at a ref
+      # without the machinery is doomed from the start. Failing here turns a
+      # seven-minute mystery into a fifteen-second message that names the cause.
+      - name: Check the sync machinery is present on this ref
+        run: |
+          missing=""
+          for path in \
+            tools/check_spec_extras.py \
+            tools/fix_spec_extras.py \
+            tools/sync_release_docs.py \
+            tools/spec_extras.json; do
+            [ -f "${path}" ] || missing="${missing} ${path}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::Missing on ${TARGET_REF}:${missing}"
+            echo "This workflow rewrites the tree it checks out, so the scripts must"
+            echo "live on that ref. If they are still on a feature branch, dispatch"
+            echo "this workflow with 'ref' set to that branch (which forces a dry run)."
+            exit 1
+          fi
+          echo "All four files present on ${TARGET_REF}."
+
+      # A tree that is not dev must never produce a push or a PR: the fix would
+      # be built from code that is not what dev runs. Gating on the tree rather
+      # than on the trigger means this holds even if someone later adds a
+      # pull_request trigger — which is the mistake that produced #4668.
+      - name: Decide whether this run may push
+        id: mode
+        run: |
+          if [ "${TARGET_REF}" != "dev" ]; then
+            echo "Target is ${TARGET_REF}, not dev — forcing a dry run."
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "Dry run requested."
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -103,6 +162,7 @@ jobs:
       # stopping here loses nothing.
       - name: Re-check dev is still where we started
         id: freshness
+        if: ${{ steps.mode.outputs.dry_run == 'false' }}
         run: |
           git fetch --quiet origin dev
           CURRENT="$(git rev-parse FETCH_HEAD)"
@@ -114,9 +174,11 @@ jobs:
             echo "stale=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # `stale` is empty on a dry run because the freshness step is skipped, so
+      # test for the failing value rather than the passing one.
       - name: Detect spec extras drift
         id: check
-        if: ${{ steps.freshness.outputs.stale == 'false' }}
+        if: ${{ steps.freshness.outputs.stale != 'true' }}
         run: |
           set +e
           uv run python tools/check_spec_extras.py > spec_extras_report.txt
@@ -125,7 +187,7 @@ jobs:
           cat spec_extras_report.txt
           cat spec_extras_report.txt >> "$GITHUB_STEP_SUMMARY"
           if [ "$code" -eq 2 ]; then
-            echo "Checker failed to import the app" >&2
+            echo "::error::The checker could not import the cognee app." >&2
             exit 2
           fi
           echo "drift=$([ "$code" -eq 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
@@ -160,9 +222,23 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Show the fix without pushing
+        if: ${{ steps.check.outputs.drift == 'true' && steps.mode.outputs.dry_run == 'true' }}
+        run: |
+          {
+            echo
+            echo '### Dry run — nothing pushed'
+            echo
+            echo "Ran against \`${TARGET_REF}\`. Diff the fixer produced:"
+            echo '```diff'
+            git --no-pager diff -- tools/spec_extras.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          git --no-pager diff --stat -- tools/spec_extras.json
+
       - name: Commit and push fix branch
         id: commit
-        if: ${{ steps.check.outputs.drift == 'true' }}
+        if: ${{ steps.check.outputs.drift == 'true' && steps.mode.outputs.dry_run == 'false' }}
         env:
           PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
