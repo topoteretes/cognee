@@ -12,7 +12,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -64,6 +64,16 @@ class RecallPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    context_format: ContextFormat = Field(
+        default=ContextFormat.CONTEXT,
+        examples=[ContextFormat.CONTEXT.value],
+        description=(
+            "Shape of an only_context result. 'context' returns the bare retrieval"
+            " context; 'prompt' returns the full envelope a completion would have"
+            " received — session guidance, conversation history, and the rendered"
+            " user and system prompts. Ignored unless only_context is true."
+        ),
+    )
     verbose: bool = Field(default=False)
     include_references: bool = Field(
         default=False,
@@ -194,6 +204,10 @@ def get_recall_router() -> APIRouter:
         - **node_name** (Optional[List[str]]): Filter to specific node sets
         - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return only the LLM context
+        - **context_format** (str): Shape of an only_context result — "context"
+          (default, the bare retrieval context) or "prompt" (the full envelope a
+          completion would receive: session guidance, conversation history, and the
+          rendered user and system prompts)
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)
@@ -255,6 +269,7 @@ def get_recall_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                context_format=payload.context_format,
                 session_id=payload.session_id,
                 scope=payload.scope,
                 context_profile=payload.context_profile,
