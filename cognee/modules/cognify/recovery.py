@@ -46,11 +46,14 @@ async def recover_stale_cognify_runs_on_startup() -> None:
     Startup recovery is intentionally limited to API lifespan initialization,
     before any new pipeline processing starts.
 
-    Only runs whose latest status is ``DATASET_PROCESSING_STARTED`` are
-    recovered: an ``ERRORED`` run has already been rolled back inline at error
-    time (see ``run_tasks``), so re-selecting it here would repeat the rollback
-    on every restart. After a successful rollback the dataset's pipeline status
-    is reset to ``DATASET_PROCESSING_INITIATED`` so it is no longer reported as
+    Recovers both ``DATASET_PROCESSING_STARTED`` and stale
+    ``DATASET_PROCESSING_INITIATED`` runs: an ``ERRORED`` run has already been
+    rolled back inline at error time (see ``run_tasks``), so re-selecting it
+    here would repeat the rollback on every restart. ``INITIATED`` rows that
+    never reached ``STARTED`` (e.g. queue deadlock before log_pipeline_run_start)
+    would otherwise stay stuck forever — the 56h outage was exactly this.
+    After a successful rollback/reset the dataset's pipeline status is set to
+    ``DATASET_PROCESSING_INITIATED`` so it is no longer reported as
     "already being processed" and can be cognified again.
     """
     db_engine = get_relational_engine()
@@ -60,7 +63,11 @@ async def recover_stale_cognify_runs_on_startup() -> None:
         recovery_candidates = [
             run
             for run in latest_per_dataset.values()
-            if run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED
+            if run.status
+            in (
+                PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                PipelineRunStatus.DATASET_PROCESSING_INITIATED,
+            )
         ]
     except Exception:
         logger.error("Failed to recover latest cognify run which did not successfully finish.")
@@ -88,18 +95,27 @@ async def recover_stale_cognify_runs_on_startup() -> None:
             continue
 
         try:
-            async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                await cognify_rollback_handler(
-                    pipeline_run_id=pipeline_run.pipeline_run_id,
-                    dataset=dataset,
-                )
-                # Clear the lingering STARTED status so a re-run is not blocked by
-                # check_pipeline_run_qualification ("already being processed").
+            is_initiated = pipeline_run.status == PipelineRunStatus.DATASET_PROCESSING_INITIATED
+            if is_initiated:
+                # No graph work started yet — just reset the stuck INITIATED row.
                 await reset_pipeline_run_status(
                     user_id=dataset.owner_id,
                     dataset_id=dataset.id,
                     pipeline_name="cognify_pipeline",
                 )
+            else:
+                async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+                    await cognify_rollback_handler(
+                        pipeline_run_id=pipeline_run.pipeline_run_id,
+                        dataset=dataset,
+                    )
+                    # Clear the lingering STARTED status so a re-run is not blocked by
+                    # check_pipeline_run_qualification ("already being processed").
+                    await reset_pipeline_run_status(
+                        user_id=dataset.owner_id,
+                        dataset_id=dataset.id,
+                        pipeline_name="cognify_pipeline",
+                    )
             logger.info(
                 "Startup recovery completed for cognify run %s (dataset=%s).",
                 pipeline_run.pipeline_run_id,

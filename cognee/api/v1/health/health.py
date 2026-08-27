@@ -246,6 +246,64 @@ class HealthChecker:
                 details=f"Embedding test failed: {str(e)}",
             )
 
+    async def check_dataset_queue(self) -> ComponentHealth:
+        """Check dataset queue pressure - reflects actual read/write capability.
+
+        While relational/vector/graph checks only test basic connectivity,
+        a full dataset queue means POST /api/v1/add and POST /api/v1/search
+        will block or 503 even though /health otherwise looks healthy.
+        This surfaced the 56h outage where all four components reported
+        healthy while ingest/retrieval were deadlocked.
+        """
+        start_time = time.time()
+        try:
+            from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+            queue = dataset_queue()
+            if not getattr(queue, "_enabled", False):
+                return ComponentHealth(
+                    status=HealthStatus.HEALTHY,
+                    provider="dataset_queue",
+                    response_time_ms=int((time.time() - start_time) * 1000),
+                    details="Queue disabled — no concurrency limit",
+                )
+            max_conc = getattr(queue, "_max_concurrent", 0)
+            available = (
+                getattr(queue._semaphore, "_value", max_conc)
+                if hasattr(queue, "_semaphore")
+                else max_conc
+            )
+            active = len(queue.active_dataset_ids()) if hasattr(queue, "active_dataset_ids") else 0
+            response_time = int((time.time() - start_time) * 1000)
+            if available == 0:
+                return ComponentHealth(
+                    status=HealthStatus.UNHEALTHY,
+                    provider="dataset_queue",
+                    response_time_ms=response_time,
+                    details=f"Queue full ({max_conc}/{max_conc} slots occupied, {active} active datasets) — add/search will block",
+                )
+            if available <= max(1, max_conc // 3):
+                return ComponentHealth(
+                    status=HealthStatus.DEGRADED,
+                    provider="dataset_queue",
+                    response_time_ms=response_time,
+                    details=f"Queue pressured ({max_conc - available}/{max_conc} slots occupied, {available} free)",
+                )
+            return ComponentHealth(
+                status=HealthStatus.HEALTHY,
+                provider="dataset_queue",
+                response_time_ms=response_time,
+                details=f"Queue healthy ({available}/{max_conc} slots free)",
+            )
+        except Exception as e:
+            response_time = int((time.time() - start_time) * 1000)
+            return ComponentHealth(
+                status=HealthStatus.DEGRADED,
+                provider="dataset_queue",
+                response_time_ms=response_time,
+                details=f"Queue check failed: {str(e)}",
+            )
+
     async def get_health_status(self, detailed: bool = False) -> HealthResponse:
         """Get comprehensive health status."""
         components = {}
@@ -255,6 +313,7 @@ class HealthChecker:
             ("vector_db", self.check_vector_db()),
             ("graph_db", self.check_graph_db()),
             ("file_storage", self.check_file_storage()),
+            ("dataset_queue", self.check_dataset_queue()),
         ]
 
         # Run critical checks

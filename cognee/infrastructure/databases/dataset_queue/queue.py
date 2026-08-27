@@ -53,6 +53,12 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("DatasetQueue")
 
+# Bounded wait for dataset-queue semaphore: prevents a tenant with
+# leaked/stuck slots from hanging new /add and /search requests forever.
+# Override via DATASET_QUEUE_ACQUIRE_TIMEOUT (seconds); 0 = wait forever
+# for backwards compatibility in tests that intentionally block.
+DATASET_QUEUE_ACQUIRE_TIMEOUT = float(os.getenv("DATASET_QUEUE_ACQUIRE_TIMEOUT", "30"))
+
 
 # Recognised truthy values for ``DATASET_QUEUE_ENABLED``.
 TRUE_VALUES = frozenset({"1", "true", "yes", "on", "y", "t"})
@@ -231,7 +237,27 @@ class DatasetQueue:
 
         # Acquire a fresh slot for this (task, dataset).
         logger.debug("Task %d acquiring dataset queue slot for dataset_id=%s", task_id, dataset_id)
-        await self._semaphore.acquire()
+        timeout = DATASET_QUEUE_ACQUIRE_TIMEOUT
+        try:
+            if timeout and timeout > 0:
+                await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+            else:
+                await self._semaphore.acquire()
+        except asyncio.TimeoutError as exc:
+            logger.error(
+                "Dataset queue acquire timed out after %ss for dataset_id=%s (max_concurrent=%s, available=%s)",
+                timeout,
+                dataset_id,
+                self._max_concurrent,
+                self._semaphore._value,
+            )
+            from cognee.exceptions import CogneeApiError
+
+            raise CogneeApiError(
+                message=f"Dataset queue is full (max_concurrent={self._max_concurrent}). Try again shortly.",
+                name="DatasetQueueFull",
+                status_code=503,
+            ) from exc
         release = _make_release(self._semaphore)
 
         self._ensure_task_cleanup_registered(task, task_id)
@@ -474,7 +500,26 @@ class DatasetQueue:
             yield
             return
 
-        await self._semaphore.acquire()
+        timeout = DATASET_QUEUE_ACQUIRE_TIMEOUT
+        try:
+            if timeout and timeout > 0:
+                await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+            else:
+                await self._semaphore.acquire()
+        except asyncio.TimeoutError as exc:
+            logger.error(
+                "Dataset queue acquire timed out after %ss (max_concurrent=%s, available=%s)",
+                timeout,
+                self._max_concurrent,
+                self._semaphore._value,
+            )
+            from cognee.exceptions import CogneeApiError
+
+            raise CogneeApiError(
+                message=f"Dataset queue is full (max_concurrent={self._max_concurrent}). Try again shortly.",
+                name="DatasetQueueFull",
+                status_code=503,
+            ) from exc
         release = _make_release(self._semaphore)
 
         slot_key = None
