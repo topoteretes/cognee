@@ -1,7 +1,11 @@
 name: Nightly Tests
+# Least-privilege token (OSSF Scorecard: Token-Permissions). packages: read is
+# needed by the called performance_report.yml jobs, whose postgres service
+# container pulls ghcr.io/topoteretes/pgvector:pg17 with the GITHUB_TOKEN.
+# Nothing in this workflow publishes packages, so no write scope.
 permissions:
   contents: read
-  packages: write
+  packages: read
 
 on:
   schedule:
@@ -227,7 +231,7 @@ jobs:
       # This job runs repo scripts (the Slack block renderer, the MotherDuck
       # ETL), so it needs a working tree.
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Determine status
         id: status
@@ -335,7 +339,7 @@ jobs:
         # Posts on scheduled and manual (workflow_dispatch) runs. There is no
         # longer a pull_request trigger, so a workflow edit surfaces its reports
         # by being dispatched on the branch rather than by opening a PR.
-        uses: slackapi/slack-github-action@v2.1.0
+        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}

@@ -270,8 +270,9 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     Cleanup scope:
     - Graph DB (nodes, edges): yes
     - Vector DB (embeddings): yes
-    - Session cache: yes — sessions attributed to the dataset are deleted
-      (their answers reference the removed graph; non-fatal, best-effort)
+    - Session cache: yes — attributed sessions are deleted; QAs in
+      dataset-unattributed sessions that used the removed graph ids are
+      removed (non-fatal, best-effort)
     - Pipeline status: reset (so cognify re-processes all data)
     - Relational DB (dataset, data records): preserved
     - Raw files: preserved
@@ -294,17 +295,23 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     # on this dataset and exclude concurrent deletes.
     async with dataset_lock(dataset_id):
         # 1. Delete graph nodes/edges and vector embeddings
-        await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-        # 1b. Drop sessions attributed to this dataset: their cached answers
-        # assert graph content that no longer exists, and a re-cognify with
-        # different settings should not replay them (non-fatal).
+        # 1b. Drop sessions attributed to this dataset, then remove tagged
+        # QAs from dataset-unattributed sessions (non-fatal).
         try:
             from cognee.modules.session_lifecycle.invalidate_sessions import (
                 invalidate_sessions_for_dataset,
+                invalidate_sessions_for_deleted_data,
             )
 
             await invalidate_sessions_for_dataset(dataset_id)
+            await invalidate_sessions_for_deleted_data(
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
+            )
         except Exception as error:
             logger.warning(
                 "forget: session invalidation failed for dataset %s (non-fatal): %s",
@@ -395,7 +402,10 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
             )
 
             await invalidate_sessions_for_deleted_data(
-                dataset_id, deleted_elements.node_ids, deleted_elements.edge_ids
+                dataset_id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=user.id,
             )
         except Exception as error:
             logger.warning(
