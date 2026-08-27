@@ -52,31 +52,32 @@ on:
         required: false
         type: boolean
         default: false
-  # Weekly sweep, ahead of any release cut later in the week.
+  # Weekly, Monday 06:00 UTC — an hour after router_docstring_sync.yml, so the
+  # two land their PRs in one review session and this run gets the uv cache that
+  # one leaves warm (a cold install here is ~6 minutes, a warm one ~45 seconds).
+  #
+  # Second, not first, because the data flows that way: the docstring sync
+  # rewrites handler docstrings, which become the endpoint descriptions this
+  # job feeds to Claude when writing tag blurbs. The benefit only lands once
+  # that job's PR is merged, so in practice it is a week behind — but the
+  # ordering costs nothing and is the right direction.
+  #
+  # There is no push trigger. It would have fired on 205 of the last 791
+  # commits to dev, about 7 runs a day, while a new route tag appears roughly
+  # 2-3 times a month — and pyproject.toml/uv.lock were pure noise, 92 commits
+  # in 90 days of which only 4 touched a router at all. A missing tag blurb
+  # renders a bare sidebar group; it is never incorrect, so it does not warrant
+  # watching every commit. Dispatch manually if a release is imminent.
   schedule:
-    - cron: "0 5 * * 1"
-  # Anything that can add a route tag, move a route, or change the extras.
-  # Dependency bumps count: a FastAPI upgrade can change how routes are exposed.
-  push:
-    branches:
-      - dev
-    paths:
-      - "cognee/api/**"
-      - "tools/spec_extras.json"
-      - "tools/check_spec_extras.py"
-      - "tools/fix_spec_extras.py"
-      - "tools/sync_release_docs.py"
-      - ".github/workflows/spec_extras_sync.yml"
-      - "pyproject.toml"
-      - "uv.lock"
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: write
   pull-requests: write
 
 env:
-  # `inputs` is empty outside workflow_dispatch, so schedule and push runs always
-  # get dev.
+  # `inputs` is empty outside workflow_dispatch, so the weekly schedule always
+  # gets dev.
   TARGET_REF: ${{ inputs.ref || 'dev' }}
 
 # Queue rather than cancel: a run cancelled between the push and the PR update
@@ -157,9 +158,16 @@ jobs:
         run: uv sync --locked --all-extras
 
       # The install above takes minutes. If dev moved in the meantime, anything
-      # built from this checkout is already stale — and pushing it would revert
-      # whatever landed. The push that moved dev has its own queued run, so
-      # stopping here loses nothing.
+      # built from this checkout is already stale, and pushing it would revert
+      # whatever landed — that is how #4688 happened.
+      #
+      # This used to say the push that moved dev would have its own queued run,
+      # so bailing cost nothing. With the push trigger gone that is no longer
+      # true: the next scheduled run is a week away. dev takes ~26 commits a
+      # day, so a ~6 minute cold install has order-of-10% odds of losing the
+      # race. Bailing is still right — a stale fix must never be pushed — but it
+      # is now a real skipped week, so say so loudly enough that someone can
+      # dispatch it manually.
       - name: Re-check dev is still where we started
         id: freshness
         if: ${{ steps.mode.outputs.dry_run == 'false' }}
@@ -167,9 +175,15 @@ jobs:
           git fetch --quiet origin dev
           CURRENT="$(git rev-parse FETCH_HEAD)"
           if [ "${CURRENT}" != "${{ steps.base.outputs.sha }}" ]; then
-            echo "dev moved from ${{ steps.base.outputs.sha }} to ${CURRENT} during setup."
-            echo "The run triggered by that push will handle it — stopping."
             echo "stale=true" >> "$GITHUB_OUTPUT"
+            MESSAGE="dev moved from ${{ steps.base.outputs.sha }} to ${CURRENT} during setup, so this run was built from a stale tree and stopped without pushing. Re-run this workflow to pick up the new dev."
+            echo "::warning::${MESSAGE}"
+            {
+              echo
+              echo "### Skipped — dev moved during setup"
+              echo
+              echo "${MESSAGE}"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "stale=false" >> "$GITHUB_OUTPUT"
           fi
