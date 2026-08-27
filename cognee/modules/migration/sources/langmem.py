@@ -22,7 +22,7 @@ from cognee.modules.migration.cogx import (
     COGXScope,
     parse_timestamp,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 _CONTENT_KEYS = ("content", "text", "memory", "data", "message")
 
@@ -41,7 +41,7 @@ class LangMemSource(MemorySource):
     def _load_raw(self) -> List[Dict[str, Any]]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if isinstance(data, dict):
             recognized = False
             for key in ("memories", "results", "items", "data"):

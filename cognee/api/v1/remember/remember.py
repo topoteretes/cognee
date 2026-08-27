@@ -168,10 +168,14 @@ async def _add_to_session(session_id: str, data, user):
     stripped = text.strip()
     if not stripped:
         return
-    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
+    matched_prefix = next(
+        (prefix for prefix in _SESSION_PLACEHOLDER_PREFIXES if stripped.startswith(prefix)), None
+    )
+    if matched_prefix is not None:
+        # Log only the constant prefix — the payload itself must never reach the logs.
         logger.debug(
-            "remember: skipping session write for placeholder-only payload (%.40s…)",
-            stripped,
+            "remember: skipping session write for placeholder-only payload (%s…)",
+            matched_prefix,
         )
         return
 
@@ -1112,12 +1116,17 @@ async def _remember_inner(
                 # One failing repo must not abort the rest of the batch — record
                 # the failure per item and keep going.
                 errors: list = []
-                for spec in repo_specs:
+                for position, spec in enumerate(repo_specs, start=1):
                     try:
                         item = await _run_one_repo(spec)
                     except Exception as exc:
                         source = redact_repo_spec(spec)
-                        logger.exception("Background code-graph run failed for '%s'", source)
+                        # Specs can embed URL credentials — never log spec-derived values.
+                        logger.exception(
+                            "Background code-graph run failed for repo %d of %d",
+                            position,
+                            len(repo_specs),
+                        )
                         item = {
                             "kind": "code_repository",
                             "source": source,
