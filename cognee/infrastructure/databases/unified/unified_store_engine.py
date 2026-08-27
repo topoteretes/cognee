@@ -111,8 +111,14 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
-    async def delete_by_dataset_id(self, dataset_id: str) -> None:
-        """Remove the dataset's source refs; delete artifacts left unowned."""
+    async def delete_by_dataset_id(self, dataset_id: str) -> "SourceRefRemovalResult":
+        """Remove the dataset's source refs; delete artifacts left unowned.
+
+        Returns the hard-deleted node/edge identities, same as
+        ``delete_by_source_ref`` — callers that need to know whether this
+        dataset's graph held anything (e.g. to decide whether a fallback is
+        needed) read them off the result instead of re-deriving them.
+        """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
@@ -124,7 +130,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
         node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
         edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
 
-        await execute_source_ref_removal(
+        return await execute_source_ref_removal(
             graph,
             vector,
             node_data=node_data,

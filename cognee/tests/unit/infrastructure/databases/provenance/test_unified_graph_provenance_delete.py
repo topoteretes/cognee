@@ -442,7 +442,7 @@ async def test_delete_by_dataset_id_preserves_cross_dataset_artifacts():
     vector = FakeVectorEngine()
     engine = _build_engine(graph, vector)
 
-    await engine.delete_by_dataset_id(str(dataset_a))
+    result = await engine.delete_by_dataset_id(str(dataset_a))
 
     # A-owned-only node is gone; B-only untouched; shared survives with ref_b.
     assert "only_a" not in graph.nodes
@@ -450,6 +450,11 @@ async def test_delete_by_dataset_id_preserves_cross_dataset_artifacts():
     assert graph.nodes["only_b"].source_ref_keys == [ref_b]
     assert "shared" in graph.nodes
     assert graph.nodes["shared"].source_ref_keys == [ref_b]
+
+    # The hard-deleted identities are returned, not discarded (COG-6335): a
+    # caller deciding whether a dataset had anything to delete reads this
+    # instead of re-deriving it.
+    assert result.deleted_node_ids == ["only_a"]
 
     assert ("Entity_name", ["only_a"]) in vector.deleted
     assert all(ids != ["only_b"] for _, ids in vector.deleted)

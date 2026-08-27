@@ -1,4 +1,8 @@
-from .get_or_create_dataset_database import get_or_create_dataset_database
+from .get_or_create_dataset_database import (
+    get_or_create_dataset_database,
+    get_existing_dataset_database,
+)
 from .resolve_dataset_database_connection_info import resolve_dataset_database_connection_info
 from .get_graph_dataset_database_handler import get_graph_dataset_database_handler
 from .get_vector_dataset_database_handler import get_vector_dataset_database_handler
+from .delete_isolated_dataset_storage import delete_isolated_dataset_storage

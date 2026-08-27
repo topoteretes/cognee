@@ -24,9 +24,12 @@ class GraphVectorStoreInterface:
         """
         raise UnsupportedProvenanceCapability()
 
-    async def delete_by_dataset_id(self, dataset_id: str) -> None:
+    async def delete_by_dataset_id(self, dataset_id: str):
         """
         Delete artifacts owned only by the given dataset.
+
+        Returns a ``SourceRefRemovalResult`` carrying the hard-deleted node/edge
+        identities, mirroring ``delete_by_source_ref``.
 
         Parameters:
         -----------

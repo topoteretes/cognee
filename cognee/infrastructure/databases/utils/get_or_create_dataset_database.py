@@ -39,13 +39,16 @@ async def _get_graph_db_info(dataset_id: UUID, user: User) -> dict:
     return await handler["handler_instance"].create_dataset(dataset_id, user)
 
 
-async def _existing_dataset_database(
+async def get_existing_dataset_database(
     dataset_id: UUID,
     user: User,
 ) -> Optional[DatasetDatabase]:
     """
     Check if a DatasetDatabase row already exists for the given owner + dataset.
-    Return None if it doesn't exist, return the row if it does.
+    Return None if it doesn't exist, return the row if it does. Never creates one —
+    callers that need "create if missing" use ``get_or_create_dataset_database``
+    instead. A row existing is the ground-truth signal that this dataset owns an
+    isolated graph+vector database pair.
     Args:
         dataset_id:
         user:
@@ -99,7 +102,7 @@ async def get_or_create_dataset_database(
         dataset = await create_authorized_dataset(dataset, user)
 
     # If dataset database already exists return it
-    existing_dataset_database = await _existing_dataset_database(dataset_id, user)
+    existing_dataset_database = await get_existing_dataset_database(dataset_id, user)
     if existing_dataset_database:
         return existing_dataset_database
 

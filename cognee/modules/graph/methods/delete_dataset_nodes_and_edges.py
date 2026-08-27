@@ -34,8 +34,8 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Del
     if unified.supports_graph_provenance_delete():
         graph_engine = unified.graph
         if await stores_provenance_in_graph(graph_engine):
-            await unified.delete_by_dataset_id(str(dataset_id))
-            return DeletedGraphElements()
+            result = await unified.delete_by_dataset_id(str(dataset_id))
+            return DeletedGraphElements.from_source_ref_removal(result)
 
     if backend_access_control_enabled():
         affected_nodes = await get_dataset_related_nodes(dataset_id)

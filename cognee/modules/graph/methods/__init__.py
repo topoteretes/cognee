@@ -24,5 +24,6 @@ from .get_dataset_related_edges import get_dataset_related_edges, get_global_dat
 from .delete_dataset_related_nodes import delete_dataset_related_nodes
 from .delete_dataset_related_edges import delete_dataset_related_edges
 from .delete_dataset_nodes_and_edges import delete_dataset_nodes_and_edges
+from .ensure_graph_memory_cleared import ensure_graph_memory_cleared, GraphMemoryStatus
 
 from .legacy_delete import legacy_delete

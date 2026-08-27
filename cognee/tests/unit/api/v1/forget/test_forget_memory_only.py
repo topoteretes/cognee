@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
+from cognee.modules.graph.methods.ensure_graph_memory_cleared import GraphMemoryStatus
 
 # Import the actual module (not the function) to access private helpers
 forget_module = importlib.import_module("cognee.api.v1.forget.forget")
@@ -25,6 +26,9 @@ delete_dataset_nodes_and_edges_module = importlib.import_module(
 )
 delete_data_nodes_and_edges_module = importlib.import_module(
     "cognee.modules.graph.methods.delete_data_nodes_and_edges"
+)
+ensure_graph_memory_cleared_module = importlib.import_module(
+    "cognee.modules.graph.methods.ensure_graph_memory_cleared"
 )
 reset_dataset_pipeline_run_status_module = importlib.import_module(
     "cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status"
@@ -122,6 +126,7 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     mock_delete = AsyncMock(return_value=DeletedGraphElements(node_ids={"node_deleted"}))
     mock_reset_status = AsyncMock()
     mock_invalidate_deleted_data = AsyncMock()
+    mock_ensure_cleared = AsyncMock(return_value=GraphMemoryStatus(cleared=True))
     monkeypatch.setattr(
         forget_module,
         "_resolve_dataset_id",
@@ -133,6 +138,11 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
             delete_dataset_nodes_and_edges_module,
             "delete_dataset_nodes_and_edges",
             mock_delete,
+        ),
+        patch.object(
+            ensure_graph_memory_cleared_module,
+            "ensure_graph_memory_cleared",
+            mock_ensure_cleared,
         ),
         patch(
             "cognee.modules.session_lifecycle.invalidate_sessions.invalidate_sessions_for_dataset",
@@ -158,8 +168,13 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     assert result["status"] == "success"
     assert result["dataset_id"] == str(DATASET_ID)
     assert result["data_records_reset"] == 2
+    assert result["nodes_deleted"] == 1
+    assert result["edges_deleted"] == 0
+    assert result["graph_memory_cleared"] is True
+    assert result["graph_memory_note"] is None
 
     mock_delete.assert_awaited_once_with(DATASET_ID, USER.id)
+    mock_ensure_cleared.assert_awaited_once_with(DATASET_ID, USER)
     mock_invalidate_deleted_data.assert_awaited_once_with(
         DATASET_ID,
         {"node_deleted"},
@@ -204,6 +219,11 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
             "delete_dataset_nodes_and_edges",
             AsyncMock(return_value=DeletedGraphElements()),
         ),
+        patch.object(
+            ensure_graph_memory_cleared_module,
+            "ensure_graph_memory_cleared",
+            AsyncMock(return_value=GraphMemoryStatus(cleared=True)),
+        ),
         patch(
             "cognee.infrastructure.databases.relational.get_relational_engine",
             return_value=engine,
@@ -218,7 +238,60 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
 
     assert result["status"] == "success"
     assert result["data_records_reset"] == 2
+    assert result["nodes_deleted"] == 0
+    assert result["edges_deleted"] == 0
     mock_reset_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_forget_dataset_memory_reports_incomplete_clear_without_raising(monkeypatch):
+    """COG-6335: a dataset with content that has no deletion provenance (e.g.
+    remember(content_type="code")) must not be reported as a plain success —
+    but it also must not raise, so forget() stays safe to call repeatedly on
+    an already-forgotten or never-populated dataset."""
+    session = _FakeSession([])
+    engine = _FakeEngine(session)
+
+    monkeypatch.setattr(
+        forget_module,
+        "_resolve_dataset_id",
+        AsyncMock(return_value=DATASET_ID),
+    )
+
+    with (
+        patch.object(
+            delete_dataset_nodes_and_edges_module,
+            "delete_dataset_nodes_and_edges",
+            AsyncMock(return_value=DeletedGraphElements()),
+        ),
+        patch.object(
+            ensure_graph_memory_cleared_module,
+            "ensure_graph_memory_cleared",
+            AsyncMock(
+                return_value=GraphMemoryStatus(
+                    cleared=False, note="content had no deletion provenance"
+                )
+            ),
+        ),
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            return_value=engine,
+        ),
+        patch.object(
+            reset_dataset_pipeline_run_status_module,
+            "reset_dataset_pipeline_run_status",
+            AsyncMock(),
+        ),
+    ):
+        result = await forget_module._forget_dataset_memory(str(DATASET_ID), USER)
+
+    # Never raises, and status stays "success" — the call itself completed and
+    # is safe to retry — but the caller can tell memory was not fully cleared.
+    assert result["status"] == "success"
+    assert result["nodes_deleted"] == 0
+    assert result["edges_deleted"] == 0
+    assert result["graph_memory_cleared"] is False
+    assert result["graph_memory_note"] == "content had no deletion provenance"
 
 
 # ---------------------------------------------------------------------------

@@ -268,14 +268,27 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     (e.g. a new custom prompt or graph model).
 
     Cleanup scope:
-    - Graph DB (nodes, edges): yes
-    - Vector DB (embeddings): yes
+    - Graph DB (nodes, edges): content tracked by deletion provenance, yes.
+      Content with none (e.g. ``remember(content_type="code")``) is also
+      cleared when this dataset owns an isolated graph+vector store on a
+      backend that supports resetting it safely; see ``graph_memory_cleared``/
+      ``graph_memory_note`` in the return value for what actually happened.
+    - Vector DB (embeddings): same scope as the graph DB above.
     - Session cache: yes — attributed sessions are deleted; QAs in
       dataset-unattributed sessions that used the removed graph ids are
       removed (non-fatal, best-effort)
     - Pipeline status: reset (so cognify re-processes all data)
     - Relational DB (dataset, data records): preserved
     - Raw files: preserved
+
+    Returns a dict with ``nodes_deleted``/``edges_deleted`` (from deletion-
+    provenance tracking) and ``graph_memory_cleared`` (bool, ``True`` only when
+    this call is confident nothing memory-relevant remains). ``status`` stays
+    ``"success"`` whenever the call itself completes without error — including
+    when there was nothing to delete, or when ``graph_memory_cleared`` is
+    ``False`` — so repeated calls on an already-forgotten or never-populated
+    dataset stay safe; a caller that needs to know whether memory was actually
+    cleared reads ``graph_memory_cleared``, not ``status``.
     """
     from sqlalchemy import select
     from sqlalchemy.orm import attributes as orm_attributes
@@ -284,6 +297,9 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     from cognee.modules.data.models import Data
     from cognee.modules.graph.methods.delete_dataset_nodes_and_edges import (
         delete_dataset_nodes_and_edges,
+    )
+    from cognee.modules.graph.methods.ensure_graph_memory_cleared import (
+        ensure_graph_memory_cleared,
     )
     from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
         reset_dataset_pipeline_run_status,
@@ -294,10 +310,19 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
     # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
     # on this dataset and exclude concurrent deletes.
     async with dataset_lock(dataset_id):
-        # 1. Delete graph nodes/edges and vector embeddings
+        # 1. Delete graph nodes/edges and vector embeddings tracked by deletion
+        # provenance.
         deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-        # 1b. Drop sessions attributed to this dataset, then remove tagged
+        # 1b. Content with no deletion provenance (e.g. code graphs) is invisible
+        # to step 1. When this dataset owns an isolated graph+vector store on a
+        # backend that supports it, finish the job with a full store reset (safe
+        # even if step 1 also found and removed provenance-tracked content — see
+        # ensure_graph_memory_cleared's module docstring for why isolation makes
+        # that safe); otherwise just report honestly what is known to remain.
+        graph_memory_status = await ensure_graph_memory_cleared(dataset_id, user)
+
+        # 1c. Drop sessions attributed to this dataset, then remove tagged
         # QAs from dataset-unattributed sessions (non-fatal).
         try:
             from cognee.modules.session_lifecycle.invalidate_sessions import (
@@ -350,14 +375,22 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
         )
 
     logger.info(
-        "forget: cleared memory for dataset=%s, user=%s (%d data records reset)",
+        "forget: cleared memory for dataset=%s, user=%s (%d data records reset, "
+        "%d nodes / %d edges deleted, graph_memory_cleared=%s)",
         dataset_id,
         user.id,
         len(data_records),
+        len(deleted_elements.node_ids),
+        len(deleted_elements.edge_ids),
+        graph_memory_status.cleared,
     )
     return {
         "dataset_id": str(dataset_id),
         "data_records_reset": len(data_records),
+        "nodes_deleted": len(deleted_elements.node_ids),
+        "edges_deleted": len(deleted_elements.edge_ids),
+        "graph_memory_cleared": graph_memory_status.cleared,
+        "graph_memory_note": graph_memory_status.note,
         "status": "success",
     }
 

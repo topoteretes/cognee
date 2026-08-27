@@ -21,7 +21,7 @@ import pytest
 import cognee.modules.graph.methods.delete_data_nodes_and_edges  # noqa: F401
 import cognee.modules.graph.methods.delete_dataset_nodes_and_edges  # noqa: F401
 import cognee.modules.graph.methods.try_delete_data_by_graph_provenance  # noqa: F401
-from cognee.infrastructure.databases.provenance import make_source_ref_key
+from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
 from cognee.infrastructure.databases.unified.provenance_delete_planner import (
     SourceRefRemovalResult,
 )
@@ -41,7 +41,7 @@ def _unified(graph_provenance_supported=True):
         supports_graph_provenance_delete=lambda: graph_provenance_supported,
         graph=object(),
         delete_by_source_ref=AsyncMock(return_value=SourceRefRemovalResult()),
-        delete_by_dataset_id=AsyncMock(),
+        delete_by_dataset_id=AsyncMock(return_value=SourceRefRemovalResult()),
     )
 
 
@@ -120,8 +120,18 @@ async def test_delete_data_routes_graph_provenance():
 
 
 async def test_delete_dataset_routes_graph_provenance():
+    """The real SourceRefRemovalResult from delete_by_dataset_id is threaded
+    through, not discarded — a regression guard for COG-6335, where the graph-
+    provenance branch used to hardcode an empty DeletedGraphElements() no
+    matter what delete_by_dataset_id actually removed."""
     dataset_id, user_id = uuid4(), uuid4()
     unified = _unified()
+    unified.delete_by_dataset_id = AsyncMock(
+        return_value=SourceRefRemovalResult(
+            deleted_node_ids=["n1"],
+            deleted_edges=[EdgeIdentity("n1", "n2", "relates_to")],
+        )
+    )
 
     with (
         patch.object(ddsne_module, "get_user", AsyncMock(return_value=SimpleNamespace(id=user_id))),
@@ -138,7 +148,8 @@ async def test_delete_dataset_routes_graph_provenance():
 
     unified.delete_by_dataset_id.assert_awaited_once_with(str(dataset_id))
     legacy_delete.assert_not_called()
-    assert result == DeletedGraphElements()
+    assert result.node_ids == {"n1"}
+    assert len(result.edge_ids) == 1
 
 
 async def test_delete_data_old_graph_uses_legacy():
