@@ -105,6 +105,33 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
     return _release
 
 
+def _noop_release() -> None:
+    """No-op releaser for a per-task dataset ``SlotEntry``.
+
+    The real semaphore permit is owned per dataset by ``_DatasetPermit`` and
+    freed exactly once by the last holder, so the per-task entry must not
+    release anything itself.
+    """
+    return None
+
+
+class _DatasetPermit:
+    """The single semaphore permit shared by every task using one dataset.
+
+    ``holders`` counts the tasks currently holding the dataset; the permit is
+    acquired when it rises 0 -> 1 and released when it falls back to 0. This is
+    what makes concurrent requests to the *same* dataset share ONE budget slot
+    (they share ONE engine — the cache pins a single proxy per dataset) instead
+    of each taking their own, which let a single hot dataset exhaust the budget.
+    """
+
+    __slots__ = ("release", "holders")
+
+    def __init__(self, release: Callable[[], None]) -> None:
+        self.release = release
+        self.holders = 0
+
+
 class SlotEntry:
     """A single acquired slot with a nesting depth counter."""
 
@@ -150,6 +177,60 @@ class DatasetQueue:
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
         self._registered_tasks: Set[int] = set()
+        # Semaphore permits are owned per DATASET, not per (task, dataset):
+        # concurrent tasks on the same dataset share ONE permit, so a hot
+        # dataset can no longer exhaust the budget with its own concurrency.
+        # First holder acquires, last holder releases (see ensure_slot /
+        # _drop_dataset_holder). ``active_dataset_ids`` and the engine caches
+        # already keyed pinning by dataset; this aligns the permit with them.
+        self._dataset_permit: Dict[str, _DatasetPermit] = {}
+        # Per-dataset lock guarding the first-acquire / last-release transition
+        # so two tasks racing to be the first holder cannot double-acquire.
+        # Distinct datasets take distinct locks and never serialize together.
+        self._dataset_locks: Dict[str, asyncio.Lock] = {}
+
+    # ----------------------------------------------------- per-dataset permits
+    def _ds_lock(self, ds_key: str) -> asyncio.Lock:
+        """Return the lock guarding ``ds_key``'s first-acquire / last-release.
+
+        Created on first use and kept for the process lifetime: the number of
+        distinct datasets one process serves is bounded (one tenant per process
+        in the cloud deployment), and a lock is never removed because a
+        concurrent waiter may still hold a reference to it.
+        """
+        lock = self._dataset_locks.get(ds_key)
+        if lock is None:
+            lock = self._dataset_locks[ds_key] = asyncio.Lock()
+        return lock
+
+    def _drop_dataset_holder(self, ds_key: str, *, evict: bool) -> None:
+        """Decrement ``ds_key``'s permit; the last holder frees engines + slot.
+
+        Synchronous, so the async release path and the task-end backstop (a
+        done-callback that cannot await) share one implementation.
+
+        ``evict`` controls the engine teardown. The normal release path passes
+        ``evict=True``: on the last holder the subprocess engines are torn down
+        (kept warm under the idle TTL, force-close evicted otherwise) and then
+        the permit is freed. The task-end backstop passes ``evict=False``: it
+        runs in a done-callback, outside the crashed task's ContextVar context,
+        so it must not read that context to evict — it only frees the permit,
+        exactly as the pre-change backstop did (it never evicted either).
+
+        The permit is released in a ``finally`` so a raising teardown still
+        frees the semaphore slot, never leaking a permit.
+        """
+        permit = self._dataset_permit.get(ds_key)
+        if permit is None:
+            return
+        permit.holders -= 1
+        if permit.holders <= 0:
+            self._dataset_permit.pop(ds_key, None)
+            try:
+                if evict:
+                    self._release_subprocess_engines()
+            finally:
+                permit.release()
 
     # ------------------------------------------------------ active datasets
     def active_dataset_ids(self) -> set:
@@ -190,9 +271,16 @@ class DatasetQueue:
         def _release_all_on_done(_t: asyncio.Task, _tid: int = task_id) -> None:
             slots = self._task_slots.pop(_tid, {})
             self._registered_tasks.discard(_tid)
-            for entry in slots.values():
-                # Backstop: release whatever's left regardless of depth.
-                entry.release()
+            # Backstop for a task that exits without releasing. Dataset slots
+            # decrement the shared per-dataset permit (freeing it iff this was
+            # the last holder); scoped acquire() slots own their permit and
+            # release it directly. Runs in a done-callback (synchronous, no
+            # await), so it never interleaves inside a coroutine step.
+            for slot_key, entry in slots.items():
+                if slot_key.startswith("ds:"):
+                    self._drop_dataset_holder(slot_key, evict=False)
+                else:
+                    entry.release()
 
         task.add_done_callback(_release_all_on_done)
 
@@ -229,14 +317,30 @@ class DatasetQueue:
             entry.depth += 1
             return
 
-        # Acquire a fresh slot for this (task, dataset).
-        logger.debug("Task %d acquiring dataset queue slot for dataset_id=%s", task_id, dataset_id)
-        await self._semaphore.acquire()
-        release = _make_release(self._semaphore)
-
-        self._ensure_task_cleanup_registered(task, task_id)
-        # After registration, the task entry exists in ``_task_slots``.
-        self._task_slots[task_id][ds_key] = SlotEntry(release, depth=1)
+        # First time THIS task touches ds_key. The semaphore permit is owned
+        # per DATASET: concurrent tasks on the SAME dataset share ONE permit,
+        # because they share ONE engine (the cache pins a single proxy per
+        # dataset). Only the first holder acquires the semaphore; the last
+        # holder releases it (see _drop_dataset_holder). The per-dataset lock
+        # makes the "is there already a permit?" check and the acquire atomic,
+        # so two tasks racing to be the first holder cannot double-acquire; a
+        # task waiting for the budget on one dataset never blocks another.
+        async with self._ds_lock(ds_key):
+            permit = self._dataset_permit.get(ds_key)
+            if permit is None:
+                logger.debug(
+                    "Task %d acquiring dataset queue permit for dataset_id=%s",
+                    task_id,
+                    dataset_id,
+                )
+                await self._semaphore.acquire()
+                permit = _DatasetPermit(release=_make_release(self._semaphore))
+                self._dataset_permit[ds_key] = permit
+            permit.holders += 1
+            self._ensure_task_cleanup_registered(task, task_id)
+            # The per-task entry's releaser is a no-op: the shared permit is
+            # released by the last holder in _drop_dataset_holder, not here.
+            self._task_slots[task_id][ds_key] = SlotEntry(_noop_release, depth=1)
 
     # ----------------------------------------- subprocess engine teardown
     def _release_subprocess_engines(self) -> None:
@@ -423,25 +527,19 @@ class DatasetQueue:
         if entry.depth > 0:
             return
 
-        # About to fully release.  Release subprocess engines only when no
-        # other task holds the same dataset: kept warm under the idle TTL,
-        # force-close evicted otherwise (see ``_release_subprocess_engines``).
-        # The caller's response must not wait on the close of engines it has
-        # already finished using.
-        try:
-            other_holds = any(
-                ds_key in slots for tid, slots in self._task_slots.items() if tid != task_id
-            )
-            if not other_holds:
-                self._release_subprocess_engines()
-        finally:
-            self._task_slots.get(task_id, {}).pop(ds_key, None)
-            logger.debug(
-                "Task %d releasing dataset queue slot for dataset_id=%s",
-                task_id,
-                dataset_id,
-            )
-            entry.release()
+        # This task is fully done with ds_key. Drop its entry, then decrement
+        # the dataset-owned permit; the LAST holder across all tasks frees the
+        # subprocess engines (kept warm under the idle TTL, force-close evicted
+        # otherwise) and the single semaphore permit. The per-dataset lock
+        # serialises this against a concurrent ensure_slot sharing the permit.
+        self._task_slots.get(task_id, {}).pop(ds_key, None)
+        async with self._ds_lock(ds_key):
+            self._drop_dataset_holder(ds_key, evict=True)
+        logger.debug(
+            "Task %d releasing dataset queue slot for dataset_id=%s",
+            task_id,
+            dataset_id,
+        )
 
     # ---------------------------------------------------------------- acquire
     @asynccontextmanager
