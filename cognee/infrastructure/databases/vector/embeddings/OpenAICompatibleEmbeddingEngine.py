@@ -24,7 +24,6 @@ from openai import AsyncOpenAI
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
 )
@@ -32,6 +31,10 @@ from tenacity import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
+from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    embedding_retry_condition,
+)
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
@@ -114,8 +117,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (EmbeddingContextWindowTooSmallError, ValueError, asyncio.CancelledError)
+        # Budget exhaustion is terminal too: this engine talks to any
+        # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
+        # by predicate rather than by class -- see embeddings/retry_config.py.
+        retry=embedding_retry_condition(
+            EmbeddingContextWindowTooSmallError, ValueError, asyncio.CancelledError
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -161,6 +167,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             embeddings = [item.embedding for item in response.data]
 
         except Exception as error:
+            # A proxy spend cap is terminal, and none of the branches below can
+            # read it correctly: it is neither a context-window problem nor a
+            # connectivity one. Raise the same actionable 402 the LLM path does.
+            raise_if_budget_exhausted(error)
+
             error_str = str(error).lower()
 
             # Handle context window exceeded by splitting input
