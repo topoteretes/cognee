@@ -231,3 +231,26 @@ def test_unknown_content_type_still_rejected(client, fake_remember):
     assert response.status_code == 400
     assert "Unsupported content_type" in response.json()["detail"]
     assert not fake_remember
+
+
+# ----- self_improvement form field (not code-specific, same harness) -----
+
+
+def test_self_improvement_defaults_true(client, fake_remember):
+    response = client.post(
+        "/remember",
+        data={"datasetName": "ds", "session_id": "s1"},
+        files={"data": ("text_abc.txt", b"a turn", "text/plain")},
+    )
+    assert response.status_code == 200, response.text
+    assert fake_remember["kwargs"]["self_improvement"] is True
+
+
+def test_self_improvement_false_is_forwarded(client, fake_remember):
+    response = client.post(
+        "/remember",
+        data={"datasetName": "ds", "session_id": "s1", "self_improvement": "false"},
+        files={"data": ("text_abc.txt", b"a turn", "text/plain")},
+    )
+    assert response.status_code == 200, response.text
+    assert fake_remember["kwargs"]["self_improvement"] is False

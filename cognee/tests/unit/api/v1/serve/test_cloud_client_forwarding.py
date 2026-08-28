@@ -118,6 +118,20 @@ def test_remember_accepts_single_node_set_string():
     assert field_values(session.calls[0]["data"], "node_set") == ["agent_actions"]
 
 
+def test_remember_sends_self_improvement_only_when_disabled():
+    client, session = make_client()
+    asyncio.run(client.remember("t", session_id="s", self_improvement=False))
+    assert field_values(session.calls[0]["data"], "self_improvement") == ["false"]
+
+    client, session = make_client()
+    asyncio.run(client.remember("t", session_id="s"))
+    assert field_values(session.calls[0]["data"], "self_improvement") == []
+
+    client, session = make_client()
+    asyncio.run(client.remember("t", session_id="s", self_improvement=True))
+    assert field_values(session.calls[0]["data"], "self_improvement") == []
+
+
 def test_remember_without_node_set_sends_no_field():
     client, session = make_client()
     asyncio.run(client.remember("a memory"))

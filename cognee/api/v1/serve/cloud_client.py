@@ -321,6 +321,10 @@ class CloudClient:
             form.add_field("session_id", kwargs["session_id"])
         if kwargs.get("run_in_background"):
             form.add_field("run_in_background", "true")
+        # Only the non-default is sent: an older server without the field
+        # ignores it, and the default request stays byte-identical.
+        if kwargs.get("self_improvement") is False:
+            form.add_field("self_improvement", "false")
         if kwargs.get("custom_prompt"):
             form.add_field("custom_prompt", kwargs["custom_prompt"])
         if kwargs.get("chunk_size") is not None:

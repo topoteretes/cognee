@@ -23,13 +23,12 @@ async def disconnect(clear_saved: bool = False) -> None:
     if client:
         await client.close()
         set_remote_client(None)
-        logger.info("Disconnected from Cognee Cloud")
-        print("  Disconnected from Cognee Cloud. Operations now run locally.")
+        logger.info("Disconnected from Cognee Cloud; operations now run locally")
     else:
-        print("  Not connected to Cognee Cloud.")
+        logger.info("Not connected to Cognee Cloud")
 
     if clear_saved:
         from cognee.api.v1.serve.credentials import clear_credentials
 
         clear_credentials()
-        print("  Saved credentials cleared.")
+        logger.info("Saved credentials cleared")

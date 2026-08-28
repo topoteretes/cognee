@@ -139,6 +139,26 @@ def test_remember_routes_node_set_and_session_id(stub_client):
     assert kwargs["session_id"] == "oc_session"
 
 
+def test_remember_forwards_self_improvement(stub_client):
+    # Hermes stores every turn with self_improvement=False and batches one
+    # improve(session_ids=...) at session end; dropping the flag made the
+    # server bridge on every turn instead.
+    asyncio.run(cognee.remember("a turn", session_id="oc_session", self_improvement=False))
+    _, _, _, kwargs = last_call(stub_client, "remember")
+    assert kwargs["self_improvement"] is False
+
+
+def test_remember_warns_on_session_ids_for_permanent_write(stub_client, monkeypatch):
+    # /api/v1/remember has no session_ids field; the write cannot be linked
+    # to its sessions over HTTP, so say so instead of dropping it silently.
+    warnings = []
+    monkeypatch.setattr(state.logger, "warning", lambda *args, **kwargs: warnings.append(args))
+    asyncio.run(cognee.remember("a note", session_ids=["s1"]))
+    assert warnings and "session_ids" in warnings[0][2]
+    _, _, _, kwargs = last_call(stub_client, "remember")
+    assert "session_ids" not in kwargs
+
+
 def test_remember_warns_on_local_only_kwargs(stub_client, monkeypatch):
     warnings = []
     monkeypatch.setattr(state.logger, "warning", lambda *args, **kwargs: warnings.append(args))

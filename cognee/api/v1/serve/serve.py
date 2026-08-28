@@ -24,6 +24,7 @@ async def serve(
     auth0_audience: Optional[str] = None,
     bootstrap_auth: Optional[bool] = None,
     persist_credentials: bool = True,
+    strict: bool = False,
 ) -> CloudClient:
     """Connect the local Cognee SDK to a remote or local Cognee instance.
 
@@ -70,6 +71,15 @@ async def serve(
             ``serve()`` calls reconnect without arguments). Integrations
             that manage their own keys pass ``False`` so serve stays a
             pure pass-through and never duplicates their credentials.
+        strict: Direct mode only — fail fast instead of connecting
+            optimistically. Raises ``CogneeTransportError`` when the
+            instance does not answer its health check, and
+            ``CogneeAuthError`` when the host is not private and no API
+            key could be resolved (a keyless connect only works against a
+            server with authentication off, which a remote host never
+            is). Agent integrations should pass ``True`` so a bad
+            ``COGNEE_BASE_URL`` surfaces at startup rather than on the
+            first real call.
 
     Returns:
         CloudClient connected to the instance.
@@ -86,6 +96,7 @@ async def serve(
             resolved_api_key,
             bootstrap_auth=bootstrap_auth,
             persist_credentials=persist_credentials,
+            strict=strict,
         )
 
     return await _serve_cloud(
@@ -101,6 +112,7 @@ async def _serve_direct(
     api_key: str = "",
     bootstrap_auth: Optional[bool] = None,
     persist_credentials: bool = True,
+    strict: bool = False,
 ) -> CloudClient:
     """Connect directly to a Cognee instance — no Auth0, no Management API.
 
@@ -117,7 +129,11 @@ async def _serve_direct(
     """
     from cognee.api.v1.serve.cloud_client import CloudClient
     from cognee.api.v1.serve.credentials import CloudCredentials, load_credentials, save_credentials
-    from cognee.api.v1.serve.exceptions import CogneeAPIError
+    from cognee.api.v1.serve.exceptions import (
+        CogneeAPIError,
+        CogneeAuthError,
+        CogneeTransportError,
+    )
     from cognee.api.v1.serve.local_auth import bootstrap_allowed, login_and_mint_api_key
     from cognee.api.v1.serve.state import set_remote_client
 
@@ -131,6 +147,14 @@ async def _serve_direct(
             api_key = saved.api_key
             key_from_cache = True
         elif not bootstrap_allowed(service_url, bootstrap_auth):
+            if strict:
+                raise CogneeAuthError(
+                    f"No API key for {service_url}. Pass api_key (or set COGNEE_API_KEY); "
+                    "keys can only be minted by logging in to private hosts, or with "
+                    "bootstrap_auth=True / COGNEE_AUTH_BOOTSTRAP=true.",
+                    status=401,
+                    operation="serve",
+                )
             logger.warning(
                 "No API key for %s and auth bootstrap is disabled for non-private hosts; "
                 "connecting without one. Pass api_key (or set COGNEE_API_KEY), or opt in "
@@ -143,6 +167,8 @@ async def _serve_direct(
                 api_key = await login_and_mint_api_key(service_url)
                 logger.info("Minted API key for %s via default-user login", service_url)
             except CogneeAPIError as error:
+                if strict:
+                    raise
                 logger.warning(
                     "Could not obtain an API key for %s (%s); connecting without one — "
                     "this only works when the server runs with authentication off.",
@@ -175,6 +201,13 @@ async def _serve_direct(
 
     health_ok = await client._health_check()
     if not health_ok:
+        if strict:
+            await client.close()
+            raise CogneeTransportError(
+                f"Cognee instance at {service_url} did not answer its health check.",
+                operation="serve",
+                cause=ConnectionError(f"{service_url}/health unreachable or non-200"),
+            )
         logger.warning("Instance at %s did not respond to health check", service_url)
 
     # Save so subsequent serve() calls reconnect without args. Callers that
@@ -191,8 +224,8 @@ async def _serve_direct(
         )
 
     set_remote_client(client)
-    mode = "local" if "localhost" in service_url or "127.0.0.1" in service_url else "remote"
-    print(f"  Connected to Cognee ({mode}) at {service_url}")
+    # Logged, not printed: agent hooks parse this process's stdout.
+    logger.info("Connected to Cognee at %s", service_url)
     return client
 
 
@@ -238,7 +271,7 @@ async def _serve_cloud(
             if await client._health_check():
                 logger.info("Using cached credentials for %s (token status ignored)", creds.email)
                 set_remote_client(client)
-                print(f"  Connected to Cognee Cloud at {creds.service_url}")
+                logger.info("Connected to Cognee Cloud at %s", creds.service_url)
                 return client
         except Exception as e:
             logger.warning("Immediate health check failed: %s", e)
@@ -263,14 +296,14 @@ async def _serve_cloud(
                 client = CloudClient(creds.service_url, creds.api_key)
                 if await client._health_check():
                     set_remote_client(client)
-                    print(f"  Connected to Cognee Cloud at {creds.service_url}")
+                    logger.info("Connected to Cognee Cloud at %s", creds.service_url)
                     return client
                 await client.close()
             except Exception as e:
                 logger.warning("Token refresh failed, re-authenticating: %s", e)
 
     # Step 2: Device Code Flow
-    print("  Authenticating with Cognee Cloud...")
+    logger.info("Authenticating with Cognee Cloud...")
     token = await device_code_login(
         domain=auth0_domain,
         client_id=auth0_client_id,
@@ -321,8 +354,8 @@ async def _serve_cloud(
         )
 
     set_remote_client(client)
-    print(f"  Connected to Cognee Cloud at {service_url}")
+    logger.info("Connected to Cognee Cloud at %s", service_url)
     if email:
-        print(f"  Tenant: {tenant.name} ({email})")
+        logger.info("Tenant: %s (%s)", tenant.name, email)
 
     return client

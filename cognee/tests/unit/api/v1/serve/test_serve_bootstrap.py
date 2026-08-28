@@ -448,3 +448,85 @@ def test_freshly_minted_key_gets_no_refresh_hook(isolated_credentials, quiet_cli
     )
     client = asyncio.run(_serve_direct("http://localhost:8011"))
     assert client.refresh_api_key is None
+
+
+# ----- strict mode: fail fast instead of connecting optimistically -----
+
+
+def test_strict_raises_when_health_check_fails(isolated_credentials, monkeypatch):
+    from cognee.api.v1.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.exceptions import CogneeTransportError
+    from cognee.api.v1.serve.serve import _serve_direct
+    from cognee.api.v1.serve.state import get_remote_client
+
+    monkeypatch.setattr(CloudClient, "_health_check", AsyncMock(return_value=False))
+    with pytest.raises(CogneeTransportError):
+        asyncio.run(_serve_direct("http://localhost:8011", "ck_explicit", strict=True))
+    # A failed strict connect must not leave a half-configured client installed.
+    assert get_remote_client() is None
+
+
+def test_non_strict_still_connects_when_health_check_fails(isolated_credentials, monkeypatch):
+    from cognee.api.v1.serve.cloud_client import CloudClient
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.setattr(CloudClient, "_health_check", AsyncMock(return_value=False))
+    client = asyncio.run(_serve_direct("http://localhost:8011", "ck_explicit"))
+    assert client.api_key == "ck_explicit"
+
+
+def test_strict_raises_for_remote_host_without_key(isolated_credentials, quiet_client, monkeypatch):
+    from cognee.api.v1.serve import local_auth as local_auth_module
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.delenv("COGNEE_AUTH_BOOTSTRAP", raising=False)
+    mint = AsyncMock(return_value="ck_should_not_be_used")
+    monkeypatch.setattr(local_auth_module, "login_and_mint_api_key", mint)
+
+    with pytest.raises(CogneeAuthError):
+        asyncio.run(_serve_direct("https://tenant-abc.cloud.cognee.ai", strict=True))
+    mint.assert_not_awaited()
+
+
+def test_strict_raises_when_local_mint_fails(isolated_credentials, quiet_client, monkeypatch):
+    from cognee.api.v1.serve import local_auth as local_auth_module
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.setattr(
+        local_auth_module,
+        "login_and_mint_api_key",
+        AsyncMock(side_effect=CogneeAuthError("denied", status=400, body="", operation="login")),
+    )
+    with pytest.raises(CogneeAuthError):
+        asyncio.run(_serve_direct("http://localhost:8011", strict=True))
+
+
+def test_strict_connects_normally_when_everything_resolves(
+    isolated_credentials, quiet_client, monkeypatch
+):
+    from cognee.api.v1.serve import local_auth as local_auth_module
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    monkeypatch.setattr(
+        local_auth_module, "login_and_mint_api_key", AsyncMock(return_value="ck_minted")
+    )
+    client = asyncio.run(_serve_direct("http://localhost:8011", strict=True))
+    assert client.api_key == "ck_minted"
+
+
+def test_connect_does_not_write_to_stdout(isolated_credentials, quiet_client, capsys):
+    # Agent hooks parse this process's stdout; a banner there corrupts it.
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    asyncio.run(_serve_direct("http://localhost:8011", "ck_explicit"))
+    assert capsys.readouterr().out == ""
+
+
+def test_disconnect_does_not_write_to_stdout(isolated_credentials, quiet_client, capsys):
+    from cognee.api.v1.serve.disconnect import disconnect
+    from cognee.api.v1.serve.serve import _serve_direct
+
+    asyncio.run(_serve_direct("http://localhost:8011", "ck_explicit"))
+    asyncio.run(disconnect())
+    asyncio.run(disconnect())  # the "not connected" branch too
+    assert capsys.readouterr().out == ""

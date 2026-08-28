@@ -1010,6 +1010,12 @@ async def _remember_inner(
             preferred_loaders=kwargs.pop("preferred_loaders", None),
             vector_db_config=kwargs.pop("vector_db_config", None),
             graph_db_config=kwargs.pop("graph_db_config", None),
+            chunker=chunker,
+            # /api/v1/remember has no session_ids field: a permanent write
+            # cannot be linked to its sessions over HTTP. improve(session_ids=)
+            # still bridges them.
+            session_ids=session_ids or None,
+            repo_credentials=kwargs.pop("repo_credentials", None),
         )
         return await client.remember(
             data,
@@ -1019,6 +1025,7 @@ async def _remember_inner(
             chunk_size=chunk_size,
             custom_prompt=custom_prompt,
             run_in_background=run_in_background,
+            self_improvement=self_improvement,
             **kwargs,
         )
 
