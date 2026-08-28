@@ -36,7 +36,10 @@ from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine im
 from cognee.infrastructure.databases.vector.embeddings.OpenAICompatibleEmbeddingEngine import (
     OpenAICompatibleEmbeddingEngine,
 )
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingCredentialsError,
+    EmbeddingException,
+)
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 
 BUDGET_MESSAGE = "Budget has been exceeded! Current cost: 20.00066499999998, Max budget: 20.0"
@@ -76,6 +79,27 @@ def _openai_structured_budget_error() -> openai.RateLimitError:
         },
     )
     return openai.RateLimitError("Rejected by proxy", response=response, body=None)
+
+
+def _openai_transient_rate_limit() -> openai.RateLimitError:
+    """A per-minute rate limit: readable body, but not a spend cap."""
+    response = httpx.Response(
+        status_code=429,
+        request=httpx.Request("POST", "http://localhost:8099/v1/embeddings"),
+        json={"error": {"message": "Rate limit reached", "type": "rate_limit_error"}},
+    )
+    return openai.RateLimitError("Rate limit reached", response=response, body=None)
+
+
+def _openai_auth_error() -> openai.AuthenticationError:
+    return openai.AuthenticationError(
+        "invalid api key",
+        response=httpx.Response(
+            status_code=401,
+            request=httpx.Request("POST", "http://localhost:8099/v1/embeddings"),
+        ),
+        body=None,
+    )
 
 
 def _auth_error() -> litellm.exceptions.AuthenticationError:
@@ -293,6 +317,42 @@ async def test_openai_compatible_structured_budget_rejection_bypasses_retry():
     assert engine._client.embeddings.create.await_count == 1
 
 
+@pytest.mark.asyncio
+async def test_openai_compatible_transient_rate_limit_is_still_retried():
+    """The transient mirror for the engine whose conversion sits highest.
+
+    ``raise_if_budget_exhausted`` runs ahead of this engine's context-window
+    split recovery, so a false positive here would be the most damaging one in
+    the change. The second attempt raises an auth error, which is terminal only
+    because it is re-raised unwrapped, so this also pins that.
+    """
+    engine = OpenAICompatibleEmbeddingEngine(
+        model="test-model",
+        dimensions=4,
+        endpoint="http://localhost:8099",
+        api_key="test-key",
+    )
+
+    calls = {"count": 0}
+
+    async def _transient_then_terminal(**kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise _openai_transient_rate_limit()
+        raise _openai_auth_error()
+
+    engine._client = MagicMock()
+    engine._client.embeddings.create = AsyncMock(side_effect=_transient_then_terminal)
+
+    with pytest.raises(EmbeddingCredentialsError):
+        await engine.embed_text(["hello world"])
+
+    # A callable, not a two-item list: if the auth branch regressed, call 3+
+    # keeps raising the auth error instead of StopAsyncIteration, so the failure
+    # names the real cause instead of running the full ladder first.
+    assert calls["count"] == 2
+
+
 class _FakeAiohttpResponse:
     """Minimal stand-in for the aiohttp response ``_get_embedding`` reads."""
 
@@ -396,3 +456,31 @@ async def test_ollama_engine_object_shaped_context_window_error_is_terminal(monk
         await engine.embed_text(["ab"])
 
     assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_credentials_error_is_terminal_and_stays_a_422():
+    """A rejected key must fail fast without becoming a 500.
+
+    Re-raising the openai class bare would fast-fail too, but it leaves the
+    ``CogneeApiError`` family, so a router's ``except Exception`` turns a
+    configuration mistake into "Internal server error". The status code is as
+    much part of this contract as the attempt count.
+    """
+    engine = OpenAICompatibleEmbeddingEngine(
+        model="test-model",
+        dimensions=4,
+        endpoint="http://localhost:8099",
+        api_key="wrong-key",
+    )
+
+    engine._client = MagicMock()
+    engine._client.embeddings.create = AsyncMock(side_effect=_openai_auth_error())
+
+    with pytest.raises(EmbeddingCredentialsError) as exc_info:
+        await engine.embed_text(["hello world"])
+
+    assert engine._client.embeddings.create.await_count == 1
+    assert exc_info.value.status_code == 422
+    # The provider's own text is what makes the 422 actionable.
+    assert "invalid api key" in exc_info.value.message

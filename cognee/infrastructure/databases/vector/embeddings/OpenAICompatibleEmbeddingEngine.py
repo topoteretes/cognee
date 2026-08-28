@@ -20,6 +20,7 @@ from typing import List, Optional
 
 import httpx
 import numpy as np
+import openai
 from openai import AsyncOpenAI
 from tenacity import (
     before_sleep_log,
@@ -42,6 +43,7 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 )
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
     EmbeddingException,
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
@@ -121,7 +123,10 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
         # by predicate rather than by class -- see embeddings/retry_config.py.
         retry=embedding_retry_condition(
-            EmbeddingContextWindowTooSmallError, ValueError, asyncio.CancelledError
+            EmbeddingContextWindowTooSmallError,
+            EmbeddingCredentialsError,
+            ValueError,
+            asyncio.CancelledError,
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -224,6 +229,31 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 raise EmbeddingException(
                     "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
                 ) from error
+
+            if isinstance(error, (openai.AuthenticationError, openai.PermissionDeniedError)):
+                # Terminal credential failures are re-raised as a cognee type,
+                # not as the openai class: the class is what the exclusion list
+                # cannot use (the generic wrap below would hide it from the
+                # predicate anyway), and staying inside CogneeApiError is what
+                # keeps the API's 422 instead of falling through a router's
+                # ``except Exception`` into a 500. Diverges from
+                # LiteLLMEmbeddingEngine, which re-raises litellm's class bare so
+                # the CLI's remediation can match its message; that message shape
+                # is litellm's, not this SDK's, so the rationale does not carry
+                # over. The provider's text is preserved in the message instead.
+                #
+                # NotFoundError is deliberately left retryable here, unlike in
+                # LiteLLMEmbeddingEngine: an ingress or reverse proxy in front of
+                # a self-hosted server can 404 transiently during a rolling
+                # deploy, which is realistic for exactly this engine. The cost is
+                # that a permanent 404 (a typo'd model name, a wrong base path)
+                # still burns the full ladder.
+                logger.error(
+                    "Embedding endpoint rejected the request: %s. EMBEDDING_ENDPOINT='%s'.",
+                    str(error),
+                    self.endpoint,
+                )
+                raise EmbeddingCredentialsError(str(error)) from error
 
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",
