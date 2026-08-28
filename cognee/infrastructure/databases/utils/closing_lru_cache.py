@@ -85,6 +85,7 @@ handles, the dataset queue, and the delete flows rely on::
 
 import asyncio
 import concurrent.futures
+import hashlib
 import inspect
 import logging
 import time
@@ -95,6 +96,16 @@ from threading import Lock
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _key_id(key) -> str:
+    """Opaque, stable identifier for a cache key, safe to log.
+
+    Cache keys are factory-argument tuples and can embed connection strings
+    or credentials, so the key itself must never reach the logs.
+    """
+    return hashlib.sha256(repr(key).encode("utf-8", errors="replace")).hexdigest()[:12]
+
 
 # Every cache created by the ``closing_lru_cache`` decorator registers here so
 # the idle-TTL reaper can sweep them all through one entry point
@@ -547,9 +558,9 @@ class ClosingLRUCache:
             pending.result(timeout=PENDING_CLOSE_WAIT_SECONDS)
         except concurrent.futures.TimeoutError:
             logger.warning(
-                "Pending close for cache key %r did not finish within %ss; "
+                "Pending close for cache key %s did not finish within %ss; "
                 "proceeding to create a new value",
-                key,
+                _key_id(key),
                 PENDING_CLOSE_WAIT_SECONDS,
             )
             # Do not keep taxing every later lookup for this key with another
@@ -560,10 +571,10 @@ class ClosingLRUCache:
             # one means an invariant broke — surface it, then proceed with
             # creation as usual.
             logger.error(
-                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "BUG: pending close for cache key %s was cancelled unexpectedly — nothing in "
                 "cognee cancels registry futures, so the closing-registry contract was "
                 "violated and must be root-caused (the operation itself continues safely)",
-                key,
+                _key_id(key),
             )
         except Exception:
             # By construction nothing lands here: close futures resolve with
@@ -571,11 +582,11 @@ class ClosingLRUCache:
             # means that invariant broke — surface it loudly, but still
             # proceed: a creator must not fail over close bookkeeping.
             logger.error(
-                "BUG: unexpected error while waiting for pending close of cache key %r — "
+                "BUG: unexpected error while waiting for pending close of cache key %s — "
                 "registry futures must only ever resolve with None (see _start_close), so "
                 "the closing-registry contract was violated and must be root-caused "
                 "(the operation itself continues safely)",
-                key,
+                _key_id(key),
                 exc_info=True,
             )
 
@@ -627,8 +638,8 @@ class ClosingLRUCache:
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "Pending close for cache key %r did not finish within %ss; %s",
-                key,
+                "Pending close for cache key %s did not finish within %ss; %s",
+                _key_id(key),
                 PENDING_CLOSE_WAIT_SECONDS,
                 timeout_action,
             )
@@ -643,10 +654,10 @@ class ClosingLRUCache:
             if not future.cancelled():
                 raise
             logger.error(
-                "BUG: pending close for cache key %r was cancelled unexpectedly — nothing in "
+                "BUG: pending close for cache key %s was cancelled unexpectedly — nothing in "
                 "cognee cancels registry futures, so the closing-registry contract was "
                 "violated and must be root-caused (the operation itself continues safely)",
-                key,
+                _key_id(key),
             )
         except Exception:
             # By construction nothing lands here: close futures resolve with
@@ -654,11 +665,11 @@ class ClosingLRUCache:
             # means that invariant broke — surface it loudly, but let the
             # caller proceed: failing it over close bookkeeping is worse.
             logger.error(
-                "BUG: unexpected error while waiting for pending close of cache key %r — "
+                "BUG: unexpected error while waiting for pending close of cache key %s — "
                 "registry futures must only ever resolve with None (see _start_close), so "
                 "the closing-registry contract was violated and must be root-caused "
                 "(the operation itself continues safely)",
-                key,
+                _key_id(key),
                 exc_info=True,
             )
 

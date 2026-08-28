@@ -45,7 +45,7 @@ def _postgres_graph_url_from_env():
     """
     from cognee.infrastructure.databases.graph.config import get_graph_config
 
-    if get_graph_config().graph_database_provider != "postgres":
+    if get_graph_config().graph_database_provider not in ("postgres", "postgres_demo"):
         return None
     from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -58,10 +58,10 @@ async def _make_postgres_adapter():
     if not url:
         pytest.skip("postgres graph backend not configured (set GRAPH_DATABASE_PROVIDER=postgres)")
 
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
-    from cognee.infrastructure.databases.graph.postgres.tables import _meta
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
+    from cognee.infrastructure.databases.graph.postgres_demo.tables import _meta
 
-    adapter = PostgresAdapter(url)
+    adapter = PostgresDemoAdapter(url)
     try:
         async with adapter.engine.begin() as conn:
             await conn.run_sync(_meta.drop_all)

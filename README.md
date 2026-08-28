@@ -112,7 +112,7 @@ Let’s try Cognee in just a few lines of code.
 
 ### Step 1: Install Cognee
 
-You can install Cognee with **pip**, **poetry**, **uv**, or your preferred Python package manager.
+You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
 ```bash
 uv pip install cognee
@@ -372,7 +372,7 @@ pip install "cognee[postgres]"
 ```bash
 DB_PROVIDER=postgres
 VECTOR_DB_PROVIDER=pgvector
-GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_PROVIDER=postgres_demo
 CACHE_BACKEND=postgres
 
 DB_HOST=localhost

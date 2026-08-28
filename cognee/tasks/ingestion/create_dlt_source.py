@@ -59,17 +59,23 @@ def create_dlt_source_from_connection_string(
 
     if query:
         table_name, where_clause = _parse_sql_query(query)
+        schema_name, bare_table_name = _split_schema_and_table(table_name)
 
         def query_adapter_callback(q, table):
-            if table.name == table_name:
+            # sqlalchemy Table.name is never schema-qualified
+            if table.name == bare_table_name:
                 return q.where(sqlalchemy.text(where_clause))
             return q
 
-        source = sql_database(
-            credentials=connection_string,
-            table_names=[table_name],
-            query_adapter_callback=query_adapter_callback,
-        )
+        source_kwargs = {
+            "credentials": connection_string,
+            "table_names": [bare_table_name],
+            "query_adapter_callback": query_adapter_callback,
+        }
+        if schema_name:
+            source_kwargs["schema"] = schema_name
+
+        source = sql_database(**source_kwargs)
     else:
         source = sql_database(credentials=connection_string)
 
@@ -102,11 +108,27 @@ def create_dlt_source_from_csv(csv_path: str, source_name: Optional[str] = None)
     return source.with_name(source_name or csv_source_name(filename))
 
 
+def _split_schema_and_table(qualified_name: str) -> tuple:
+    """Split a possibly schema-qualified table ref into (schema, table).
+
+    ``public.users`` -> (``public``, ``users``). A bare name has no schema.
+    """
+    if "." not in qualified_name:
+        return None, qualified_name
+    schema, table = qualified_name.rsplit(".", 1)
+    return schema, table
+
+
 def _parse_sql_query(query: str) -> tuple:
     """Extract table name and WHERE clause from a SELECT query.
-    Returns (table_name, where_clause) or raises ValueError."""
+    Returns (table_name, where_clause) or raises ValueError.
+
+    Table names may be schema-qualified (``public.users``). ``\\w+`` alone
+    stops at the first dot, which used to drop both the schema and the WHERE
+    clause.
+    """
     match = re.match(
-        r"SELECT\s+.+?\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?",
+        r"SELECT\s+.+?\s+FROM\s+(\w+(?:\.\w+)*)(?:\s+WHERE\s+(.+))?",
         query.strip(),
         re.IGNORECASE | re.DOTALL,
     )

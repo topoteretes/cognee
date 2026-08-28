@@ -8,6 +8,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.search.types import ContextFormat
 from cognee.api.v1.serve.exceptions import (
     CogneeTransportError,
     http_error_for_status,
@@ -232,12 +233,22 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
+        # Code repos travel as spec strings in the 'repositories' form field —
+        # the server clones git URLs itself and reads local paths from its own
+        # filesystem (only useful when it shares the caller's filesystem).
+        # Nothing is uploaded.
+        if content_type_kw == "code":
+            specs = data if isinstance(data, list) else [data]
+            for spec in specs:
+                form.add_field("repositories", str(spec))
+            if kwargs.get("index_vectors"):
+                form.add_field("index_vectors", "true")
         # Skills are local SKILL.md files. The server's add_skills() reads
         # paths from its own filesystem — sending the path string verbatim
         # would have the server look for that path on the POD, not the
         # caller. For content_type="skills", read each SKILL.md and upload
         # its bytes so the server can write them to a tempdir.
-        if content_type_kw == "skills" and isinstance(data, (str, Path)):
+        elif content_type_kw == "skills" and isinstance(data, (str, Path)):
             source = Path(data).expanduser()
             if source.is_file():
                 skill_files = [source] if source.name == "SKILL.md" else []
@@ -277,9 +288,12 @@ class CloudClient:
             name = getattr(data, "name", "upload")
             form.add_field("data", data, filename=name)
 
+        # Code ingestion can block on a clone + whole-repo parse; the archive
+        # timeout (no total cap) fits both. Prefer run_in_background=True for
+        # large repos regardless.
         default_timeout = (
             self.UPLOAD_TIMEOUT
-            if kwargs.get("content_type") == "cogx-archive"
+            if kwargs.get("content_type") in ("cogx-archive", "code")
             else self.DEFAULT_TIMEOUT
         )
         return await self._post(
@@ -352,6 +366,10 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
+        # Only the non-default shape is worth sending: an older instance ignores the
+        # field, and omitting it keeps the request identical to what it always was.
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["context_format"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -368,6 +386,8 @@ class CloudClient:
             payload["tool_connections"] = kwargs["tool_connections"]
         if kwargs.get("tools_trigger") not in (None, "always"):
             payload["tools_trigger"] = kwargs["tools_trigger"]
+        if kwargs.get("code_query") is not None:
+            payload["code_query"] = kwargs["code_query"]
 
         return await self._post(
             "recall", "/api/v1/recall", json=payload, timeout=kwargs.get("timeout")
@@ -482,6 +502,8 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["contextFormat"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:

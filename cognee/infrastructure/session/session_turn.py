@@ -12,12 +12,14 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
 from cognee.infrastructure.session.session_context_builder import (
     apply_candidate_updates,
     build_active_context_block,
+    render_preference_block,
 )
 from cognee.infrastructure.session.session_context_models import SessionFeedbackEntry
 from cognee.infrastructure.session.session_embeddings import (
@@ -27,6 +29,7 @@ from cognee.infrastructure.session.session_embeddings import (
 from cognee.modules.retrieval.utils.completion import (
     generate_session_completion_with_optional_summary,
 )
+from cognee.modules.user_preferences import load_active_preference_lines
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_turn")
@@ -48,15 +51,30 @@ def compose_session_prompt(
     active_context_block: str,
     conversation_history: str,
 ) -> str:
-    """Assemble the session prompt from active guidance and conversation history.
+    """Assemble the session prompt from the guidance block and history.
 
-    Empty layers are skipped. The active session-context block is placed before
-    the conversation history so durable user/session guidance remains prominent.
+    Empty layers are skipped. The guidance block is the single owner of every
+    guidance line — durable preference lines are merged into its ``Preferences``
+    section by the session-context builder, never layered as a second block —
+    and it sits ahead of the conversation history.
     """
     prompt = conversation_history
     if active_context_block:
         prompt = active_context_block + "\n\n" + prompt
     return prompt
+
+
+async def load_preference_lines_safe() -> list[str]:
+    """Durable preference lines for the guidance channel. Fail-open -> [].
+
+    The layering inversion (session code importing a module) is precedented:
+    session code already imports ``modules.retrieval.utils.completion``.
+    """
+    try:
+        return await load_active_preference_lines()
+    except Exception as error:
+        logger.debug("Session turn: preference lookup failed open: %s", error)
+        return []
 
 
 def _empty_turn_preparation(query: str) -> SessionTurnPreparation:
@@ -140,24 +158,12 @@ async def generate_session_answer(
 
     Returns ``(answer, context_to_store, served_context_ids)``.
     """
-    conversation_history = await select_session_history(
+    conversation_history, served_ids = await build_session_prompt(
         session_manager,
-        user_id,
-        session_id,
-        query_text=answer_query,
+        user_id=user_id,
+        session_id=session_id,
+        query=answer_query,
     )
-
-    served_ids: list[str] = []
-    active_context_block = ""
-    if session_manager.is_auto_feedback_enabled():
-        active_context_block, served_ids = await build_active_context_block_safe(
-            session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            query=answer_query,
-        )
-
-    conversation_history = compose_session_prompt(active_context_block, conversation_history)
 
     (
         answer,
@@ -176,12 +182,65 @@ async def generate_session_answer(
     return answer, context_to_store, served_ids or None
 
 
+async def build_session_prompt(
+    session_manager,
+    *,
+    user_id: str,
+    session_id: str,
+    query: str,
+    history: str | None = None,
+    stamp_served: bool = True,
+) -> tuple[str, list[str]]:
+    """Assemble the session layer of a completion prompt: guidance block, then history.
+
+    The single owner of this assembly. The sequential answer path calls it as-is; an
+    ``only_context`` preview calls it with ``stamp_served=False`` so it reads the same
+    layers without touching ``last_served_at``. One function, two modes — so the preview
+    cannot drift from what the real completion sends.
+
+    ``history`` lets a caller that has already loaded the conversation (once across a
+    dataset fan-out) skip the second read; ``None`` loads it here. Returns
+    ``(prompt, served_ids)``.
+    """
+    conversation_history = (
+        history
+        if history is not None
+        else await select_session_history(
+            session_manager,
+            user_id,
+            session_id,
+            query_text=query,
+        )
+    )
+
+    preference_lines = await load_preference_lines_safe()
+    served_ids: list[str] = []
+    active_context_block = ""
+    if session_manager.is_auto_feedback_enabled():
+        active_context_block, served_ids = await build_active_context_block_safe(
+            session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            query=query,
+            preference_lines=preference_lines,
+            stamp_served=stamp_served,
+        )
+    elif preference_lines:
+        # No stored-entry guidance layer, but durable preferences still render
+        # through the same owner, budgets, and block shape.
+        active_context_block = render_preference_block(preference_lines)
+
+    return compose_session_prompt(active_context_block, conversation_history), served_ids
+
+
 async def build_active_context_block_safe(
     session_manager,
     *,
     user_id: str,
     session_id: str,
     query: str,
+    preference_lines: list[str] | None = None,
+    stamp_served: bool = True,
 ) -> tuple[str, list[str]]:
     """Render the active session-context guidance block. Fail-open -> ("", [])."""
     try:
@@ -190,6 +249,8 @@ async def build_active_context_block_safe(
             user_id=user_id,
             session_id=session_id,
             query=query,
+            preference_lines=preference_lines,
+            stamp_served=stamp_served,
         )
     except Exception as e:
         logger.warning("Active session-context block failed: %s", e)
@@ -287,7 +348,19 @@ async def apply_session_turn_analysis(
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-    if not analysis.candidate_context_updates and not analysis.served_context_ratings:
+    # A rating is only evidence when there is a previous turn it can refer to,
+    # and only worth persisting when preference personalization can ever
+    # consume it — with the flag off, a rating-only turn must save nothing.
+    previous_answer_rating = (
+        analysis.previous_answer_rating
+        if previous_qa_id and get_base_config().personalization_enabled
+        else None
+    )
+    if (
+        not analysis.candidate_context_updates
+        and not analysis.served_context_ratings
+        and previous_answer_rating is None
+    ):
         return []
     try:
         ratings = list(analysis.served_context_ratings or [])
@@ -298,6 +371,7 @@ async def apply_session_turn_analysis(
             created_at=datetime.now(timezone.utc).isoformat(),
             raw_text=query,
             referenced_qa_ids=[previous_qa_id] if previous_qa_id else [],
+            referenced_qa_rating=previous_answer_rating,
             influencing_context_ids=list(served_ids or []),
             candidate_context_entries=[
                 c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in candidates

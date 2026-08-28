@@ -9,7 +9,7 @@ import os
 import pytest
 import pytest_asyncio
 
-from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
@@ -43,7 +43,7 @@ async def adapter():
         f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
     )
 
-    graph_adapter = PostgresAdapter(connection_string=connection_string)
+    graph_adapter = PostgresDemoAdapter(connection_string=connection_string)
     vector_adapter = PGVectorAdapter(
         connection_string=connection_string,
         api_key=None,

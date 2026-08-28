@@ -7,7 +7,7 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 
 POSTGRES_ADAPTER_MODULES = [
-    "cognee.infrastructure.databases.graph.postgres.adapter",
+    "cognee.infrastructure.databases.graph.postgres_demo.adapter",
     "cognee.infrastructure.databases.hybrid.postgres.adapter",
 ]
 
@@ -103,10 +103,10 @@ async def test_natural_language_search_rejects_backend_without_cypher_support():
 def test_postgres_adapters_declare_no_cypher_support():
     """The class attribute is set without instantiating (no DB connection needed)."""
     postgres_adapter = pytest.importorskip(
-        "cognee.infrastructure.databases.graph.postgres.adapter",
+        "cognee.infrastructure.databases.graph.postgres_demo.adapter",
         reason="postgres extra not installed",
     )
-    assert postgres_adapter.PostgresAdapter.supports_cypher_queries is False
+    assert postgres_adapter.PostgresDemoAdapter.supports_cypher_queries is False
 
     hybrid_adapter = pytest.importorskip(
         "cognee.infrastructure.databases.hybrid.postgres.adapter",

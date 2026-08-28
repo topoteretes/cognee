@@ -21,6 +21,7 @@ to the configured fallback model. This file never imports ``instructor``.
 import asyncio
 import json
 import logging
+import re
 from typing import Any, cast
 
 import litellm
@@ -45,6 +46,22 @@ from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
 observe = get_observe()
+
+# Models on the prompted-JSON path routinely wrap their answer in a markdown
+# fence (```json ... ```). That is not a malformed answer -- the JSON inside is
+# valid -- but model_validate_json() sees a backtick at column 1 and rejects it,
+# and the self-correction retry does not help because a model that fences once
+# fences again. Strip a fence that wraps the entire payload before parsing.
+# Deliberately anchored to the whole string: JSON that merely *contains*
+# backticks in a value is left alone.
+_JSON_FENCE_RE = re.compile(r"\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z", re.DOTALL)
+
+
+def _strip_json_fence(text: str) -> str:
+    """Return ``text`` with a wrapping markdown code fence removed, if present."""
+    match = _JSON_FENCE_RE.match(text)
+    return match.group(1) if match else text
+
 
 # Max self-correction attempts when a json-object provider returns JSON that
 # fails validation. Separate from the tenacity retry (transient HTTP errors).
@@ -249,7 +266,7 @@ class NativeLiteLLMAdapter:
                     **merged_kwargs,
                 )
 
-            raw_content = response.choices[0].message.content or "{}"
+            raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
                 return _attach_raw_response(
                     response_model.model_validate_json(raw_content), response

@@ -22,10 +22,10 @@ from cognee.infrastructure.databases.vector.pgvector.PGVectorSharedDatasetDataba
 from cognee.infrastructure.databases.vector.turso.TursoVectorDatasetDatabaseHandler import (
     TursoVectorDatasetDatabaseHandler,
 )
-from cognee.infrastructure.databases.graph.postgres.PostgresGraphDatasetDatabaseHandler import (
+from cognee.infrastructure.databases.graph.postgres_demo.PostgresGraphDatasetDatabaseHandler import (
     PostgresGraphDatasetDatabaseHandler,
 )
-from cognee.infrastructure.databases.graph.postgres.PostgresGraphSharedDatasetDatabaseHandler import (
+from cognee.infrastructure.databases.graph.postgres_demo.PostgresGraphSharedDatasetDatabaseHandler import (
     PostgresGraphSharedDatasetDatabaseHandler,
 )
 from cognee.infrastructure.databases.graph.turso.TursoGraphDatasetDatabaseHandler import (
@@ -60,13 +60,14 @@ supported_dataset_database_handlers = {
         "handler_instance": TursoVectorDatasetDatabaseHandler,
         "handler_provider": "turso",
     },
+    # postgres_demo is the canonical provider name; postgres remains accepted.
     "postgres_graph": {
         "handler_instance": PostgresGraphDatasetDatabaseHandler,
-        "handler_provider": "postgres",
+        "handler_provider": ("postgres", "postgres_demo"),
     },
     "postgres_graph_shared": {
         "handler_instance": PostgresGraphSharedDatasetDatabaseHandler,
-        "handler_provider": "postgres",
+        "handler_provider": ("postgres", "postgres_demo"),
     },
     # Ladybug is the renamed Kuzu engine — either provider name works with either handler.
     "ladybug": {

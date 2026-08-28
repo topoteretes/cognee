@@ -66,10 +66,29 @@ jobs:
           python-version: ${{ matrix.python-version }}
           extra-dependencies: ${{ inputs.extra-dependencies }}
 
+      - name: Drop Git for Windows usr\bin from PATH
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Same guard the delete-test jobs already carry. Without it this job
+          # hangs: the step runs under Git for Windows' bash, so its usr\bin
+          # OpenSSL DLLs shadow the ones native extensions load, and the import
+          # deadlocks. pytest then never emits a single line -- --timeout only
+          # covers test execution, so it never engages -- and the job sits until
+          # the 60-minute ceiling cancels it. Observed on 3 of 12 recent runs.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
+
       - name: Run unit tests
         shell: bash
         run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
         env:
+          # Unbuffered + faulthandler so a wedged interpreter leaves evidence
+          # instead of a 60-minute silent cancel.
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -103,9 +122,26 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Drop Git for Windows usr\bin from PATH
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Same guard the delete-test jobs already carry. Without it this job
+          # hangs: the step runs under Git for Windows' bash, so its usr\bin
+          # OpenSSL DLLs shadow the ones native extensions load, and the import
+          # deadlocks. pytest then never emits a single line -- --timeout only
+          # covers test execution, so it never engages -- and the job sits until
+          # the 60-minute ceiling cancels it. Observed on 3 of 12 recent runs.
+          $kept = $env:PATH -split ';' | Where-Object { $_ -notmatch 'Git\\usr\\bin' }
+          $dropped = ($env:PATH -split ';').Count - $kept.Count
+          "PATH=$($kept -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Dropped $dropped PATH entry/entries matching Git\usr\bin"
+
       - name: Run default basic pipeline
         shell: bash
         env:
+          PYTHONUNBUFFERED: 1
+          PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}

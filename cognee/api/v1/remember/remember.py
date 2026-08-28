@@ -66,6 +66,7 @@ class RememberKwargs(TypedDict, total=False):
     content_type: Literal["skills", "code"]
     skill_improvement: dict[str, Any]
     index_vectors: bool
+    repo_credentials: str
     skills_text: str
     skill_name: str
     primary_key: str
@@ -167,10 +168,14 @@ async def _add_to_session(session_id: str, data, user):
     stripped = text.strip()
     if not stripped:
         return
-    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
+    matched_prefix = next(
+        (prefix for prefix in _SESSION_PLACEHOLDER_PREFIXES if stripped.startswith(prefix)), None
+    )
+    if matched_prefix is not None:
+        # Log only the constant prefix — the payload itself must never reach the logs.
         logger.debug(
-            "remember: skipping session write for placeholder-only payload (%.40s…)",
-            stripped,
+            "remember: skipping session write for placeholder-only payload (%s…)",
+            matched_prefix,
         )
         return
 
@@ -712,7 +717,10 @@ async def remember(
             code repository (local path or remote git URL, or a list of
             them) as an architectural code graph via the enola-backed
             pipeline. ``remember()`` does not auto-detect skill paths or
-            repositories.
+            repositories. ``run_in_background=True`` is honored for code:
+            the call returns a ``running`` result with the dataset_id while
+            cloning and graph extraction continue server-side — poll the
+            dataset status for ``code_graph_pipeline`` or await the result.
         skill_improvement: Internal skill-improvement control dict used with
             ``SkillRunEntry`` or ``content_type="skills"``. ``apply=True``
             requires an existing ``proposal_id``.
@@ -962,6 +970,13 @@ async def _remember_inner(
             **kwargs,
         )
 
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
+
     # Run vector migrations lazily on the first local SDK call.
     # This ensures stale LanceDB schemas are migrated before any
     # writes, even when the API server was never started. Scoped to the
@@ -979,8 +994,12 @@ async def _remember_inner(
     # normal remember), so they must be consumed here regardless of content_type.
     skills_text = kwargs.pop("skills_text", None)
     skill_name = kwargs.pop("skill_name", None)
-    # code-only kwarg, consumed here for the same reason as the skills ones.
+    # code-only kwargs, consumed here for the same reason as the skills ones.
     index_vectors = kwargs.pop("index_vectors", None)
+    # Out-of-band auth token for private https remotes (e.g. a GitHub App
+    # installation token). Kept out of the repo URLs so no secret ever rides
+    # a loggable string — see resolve_repo_source.
+    repo_credentials = kwargs.pop("repo_credentials", None)
 
     def _requested_node_set(default: str) -> str:
         requested_node_set = kwargs.get("node_set") or [default]
@@ -998,6 +1017,8 @@ async def _remember_inner(
         )
     if index_vectors is not None and content_type != "code":
         raise ValueError("index_vectors is supported only for content_type='code'.")
+    if repo_credentials is not None and content_type != "code":
+        raise ValueError("repo_credentials is supported only for content_type='code'.")
     if content_type == "code" and session_id is not None:
         raise ValueError(
             "session_id is not applicable to content_type='code'; code graphs are "
@@ -1011,7 +1032,7 @@ async def _remember_inner(
         from cognee.modules.run_custom_pipeline import run_custom_pipeline
         from cognee.shared.utils import send_telemetry
         from cognee.tasks.code_graph import get_code_graph_tasks
-        from cognee.tasks.code_graph.resolve_repo import resolve_repo_source
+        from cognee.tasks.code_graph.resolve_repo import redact_repo_spec, resolve_repo_source
 
         repo_specs = data if isinstance(data, list) else [data]
         if not repo_specs or not all(isinstance(spec, (str, _Path)) for spec in repo_specs):
@@ -1027,6 +1048,7 @@ async def _remember_inner(
                 "dataset_name": dataset_name,
                 "repository_count": len(repo_specs),
                 "index_vectors": bool(index_vectors),
+                "run_in_background": run_in_background,
                 "cognee_version": cognee_version,
             },
         )
@@ -1038,23 +1060,109 @@ async def _remember_inner(
             session_ids=None,
         )
         result.items = []
-        for spec in repo_specs:
-            repo_path = await resolve_repo_source(spec)
-            await run_custom_pipeline(
+        user = kwargs.get("user")
+        dataset_ref = dataset_id or dataset_name
+
+        def _apply_code_run_info(item: dict, pipeline_result) -> None:
+            # Blocking run_custom_pipeline returns {dataset_id: PipelineRunInfo};
+            # lift the identifiers onto the result so callers can poll
+            # GET /v1/datasets/status?pipeline=code_graph_pipeline, and surface
+            # an errored run as an errored result instead of a false success.
+            if not isinstance(pipeline_result, dict) or not pipeline_result:
+                return
+            ds_id, run_info = next(iter(pipeline_result.items()))
+            result.dataset_id = str(ds_id)
+            run_dataset_name = getattr(run_info, "dataset_name", None)
+            if run_dataset_name:
+                result.dataset_name = run_dataset_name
+            run_id = getattr(run_info, "pipeline_run_id", None)
+            if run_id is not None:
+                item["pipeline_run_id"] = str(run_id)
+                result.pipeline_run_id = str(run_id)
+            if "Errored" in getattr(run_info, "status", ""):
+                item["status"] = "errored"
+                result.status = "errored"
+                if not result.error:
+                    result.error = f"code_graph_pipeline errored for repository '{item['source']}'"
+
+        async def _run_one_repo(spec) -> dict:
+            repo_path = await resolve_repo_source(spec, credentials=repo_credentials)
+            # redact: connector-supplied URLs may carry a token in the
+            # userinfo, which must not surface in results or logs.
+            item = {
+                "kind": "code_repository",
+                "source": redact_repo_spec(spec),
+                "path": str(repo_path),
+            }
+            pipeline_result = await run_custom_pipeline(
                 tasks=get_code_graph_tasks(str(repo_path), index_vectors=bool(index_vectors)),
                 data=str(repo_path),
-                dataset=dataset_id or dataset_name,
-                user=kwargs.get("user"),
+                dataset=dataset_ref,
+                user=user,
                 pipeline_name="code_graph_pipeline",
                 # The default (graph-only) pipeline performs no LLM or embedding
                 # calls, so it must not demand an API key on first run. With
                 # index_vectors=True embeddings are used, so the checks stay on.
                 skip_connection_test=not bool(index_vectors),
             )
-            result.items.append(
-                {"kind": "code_repository", "source": str(spec), "path": str(repo_path)}
-            )
-        result.items_processed = len(result.items)
+            _apply_code_run_info(item, pipeline_result)
+            return item
+
+        if run_in_background:
+            # Resolve the dataset before returning so the response carries the
+            # dataset_id callers poll via GET /v1/datasets/status, and so
+            # authorization errors surface at request time instead of inside
+            # the background task.
+            user, authorized_datasets = await resolve_authorized_user_datasets(dataset_ref, user)
+            dataset = authorized_datasets[0]
+            dataset_ref = dataset.id
+            result.dataset_id = str(dataset.id)
+            result.dataset_name = dataset.name
+            result.status = "running"
+
+            async def _code_graph_background():
+                # One failing repo must not abort the rest of the batch — record
+                # the failure per item and keep going.
+                errors: list = []
+                for position, spec in enumerate(repo_specs, start=1):
+                    try:
+                        item = await _run_one_repo(spec)
+                    except Exception as exc:
+                        source = redact_repo_spec(spec)
+                        # Specs can embed URL credentials — never log spec-derived values.
+                        logger.exception(
+                            "Background code-graph run failed for repo %d of %d",
+                            position,
+                            len(repo_specs),
+                        )
+                        item = {
+                            "kind": "code_repository",
+                            "source": source,
+                            "status": "errored",
+                            "error": str(exc),
+                        }
+                        errors.append(f"{source}: {exc}")
+                    result.items.append(item)
+                result.items_processed = len(
+                    [item for item in result.items if item.get("status") != "errored"]
+                )
+                if errors:
+                    result.status = "errored"
+                    result.error = "; ".join(errors)
+                elif result.status == "running":
+                    result.status = "completed"
+                result.elapsed_seconds = time.monotonic() - result._started_at
+
+            result._task = asyncio.create_task(_code_graph_background())
+            _BACKGROUND_REMEMBER_TASKS.add(result._task)
+            result._task.add_done_callback(_BACKGROUND_REMEMBER_TASKS.discard)
+            return result
+
+        for spec in repo_specs:
+            result.items.append(await _run_one_repo(spec))
+        result.items_processed = len(
+            [item for item in result.items if item.get("status") != "errored"]
+        )
         result.elapsed_seconds = time.monotonic() - result._started_at
         return result
 
