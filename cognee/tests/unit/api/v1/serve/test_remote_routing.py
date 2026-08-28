@@ -5,8 +5,8 @@ the module-level functions decide *what* reaches the client. These tests
 pin the routing-site contracts: improve() hands over ``session_ids`` and
 ``run_in_background`` (hermes-agent's documented reason for bypassing
 CloudClient), add() hands over ``node_set``/``dataset_id``, recall() maps
-``auto_route`` onto the tri-state ``search_type``, and search() warns
-instead of silently dropping ``session_id``.
+``auto_route`` onto the tri-state ``search_type``, and search() forwards
+``session_id``.
 """
 
 import asyncio
@@ -148,10 +148,12 @@ def test_remember_warns_on_local_only_kwargs(stub_client, monkeypatch):
     assert "preferred_loaders" not in kwargs
 
 
-def test_search_warns_on_session_id_instead_of_dropping_silently(stub_client, monkeypatch):
+def test_search_forwards_session_id(stub_client, monkeypatch):
+    # The server's search DTO accepts session_id (history + guidance feed
+    # the completion), so it must reach the client rather than be warned away.
     warnings = []
     monkeypatch.setattr(state.logger, "warning", lambda *args, **kwargs: warnings.append(args))
     asyncio.run(cognee.search("query", session_id="oc_session"))
-    assert warnings and "session_id" in warnings[0][2]
+    assert not warnings
     _, _, kwargs = last_call(stub_client, "search")
-    assert "session_id" not in kwargs
+    assert kwargs["session_id"] == "oc_session"

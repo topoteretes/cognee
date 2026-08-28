@@ -256,12 +256,9 @@ async def search(
 
     client = get_remote_client()
     if client is not None:
-        # session_id has no field on the server's search DTO (session-aware
-        # retrieval over HTTP is recall's job); the rest are local-only
-        # objects that cannot cross the HTTP boundary.
+        # Local-only objects that cannot cross the HTTP boundary.
         warn_unsupported_remote_params(
             "search",
-            session_id=session_id,
             user=user,
             retriever_specific_config=retriever_specific_config,
             node_type=node_type if node_type is not NodeSet else None,
@@ -276,6 +273,7 @@ async def search(
             node_name=node_name,
             only_context=only_context,
             context_format=context_format,
+            session_id=session_id,
             verbose=verbose,
             include_references=include_references,
             code_query=code_query,

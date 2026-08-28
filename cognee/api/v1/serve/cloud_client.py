@@ -2,8 +2,11 @@
 
 import asyncio
 import io
+import json as json_module
 from pathlib import Path
 from typing import Any, Optional, Union
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 from uuid import UUID
 
 import aiohttp
@@ -15,6 +18,7 @@ from cognee.api.v1.serve.exceptions import (
 )
 from cognee.api.v1.serve.state import UNSET, _Unset
 from cognee.modules.ingestion.data_types.TextData import create_text_data
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("serve.cloud_client")
@@ -38,6 +42,108 @@ def _as_node_set_list(node_set: Union[str, list, None]) -> Optional[list]:
     if isinstance(node_set, str):
         return [node_set]
     return list(node_set)
+
+
+def _local_file_candidates(item: str) -> Optional[list]:
+    """Resolve a string the way local ingestion does: file(s) or None for text.
+
+    Mirrors ``save_data_item_to_storage``: ``file://`` URIs and existing
+    absolute/relative paths are files (directories expand to their files,
+    recursively, like ``resolve_data_directories``); anything else is raw
+    text. Remote fetches (``http(s)://``, ``s3://``) are rejected — the
+    server's upload endpoints take file parts only, and sending the URL as
+    text would ingest the literal URL string instead of its content.
+    """
+    parsed = urlparse(item)
+    if parsed.scheme in ("http", "https", "s3"):
+        raise ValueError(
+            f"{parsed.scheme}:// sources cannot be ingested while connected to a remote "
+            f"Cognee instance: {item!r}. Download the content and pass the file, or call "
+            "cognee.disconnect() to ingest it locally."
+        )
+    if parsed.scheme == "file":
+        # ``file://relative/path`` parses the first segment as netloc.
+        path = Path(url2pathname(f"{parsed.netloc}{parsed.path}")).expanduser()
+        if not path.exists():
+            raise FileNotFoundError(f"Local file does not exist: {item}")
+    else:
+        path = Path(item).expanduser()
+        try:
+            if not path.exists():
+                return None
+        except (OSError, ValueError):
+            # Long or NUL-bearing strings are text, not paths.
+            return None
+    if path.is_dir():
+        return sorted(child for child in path.rglob("*") if child.is_file())
+    if path.is_file():
+        return [path]
+    return None
+
+
+def _add_data_fields(form: aiohttp.FormData, data: Any) -> list:
+    """Attach ``data`` as multipart ``data`` parts, matching local ingestion semantics.
+
+    Accepts a str, Path, file-like object, ``DataItem``, or a list of those.
+    Strings are uploaded as text under a content-hash name unless they name a
+    local file (``file://`` or an existing path), which is uploaded under its
+    real basename — the extension is the server's loader-routing signal.
+    ``DataItem`` labels / external_metadata travel as the positional JSON
+    arrays the server pairs with the uploads.
+
+    Returns the file handles opened here; the caller closes them once the
+    request has been sent.
+    """
+    opened: list = []
+    labels: list = []
+    metadata: list = []
+
+    def _attach(obj, filename, content_type=None, *, label=None, meta=None):
+        if content_type:
+            form.add_field("data", obj, filename=filename, content_type=content_type)
+        else:
+            form.add_field("data", obj, filename=filename)
+        labels.append(label or "")
+        metadata.append(meta or None)
+
+    for item in data if isinstance(data, list) else [data]:
+        label = meta = None
+        if isinstance(item, DataItem):
+            label, meta, item = item.label, item.external_metadata, item.data
+        if isinstance(item, Path):
+            item = str(item)
+        if isinstance(item, str):
+            files = _local_file_candidates(item)
+            if files is None:
+                _attach(
+                    io.BytesIO(item.encode("utf-8")),
+                    _text_upload_filename(item),
+                    "text/plain",
+                    label=label,
+                    meta=meta,
+                )
+                continue
+            for path in files:
+                handle = path.open("rb")
+                opened.append(handle)
+                _attach(handle, path.name, label=label, meta=meta)
+        elif hasattr(item, "read"):
+            name = getattr(item, "name", "upload")
+            _attach(item, Path(str(name)).name or "upload", label=label, meta=meta)
+
+    if any(labels):
+        form.add_field("labels", json_module.dumps(labels))
+    if any(entry for entry in metadata):
+        form.add_field("external_metadata", json_module.dumps(metadata))
+    return opened
+
+
+def _close_all(handles: list) -> None:
+    for handle in handles:
+        try:
+            handle.close()
+        except Exception:
+            pass
 
 
 class CloudClient:
@@ -139,8 +245,6 @@ class CloudClient:
                 if resp.status >= 400:
                     body: Any = await resp.text()
                     try:
-                        import json as json_module
-
                         body = json_module.loads(body)
                     except Exception:
                         pass
@@ -209,6 +313,7 @@ class CloudClient:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
         form = aiohttp.FormData()
         form.add_field("datasetName", dataset_name)
+        opened_handles: list = []
 
         if kwargs.get("dataset_id"):
             form.add_field("datasetId", str(kwargs["dataset_id"]))
@@ -264,29 +369,10 @@ class CloudClient:
                 # the SKILL.md layout when writing to its tempdir.
                 rel = skill_path.relative_to(base).as_posix()
                 form.add_field("data", skill_path.open("rb"), filename=rel)
-        # Handle data — string or file-like objects
-        elif isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
-                elif hasattr(item, "read"):
-                    name = getattr(item, "name", "upload")
-                    form.add_field("data", item, filename=name)
-        elif hasattr(data, "read"):
-            name = getattr(data, "name", "upload")
-            form.add_field("data", data, filename=name)
+        # Text, local file paths, file-like objects, DataItems — same
+        # resolution rules as local ingestion.
+        else:
+            opened_handles = _add_data_fields(form, data)
 
         # Code ingestion can block on a clone + whole-repo parse; the archive
         # timeout (no total cap) fits both. Prefer run_in_background=True for
@@ -296,13 +382,16 @@ class CloudClient:
             if kwargs.get("content_type") in ("cogx-archive", "code")
             else self.DEFAULT_TIMEOUT
         )
-        return await self._post(
-            "remember",
-            "/api/v1/remember",
-            data=form,
-            timeout=kwargs.get("timeout"),
-            default_timeout=default_timeout,
-        )
+        try:
+            return await self._post(
+                "remember",
+                "/api/v1/remember",
+                data=form,
+                timeout=kwargs.get("timeout"),
+                default_timeout=default_timeout,
+            )
+        finally:
+            _close_all(opened_handles)
 
     async def remember_entry(
         self,
@@ -436,30 +525,12 @@ class CloudClient:
         for node_set_entry in _as_node_set_list(kwargs.get("node_set")) or []:
             form.add_field("node_set", str(node_set_entry))
 
-        if isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
-                elif hasattr(item, "read"):
-                    name = getattr(item, "name", "upload")
-                    form.add_field("data", item, filename=name)
-        elif hasattr(data, "read"):
-            name = getattr(data, "name", "upload")
-            form.add_field("data", data, filename=name)
+        opened_handles = _add_data_fields(form, data)
 
-        return await self._post("add", "/api/v1/add", data=form, timeout=kwargs.get("timeout"))
+        try:
+            return await self._post("add", "/api/v1/add", data=form, timeout=kwargs.get("timeout"))
+        finally:
+            _close_all(opened_handles)
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
@@ -513,6 +584,8 @@ class CloudClient:
             payload["contextFormat"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
+        if kwargs.get("session_id"):
+            payload["sessionId"] = kwargs["session_id"]
         if kwargs.get("skills") is not None:
             payload["skills"] = [
                 skill.name if hasattr(skill, "name") else str(skill) for skill in kwargs["skills"]
