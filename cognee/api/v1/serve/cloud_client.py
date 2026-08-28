@@ -465,9 +465,16 @@ class CloudClient:
         """POST /api/v1/cognify — build the knowledge graph."""
         payload: dict = {}
         if datasets:
-            payload["datasets"] = (
-                [str(d) for d in datasets] if isinstance(datasets, list) else [str(datasets)]
-            )
+            entries = datasets if isinstance(datasets, list) else [datasets]
+            # UUIDs must travel as dataset_ids: the server resolves entries in
+            # ``datasets`` by *name* and creates any it does not find, so a
+            # stringified UUID there would create a junk dataset named after it.
+            dataset_ids = [str(entry) for entry in entries if isinstance(entry, UUID)]
+            dataset_names = [str(entry) for entry in entries if not isinstance(entry, UUID)]
+            if dataset_ids:
+                payload["dataset_ids"] = dataset_ids
+            if dataset_names:
+                payload["datasets"] = dataset_names
         if kwargs.get("run_in_background"):
             payload["run_in_background"] = True
         if kwargs.get("custom_prompt"):

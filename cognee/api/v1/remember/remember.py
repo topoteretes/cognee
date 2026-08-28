@@ -145,13 +145,64 @@ def _data_to_text(data) -> str:
 _SESSION_PLACEHOLDER_PREFIXES = ("[UploadFile]", "[file:", "[BinaryIO", "[SpooledTemporaryFile")
 
 
+async def _read_upload_as_text(upload) -> Optional[str]:
+    """Return the UTF-8 text of an uploaded/file-like object, or None if it is not text.
+
+    HTTP callers (CloudClient, the agent plugins, curl) can only deliver text
+    to ``/api/v1/remember`` as a multipart file part, so a session write that
+    arrives over HTTP is always a file-like object wrapping the text. Read it
+    back so it is stored like the string a local SDK caller would pass. Bytes
+    that do not decode as UTF-8 are a real binary file and return None, so the
+    caller falls back to the placeholder-and-skip behaviour.
+    """
+    read_result = upload.read()
+    payload = await read_result if hasattr(read_result, "__await__") else read_result
+    # Rewind so any later consumer of the same object still sees the content.
+    seek = getattr(upload, "seek", None)
+    if seek is not None:
+        try:
+            seek_result = seek(0)
+            if hasattr(seek_result, "__await__"):
+                await seek_result
+        except Exception:
+            pass
+    if isinstance(payload, str):
+        return payload
+    if not isinstance(payload, (bytes, bytearray)):
+        return None
+    try:
+        return bytes(payload).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+async def _materialize_text_uploads(data):
+    """Replace text-bearing file-like items in ``data`` with their decoded string.
+
+    Non-text (binary) uploads are left in place so ``_data_to_text`` still
+    renders them as placeholders.
+    """
+
+    async def _one(item):
+        if isinstance(item, (str, bytes)) or not hasattr(item, "read"):
+            return item
+        text = await _read_upload_as_text(item)
+        return text if text is not None else item
+
+    if isinstance(data, list):
+        return [await _one(item) for item in data]
+    return await _one(data)
+
+
 async def _add_to_session(session_id: str, data, user):
     """Add a Q&A entry to the session cache.
 
     Sessions store chat-shaped content (prompts, assistant answers,
-    Q&A turns). File-upload data coerces to placeholder strings like
-    ``[UploadFile]`` / ``[file: name]`` — those are useless in the
-    session cache and pollute recall results, so they're skipped.
+    Q&A turns). Text delivered as an upload (the only way HTTP callers can
+    send it) is read back and stored as text. Binary file uploads coerce to
+    placeholder strings like ``[UploadFile]`` / ``[file: name]`` — those are
+    useless in the session cache and pollute recall results, so they're
+    skipped.
     """
     from cognee.infrastructure.session.get_session_manager import get_session_manager
 
@@ -164,6 +215,7 @@ async def _add_to_session(session_id: str, data, user):
     if not user_id:
         return
 
+    data = await _materialize_text_uploads(data)
     text = _data_to_text(data)
     stripped = text.strip()
     if not stripped:

@@ -180,6 +180,45 @@ def test_improve_uuid_dataset_becomes_dataset_id():
     assert "dataset_name" not in payload
 
 
+# ----- cognify dataset routing -----
+
+
+def test_cognify_uuid_datasets_travel_as_dataset_ids():
+    # The server resolves ``datasets`` entries by name and creates any it
+    # cannot find — a stringified UUID there would create a junk dataset.
+    client, session = make_client()
+    dataset_id = UUID("00000000-0000-0000-0000-000000000009")
+    asyncio.run(client.cognify([dataset_id]))
+    payload = session.calls[0]["json"]
+    assert payload["dataset_ids"] == [str(dataset_id)]
+    assert "datasets" not in payload
+
+
+def test_cognify_single_uuid_travels_as_dataset_id():
+    client, session = make_client()
+    dataset_id = UUID("00000000-0000-0000-0000-000000000010")
+    asyncio.run(client.cognify(dataset_id))
+    payload = session.calls[0]["json"]
+    assert payload["dataset_ids"] == [str(dataset_id)]
+    assert "datasets" not in payload
+
+
+def test_cognify_names_still_travel_as_datasets():
+    client, session = make_client()
+    asyncio.run(client.cognify(["docs", "notes"]))
+    payload = session.calls[0]["json"]
+    assert payload["datasets"] == ["docs", "notes"]
+    assert "dataset_ids" not in payload
+
+
+def test_cognify_without_datasets_sends_neither_key():
+    client, session = make_client()
+    asyncio.run(client.cognify(None))
+    payload = session.calls[0]["json"]
+    assert "datasets" not in payload
+    assert "dataset_ids" not in payload
+
+
 # ----- typed errors -----
 
 
