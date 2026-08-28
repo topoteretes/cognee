@@ -6,6 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
+    "test": "jest",
     "lint": "eslint .",
     "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },

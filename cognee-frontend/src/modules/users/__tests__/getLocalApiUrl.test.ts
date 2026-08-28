@@ -1,3 +1,9 @@
+/**
+ * The window.location fallback is the point of this suite, so pin jsdom to a
+ * non-localhost origin: replaceState cannot cross origins from the default one.
+ *
+ * @jest-environment-options {"url": "http://127.0.0.1:3000/local-login"}
+ */
 import { getLocalApiUrl } from "../getLocalApiUrl";
 
 describe("getLocalApiUrl", () => {
