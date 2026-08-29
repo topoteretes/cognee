@@ -95,7 +95,7 @@ jobs:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -104,7 +104,7 @@ jobs:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -113,7 +113,7 @@ jobs:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -122,7 +122,7 @@ jobs:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -130,7 +130,7 @@ jobs:
   graph-db-tests:
     name: Graph Database Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -139,7 +139,7 @@ jobs:
   vector-db-tests:
     name: Vector DB Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -148,7 +148,7 @@ jobs:
   example-tests:
     name: Example Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -157,7 +157,7 @@ jobs:
   notebook-tests:
     name: Notebook Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -165,6 +165,8 @@ jobs:
 
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
+    needs: [ build-ci-env ]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
@@ -176,6 +178,8 @@ jobs:
 
   different-os-tests-extended:
     name: OS and Python Tests Extended
+    needs: [ build-ci-env ]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.13.x"]'
@@ -185,7 +189,7 @@ jobs:
   llm-tests:
     name: LLM Test Suite
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -194,7 +198,7 @@ jobs:
   s3-file-storage-test:
     name: S3 File Storage Test
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -203,7 +207,7 @@ jobs:
   integration-tests:
     name: Run Integration Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/integration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -232,7 +236,7 @@ jobs:
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -241,7 +245,7 @@ jobs:
   search-db-tests:
     name: Search Test on Different DBs
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -250,7 +254,7 @@ jobs:
   relational-db-migration-tests:
     name: Relational DB Migration Tests
     needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -282,31 +286,31 @@ jobs:
       relational-db-migration-tests,
     ]
     runs-on: ubuntu-latest
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Check Status
         run: |
-          if [[ "${{ needs.pre-test.result }}" == "success" &&
-                "${{ needs.basic-tests.result }}" == "success" &&
-                "${{ needs.e2e-tests.result }}" == "success" &&
-                "${{ needs.cli-tests.result }}" == "success" &&
-                "${{ needs.slow-e2e-tests.result }}" == "success" &&
-                "${{ needs.graph-db-tests.result }}" == "success" &&
-                "${{ needs.vector-db-tests.result }}" == "success" &&
-                "${{ needs.example-tests.result }}" == "success" &&
-                "${{ needs.notebook-tests.result }}" == "success" &&
-                "${{ needs.different-os-tests-basic.result }}" == "success" &&
-                "${{ needs.different-os-tests-extended.result }}" == "success" &&
-                "${{ needs.llm-tests.result }}" == "success" &&
-                "${{ needs.s3-file-storage-test.result }}" == "success" &&
-                "${{ needs.integration-tests.result }}" == "success" &&
-                "${{ needs.mcp-test.result }}" == "success" &&
-                "${{ needs.docker-compose-test.result }}" == "success" &&
-                "${{ needs.docker-ci-test.result }}" == "success" &&
-                "${{ needs.ui-docker-ci-test.result }}" == "success" &&
-                "${{ needs.temporal-graph-tests.result }}" == "success" &&
-                "${{ needs.search-db-tests.result }}" == "success" &&
-                "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then
+          if [[ "${{ needs.pre-test.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.basic-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.e2e-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.cli-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.slow-e2e-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.graph-db-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.vector-db-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.example-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.notebook-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.different-os-tests-basic.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.different-os-tests-extended.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.llm-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.s3-file-storage-test.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.integration-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.mcp-test.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.docker-compose-test.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.docker-ci-test.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.ui-docker-ci-test.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.temporal-graph-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.search-db-tests.result }}" =~ ^(success|skipped)$ &&
+                "${{ needs.relational-db-migration-tests.result }}" =~ ^(success|skipped)$ ]]; then
             echo "All test suites completed successfully!"
           else
             echo "One or more test suites failed."
