@@ -55,9 +55,23 @@ async def _existing_dataset_database(
     """
     db_engine = get_relational_engine()
 
+    # dataset_id is this table's PRIMARY KEY (DatasetDatabase.py:
+    # `dataset_id = Column(UUID, ..., primary_key=True)`) -- one row per
+    # dataset, globally, by schema design. Filtering by owner_id here can
+    # never help (a dataset_id match is already unique on its own) and can
+    # only produce false negatives for a caller who has full ACL-granted
+    # permission on the dataset but isn't its literal owner_id -- confirmed
+    # live: a caller had all 4 of the same ACL permission rows as the actual
+    # owner on a dataset it didn't literally own, yet this filter still
+    # reported "no existing row", causing get_or_create_dataset_database()
+    # to attempt a fresh INSERT and crash with
+    # `UNIQUE constraint failed: dataset_database.dataset_id`
+    # (hit via /api/v1/forget on a single data item). Filtering on
+    # dataset_id alone matches the schema's actual uniqueness semantics and
+    # respects the ACL system the rest of cognee already uses for
+    # authorization, instead of re-checking literal ownership on top of it.
     async with db_engine.get_async_session() as session:
         stmt = select(DatasetDatabase).where(
-            DatasetDatabase.owner_id == user.id,
             DatasetDatabase.dataset_id == dataset_id,
         )
         existing: DatasetDatabase = await session.scalar(stmt)
