@@ -20,12 +20,35 @@ class SummariesRetriever(BaseRetriever):
 
     Instance variables:
     - top_k: int - Number of top summaries to retrieve.
+    - node_name: Optional[List[str]] - Node set names the search is scoped to.
+    - node_name_filter_operator: str - How multiple node_name values combine.
     """
 
-    def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
-        """Initialize retriever with search parameters."""
+    def __init__(
+        self,
+        top_k: int = 5,
+        session_id: Optional[str] = None,
+        node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
+    ):
+        """
+        Initialize retriever with search parameters.
+
+        Parameters:
+        -----------
+
+            - top_k (int): Maximum number of summaries to retrieve. Defaults to 5.
+            - session_id (Optional[str]): Session the search belongs to. Defaults to None.
+            - node_name (Optional[List[str]]): Node set names used to filter summaries by
+              their belongs_to_set relationship. Defaults to None, which applies no node
+              set filtering.
+            - node_name_filter_operator (str): Logical operator used when applying multiple
+              node_name filters, such as "OR" or "AND". Defaults to "OR".
+        """
         self.top_k = top_k
         self.session_id = session_id
+        self.node_name = node_name
+        self.node_name_filter_operator = node_name_filter_operator
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
@@ -53,7 +76,12 @@ class SummariesRetriever(BaseRetriever):
 
         try:
             summaries_results = await vector_engine.search(
-                "TextSummary_text", query, limit=self.top_k, include_payload=True
+                "TextSummary_text",
+                query,
+                limit=self.top_k,
+                include_payload=True,
+                node_name=self.node_name,
+                node_name_filter_operator=self.node_name_filter_operator,
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
 

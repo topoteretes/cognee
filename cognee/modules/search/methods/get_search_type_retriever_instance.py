@@ -98,7 +98,15 @@ async def get_search_type_retriever_instance(
             CodeRetriever,
             {"config": retriever_specific_config},
         ),
-        SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
+        SearchType.SUMMARIES: (
+            SummariesRetriever,
+            {
+                "top_k": top_k,
+                "session_id": session_id,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+            },
+        ),
         SearchType.CHUNKS: (
             ChunksRetriever,
             {
