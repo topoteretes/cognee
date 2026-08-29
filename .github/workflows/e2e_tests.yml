@@ -274,6 +274,32 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_dlt_mixed_input_e2e.py
 
+  run-code-graph-e2e-test:
+    name: Code Graph E2E Test (enola ingest -> typed graph -> CODE search)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Cache the pinned enola binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cognee/bin
+          key: enola-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cognee/tasks/code_graph/install_enola.py') }}
+
+      # Deliberately NO LLM/embedding secrets: the enola code-graph route must
+      # ingest, store and answer SearchType.CODE queries without an API key.
+      - name: Run code graph e2e test
+        env:
+          ENV: 'dev'
+        run: uv run python ./cognee/tests/test_code_graph_e2e.py
+
   run-s3-bucket-test:
       name: S3 Bucket Test
       runs-on: ubuntu-22.04
