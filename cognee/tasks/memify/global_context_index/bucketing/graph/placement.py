@@ -7,9 +7,12 @@ from ..common import (
     mark_bucket_for_persistence,
     record_bucket_assignment,
 )
-from .scoring import entities_weight, weighted_jaccard
+from .scoring import entities_weight, type_ids_for_entities
+from .scorers import Scorer, build_entity_group_profile, build_pattern_index, build_scorers
 from ...ids import create_bucket_id
 from ...models import BucketAssignment, SummaryNode
+
+Triple = tuple[str, str, str]
 
 
 def rebuild_graph_buckets_for_level(
@@ -20,6 +23,14 @@ def rebuild_graph_buckets_for_level(
     level: int,
     max_bucket_size: int,
     min_overlap: float,
+    entity_type_by_entity_id: Mapping[str, str] | None = None,
+    type_idf_weights: Mapping[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+    entity_relations: list[Triple] | None = None,
+    edge_type_embeddings: Mapping[str, list[float]] | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
     """
     Build graph-based buckets from in-memory summary/entity inputs.
@@ -30,10 +41,29 @@ def rebuild_graph_buckets_for_level(
     if max_bucket_size < 1:
         raise ValueError("max_bucket_size must be at least 1.")
 
+    entity_type_by_entity_id = entity_type_by_entity_id or {}
+    type_idf_weights = type_idf_weights or {}
+    entity_relations = entity_relations or []
+    edge_type_embeddings = edge_type_embeddings or {}
+
     entity_summaries, misc_summaries = _partition_summaries(
         summaries, entities_by_summary_id, idf_weights
     )
     entity_to_summary_ids = _build_entity_to_summary_ids(entity_summaries, entities_by_summary_id)
+    entity_type_to_summary_ids = _build_entity_type_to_summary_ids(
+        entity_summaries, entities_by_summary_id, entity_type_by_entity_id
+    )
+    relation_index = build_pattern_index(entity_relations)
+    combined_similarity_fn = build_scorers(
+        idf_weights,
+        entity_type_by_entity_id,
+        type_idf_weights,
+        edge_type_embeddings,
+        pattern_distance_threshold,
+        entity_weight,
+        type_weight,
+        pattern_weight,
+    )["combined"]
 
     buckets_to_persist: dict[str, SummaryNode] = {}
     assignments: list[BucketAssignment] = []
@@ -48,9 +78,13 @@ def rebuild_graph_buckets_for_level(
             unassigned_ids,
             entity_to_summary_ids,
             entities_by_summary_id,
-            idf_weights,
+            entity_type_by_entity_id,
+            relation_index,
             max_bucket_size,
             min_overlap,
+            type_weight,
+            entity_type_to_summary_ids,
+            combined_similarity_fn,
         )
         _add_entity_bucket(
             child_ids,
@@ -82,11 +116,24 @@ def place_graph_summaries_incrementally(
     level: int,
     max_bucket_size: int,
     min_overlap: float,
+    entity_type_by_entity_id: Mapping[str, str] | None = None,
+    type_idf_weights: Mapping[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+    entity_relations: list[Triple] | None = None,
+    edge_type_embeddings: Mapping[str, list[float]] | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ) -> tuple[dict[str, SummaryNode], list[BucketAssignment]]:
     if level != 0:
         raise ValueError("Graph incremental placement is only supported for level 0.")
     if max_bucket_size < 1:
         raise ValueError("max_bucket_size must be at least 1.")
+
+    entity_type_by_entity_id = entity_type_by_entity_id or {}
+    type_idf_weights = type_idf_weights or {}
+    entity_relations = entity_relations or []
+    edge_type_embeddings = edge_type_embeddings or {}
 
     validate_graph_buckets_can_be_extended(existing_buckets)
 
@@ -97,6 +144,20 @@ def place_graph_summaries_incrementally(
         idf_weights,
     )
     entity_to_bucket_ids = _build_entity_to_bucket_ids(existing_buckets)
+    entity_type_to_bucket_ids = _build_entity_type_to_bucket_ids(
+        existing_buckets, entity_type_by_entity_id
+    )
+    relation_index = build_pattern_index(entity_relations)
+    combined_similarity_fn = build_scorers(
+        idf_weights,
+        entity_type_by_entity_id,
+        type_idf_weights,
+        edge_type_embeddings,
+        pattern_distance_threshold,
+        entity_weight,
+        type_weight,
+        pattern_weight,
+    )["combined"]
     misc_bucket_ids = _build_misc_bucket_ids(existing_buckets)
     assignments: list[BucketAssignment] = []
 
@@ -120,9 +181,13 @@ def place_graph_summaries_incrementally(
             summary_entity_ids,
             entity_to_bucket_ids,
             buckets_by_id,
-            idf_weights,
+            entity_type_by_entity_id,
+            relation_index,
             max_bucket_size,
             min_overlap,
+            type_weight,
+            entity_type_to_bucket_ids,
+            combined_similarity_fn,
         )
         if bucket is None:
             bucket = _create_new_graph_bucket(
@@ -144,6 +209,7 @@ def place_graph_summaries_incrementally(
             )
 
         _index_bucket_entities(bucket, entity_to_bucket_ids)
+        _index_bucket_entity_types(bucket, entity_type_to_bucket_ids, entity_type_by_entity_id)
 
     return buckets_to_persist, assignments
 
@@ -233,6 +299,28 @@ def _index_bucket_entities(
         entity_to_bucket_ids.setdefault(entity_id, set()).add(bucket.id)
 
 
+def _build_entity_type_to_bucket_ids(
+    buckets: list[SummaryNode],
+    entity_type_by_entity_id: Mapping[str, str],
+) -> dict[str, set[str]]:
+    entity_type_to_bucket_ids: dict[str, set[str]] = {}
+    for bucket in buckets:
+        _index_bucket_entity_types(bucket, entity_type_to_bucket_ids, entity_type_by_entity_id)
+    return entity_type_to_bucket_ids
+
+
+def _index_bucket_entity_types(
+    bucket: SummaryNode,
+    entity_type_to_bucket_ids: dict[str, set[str]],
+    entity_type_by_entity_id: Mapping[str, str],
+) -> None:
+    if bucket.graph_bucket_entity_ids is None:
+        return
+
+    for type_id in type_ids_for_entities(bucket.graph_bucket_entity_ids, entity_type_by_entity_id):
+        entity_type_to_bucket_ids.setdefault(type_id, set()).add(bucket.id)
+
+
 def _build_misc_bucket_ids(
     buckets: list[SummaryNode],
 ) -> list[str]:
@@ -254,17 +342,42 @@ def _build_entity_to_summary_ids(
     return entity_to_summary_ids
 
 
+def _build_entity_type_to_summary_ids(
+    summaries: list[SummaryNode],
+    entities_by_summary_id: Mapping[str, set[str]],
+    entity_type_by_entity_id: Mapping[str, str],
+) -> dict[str, set[str]]:
+    entity_type_to_summary_ids: dict[str, set[str]] = {}
+    for summary in summaries:
+        summary_entity_ids = entities_by_summary_id.get(summary.id, set())
+        for type_id in type_ids_for_entities(summary_entity_ids, entity_type_by_entity_id):
+            entity_type_to_summary_ids.setdefault(type_id, set()).add(summary.id)
+    return entity_type_to_summary_ids
+
+
 def _choose_existing_graph_bucket(
     summary_entity_ids: set[str],
     entity_to_bucket_ids: Mapping[str, set[str]],
     buckets_by_id: Mapping[str, SummaryNode],
-    idf_weights: Mapping[str, float],
+    entity_type_by_entity_id: Mapping[str, str],
+    relation_index: Mapping[str, list[Triple]],
     max_bucket_size: int,
     min_overlap: float,
+    type_weight: float,
+    entity_type_to_bucket_ids: Mapping[str, set[str]] | None,
+    combined_similarity_fn: Scorer,
 ) -> SummaryNode | None:
+    summary_profile = build_entity_group_profile(
+        summary_entity_ids, entity_type_by_entity_id, relation_index
+    )
+
     candidate_bucket_ids: set[str] = set()
     for entity_id in summary_entity_ids:
         candidate_bucket_ids.update(entity_to_bucket_ids.get(entity_id, set()))
+
+    if type_weight > 0 and entity_type_to_bucket_ids:
+        for type_id in summary_profile.type_ids:
+            candidate_bucket_ids.update(entity_type_to_bucket_ids.get(type_id, set()))
 
     scored_candidates: list[tuple[float, int, str, SummaryNode]] = []
     for bucket_id in sorted(candidate_bucket_ids):
@@ -272,11 +385,11 @@ def _choose_existing_graph_bucket(
         if len(bucket.child_ids) >= max_bucket_size:
             continue
 
-        score = weighted_jaccard(
-            summary_entity_ids,
-            bucket.graph_bucket_entity_ids or set(),
-            idf_weights,
+        bucket_entity_ids = bucket.graph_bucket_entity_ids or set()
+        bucket_profile = build_entity_group_profile(
+            bucket_entity_ids, entity_type_by_entity_id, relation_index
         )
+        score = combined_similarity_fn(summary_profile, bucket_profile)
         if score < min_overlap:
             continue
         scored_candidates.append((-score, len(bucket.child_ids), bucket.id, bucket))
@@ -422,9 +535,13 @@ def _build_entity_bucket_child_ids(
     unassigned_ids: set[str],
     entity_to_summary_ids: Mapping[str, set[str]],
     entities_by_summary_id: Mapping[str, set[str]],
-    idf_weights: Mapping[str, float],
+    entity_type_by_entity_id: Mapping[str, str],
+    relation_index: Mapping[str, list[Triple]],
     max_bucket_size: int,
     min_overlap: float,
+    type_weight: float,
+    entity_type_to_summary_ids: Mapping[str, set[str]] | None,
+    combined_similarity_fn: Scorer,
 ) -> list[str]:
     child_ids = [seed_id]
     unassigned_ids.remove(seed_id)
@@ -436,8 +553,12 @@ def _build_entity_bucket_child_ids(
             unassigned_ids,
             entity_to_summary_ids,
             entities_by_summary_id,
-            idf_weights,
+            entity_type_by_entity_id,
+            relation_index,
             min_overlap,
+            type_weight,
+            entity_type_to_summary_ids,
+            combined_similarity_fn,
         )
         if candidate_id is None:
             break
@@ -454,22 +575,35 @@ def _choose_best_candidate(
     unassigned_ids: set[str],
     entity_to_summary_ids: Mapping[str, set[str]],
     entities_by_summary_id: Mapping[str, set[str]],
-    idf_weights: Mapping[str, float],
+    entity_type_by_entity_id: Mapping[str, str],
+    relation_index: Mapping[str, list[Triple]],
     min_overlap: float,
+    type_weight: float,
+    entity_type_to_summary_ids: Mapping[str, set[str]] | None,
+    combined_similarity_fn: Scorer,
 ) -> str | None:
+    bucket_profile = build_entity_group_profile(
+        bucket_entity_ids, entity_type_by_entity_id, relation_index
+    )
+
     candidate_ids = set()
     for entity_id in bucket_entity_ids:
         candidate_ids.update(entity_to_summary_ids.get(entity_id, set()))
+
+    if type_weight > 0 and entity_type_to_summary_ids:
+        for type_id in bucket_profile.type_ids:
+            candidate_ids.update(entity_type_to_summary_ids.get(type_id, set()))
+
     candidate_ids &= unassigned_ids
 
     best_id: str | None = None
     best_score = float("-inf")
     for candidate_id in sorted(candidate_ids):
-        score = weighted_jaccard(
-            entities_by_summary_id.get(candidate_id, set()),
-            bucket_entity_ids,
-            idf_weights,
+        candidate_entity_ids = entities_by_summary_id.get(candidate_id, set())
+        candidate_profile = build_entity_group_profile(
+            candidate_entity_ids, entity_type_by_entity_id, relation_index
         )
+        score = combined_similarity_fn(candidate_profile, bucket_profile)
         if score < min_overlap:
             continue
         if score > best_score:
