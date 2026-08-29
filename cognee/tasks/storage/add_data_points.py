@@ -18,6 +18,7 @@ from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
     ensure_default_edge_properties,
+    get_belongs_to_set_names,
     get_graph_from_model,
 )
 from .index_data_points import index_data_points
@@ -364,12 +365,17 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
             continue
         seen_ids.add(triplet_id)
 
+        belongs_to_set = set(get_belongs_to_set_names(edge_properties))
+        belongs_to_set.update(get_belongs_to_set_names(source_node))
+        belongs_to_set.update(get_belongs_to_set_names(target_node))
+
         triplets.append(
             Triplet(
                 id=triplet_id,
                 from_node_id=str(source_node_id),
                 to_node_id=str(target_node_id),
                 text=embeddable_text,
+                belongs_to_set=sorted(belongs_to_set) or None,
             )
         )
 

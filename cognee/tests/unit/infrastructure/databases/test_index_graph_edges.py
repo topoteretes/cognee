@@ -81,6 +81,29 @@ def test_create_edge_type_datapoints_uses_edge_text_without_relationship_propert
     assert datapoints[0].relationship_name == "custom text"
 
 
+def test_create_edge_type_datapoints_unions_node_sets_for_same_text():
+    edges = [
+        (
+            "source-1",
+            "target-1",
+            "related_to",
+            {"edge_text": "shared relation", "belongs_to_set": ["beta", "shared"]},
+        ),
+        (
+            "source-2",
+            "target-2",
+            "related_to",
+            {"edge_text": "shared relation", "belongs_to_set": ["alpha", "shared"]},
+        ),
+    ]
+
+    datapoints = create_edge_type_datapoints(edges)
+
+    assert len(datapoints) == 1
+    assert datapoints[0].number_of_edges == 2
+    assert datapoints[0].belongs_to_set == ["alpha", "beta", "shared"]
+
+
 def test_create_edge_type_datapoints_falls_back_from_blank_edge_text_to_relationship_name():
     edges = [
         ("source", "target", "related_to", {"relationship_name": "related_to", "edge_text": ""}),

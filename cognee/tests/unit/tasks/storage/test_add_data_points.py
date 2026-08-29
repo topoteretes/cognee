@@ -540,6 +540,16 @@ def test_create_triplets_from_graph():
     assert "target node" in triplets[0].text
 
 
+def test_create_triplets_from_graph_unions_endpoint_node_sets():
+    dp1 = SimplePoint(text="source node", belongs_to_set=["beta", "shared"])
+    dp2 = SimplePoint(text="target node", belongs_to_set=["alpha", "shared"])
+    edge = (str(dp1.id), str(dp2.id), "connects_to", {"edge_text": "links"})
+
+    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
+
+    assert triplets[0].belongs_to_set == ["alpha", "beta", "shared"]
+
+
 def test_extract_embeddable_text_with_none_datapoint():
     text = _extract_embeddable_text_from_datapoint(None)
     assert text == ""
@@ -656,6 +666,21 @@ def test_ensure_default_edge_properties_preserves_existing_defaults():
     assert properties["edge_object_id"] == "edge-id"
     assert properties["feedback_weight"] == 0.9
     assert properties["edge_text"] == "source related to target"
+
+
+def test_ensure_default_edge_properties_unions_endpoint_node_sets():
+    source = SimplePoint(text="source", belongs_to_set=["beta", "shared"])
+    target = SimplePoint(text="target", belongs_to_set=["alpha", "shared"])
+    edge = (
+        str(source.id),
+        str(target.id),
+        "related_to",
+        {"belongs_to_set": ["existing"]},
+    )
+
+    result = ensure_default_edge_properties([edge], nodes=[source, target])
+
+    assert result[0][3]["belongs_to_set"] == ["alpha", "beta", "existing", "shared"]
 
 
 @pytest.mark.parametrize(
