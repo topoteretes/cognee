@@ -197,6 +197,7 @@ jobs:
     if: ${{ github.ref_name == 'main' }}
     permissions:
       contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.push.outputs.sha }}
@@ -205,9 +206,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.ref_name }}
-          # The push back to main below must authenticate with a token that is
-          # allowed to push to the protected branch; the default workflow token
-          # is not. GH_RELEASE_TOKEN already creates the GitHub release.
+          # Prefer GH_RELEASE_TOKEN (it already creates the GitHub release):
+          # PRs opened with the default workflow token do not trigger other
+          # workflows, so the sync PR's required checks would never run and
+          # auto-merge would never fire.
           token: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
 
       - name: Install uv
@@ -249,10 +251,11 @@ jobs:
             exit 1
           fi
 
-      - name: Commit and push the lock bump
+      - name: Commit the lock bump and open a sync PR
         id: push
         env:
           VERSION: ${{ needs.release-github.outputs.version }}
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || github.token }}
         run: |
           git config user.name "Cognee Team"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -261,9 +264,23 @@ jobs:
           else
             git add cognee-mcp/uv.lock
             git commit -m "chore: Sync cognee-mcp lock to cognee ${VERSION} [release]"
-            # Rebase in case main moved while the release was running.
-            git pull --rebase origin main
-            git push origin HEAD:main
+            # main is protected (changes must go through a pull request), so a
+            # direct `git push origin HEAD:main` is rejected with GH006 — the
+            # v1.5.3 release stalled on exactly that. Push a release branch and
+            # open an auto-merging sync PR instead. --force keeps re-runs of
+            # this job idempotent.
+            BRANCH="release/mcp-lock-v${VERSION}"
+            git push --force origin "HEAD:${BRANCH}"
+            if [ -z "$(gh pr list --head "${BRANCH}" --base main --state open --json number --jq '.[].number')" ]; then
+              gh pr create --base main --head "${BRANCH}" \
+                --title "chore: sync cognee-mcp lock to cognee ${VERSION} [release]" \
+                --body "Automated by release.yml: pins cognee-mcp/uv.lock to the just-released cognee ${VERSION} so the MCP image matches its tag (issue #4360)."
+            fi
+            # Best effort: merges once required checks pass. If auto-merge is
+            # disabled on the repo, the PR stays open for a manual merge — the
+            # MCP image build below does not wait for the merge, it builds from
+            # this commit's SHA directly.
+            gh pr merge "${BRANCH}" --auto --squash || gh pr merge "${BRANCH}" --auto --merge || true
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
