@@ -195,8 +195,23 @@ class DatabaseContextManager:
         data_root_directory = os.path.join(
             base_config.data_root_directory, str(user.tenant_id or user.id)
         )
+        # dataset_database.owner_id, not the calling user.id: get_or_create_dataset_database()
+        # correctly resolves the dataset's real DatasetDatabase row for an ACL-granted caller
+        # who isn't the literal owner, but Ladybug/Kuzu's on-disk graph file was created under
+        # the OWNER's directory (.cognee_system/databases/{owner_id}/{graph_database_name}),
+        # not the caller's. Building this path from the caller's own id redirects a non-owner
+        # to their own, likely-nonexistent directory instead of the dataset's real graph file.
+        # Reported by @linhongyu510 in review of PR #4830: reproduced on head 9edd8b12 with a
+        # context test where caller_id != dataset_database.owner_id -- the resolved path
+        # contained caller_id and the owner-path assertion failed. Confirmed independently with
+        # a live repro against real data: /forget on a dataset owned by a different identity
+        # reported success (the relational Data/dataset_data rows were correctly deleted) while
+        # never touching the real graph at all, since it resolved to a path that didn't exist --
+        # 295 of 580 real graph nodes for that dataset were left orphaned as a direct result.
+        # LanceDB does not share this symptom -- its vector_database_url is already absolute,
+        # not reconstructed from a directory + user id.
         databases_directory_path = os.path.join(
-            base_config.system_root_directory, "databases", str(user.id)
+            base_config.system_root_directory, "databases", str(dataset_database.owner_id)
         )
 
         # Set vector and graph database configuration based on dataset database information
