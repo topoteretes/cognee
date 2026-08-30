@@ -2285,13 +2285,21 @@ class Neo4jAdapter(GraphDBInterface):
             input flag.
         """
 
-        nodes, edges = await self.get_model_independent_graph_data()
+        # Count in Cypher instead of materializing the graph via
+        # get_model_independent_graph_data()'s collect(n) / collect([n, r, m]):
+        # those aggregates load every node and edge (with all properties) into a
+        # single transaction result, which exhausts the Neo4j transaction memory
+        # pool on large graphs just to take len() of it.
+        node_count = await self.query(f"MATCH (n:`{BASE_LABEL}`) RETURN count(n) AS count")
+        edge_count = await self.query(
+            f"MATCH (n:`{BASE_LABEL}`)-[r]->(m:`{BASE_LABEL}`) RETURN count(r) AS count"
+        )
+        num_nodes = node_count[0]["count"] if node_count else 0
+        num_edges = edge_count[0]["count"] if edge_count else 0
+
         graph_name = "myGraph"
         await self.drop_graph(graph_name)
         await self.project_entire_graph(graph_name)
-
-        num_nodes = len(nodes[0]["nodes"])
-        num_edges = len(edges[0]["elements"])
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
