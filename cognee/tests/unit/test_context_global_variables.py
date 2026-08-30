@@ -79,6 +79,7 @@ async def test_dataset_database_configs_persist_after_exit(monkeypatch):
     user_id = uuid4()
     fake_user = SimpleNamespace(id=user_id, tenant_id=None)
     fake_dataset_database = SimpleNamespace(
+        owner_id=user_id,
         vector_database_provider="lancedb",
         vector_database_url="",
         vector_database_key="",
@@ -132,6 +133,84 @@ async def test_dataset_database_configs_persist_after_exit(monkeypatch):
     assert graph_db_config.get()["graph_database_name"] == "test_graph_db"
     assert vector_db_config.get()["vector_db_name"] == "test_vector_db"
     assert file_storage_config.get() is not None
+
+
+@pytest.mark.asyncio
+async def test_graph_file_path_uses_dataset_owner_not_caller(monkeypatch):
+    """Regression for PR #4830 (review by linhongyu510): an ACL-granted caller
+    who is not the dataset's owner must still resolve the OWNER's graph file.
+
+    Ladybug/Kuzu graph files live under
+    .cognee_system/databases/{owner_id}/{graph_database_name} -- they are
+    created once by whoever first created the dataset database record, not
+    per-caller. Building databases_directory_path from the calling user's id
+    instead of dataset_database.owner_id silently redirects a non-owner to
+    their own, likely-nonexistent directory instead of the dataset's real
+    graph file: forget()/cognify() would then report success against a path
+    that was never the shared graph at all. This bug caused real graph-node
+    orphaning in production (see DEVIATIONS.md row 42); it does not raise,
+    so only an explicit path assertion like this one catches it.
+    """
+    dataset_id = uuid4()
+    owner_id = uuid4()
+    caller_id = uuid4()
+    assert owner_id != caller_id
+
+    fake_caller = SimpleNamespace(id=caller_id, tenant_id=None)
+    fake_dataset_database = SimpleNamespace(
+        owner_id=owner_id,
+        vector_database_provider="lancedb",
+        vector_database_url="",
+        vector_database_key="",
+        vector_database_name="test_vector_db",
+        vector_database_connection_info={},
+        graph_database_provider="ladybug",
+        graph_database_url="",
+        graph_database_key="",
+        graph_database_name="test_graph_db",
+        graph_database_connection_info={},
+        graph_dataset_database_handler="ladybug",
+    )
+
+    async def fake_get_user(_user_id):
+        return fake_caller
+
+    async def fake_get_or_create_dataset_database(_dataset, _user):
+        # Simulates the ACL-correct case (this PR's primary-key fix): the
+        # caller is granted access to the OWNER's existing row, not their own.
+        return fake_dataset_database
+
+    async def fake_resolve_connection_info(dataset_database):
+        return dataset_database
+
+    class FakeDatasetQueue:
+        async def ensure_slot(self, dataset):
+            pass
+
+        async def release_slot_for(self, dataset):
+            pass
+
+    monkeypatch.setattr(
+        "cognee.context_global_variables.backend_access_control_enabled", lambda: True
+    )
+    monkeypatch.setattr("cognee.context_global_variables.get_user", fake_get_user)
+    monkeypatch.setattr(
+        "cognee.context_global_variables.get_or_create_dataset_database",
+        fake_get_or_create_dataset_database,
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.resolve_dataset_database_connection_info",
+        fake_resolve_connection_info,
+    )
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.dataset_queue.dataset_queue", FakeDatasetQueue
+    )
+
+    async with set_database_global_context_variables(dataset_id, caller_id):
+        resolved_path = graph_db_config.get()["graph_file_path"]
+
+    assert str(owner_id) in resolved_path
+    assert str(caller_id) not in resolved_path
 
 
 @pytest.mark.asyncio
