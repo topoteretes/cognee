@@ -51,7 +51,7 @@ export function normalizeBackendUrl(
   // problem tells the operator nothing about what to type instead.
   if (!/^https?:\/\//i.test(value)) {
     throw new Error(
-      `${source} must be an absolute http(s) URL, got "${value}". Expected something like "http://cognee:8000".`,
+      `${source} must be an absolute http(s) URL, got "${value}". Expected something like "http://localhost:8000".`,
     );
   }
 
