@@ -55,21 +55,22 @@ async def _existing_dataset_database(
     """
     db_engine = get_relational_engine()
 
-    # dataset_id is this table's PRIMARY KEY (DatasetDatabase.py:
-    # `dataset_id = Column(UUID, ..., primary_key=True)`) -- one row per
-    # dataset, globally, by schema design. Filtering by owner_id here can
-    # never help (a dataset_id match is already unique on its own) and can
-    # only produce false negatives for a caller who has full ACL-granted
-    # permission on the dataset but isn't its literal owner_id -- confirmed
-    # live: a caller had all 4 of the same ACL permission rows as the actual
-    # owner on a dataset it didn't literally own, yet this filter still
-    # reported "no existing row", causing get_or_create_dataset_database()
-    # to attempt a fresh INSERT and crash with
-    # `UNIQUE constraint failed: dataset_database.dataset_id`
-    # (hit via /api/v1/forget on a single data item). Filtering on
-    # dataset_id alone matches the schema's actual uniqueness semantics and
-    # respects the ACL system the rest of cognee already uses for
-    # authorization, instead of re-checking literal ownership on top of it.
+    # LOCAL FIX (2026-08-29): dataset_id is this table's PRIMARY KEY
+    # (DatasetDatabase.py: `dataset_id = Column(UUID, ..., primary_key=True)`)
+    # -- one row per dataset, globally, by schema design. Filtering by
+    # owner_id here can never help (a dataset_id match is already unique on
+    # its own) and can only produce false negatives for a caller who has
+    # full ACL-granted permission on the dataset but isn't its literal
+    # owner_id -- confirmed live: default_user had all 4 of the same ACL
+    # permission rows as the actual owner on a dataset (nanobot's own
+    # agent identity owns it), yet this filter still reported "no existing
+    # row", causing get_or_create_dataset_database() to attempt a fresh
+    # INSERT and crash with `UNIQUE constraint failed: dataset_database.dataset_id`
+    # (found while forgetting a data item from nanobot_memory via /api/v1/forget
+    # as default_user). Filtering on dataset_id alone matches the schema's
+    # actual uniqueness semantics and respects the ACL system the rest of
+    # cognee already uses for authorization, instead of re-checking literal
+    # ownership on top of it.
     async with db_engine.get_async_session() as session:
         stmt = select(DatasetDatabase).where(
             DatasetDatabase.dataset_id == dataset_id,
@@ -96,6 +97,18 @@ async def get_or_create_dataset_database(
         Principal that owns this dataset.
     dataset : Union[str, UUID]
         Dataset being linked.
+
+    Security note
+    -------------
+    This function performs no authorization check of its own. When `dataset`
+    is a UUID, get_unique_dataset_id() returns it unchanged -- by design, so
+    a caller can resolve a shared dataset it does not own -- which means
+    ANY UUID is accepted here regardless of whether `user` actually has
+    permission for it. Callers MUST perform their own explicit ACL check
+    (e.g. get_authorized_dataset(user, dataset_id, permission_type)) before
+    calling this function or apply_database_context_variables(), which
+    depends on it. See cognee/api/v1/forget/forget.py for the pattern this
+    is expected to follow.
     """
     db_engine = get_relational_engine()
 
@@ -105,12 +118,9 @@ async def get_or_create_dataset_database(
     if isinstance(dataset, str):
         from cognee.modules.data.methods import create_authorized_dataset
 
-        # create_authorized_dataset opens its own relational session (and so does
-        # the permission grant it performs). Don't wrap it in an extra session
-        # here: that outer connection was never used, and holding it idle while
-        # the callee acquires more connections deadlocks the pool under
-        # concurrency (same class as #4197).
-        dataset = await create_authorized_dataset(dataset, user)
+        async with db_engine.get_async_session() as session:
+            if isinstance(dataset, str):
+                dataset = await create_authorized_dataset(dataset, user)
 
     # If dataset database already exists return it
     existing_dataset_database = await _existing_dataset_database(dataset_id, user)
