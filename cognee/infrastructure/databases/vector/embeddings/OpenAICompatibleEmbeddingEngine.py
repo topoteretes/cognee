@@ -92,6 +92,15 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
+        # Many OpenAI-compatible endpoints cap how many inputs a single
+        # embeddings request may carry (e.g. NVIDIA NIM rejects >256 with a
+        # 400 that no retry can fix). Chunk inputs up front instead of
+        # relying on the caller to respect the cap.
+        try:
+            self.max_input_batch = int(os.getenv("EMBEDDING_MAX_INPUT_BATCH", "256"))
+        except ValueError:
+            self.max_input_batch = 256
+        self.max_input_batch = max(1, self.max_input_batch)
         # Some OpenAI-compatible servers (e.g. self-hosted NVIDIA NIM
         # containers) require an "input_type" field ("query" / "passage")
         # that isn't part of the OpenAI embeddings spec. Sent via extra_body
@@ -140,6 +149,21 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         original_texts = text if isinstance(text, list) else [text]
         sanitized_text = sanitize_embedding_text_inputs(original_texts)
 
+        # Chunk oversized inputs up front: a request above the endpoint's
+        # input-count cap fails deterministically (400), so retrying the same
+        # batch — as the outer tenacity decorator would — only burns the whole
+        # 128s retry budget before reraising. Each chunk goes through the
+        # normal (retry-protected) path recursively.
+        if len(sanitized_text) > self.max_input_batch:
+            chunk_vectors = await asyncio.gather(
+                *[
+                    self.embed_text(sanitized_text[i : i + self.max_input_batch])
+                    for i in range(0, len(sanitized_text), self.max_input_batch)
+                ]
+            )
+            embeddings = [vector for chunk in chunk_vectors for vector in chunk]
+            return handle_embedding_response(original_texts, embeddings, self.dimensions)
+
         if self.mock:
             embeddings = [[0.0] * (self.dimensions or 1) for _ in sanitized_text]
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
@@ -171,6 +195,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 "maximum context",
                 "maximum tokens",
                 "max tokens",
+                # Input-count caps (e.g. NVIDIA NIM's "input count 464 exceeds
+                # maximum allowed batch size") are fixed the same way: split
+                # the input and recurse.
+                "batch size",
+                "input count",
             )
             if any(pattern in error_str for pattern in context_error_patterns):
                 if isinstance(original_texts, list) and len(original_texts) > 1:
