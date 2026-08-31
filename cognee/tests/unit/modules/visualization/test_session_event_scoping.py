@@ -11,6 +11,7 @@ test_live_events.py cannot see, since it replaces collect_session_events
 wholesale.
 """
 
+import importlib
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -23,6 +24,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from cognee.modules.session_lifecycle.metrics import SessionStatus
 from cognee.modules.session_lifecycle.models import SessionRecord
 from cognee.modules.visualization import session_events
+
+# Must come from importlib, not `import ... as`: the package __init__ binds
+# the name `get_session_manager` to the *function*, so both the dotted
+# string patch target and `import a.b.c as x` resolve to that function
+# instead of the module, unless something imported the submodule first.
+# That import-order dependence is why this passed locally and failed on CI.
+get_session_manager_module = importlib.import_module(
+    "cognee.infrastructure.session.get_session_manager"
+)
 
 DATASET_A = UUID("aaaaaaaa-1111-4111-8111-1111111111ab")
 DATASET_B = UUID("bbbbbbbb-2222-4222-8222-2222222222cd")
@@ -143,8 +153,9 @@ async def test_explicit_session_ids_bypass_the_dataset_filter():
         ]
 
     with (
-        patch(
-            "cognee.infrastructure.session.get_session_manager.get_session_manager",
+        patch.object(
+            get_session_manager_module,
+            "get_session_manager",
             return_value=SimpleNamespace(is_available=True, get_session=_get_session),
         ),
         patch.object(session_events, "_list_recent_session_ids") as listing,
