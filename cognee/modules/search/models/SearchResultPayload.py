@@ -5,6 +5,25 @@ from pydantic.alias_generators import to_camel
 from cognee.modules.search.types.SearchType import SearchType
 
 
+def serialize_value(val: Any) -> Any:
+    """Recursively serialize complex types, BaseModels, UUIDs, sets, dicts to JSON-safe structures."""
+    if isinstance(val, BaseModel):
+        return serialize_value(val.model_dump())
+    elif isinstance(val, UUID):
+        return str(val)
+    elif isinstance(val, (list, tuple, set)):
+        return [serialize_value(item) for item in val]
+    elif isinstance(val, dict):
+        return {
+            (str(key) if not isinstance(key, (str, int)) else key): serialize_value(value)
+            for key, value in val.items()
+        }
+    elif isinstance(val, (int, float, str, bool, type(None))):
+        return val
+    else:
+        return str(val)
+
+
 class SearchResultPayload(BaseModel):
     """Result payload from retriever classes."""
 
@@ -34,37 +53,14 @@ class SearchResultPayload(BaseModel):
         Custom serializer to handle complex types in result_object.
         Transforms non-JSON-compatible types to their string representation.
         """
-
-        # Helper to check if a value is a "simple" JSON-compatible type
-        def is_simple(item):
-            return isinstance(item, (int, float, dict, str, bool, type(None)))
-
-        if isinstance(v, list) and all(isinstance(item, dict) for item in v):
-            # Handle List of Dictionaries
-            return [
-                {key: (val if is_simple(val) else str(val)) for key, val in item.items()}
-                for item in v
-            ]
-        elif isinstance(v, list):
-            # Handle Lists
-            return [item if is_simple(item) else str(item) for item in v]
-        elif isinstance(v, dict):
-            # Handle Dictionaries
-            return {key: (val if is_simple(val) else str(val)) for key, val in v.items()}
-        else:
-            # Fallback for the object itself
-            return v if is_simple(v) else str(v)
+        return serialize_value(v)
 
     @field_serializer("completion")
     def serialize_completion(self, v: Any):
         """Serialize completion field. Supports str, list, dict, and Pydantic BaseModel."""
         if v is None:
             return None
-        if isinstance(v, BaseModel):
-            return v.model_dump()
-        if isinstance(v, list):
-            return [item.model_dump() if isinstance(item, BaseModel) else item for item in v]
-        return v
+        return serialize_value(v)
 
     @property
     def result(self) -> Any:
@@ -72,9 +68,9 @@ class SearchResultPayload(BaseModel):
         Return context if only_context is True, else return completion if it exists, else return result_object."""
         if self.only_context:
             return self.context
-        elif self.completion:
+        elif self.completion is not None:
             return self.completion
-        elif self.context:
+        elif self.context is not None:
             return self.context
         else:
             return self.result_object

@@ -64,3 +64,50 @@ def test_search_result_payload_model_json_round_trip():
     payload = SearchResultPayload(completion=deal, search_type=SearchType.GRAPH_COMPLETION)
     dumped = json.loads(payload.model_dump_json())
     assert dumped["completion"] == {"deal_name": "Acme Corp", "health": "Good"}
+
+
+def test_search_result_payload_complex_serialization():
+    """Test that result_object handles complex/nested models and UUIDs correctly."""
+    from uuid import UUID
+    import json
+
+    deal = DealBrief(deal_name="Acme Corp", health="Good")
+    nested_data = {
+        "deals": [deal],
+        "transaction_id": UUID("12345678-1234-5678-1234-567812345678"),
+        "active": True,
+    }
+
+    payload = SearchResultPayload(
+        result_object=nested_data,
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    # Test default snake_case output
+    dumped = json.loads(payload.model_dump_json())
+    assert dumped["result_object"]["deals"] == [{"deal_name": "Acme Corp", "health": "Good"}]
+    assert dumped["result_object"]["transaction_id"] == "12345678-1234-5678-1234-567812345678"
+    assert dumped["result_object"]["active"] is True
+
+    # Test camelCase output when serialized by_alias=True
+    dumped_alias = json.loads(payload.model_dump_json(by_alias=True))
+    assert dumped_alias["resultObject"]["deals"] == [{"deal_name": "Acme Corp", "health": "Good"}]
+    assert dumped_alias["resultObject"]["transaction_id"] == "12345678-1234-5678-1234-567812345678"
+    assert dumped_alias["resultObject"]["active"] is True
+
+
+def test_search_result_payload_falsy_completion():
+    """Test that empty or falsy completions are returned correctly instead of falling back."""
+    payload_empty_str = SearchResultPayload(
+        completion="",
+        context="Fallback context",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert payload_empty_str.result == ""
+
+    payload_empty_list = SearchResultPayload(
+        completion=[],
+        context="Fallback context",
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+    assert payload_empty_list.result == []
