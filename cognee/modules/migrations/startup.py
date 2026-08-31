@@ -242,6 +242,113 @@ async def _relational_schema_exists() -> bool:
     return "users" in tables or "alembic_version" in tables
 
 
+_SCHEMA_CHECK_MODES = ("strict", "warn", "off")
+
+
+def _schema_check_mode() -> str:
+    """Read ``MIGRATION_SCHEMA_CHECK`` dynamically (same contract as
+    ``ENABLE_AUTO_MIGRATIONS``): ``strict`` raises on drift, ``warn`` logs it,
+    ``off`` skips the comparison entirely."""
+    mode = os.getenv("MIGRATION_SCHEMA_CHECK", "warn").strip().lower()
+    if mode not in _SCHEMA_CHECK_MODES:
+        logger.warning(
+            "Unknown MIGRATION_SCHEMA_CHECK=%r; using 'warn'. Valid values: %s.",
+            mode,
+            ", ".join(_SCHEMA_CHECK_MODES),
+        )
+        return "warn"
+    return mode
+
+
+async def _collect_relational_schema_drift() -> list[str]:
+    """Tables and columns ``Base.metadata`` declares that the live database lacks.
+
+    Compares against the SAME metadata ``create_database`` builds from, so this
+    answers the question the stamp only assumes: does the schema actually match
+    the revision we recorded? Extra tables/columns in the database are ignored —
+    Alembic bookkeeping and older columns are not drift.
+
+    Returns an empty list when the database cannot be inspected: this is a safety
+    net, and it must never become a new way for startup to fail.
+    """
+    from sqlalchemy import inspect
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.infrastructure.databases.relational.ModelBase import Base
+
+    expected = Base.metadata.sorted_tables
+    if not expected:
+        # Models not imported in this process — nothing to compare against.
+        return []
+
+    def _reflect(sync_connection):
+        inspector = inspect(sync_connection)
+        present = {
+            schema: set(inspector.get_table_names(schema=schema))
+            for schema in {table.schema for table in expected}
+        }
+        columns = {
+            (table.schema, table.name): {
+                column["name"] for column in inspector.get_columns(table.name, schema=table.schema)
+            }
+            for table in expected
+            if table.name in present[table.schema]
+        }
+        return present, columns
+
+    try:
+        async with get_relational_engine().engine.connect() as connection:
+            present, actual_columns = await connection.run_sync(_reflect)
+    except Exception as error:
+        logger.warning("Could not verify the relational schema against the models: %s", error)
+        return []
+
+    drift = []
+    for table in expected:
+        if table.name not in present[table.schema]:
+            drift.append(f"missing table '{table.name}'")
+            continue
+        missing = sorted(
+            {column.name for column in table.columns} - actual_columns[(table.schema, table.name)]
+        )
+        if missing:
+            drift.append(f"table '{table.name}' is missing column(s): {', '.join(missing)}")
+    return drift
+
+
+async def verify_relational_schema() -> list[str]:
+    """Assert the relational schema matches the ORM models, and report what does not.
+
+    The fresh-database path STAMPS Alembic head after ``create_all`` instead of
+    replaying history, which asserts that the models and the head describe the
+    same schema. Nothing verified that assertion, so when a deployment shipped an
+    Alembic tree ahead of its bundled models, tenants were provisioned with a
+    schema that silently disagreed with the revision they were stamped at — and
+    every signal (exit code, ``alembic current``, the logs) still read healthy.
+
+    Returns the drift descriptions (empty when the schema matches).
+    """
+    mode = _schema_check_mode()
+    if mode == "off":
+        return []
+
+    drift = await _collect_relational_schema_drift()
+    if not drift:
+        return []
+
+    message = (
+        f"Relational schema does not match the ORM models: {'; '.join(drift)}. "
+        "The database is stamped at an Alembic revision whose schema it does not "
+        "actually have; reads and writes against the missing columns will fail at "
+        "runtime. Repair with a migration that adds them (set "
+        "MIGRATION_SCHEMA_CHECK=warn to downgrade this to a log line)."
+    )
+    if mode == "strict":
+        raise MigrationError(message)
+    logger.error(message)
+    return drift
+
+
 # Alembic revisions that CREATE the cognee data-migration bookkeeping (the
 # dataset_database tracking columns and the global_database_version table). The
 # data-migration system reads/writes these, so the relational schema must not be
@@ -301,6 +408,11 @@ async def apply_all_migrations(
             logger.info("Fresh database: creating schema and stamping at head.")
             await get_relational_engine().create_database()
             await run_relational_stamp("head", script_location)
+
+        # Both branches above only ASSERT that the schema is now at
+        # ``relational_target`` — the stamp records it, the upgrade assumes it.
+        # Verify it before the graph/vector chain reads those tables.
+        await verify_relational_schema()
 
         return await run_database_migrations(data_target)
 
