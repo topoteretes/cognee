@@ -462,6 +462,20 @@ def test_edge_endpoint_with_composite_identity_raises():
         datapoint_model_to_basemodel(Graph)
 
 
+def test_edge_endpoint_may_have_extra_required_fields():
+    class Person(DataPoint):
+        name: str
+        age: int
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Graph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    simplified = datapoint_model_to_basemodel(Graph, strip_metadata=True)
+    assert "friends_with" in simplified.model_fields
+
+
 def test_edge_schema_round_trip_drops_edge_fields():
     Person = _named_person()
 

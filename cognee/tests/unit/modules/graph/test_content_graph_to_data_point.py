@@ -37,6 +37,11 @@ class PeopleGraph(DataPoint):
     people: list[Person]
 
 
+class MixedGraph(DataPoint):
+    people: list[Person]
+    friends_with: list[Edge[Person, Person]]
+
+
 class NestedOnly(DataPoint):
     name: str
     child: "NestedOnly | None" = None
@@ -315,3 +320,22 @@ async def test_nested_owners_keep_their_own_rows():
     assert root.cliques[1].friends_with[0].target.id == NamedPerson.id_for("Dave")
     assert len(root.cliques[0].friends_with) == 1
     assert len(root.cliques[1].friends_with) == 1
+
+
+@pytest.mark.asyncio
+async def test_from_identity_and_edge_rows_together():
+    root = await _from_dump(
+        MixedGraph,
+        {
+            "people": [
+                {"name": "Alice", "is_a": "Student"},
+                {"name": "Bob", "is_a": "Student"},
+            ],
+            "friends_with": [{"source": "Alice", "target": "Bob"}],
+        },
+    )
+    assert root.people[0].is_a.id == Role.id_for("Student")
+    assert root.friends_with[0].source.id == Person.id_for("Alice")
+    assert root.friends_with[0].source is not root
+    _, edges = await get_graph_from_model(root)
+    assert "friends_with" in _rel_names(edges)
