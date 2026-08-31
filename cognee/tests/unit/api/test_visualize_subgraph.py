@@ -53,10 +53,10 @@ def _patches(engine):
     return (
         patch.object(visualize_module, "get_graph_engine", AsyncMock(return_value=engine)),
         patch.object(visualize_module, "set_database_global_context_variables", _noop_db_context),
-        patch(
-            "cognee.modules.visualization.session_events.collect_session_events",
-            AsyncMock(return_value=[]),
-        ),
+        # Patch the name visualize.py binds at import time. Patching the
+        # source module instead silently stops intercepting, because
+        # fetch_visualization_data resolves this through its module global.
+        patch.object(visualize_module, "collect_session_events", AsyncMock(return_value=[])),
     )
 
 
