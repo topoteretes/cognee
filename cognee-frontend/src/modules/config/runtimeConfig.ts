@@ -76,11 +76,30 @@ export function readRuntimeConfig(): Partial<RuntimeConfig> {
   const element = document.getElementById(RUNTIME_CONFIG_ELEMENT_ID);
   if (!element?.textContent) return {};
 
+  let parsed: Partial<RuntimeConfig>;
   try {
-    return JSON.parse(element.textContent) as Partial<RuntimeConfig>;
+    parsed = JSON.parse(element.textContent) as Partial<RuntimeConfig>;
   } catch {
     return {};
   }
+
+  // Re-check the URL on the way out of the DOM, with the same rule the server
+  // applied on the way in. The client should not trust document content it did
+  // not verify itself: this value reaches href attributes, so an unvalidated
+  // "javascript:" here would be an XSS sink. Anything unusable degrades to the
+  // caller's own fallback rather than throwing.
+  const backendUrl = parsed.backendUrl?.trim();
+  if (!backendUrl) return {};
+  if (!/^https?:\/\//i.test(backendUrl)) return {};
+
+  try {
+    const { protocol } = new URL(backendUrl);
+    if (protocol !== "http:" && protocol !== "https:") return {};
+  } catch {
+    return {};
+  }
+
+  return { backendUrl: stripTrailingSlash(backendUrl) };
 }
 
 /**

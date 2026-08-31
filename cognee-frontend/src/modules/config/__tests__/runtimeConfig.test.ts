@@ -94,6 +94,26 @@ describe("readRuntimeConfig", () => {
 
     expect(readRuntimeConfig()).toEqual({});
   });
+
+  it("rejects a scheme the browser would treat as executable", () => {
+    // This value reaches href attributes, so an unvalidated javascript: URL
+    // taken straight out of the DOM would be an XSS sink.
+    renderConfigElement(JSON.stringify({ backendUrl: "javascript:alert(1)" }));
+
+    expect(readRuntimeConfig()).toEqual({});
+  });
+
+  it("rejects a scheme the client cannot fetch from", () => {
+    renderConfigElement(JSON.stringify({ backendUrl: "ftp://cognee:8000" }));
+
+    expect(readRuntimeConfig()).toEqual({});
+  });
+
+  it("normalises a trailing slash coming out of the DOM", () => {
+    renderConfigElement(JSON.stringify({ backendUrl: "http://cognee:8000/" }));
+
+    expect(readRuntimeConfig()).toEqual({ backendUrl: "http://cognee:8000" });
+  });
 });
 
 describe("stripTrailingSlash", () => {
