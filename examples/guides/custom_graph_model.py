@@ -3,11 +3,13 @@ import os
 from typing import List
 
 from cognee import forget, remember, visualize_graph
+from cognee.infrastructure.engine import Edge
 from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = (
     "Extract all people mentioned in the text. "
-    "For each person, extract ALL activities they like, including shared activities."
+    "For each person, extract ALL activities they like, including shared activities. "
+    "Also extract friendships between people."
 )
 
 
@@ -24,6 +26,7 @@ class Person(DataPoint):
 
 class PeopleGraph(DataPoint):
     people: List[Person]
+    friends_with: List[Edge[Person, Person]]
 
 
 async def main():

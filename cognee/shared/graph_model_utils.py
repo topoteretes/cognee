@@ -2,8 +2,9 @@ import asyncio
 import re
 import sys
 import types
+from functools import lru_cache
 from pprint import pprint
-from typing import Any, Union, cast, get_args, get_origin
+from typing import Any, Literal, Optional, Union, cast, get_args, get_origin
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -13,10 +14,14 @@ from pydantic_core import PydanticUndefined
 
 import cognee
 from cognee.api.v1.search import SearchType
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
-from cognee.shared.logging_utils import ERROR, setup_logging
+from cognee.modules.engine.utils import generate_edge_name
+from cognee.modules.graph.utils.get_graph_from_model import collect_stored_data_points
+from cognee.shared.logging_utils import ERROR, get_logger, setup_logging
 from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
+
+logger = get_logger()
 
 
 def _reference_target_type(annotation: Any) -> Any:
@@ -71,6 +76,81 @@ def _from_identity_llm_annotation(annotation: Any) -> Any:
     return str
 
 
+def _list_edge_inner(annotation: Any) -> type | None:
+    """Return the Edge[...] class if this is list[Edge[...]], else None."""
+    if get_origin(annotation) not in (list,):
+        return None
+    inner = get_args(annotation)[0]
+    if isinstance(inner, type) and issubclass(inner, Edge):
+        return inner
+    return None
+
+
+def edge_field_types(
+    model: type[BaseModel],
+) -> dict[str, tuple[type[DataPoint], type[DataPoint], Any]]:
+    """Map each list[Edge[...]] field to its generic args (source, target, naming)."""
+    fields: dict[str, tuple[type[DataPoint], type[DataPoint], Any]] = {}
+    for name, field_info in model.model_fields.items():
+        inner = _list_edge_inner(field_info.annotation)
+        if inner is None:
+            continue
+        fields[name] = inner.__pydantic_generic_metadata__["args"]
+    return fields
+
+
+def relationship_type_annotation(naming: Any) -> Any | None:
+    """Row-field annotation for relationship_type, or None in the fixed (field-name) mode."""
+    if naming is str:
+        return str
+    if get_origin(naming) is Literal:
+        return naming
+    return None
+
+
+def _row_class_name(field_name: str) -> str:
+    return "".join(part.title() for part in field_name.split("_")) + "Edge"
+
+
+@lru_cache(maxsize=128)
+def _edge_row_model_for(
+    field_name: str,
+    source_type: type[DataPoint],
+    target_type: type[DataPoint],
+    rel_annotation: Any,
+) -> type[BaseModel]:
+    source_id = source_type._get_identity_fields()[0]
+    target_id = target_type._get_identity_fields()[0]
+    fields: dict[str, Any] = {
+        "source": (
+            str,
+            Field(description=f"The {source_id} of a {source_type.__name__} already in the graph"),
+        ),
+        "target": (
+            str,
+            Field(description=f"The {target_id} of a {target_type.__name__} already in the graph"),
+        ),
+    }
+    if rel_annotation is not None:
+        fields["relationship_type"] = (rel_annotation, ...)
+    return create_model(_row_class_name(field_name), **fields)
+
+
+def _llm_edge_field(field_name: str, field_info: Any, default_value: Any) -> tuple | None:
+    inner = _list_edge_inner(field_info.annotation)
+    if inner is None:
+        return None
+    source_type, target_type, naming = inner.__pydantic_generic_metadata__["args"]
+    _check_single_identity_field(source_type, field_name)
+    _check_single_identity_field(target_type, field_name)
+    rel_annotation = relationship_type_annotation(naming)
+    row_model = _edge_row_model_for(field_name, source_type, target_type, rel_annotation)
+    return (
+        list[row_model],
+        default_value if default_value is not PydanticUndefined else PydanticUndefined,
+    )
+
+
 def _rewrite_from_identity(value: Any, target_type: type[DataPoint]) -> Any:
     identity_field = target_type._get_identity_fields()[0]
     if value is None:
@@ -82,15 +162,25 @@ def _rewrite_from_identity(value: Any, target_type: type[DataPoint]) -> Any:
     return value
 
 
-def _llm_dump_to_model_dump(value: Any, model_class: type[BaseModel]) -> Any:
+def _llm_dump_to_model_dump(
+    value: Any, model_class: type[BaseModel], path: tuple[Any, ...] = ()
+) -> tuple[Any, dict]:
     if not isinstance(value, dict) or not (
         isinstance(model_class, type) and issubclass(model_class, BaseModel)
     ):
-        return value
+        return value, {}
 
-    refs = from_identity_fields(model_class) if issubclass(model_class, DataPoint) else {}
+    is_datapoint = issubclass(model_class, DataPoint)
+    refs = from_identity_fields(model_class) if is_datapoint else {}
+    edges = edge_field_types(model_class) if is_datapoint else {}
     converted: dict[str, Any] = {}
+    rows: dict = {}
     for name, item in value.items():
+        if name in edges:
+            converted[name] = []
+            if isinstance(item, list) and item:
+                rows[(path, name)] = item
+            continue
         if name in refs:
             converted[name] = _rewrite_from_identity(item, refs[name])
             continue
@@ -98,30 +188,102 @@ def _llm_dump_to_model_dump(value: Any, model_class: type[BaseModel]) -> Any:
         if field_info is None:
             converted[name] = item
             continue
-        converted[name] = _descend_llm_dump(item, field_info.annotation)
-    return converted
+        nested_dump, nested_rows = _descend_llm_dump(item, field_info.annotation, (*path, name))
+        converted[name] = nested_dump
+        rows.update(nested_rows)
+
+    for name in edges:
+        if name not in converted:
+            converted[name] = []
+
+    return converted, rows
 
 
-def _descend_llm_dump(value: Any, annotation: Any) -> Any:
+def _descend_llm_dump(value: Any, annotation: Any, path: tuple[Any, ...]) -> tuple[Any, dict]:
     origin = get_origin(annotation)
     if origin in (list,):
         if not isinstance(value, list):
-            return value
+            return value, {}
         inner = get_args(annotation)[0]
-        return [_descend_llm_dump(item, inner) for item in value]
+        converted_items = []
+        rows: dict = {}
+        for index, item in enumerate(value):
+            converted, nested = _descend_llm_dump(item, inner, (*path, index))
+            converted_items.append(converted)
+            rows.update(nested)
+        return converted_items, rows
     if origin in (Union, types.UnionType):
         args = [arg for arg in get_args(annotation) if arg is not type(None)]
         if len(args) == 1:
-            return _descend_llm_dump(value, args[0])
-        return value
+            return _descend_llm_dump(value, args[0], path)
+        return value, {}
     if isinstance(annotation, type) and issubclass(annotation, DataPoint):
-        return _llm_dump_to_model_dump(value, annotation)
-    return value
+        return _llm_dump_to_model_dump(value, annotation, path)
+    return value, {}
+
+
+def _instance_at(root: DataPoint, path: tuple[Any, ...]) -> Any:
+    current: Any = root
+    for step in path:
+        current = current[step] if isinstance(step, int) else getattr(current, step)
+    return current
+
+
+def _lookup_endpoint(index: dict, endpoint_type: type[DataPoint], identity_value: str):
+    return index.get((endpoint_type, endpoint_type.id_for(identity_value)))
+
+
+def _build_resolved_edge(
+    row: dict,
+    source_node: DataPoint,
+    target_node: DataPoint,
+    source_type: type[DataPoint],
+    target_type: type[DataPoint],
+    rel_annotation: Any,
+    field_name: str,
+) -> Edge:
+    name = row.get("relationship_type")
+    if rel_annotation is str:
+        name = generate_edge_name(name)
+    return Edge[source_type, target_type, rel_annotation or Optional[str]](
+        source=source_node, target=target_node, relationship_type=name
+    ).normalize(source_node, field_name, target=target_node)
+
+
+async def _attach_edge_rows(root: DataPoint, rows: dict) -> None:
+    stored = await collect_stored_data_points(root)
+    index = {(type(node), node.id): node for node in stored}
+    for (path, field_name), row_dicts in rows.items():
+        owner = _instance_at(root, path)
+        source_type, target_type, naming = edge_field_types(type(owner))[field_name]
+        rel_annotation = relationship_type_annotation(naming)
+        built = []
+        for row in row_dicts:
+            source_node = _lookup_endpoint(index, source_type, row["source"])
+            target_node = _lookup_endpoint(index, target_type, row["target"])
+            if source_node is None or target_node is None:
+                logger.warning("Skipping unresolved edge on %s: %s", field_name, row)
+                continue
+            built.append(
+                _build_resolved_edge(
+                    row,
+                    source_node,
+                    target_node,
+                    source_type,
+                    target_type,
+                    rel_annotation,
+                    field_name,
+                )
+            )
+        setattr(owner, field_name, built)
 
 
 async def content_graph_to_data_point(content_graph: BaseModel, graph_model: type[DataPoint]):
-    dump = _llm_dump_to_model_dump(content_graph.model_dump(), graph_model)
-    return graph_model.model_validate(dump)
+    dump, rows = _llm_dump_to_model_dump(content_graph.model_dump(), graph_model)
+    root = graph_model.model_validate(dump)
+    if rows:
+        await _attach_edge_rows(root, rows)
+    return root
 
 
 def datapoint_model_to_basemodel(
@@ -218,6 +380,10 @@ def datapoint_model_to_basemodel(
                     _from_identity_llm_annotation(field_info.annotation),
                     field_default,
                 )
+                continue
+            edge_field = _llm_edge_field(field_name, field_info, default_value)
+            if edge_field is not None:
+                converted_fields[field_name] = edge_field
                 continue
             converted_fields[field_name] = (
                 _replace_datapoint_types(field_info.annotation, cache),

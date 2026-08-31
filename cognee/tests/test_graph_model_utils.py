@@ -1,14 +1,16 @@
-from typing import Annotated, get_args
+from typing import Annotated, Literal, get_args
 
 import pytest
 from pydantic import BaseModel
 
-from cognee.infrastructure.engine import DataPoint, FromIdentity
+from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
 from cognee.shared.graph_model_utils import (
     datapoint_model_to_basemodel,
+    edge_field_types,
     from_identity_fields,
     graph_model_to_graph_schema,
     graph_schema_to_graph_model,
+    relationship_type_annotation,
 )
 from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
@@ -342,3 +344,130 @@ def test_from_identity_schema_round_trip_drops_the_marker():
     schema = graph_model_to_graph_schema(Person)
     regenerated = graph_schema_to_graph_model(schema)
     assert from_identity_fields(regenerated) == {}
+
+
+def _named_person():
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    return Person
+
+
+def _row_schema(simplified: type[BaseModel], field_name: str) -> dict:
+    schema = simplified.model_json_schema()
+    items = schema["properties"][field_name]["items"]
+    if "$ref" in items:
+        return schema["$defs"][items["$ref"].rsplit("/", 1)[-1]]
+    return items
+
+
+def test_fixed_edge_row_has_source_and_target_only():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    simplified = datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True)
+    row = _row_schema(simplified, "friends_with")
+    assert set(row["properties"]) == {"source", "target"}
+    assert row["properties"]["source"]["type"] == "string"
+    assert row["properties"]["target"]["type"] == "string"
+    assert "relationship_type" not in row["properties"]
+    source, target, naming = edge_field_types(PeopleGraph)["friends_with"]
+    assert source is Person and target is Person
+    assert relationship_type_annotation(naming) is None
+
+
+def test_enumerated_edge_row_has_required_enum():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        ties: list[Edge[Person, Person, Literal["friends_with", "married_to"]]]
+
+    row = _row_schema(datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True), "ties")
+    assert row["properties"]["relationship_type"]["enum"] == ["friends_with", "married_to"]
+    assert "relationship_type" in row["required"]
+
+
+def test_free_form_edge_row_has_required_string():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        ties: list[Edge[Person, Person, str]]
+
+    row = _row_schema(datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True), "ties")
+    assert row["properties"]["relationship_type"]["type"] == "string"
+    assert "enum" not in row["properties"]["relationship_type"]
+    assert "relationship_type" in row["required"]
+
+
+def test_edge_row_schema_has_no_infra():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    simplified = datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True)
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(_row_schema(simplified, "friends_with")["properties"])
+    dump = simplified(
+        people=[{"name": "Alice"}, {"name": "Bob"}],
+        friends_with=[{"source": "Alice", "target": "Bob"}],
+    ).model_dump()
+    assert_dump_has_no_infra(dump)
+
+
+def test_two_edge_fields_get_distinct_row_names():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+        married_to: list[Edge[Person, Person]]
+
+    defs = datapoint_model_to_basemodel(PeopleGraph, strip_metadata=True).model_json_schema()[
+        "$defs"
+    ]
+    assert "FriendsWithEdge" in defs
+    assert "MarriedToEdge" in defs
+
+
+def test_edge_endpoint_without_identity_raises():
+    class Token(DataPoint):
+        name: str
+
+    class Graph(DataPoint):
+        tokens: list[Token]
+        linked: list[Edge[Token, Token]]
+
+    with pytest.raises(InvalidReferenceTypeError, match="Token"):
+        datapoint_model_to_basemodel(Graph)
+
+
+def test_edge_endpoint_with_composite_identity_raises():
+    class Player(DataPoint):
+        name: str
+        team: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name", "team"]}
+
+    class Graph(DataPoint):
+        players: list[Player]
+        teammates: list[Edge[Player, Player]]
+
+    with pytest.raises(InvalidReferenceTypeError, match="Player"):
+        datapoint_model_to_basemodel(Graph)
+
+
+def test_edge_schema_round_trip_drops_edge_fields():
+    Person = _named_person()
+
+    class PeopleGraph(DataPoint):
+        people: list[Person]
+        friends_with: list[Edge[Person, Person]]
+
+    regenerated = graph_schema_to_graph_model(graph_model_to_graph_schema(PeopleGraph))
+    assert edge_field_types(regenerated) == {}
