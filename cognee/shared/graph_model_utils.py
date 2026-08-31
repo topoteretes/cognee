@@ -14,7 +14,114 @@ from pydantic_core import PydanticUndefined
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
 from cognee.shared.logging_utils import ERROR, setup_logging
+from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
+
+
+def _reference_target_type(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in (list,):
+        return _reference_target_type(get_args(annotation)[0])
+    if origin in (Union, types.UnionType):
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(args) == 1:
+            return _reference_target_type(args[0])
+    return annotation
+
+
+def from_identity_fields(model: type[BaseModel]) -> dict[str, type[DataPoint]]:
+    """Map field name to the DataPoint type a FromIdentity field refers to."""
+    fields: dict[str, type[DataPoint]] = {}
+    for name, field_info in model.model_fields.items():
+        if any(isinstance(meta, _FromIdentity) for meta in field_info.metadata):
+            fields[name] = _reference_target_type(field_info.annotation)
+    return fields
+
+
+def _check_single_identity_field(target_type: type, owning_field: str) -> None:
+    identity = target_type._get_identity_fields() if issubclass(target_type, DataPoint) else None
+    if not identity or len(identity) != 1:
+        raise InvalidReferenceTypeError(
+            f"{target_type.__name__} on {owning_field} needs exactly one identity_fields "
+            f"entry, got {identity!r}"
+        )
+
+
+def _check_constructible_from_identity(target_type: type, owning_field: str) -> None:
+    identity = set(target_type._get_identity_fields() or [])
+    offending = [
+        name
+        for name, info in target_type.model_fields.items()
+        if name not in DataPoint.model_fields and name not in identity and info.is_required()
+    ]
+    if offending:
+        raise InvalidReferenceTypeError(
+            f"{target_type.__name__} on {owning_field} has required fields that cannot "
+            f"be filled from an identity string: {offending}"
+        )
+
+
+def _from_identity_llm_annotation(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in (list,):
+        return list[str]
+    if origin in (Union, types.UnionType) and type(None) in get_args(annotation):
+        return str | None
+    return str
+
+
+def _rewrite_from_identity(value: Any, target_type: type[DataPoint]) -> Any:
+    identity_field = target_type._get_identity_fields()[0]
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [_rewrite_from_identity(item, target_type) for item in value]
+    if isinstance(value, str):
+        return {identity_field: value}
+    return value
+
+
+def _llm_dump_to_model_dump(value: Any, model_class: type[BaseModel]) -> Any:
+    if not isinstance(value, dict) or not (
+        isinstance(model_class, type) and issubclass(model_class, BaseModel)
+    ):
+        return value
+
+    refs = from_identity_fields(model_class) if issubclass(model_class, DataPoint) else {}
+    converted: dict[str, Any] = {}
+    for name, item in value.items():
+        if name in refs:
+            converted[name] = _rewrite_from_identity(item, refs[name])
+            continue
+        field_info = model_class.model_fields.get(name)
+        if field_info is None:
+            converted[name] = item
+            continue
+        converted[name] = _descend_llm_dump(item, field_info.annotation)
+    return converted
+
+
+def _descend_llm_dump(value: Any, annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in (list,):
+        if not isinstance(value, list):
+            return value
+        inner = get_args(annotation)[0]
+        return [_descend_llm_dump(item, inner) for item in value]
+    if origin in (Union, types.UnionType):
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(args) == 1:
+            return _descend_llm_dump(value, args[0])
+        return value
+    if isinstance(annotation, type) and issubclass(annotation, DataPoint):
+        return _llm_dump_to_model_dump(value, annotation)
+    return value
+
+
+async def content_graph_to_data_point(content_graph: BaseModel, graph_model: type[DataPoint]):
+    dump = _llm_dump_to_model_dump(content_graph.model_dump(), graph_model)
+    return graph_model.model_validate(dump)
 
 
 def datapoint_model_to_basemodel(
@@ -91,6 +198,27 @@ def datapoint_model_to_basemodel(
                 if field_info.default_factory is not None
                 else field_info.default
             )
+            if any(isinstance(meta, _FromIdentity) for meta in field_info.metadata):
+                target_type = _reference_target_type(field_info.annotation)
+                _check_single_identity_field(target_type, field_name)
+                _check_constructible_from_identity(target_type, field_name)
+                identity_field = target_type._get_identity_fields()[0]
+                description = (
+                    f"The {identity_field} of a {target_type.__name__} already in the graph"
+                )
+                if field_info.default_factory is not None:
+                    field_default = Field(
+                        default_factory=field_info.default_factory, description=description
+                    )
+                elif default_value is not PydanticUndefined:
+                    field_default = Field(default=default_value, description=description)
+                else:
+                    field_default = Field(description=description)
+                converted_fields[field_name] = (
+                    _from_identity_llm_annotation(field_info.annotation),
+                    field_default,
+                )
+                continue
             converted_fields[field_name] = (
                 _replace_datapoint_types(field_info.annotation, cache),
                 default_value if default_value is not PydanticUndefined else PydanticUndefined,

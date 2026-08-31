@@ -1,13 +1,16 @@
-from typing import get_args
+from typing import Annotated, get_args
 
 import pytest
 from pydantic import BaseModel
 
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, FromIdentity
 from cognee.shared.graph_model_utils import (
     datapoint_model_to_basemodel,
+    from_identity_fields,
     graph_model_to_graph_schema,
+    graph_schema_to_graph_model,
 )
+from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
 DATAPOINT_INFRA_FIELDS = {
     "id",
@@ -25,6 +28,9 @@ DATAPOINT_INFRA_FIELDS = {
     "source_content_hash",
     "feedback_weight",
     "importance_weight",
+    "ontology_uri",
+    "valid_to",
+    "metadata",
 }
 
 
@@ -270,3 +276,69 @@ def test_preserves_inherited_fields_in_cyclic_models():
     assert "label" in nested_b_model.model_fields
     assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified_a.model_fields)
     assert DATAPOINT_INFRA_FIELDS.isdisjoint(nested_b_model.model_fields)
+
+
+def test_from_identity_field_renders_as_string():
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    simplified = datapoint_model_to_basemodel(Person, strip_metadata=True)
+    schema = simplified.model_json_schema()
+    assert schema["properties"]["is_a"]["type"] == "string"
+    assert "$ref" not in schema["properties"]["is_a"]
+    assert DATAPOINT_INFRA_FIELDS.isdisjoint(simplified.model_fields)
+    assert_dump_has_no_infra(simplified(name="Alice", is_a="Student").model_dump())
+
+
+def test_model_without_from_identity_is_unchanged(programming_language_models):
+    ProgrammingLanguage = programming_language_models["ProgrammingLanguage"]
+    simplified = datapoint_model_to_basemodel(ProgrammingLanguage, strip_metadata=True)
+    assert set(simplified.model_fields) == {"name", "used_in", "is_type"}
+    assert simplified.model_fields["is_type"].annotation is not str
+
+
+def test_from_identity_target_without_identity_raises():
+    class Role(DataPoint):
+        name: str
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+
+    with pytest.raises(InvalidReferenceTypeError, match="Role"):
+        datapoint_model_to_basemodel(Person)
+
+
+def test_from_identity_target_with_extra_required_field_raises():
+    class Role(DataPoint):
+        name: str
+        level: int
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+
+    with pytest.raises(InvalidReferenceTypeError, match="level"):
+        datapoint_model_to_basemodel(Person)
+
+
+def test_from_identity_schema_round_trip_drops_the_marker():
+    class Role(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Person(DataPoint):
+        name: str
+        is_a: Annotated[Role, FromIdentity()]
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    schema = graph_model_to_graph_schema(Person)
+    regenerated = graph_schema_to_graph_model(schema)
+    assert from_identity_fields(regenerated) == {}

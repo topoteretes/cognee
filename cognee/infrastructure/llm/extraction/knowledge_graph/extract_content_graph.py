@@ -9,7 +9,10 @@ from cognee.infrastructure.llm.config import (
 )
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
+from cognee.shared.graph_model_utils import (
+    content_graph_to_data_point,
+    datapoint_model_to_basemodel,
+)
 
 
 async def extract_content_graph(
@@ -43,5 +46,5 @@ async def extract_content_graph(
     )
 
     if simplified_response_model is not response_model:
-        return response_model.model_validate(content_graph.model_dump())
+        return await content_graph_to_data_point(content_graph, response_model)
     return content_graph
