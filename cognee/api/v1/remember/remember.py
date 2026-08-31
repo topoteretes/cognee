@@ -786,6 +786,11 @@ async def remember(
                     "cognee_version": cognee_version,
                 },
             )
+            # index_vectors=False imports the archive's graph without touching
+            # the vector/embedding stack (same kwarg the code route uses), so a
+            # bundled archive restores with no API key. Vector-independent
+            # search (CHUNKS_LEXICAL) still works over such an import.
+            graph_only = not kwargs.pop("index_vectors", True)
             return await import_memory_source(
                 data,
                 dataset_name=dataset_name,
@@ -794,6 +799,7 @@ async def remember(
                 chunker=chunker,
                 custom_prompt=custom_prompt,
                 self_improvement=self_improvement,
+                graph_only=graph_only,
                 **kwargs,
             )
 
