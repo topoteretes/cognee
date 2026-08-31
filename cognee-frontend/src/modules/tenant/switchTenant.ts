@@ -1,4 +1,3 @@
-import { clearInitCache } from "./initCache";
 import persistSelectedTenant from "./persistSelectedTenant";
 
 // Read by useTenantInit.ts's connectToSelectedTenant on the other side of the
@@ -60,7 +59,6 @@ export default function switchTenant(
   navigateTo?: string,
   isFreshlyCreated?: boolean,
 ): void {
-  clearInitCache();
   persistSelectedTenant(tenantId, tenantName);
   if (isFreshlyCreated) {
     markFreshlyCreatedTenant(tenantId);
