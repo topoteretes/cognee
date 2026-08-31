@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from typing import Type, List, Optional
+from typing import Type, List, Literal, Optional
 from pydantic import BaseModel
 
 from cognee.modules.pipelines.tasks.task import task_summary
@@ -13,6 +13,7 @@ from cognee.modules.ontology.construct_data_points_and_edges_with_ontology impor
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
+    collect_stored_data_points,
     construct_data_points_and_edges,
     find_existing_edge_identities,
 )
@@ -83,6 +84,7 @@ async def integrate_chunk_graphs(
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: Optional[BaseOntologyResolver],
+    chunk_attachment: Optional[Literal["direct", "all"]] = None,
     pipeline_name: str = None,
     task_name: str = None,
     **kwargs,
@@ -98,6 +100,9 @@ async def integrate_chunk_graphs(
         chunk_graphs: List of knowledge graphs corresponding to each chunk
         graph_model: Pydantic model class for graph data validation
         ontology_resolver: Optional resolver for ontology canonicalization and enrichment
+        chunk_attachment: How widely each chunk links into its extracted graph.
+            ``"all"`` links it to every stored node; omitted and ``"direct"``
+            keep the single-root linkage. Custom DataPoint models only.
 
     Returns:
         The input chunks, updated with their extracted entities
@@ -121,7 +126,12 @@ async def integrate_chunk_graphs(
 
     if not issubclass(graph_model, KnowledgeGraph):
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
-            data_chunks[chunk_index].contains = chunk_graph
+            if chunk_attachment == "all" and isinstance(chunk_graph, DataPoint):
+                # The field name supplies the "contains" relationship, and the shared
+                # edge-text policy fills the label - no Edge wrapper needed here.
+                data_chunks[chunk_index].contains = await collect_stored_data_points(chunk_graph)
+            else:
+                data_chunks[chunk_index].contains = chunk_graph
 
         return data_chunks
 
@@ -168,6 +178,7 @@ async def extract_graph_from_data(
     config: Optional[Config] = None,
     custom_prompt: Optional[str] = None,
     ctx=None,
+    chunk_attachment: Optional[Literal["direct", "all"]] = None,
     **kwargs,
 ) -> List[DocumentChunk]:
     """
@@ -211,6 +222,7 @@ async def extract_graph_from_data(
         chunk_graphs,
         graph_model,
         ontology_resolver,
+        chunk_attachment=chunk_attachment,
         pipeline_name=pipeline_name,
         task_name=task_name,
         **kwargs,

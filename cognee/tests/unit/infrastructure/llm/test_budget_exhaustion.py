@@ -68,6 +68,14 @@ LITELLM_BUDGET_MESSAGES = [
     # Shape 3 -- per-model budget caps (model_max_budget_limiter.py:80,135)
     "LiteLLM Virtual Key: tok, key_alias: ka, exceeded budget for model=gpt-4o",
     "LiteLLM End User: e1, exceeded budget for model=gpt-4o",
+    # Observed verbatim from a real proxy (ghcr.io/berriai/litellm:main-stable,
+    # a virtual key driven past its cap, HTTP 429) rather than read from
+    # litellm's source. Appended rather than inserted: index 0 is the default
+    # for ``_wrapped_budget_error`` and other tests key off its exact wording.
+    # The key alias and key hint sit mid-sentence, which is the span the bounded
+    # wildcard in ``_BUDGET_SENTENCE_RE`` has to cross.
+    "Budget has been exceeded! Key=my-key-alias (sk-...-VGw) "
+    "Current cost: 20.00066499999998, Max budget: 0.01",
 ]
 
 # Prose that a cognified document could plausibly contain. None of it may be
