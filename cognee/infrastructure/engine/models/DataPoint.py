@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,7 +9,19 @@ from typing_extensions import NotRequired, TypedDict
 from cognee.infrastructure.engine.models.FieldAnnotations import _Dedup, _Embeddable
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
 
+if TYPE_CHECKING:
+    from cognee.infrastructure.engine.models.Edge import Edge
+
 logger = logging.getLogger(__name__)
+
+
+def _node_set_names(belongs_to_set: list[Any]) -> list[str]:
+    """Nodeset names as a scalar property, so the vector database can filter on them."""
+    return [
+        node_set if isinstance(node_set, str) else node_set.name
+        for node_set in belongs_to_set
+        if isinstance(node_set, str) or hasattr(node_set, "name")
+    ]
 
 
 # Define metadata type
@@ -374,3 +386,56 @@ class DataPoint(BaseModel):
               data.
         """
         return cls.model_validate(data)
+
+    def graph_fields(self) -> tuple[dict[str, Any], set[str], list[tuple[str, "Edge"]]]:
+        """How this node maps onto the graph, in one pass over its fields.
+
+        Returns the scalar properties to store on it, the field names to strip from the
+        stored copy, and every relationship it declares as a normalized ``Edge``.
+
+        Targets are RAW: a transparent container is still a container here. Resolving one
+        is the walk's job, because "a container is never stored" is a storage fact.
+        """
+        properties: dict[str, Any] = {"id": self.id, "type": type(self).__name__}
+        excluded: set[str] = set()
+        declared: list[tuple[str, "Edge"]] = []
+
+        for field_name, field_value in self:
+            if field_name == "metadata":
+                continue
+            edges = self._edges_in_field(field_name, field_value)
+            if not edges:
+                properties[field_name] = field_value
+                continue
+            if field_name == "belongs_to_set":
+                properties[field_name] = _node_set_names(field_value)
+            else:
+                excluded.add(field_name)
+            for edge in edges:
+                declared.append((field_name, edge))
+
+        return properties, excluded, declared
+
+    def _edges_in_field(self, field_name: str, value: Any) -> "list[Edge]":
+        from cognee.infrastructure.engine.models.Edge import Edge
+
+        items = value if isinstance(value, list) else [value]
+        edges: list[Edge] = []
+        for item in items:
+            if isinstance(item, DataPoint):
+                edges.append(
+                    Edge.model_construct(source=self, target=item, relationship_type=field_name)
+                )
+                continue
+            if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], Edge):
+                edge_metadata, targets = item
+                if isinstance(targets, DataPoint):
+                    edges.append(edge_metadata.normalize(self, field_name, target=targets))
+                    continue
+                if isinstance(targets, list) and targets and isinstance(targets[0], DataPoint):
+                    for inner in targets:
+                        edges.append(edge_metadata.normalize(self, field_name, target=inner))
+                continue
+            if isinstance(item, Edge) and item.target is not None:
+                edges.append(item.normalize(self, field_name))
+        return edges
