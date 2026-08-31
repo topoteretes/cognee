@@ -78,6 +78,30 @@ def test_wrap_cognify_exception():
     assert isinstance(wrapped, CognifyFailedError)
     assert wrapped.error_class == "AuthenticationError"
     assert "invalid api key" in str(wrapped)
+    # On the run-level path raise_on_error=False re-raises the original
+    # exception — the hint must not promise errored run info.
+    assert "original exception" in str(wrapped)
+    assert "errored run info" not in str(wrapped)
 
     # Already-typed errors pass through unchanged: no double-wrapping.
     assert _wrap_cognify_exception(wrapped, None) is wrapped
+
+
+def test_get_errored_run_info():
+    """Callers that opt out of raising use this to detect a failed build."""
+    from uuid import uuid4
+
+    from cognee.modules.pipelines.models.PipelineRunInfo import (
+        PipelineRunCompleted,
+        PipelineRunErrored,
+        get_errored_run_info,
+    )
+
+    common = {"pipeline_run_id": uuid4(), "dataset_id": uuid4(), "dataset_name": "ds"}
+    completed = PipelineRunCompleted(**common)
+    errored = PipelineRunErrored(**common, error_class="AuthenticationError")
+
+    assert get_errored_run_info(None) is None
+    assert get_errored_run_info({"ds": completed}) is None
+    assert get_errored_run_info({"a": completed, "b": errored}) is errored
+    assert get_errored_run_info(errored) is errored

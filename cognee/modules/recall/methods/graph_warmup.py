@@ -8,10 +8,12 @@ readiness states:
   ``add_pipeline`` rows exist: staged data and custom pipelines built through
   ``run_tasks_base`` log nothing else, and over-reporting warm merely falls
   through to a normal search — the pre-feature behavior).
-* ``build_failed`` — no graph-writing pipeline ever completed and an attempt
-  ERRORED. This is the canonical failed-first-cognify state: without it,
-  recall returns empty results with no explanation to exactly the users whose
-  first build broke.
+* ``build_failed`` — no graph-writing pipeline ever completed and a
+  graph-writing attempt ERRORED. This is the canonical failed-first-cognify
+  state: without it, recall returns empty results with no explanation to
+  exactly the users whose first build broke. Errored ``add_pipeline`` rows
+  never trigger it — staging failures don't say anything about the graph, and
+  counting them would break the staging-only fail-safe above.
 * ``never_built`` — no pipeline has ever touched the datasets (or none has
   finished or failed yet).
 
@@ -120,7 +122,11 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
         if warm:
             return WarmupProbe(STATE_WARM, _WARM_COUNT)
 
-        # Cold path: distinguish failed / staged-only / empty.
+        # Cold path: distinguish failed / staged-only / empty. Staging
+        # (add_pipeline) failures are excluded: they say nothing about the
+        # graph, and counting them would flip datasets that only ever staged
+        # data — including custom pipelines that build graphs without logging
+        # runs — from the warm fail-safe below into build_failed.
         latest_errored = (
             await session.execute(
                 select(PipelineRun.error_class, PipelineRun.error_message)
@@ -128,6 +134,7 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
                     and_(
                         PipelineRun.dataset_id.in_(ids),
                         PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+                        PipelineRun.pipeline_name != _STAGING_PIPELINE,
                     )
                 )
                 .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())

@@ -4,6 +4,7 @@ from uuid import UUID
 import cognee
 
 from cognee.exceptions import CogneeValidationError, CogneeSystemError
+from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
@@ -66,7 +67,23 @@ async def cognify_session(
                 user=user,
             )
             logger.debug("Session data added to cognee with node_set: user_sessions")
-            await cognee.cognify(datasets=[dataset_id], user=user)
+            # raise_on_error=False: one window's failed build must not kill the
+            # whole memify run — inspect the run info instead, keep this
+            # window's watermark put (so it is re-extracted and retried on the
+            # next improve()), and continue with the remaining windows.
+            cognify_result = await cognee.cognify(
+                datasets=[dataset_id], user=user, raise_on_error=False
+            )
+            errored_run = get_errored_run_info(cognify_result)
+            if errored_run is not None:
+                logger.error(
+                    "Cognify failed for session %s window (%s: %s); watermark not advanced, "
+                    "window will be retried on the next improve()",
+                    window.session_id,
+                    errored_run.error_class,
+                    errored_run.error_message,
+                )
+                continue
             logger.info("Session data successfully cognified")
 
             await save_persisted_qa_count(

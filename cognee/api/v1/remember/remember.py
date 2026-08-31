@@ -1372,9 +1372,11 @@ async def _remember_inner(
                 # Loud-by-default: a failed build raises CognifyFailedError
                 # (typed, classified, with a remedy) out of blocking remember()
                 # instead of returning a silently "errored" result nobody
-                # inspects. Background mode still records the failure on the
-                # result and the run record — a raise has nowhere to go there.
-                raise_on_error=raise_on_error,
+                # inspects. In background remember() a raise has nowhere to go
+                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                # raw_result — so take the errored-run-info path there and let
+                # _resolve() record the failure on the result.
+                raise_on_error=raise_on_error and not run_in_background,
                 **shared_kwargs,
                 **cognify_kwargs,
             )

@@ -66,6 +66,9 @@ def _wrap_cognify_exception(error: BaseException, datasets) -> "Exception":
         dataset_name=str(datasets) if datasets else None,
         error_class=type(error).__name__,
         error_message=scrub_error_message(error),
+        # On this path raise_on_error=False re-raises the original exception —
+        # there is no errored run info to hand back.
+        hint="Pass raise_on_error=False to get the original exception instead.",
     )
 
 
@@ -387,8 +390,13 @@ async def cognify(
             # errored-run-info path below. Wrap them in the same typed,
             # classified exception so foreground callers see ONE failure
             # surface either way; raise_on_error=False keeps the raw exception
-            # (today's behavior).
-            if raise_on_error and not run_in_background:
+            # (today's behavior). Already-typed cognee errors — e.g.
+            # PermissionDeniedError / DatasetNotFoundError from dataset
+            # resolution — pass through unchanged so callers' except clauses
+            # keep matching.
+            from cognee.exceptions import CogneeApiError
+
+            if raise_on_error and not run_in_background and not isinstance(error, CogneeApiError):
                 raise _wrap_cognify_exception(error, datasets) from error
             raise
 

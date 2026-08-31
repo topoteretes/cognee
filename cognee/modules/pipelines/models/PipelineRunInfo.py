@@ -51,3 +51,19 @@ class PipelineRunErrored(PipelineRunInfo):
     error_class: Optional[str] = None
     error_message: Optional[str] = None
     pass
+
+
+def get_errored_run_info(result) -> Optional[PipelineRunErrored]:
+    """First ``PipelineRunErrored`` in a cognify()/run_pipeline result, or None.
+
+    Blocking pipeline executors return ``{dataset_id: PipelineRunInfo}`` (or a
+    bare run info); callers that pass ``raise_on_error=False`` use this to tell
+    a failed build apart from a completed one.
+    """
+    if isinstance(result, PipelineRunErrored):
+        return result
+    if isinstance(result, dict):
+        for run_info in result.values():
+            if isinstance(run_info, PipelineRunErrored):
+                return run_info
+    return None

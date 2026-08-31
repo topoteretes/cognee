@@ -34,6 +34,7 @@ class CognifyFailedError(CogneeSystemError):
         dataset_name: str = None,
         error_class: str = None,
         error_message: str = None,
+        hint: str = None,
     ):
         self.dataset_name = dataset_name
         self.error_class = error_class
@@ -41,8 +42,12 @@ class CognifyFailedError(CogneeSystemError):
 
         dataset_desc = f" for dataset '{dataset_name}'" if dataset_name else ""
         cause_desc = f"{error_class}: {error_message}" if error_class else (error_message or "")
-        message = (
-            f"Cognify failed{dataset_desc}: {cause_desc} "
-            f"| Pass raise_on_error=False to get the errored run info instead of this exception."
+        # The default hint describes the errored-run-info path; run-level
+        # crashes wrapped by cognify pass a hint matching what
+        # raise_on_error=False actually does there (re-raise the original).
+        hint = (
+            hint
+            or "Pass raise_on_error=False to get the errored run info instead of this exception."
         )
+        message = f"Cognify failed{dataset_desc}: {cause_desc} | {hint}"
         super().__init__(message, "CognifyFailedError", status.HTTP_422_UNPROCESSABLE_CONTENT)
