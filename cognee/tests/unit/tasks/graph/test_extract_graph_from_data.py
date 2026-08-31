@@ -265,7 +265,9 @@ async def test_integrate_chunk_graphs_selects_the_ontology_constructor(
     await integrate_chunk_graphs([chunk], [graph], KnowledgeGraph, resolver)
 
     mock_construct.assert_not_called()
-    mock_construct_with_ontology.assert_called_once_with([chunk], [graph], resolver)
+    mock_construct_with_ontology.assert_called_once_with(
+        [chunk], [graph], resolver, ontology_mode=None
+    )
 
 
 @pytest.mark.asyncio
