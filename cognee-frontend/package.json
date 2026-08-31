@@ -32,6 +32,7 @@
     "react-error-boundary": "^6.0.0",
     "react-force-graph-2d": "^1.29.0",
     "react-markdown": "^10.1.0",
+    "server-only": "^0.0.1",
     "uuid": "^11.1.0",
     "valibot": "^1.2.0"
   },

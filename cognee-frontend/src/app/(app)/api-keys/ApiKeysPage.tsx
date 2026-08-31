@@ -12,7 +12,6 @@ import getMyUserId from "@/modules/apiKeys/getMyUserId";
 import { TrackPageView, trackEvent } from "@/modules/analytics";
 import { isCloudEnvironment } from "@/utils";
 import { notifications } from "@mantine/notifications";
-import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 function StatusDot({ label, ready }: { label: string; ready: boolean }) {
   return (
@@ -54,7 +53,7 @@ export default function ApiKeysPage() {
   const isCloud = isCloudEnvironment();
   // In cloud, never fall back to localhost — show the real tenant URL when known,
   // otherwise treat as provisioning. Only local/OSS mode uses localApiUrl.
-  const baseUrl = isCloud ? serviceUrl : (serviceUrl || getLocalApiUrl());
+  const baseUrl = serviceUrl;
   const urlProvisioning = isCloud && !serviceUrl;
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);

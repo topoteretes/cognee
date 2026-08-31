@@ -1,3 +1,9 @@
+// Server-side only. Without this guard, a client component importing this
+// module would get process.env.COGNEE_BACKEND_URL replaced with undefined at
+// build time and silently fall back to localhost. next/jest maps this to an
+// empty mock, so tests are unaffected.
+import "server-only";
+
 import { normalizeBackendUrl, type RuntimeConfig } from "./runtimeConfig";
 
 /**
