@@ -405,7 +405,11 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/export/{dataset_id}")
     async def export_dataset_markdown(dataset_id: UUID, user=Depends(get_authenticated_user)):
-        """Export a dataset's knowledge graph as a Markdown memory report."""
+        """Export a dataset's knowledge graph as a Markdown memory report.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+        """
         from fastapi.responses import Response
         from cognee.modules.data.models.Dataset import Dataset
         from cognee.modules.data.models.Data import Data

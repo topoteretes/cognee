@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Collection, Union, Optional
+from typing import Collection, Literal, Union, Optional
 from uuid import UUID
 
 from cognee.modules.cognify.config import get_cognify_config
@@ -9,6 +9,7 @@ from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
 from cognee.modules.pipelines import run_pipeline
@@ -17,7 +18,10 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -120,6 +124,7 @@ async def cognify(
     data_cache: bool = True,
     dry_run: bool = False,
     raise_on_error: bool = True,
+    chunk_attachment: Optional[Literal["direct", "all"]] = None,
     **kwargs,
 ):
     """
@@ -194,6 +199,22 @@ async def cognify(
         dry_run: If True, return a stage-level estimate of LLM token usage and rough cost
                  without making LLM calls or writing graph results. The estimate covers all
                  data in the selected dataset(s); an incremental run may process fewer items.
+        chunk_attachment: How widely each chunk links into the graph extracted from it.
+                 Accepts "direct", "all", or None; omitting it is the same as "direct".
+                 - "direct": the chunk links to the extracted root, or - if that root is a
+                   transparent container - to the children that replaced it. Today's behaviour.
+                 - "all": the chunk links once to every stored node reachable from that root,
+                   so any entity is one hop from its source chunk.
+                 Requires a custom DataPoint graph_model; passing it with KnowledgeGraph
+                 raises, since that path already attaches every extracted entity to its chunk.
+                 Applies to standard-routed items only, exactly like graph_model - DLT-source
+                 manifests and code files run their own task lists and ignore both.
+                 Orthogonal to metadata["transparent"], which is a property of the model.
+                 SDK-only: not exposed over the REST API. Raises with temporal_cognify=True
+                 or while connected to a remote instance; permitted with dry_run=True.
+                 Cost of "all": index_graph_edges embeds one EdgeType per distinct edge text,
+                 and contains edge text is "<chunk label> contains <node label>." - so a model
+                 yielding N nodes per chunk means roughly N extra embedded rows per chunk.
 
     Returns:
         Union[dict, list[PipelineRunInfo], DryRunEstimate]:
@@ -270,11 +291,34 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
+    if chunk_attachment is not None:
+        # cognify() forwards unknown kwargs into the LLM call, which also takes
+        # **kwargs, so an unusable value here has to raise rather than vanish.
+        if chunk_attachment not in ("direct", "all"):
+            raise ValueError(
+                f"Invalid chunk_attachment {chunk_attachment!r}; expected 'direct', 'all', or None."
+            )
+        if not (isinstance(graph_model, type) and issubclass(graph_model, DataPoint)):
+            raise ValueError(
+                "chunk_attachment requires a custom DataPoint graph_model; "
+                f"{getattr(graph_model, '__name__', graph_model)!r} is not a DataPoint subclass."
+            )
+        if temporal_cognify:
+            raise ValueError(
+                "chunk_attachment is not supported with temporal_cognify=True; the temporal "
+                "pipeline does not attach extracted graphs to chunks."
+            )
+
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
 
     client = get_remote_client()
     if client is not None:
+        if chunk_attachment is not None:
+            raise ValueError(
+                "chunk_attachment is not supported while connected to a remote Cognee "
+                "instance. Call cognee.disconnect() to use it locally."
+            )
         if dry_run:
             raise ValueError(
                 "dry_run is not supported while connected to a remote Cognee instance. "
@@ -304,7 +348,13 @@ async def cognify(
         await run_migrations_and_block(datasets, user)
 
         resolved_resolver = get_configured_ontology_resolver(config)
-        config = {"ontology_config": {"ontology_resolver": resolved_resolver}}
+        resolved_ontology_mode = get_configured_ontology_mode(config)
+        config = {
+            "ontology_config": {
+                "ontology_resolver": resolved_resolver,
+                "ontology_mode": resolved_ontology_mode,
+            }
+        }
 
         if dry_run:
             if temporal_cognify:
@@ -337,6 +387,7 @@ async def cognify(
                 custom_prompt=custom_prompt,
                 chunks_per_batch=chunks_per_batch,
                 functional_relationships=functional_relationships,
+                chunk_attachment=chunk_attachment,
                 **kwargs,
             )
 
@@ -431,6 +482,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = None,
     functional_relationships: Optional[Collection[str]] = None,
+    chunk_attachment: Optional[Literal["direct", "all"]] = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
@@ -459,6 +511,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
+            chunk_attachment=chunk_attachment,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),

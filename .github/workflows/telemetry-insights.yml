@@ -1,0 +1,88 @@
+# Daily telemetry-insights: extract anonymized aggregates from MotherDuck,
+# have Claude Code analyze pattern changes / version correlations, and file a
+# deduplicated GitHub issue with findings.
+#
+# Privacy design (do not weaken):
+#   - Step "extract" is the ONLY step with warehouse access (MOTHERDUCK_TOKEN).
+#     It runs a fixed, allowlisted aggregate script; a guard fails the job if
+#     any output contains identifier-shaped values or denylisted columns.
+#   - Step "analyze" (Claude) gets NO warehouse credentials and a restricted
+#     tool allowlist: it can only read the aggregate CSVs, the repo, and call
+#     `gh issue` / `gh pr` for duplicate detection.
+#
+# Required repository secrets: MOTHERDUCK_TOKEN (read-only token recommended),
+# ANTHROPIC_API_KEY.
+
+name: Telemetry Insights (daily)
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Days of telemetry to aggregate"
+        required: false
+        default: "70"
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: telemetry-insights
+  cancel-in-progress: false
+
+jobs:
+  telemetry-insights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 200 # git history is evidence for version-correlation analysis
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install duckdb client
+        run: pip install "duckdb>=1.1"
+
+      - name: Extract anonymized aggregates (only step with warehouse access)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          TELEMETRY_WINDOW_DAYS: ${{ github.event.inputs.window_days || '70' }}
+        run: python .github/scripts/telemetry_aggregate_extract.py
+
+      - name: Upload aggregates artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telemetry-aggregates-${{ github.run_id }}
+          path: telemetry_aggregates/
+          retention-days: 14
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Analyze with Claude Code (no warehouse access)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          claude -p "$(cat .github/scripts/telemetry_insights_prompt.md)" \
+            --permission-mode acceptEdits \
+            --allowedTools "Read,Glob,Grep,Write,Bash(gh issue:*),Bash(gh pr:*),Bash(git log:*),Bash(git show:*)" \
+            --max-turns 80
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telemetry-insights-report-${{ github.run_id }}
+          path: telemetry-insights-report.md
+          if-no-files-found: warn
+          retention-days: 90

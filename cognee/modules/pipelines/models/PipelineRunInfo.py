@@ -53,6 +53,15 @@ class PipelineRunErrored(PipelineRunInfo):
     pass
 
 
+class PipelineRunProgress(PipelineRunInfo):
+    status: str = "PipelineRunProgress"
+    completed_items: Optional[int] = None
+    total_items: Optional[int] = None
+    current_stage: Optional[str] = None
+    stage_index: Optional[int] = None
+    stage_total: Optional[int] = None
+
+
 def get_errored_run_info(result) -> Optional[PipelineRunErrored]:
     """First ``PipelineRunErrored`` in a cognify()/run_pipeline result, or None.
 

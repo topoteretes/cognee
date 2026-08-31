@@ -166,6 +166,14 @@ def partition_repo_files(directory: Path) -> tuple[List[Path], List[Path], List[
     skipped: List[Path] = []
 
     for file_path in sorted(directory.rglob("*")):
+        # is_file() follows symlinks, and read_bytes() below would then pull the
+        # TARGET's contents into the manifest. A repo (cloned or local) containing
+        # 'creds.py -> ~/.aws/credentials' would otherwise be indexed verbatim.
+        # Clones are written with core.symlinks=false, so this covers local paths
+        # and any pre-existing clone made before that landed.
+        if file_path.is_symlink():
+            skipped.append(file_path)
+            continue
         if not file_path.is_file():
             continue
         relative = file_path.relative_to(directory)
@@ -233,12 +241,11 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
     if documents and not get_llm_config().llm_api_key:
         logger.warning(
             "No LLM API key configured (LLM_API_KEY): excluding %d document file(s) of "
-            "code project %s from processing — their pipelines need an LLM (image "
+            "the code project from processing — their pipelines need an LLM (image "
             "transcription at add time, text extraction at cognify). The code graph is "
             "unaffected (enola is LLM-free). Set LLM_API_KEY and re-add the repository "
             "to ingest its documents.",
             len(documents),
-            directory,
         )
         skipped = skipped + documents
         documents = []
@@ -263,8 +270,7 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
     )
 
     logger.info(
-        "Code project detected at %s: 1 repo item covering %d file(s), %d document(s), %d skipped.",
-        directory,
+        "Code project detected: 1 repo item covering %d file(s), %d document(s), %d skipped.",
         len(covered),
         len(documents),
         len(skipped),

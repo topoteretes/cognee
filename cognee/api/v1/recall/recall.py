@@ -38,7 +38,7 @@ from cognee.modules.recall.types.RecallResponse import (
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -57,6 +57,7 @@ class RecallKwargs(TypedDict, total=False):
     node_name: list[str]
     node_name_filter_operator: str
     only_context: bool
+    context_format: str
     session_id: str
     wide_search_top_k: int
     triplet_distance_penalty: float
@@ -351,6 +352,7 @@ async def recall(
     # unspecified hybrid may defer to GRAPH_COMPLETION, and search history
     # still records the type recall chose, not the deferred one.
     only_context: bool = False,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
     session_id: str | None = None,
     context_profile: str = "qa",
     wide_search_top_k: int | None = None,
@@ -479,6 +481,7 @@ async def recall(
             message=f"Invalid tools_trigger '{tools_trigger}'. Valid values: 'always', 'on_empty'.",
             name="InvalidToolsTriggerError",
         )
+    context_format = ContextFormat.parse(context_format)
     if code_query is not None and "code" not in sources:
         raise CogneeValidationError(
             message=(
@@ -539,6 +542,7 @@ async def recall(
                 system_prompt=system_prompt,
                 node_name=node_name,
                 only_context=only_context,
+                context_format=context_format,
                 session_id=session_id,
                 context_profile=context_profile,
                 verbose=verbose,
@@ -768,6 +772,7 @@ async def recall(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,

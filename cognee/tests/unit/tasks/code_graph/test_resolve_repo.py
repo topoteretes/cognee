@@ -51,7 +51,7 @@ async def test_remote_refused_when_http_disabled(monkeypatch, tmp_path):
 async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -64,7 +64,9 @@ async def test_remote_is_shallow_cloned(monkeypatch, tmp_path):
     assert resolved == tmp_path / "github.com-org-repo"
     assert len(git_calls) == 1
     args, _cwd = git_calls[0]
-    assert args[:3] == ["clone", "--depth", "1"]
+    # core.symlinks=false is a security requirement, not incidental: without it a
+    # symlink committed in the remote is materialized and later written through.
+    assert args[:5] == ["clone", "-c", "core.symlinks=false", "--depth", "1"]
     assert "https://github.com/org/repo" in args
 
 
@@ -74,7 +76,7 @@ async def test_existing_clone_is_reused_with_pull(monkeypatch, tmp_path):
     (clone_dir / ".git").mkdir(parents=True)
     git_calls = []
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         git_calls.append((args, cwd))
         return 0, ""
 
@@ -93,7 +95,7 @@ async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
     clone_dir = tmp_path / "github.com-org-repo"
     (clone_dir / ".git").mkdir(parents=True)
 
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         return 1, "fatal: not fast-forward"
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)
@@ -107,7 +109,7 @@ async def test_failed_pull_still_reuses_stale_clone(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_failed_clone_raises_with_stderr(monkeypatch, tmp_path):
-    async def fake_run_git(args, cwd=None):
+    async def fake_run_git(args, cwd=None, env=None):
         return 128, "fatal: repository not found"
 
     monkeypatch.setattr(resolve_module, "_run_git", fake_run_git)

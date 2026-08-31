@@ -25,6 +25,7 @@ from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.unified.provenance_delete_planner import (
     SourceRefRemovalResult,
 )
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 
 ddne_module = sys.modules["cognee.modules.graph.methods.delete_data_nodes_and_edges"]
 ddsne_module = sys.modules["cognee.modules.graph.methods.delete_dataset_nodes_and_edges"]
@@ -133,10 +134,11 @@ async def test_delete_dataset_routes_graph_provenance():
         patch.object(ddsne_module, "stores_provenance_in_graph", AsyncMock(return_value=True)),
         patch.object(ddsne_module, "delete_from_graph_and_vector", AsyncMock()) as legacy_delete,
     ):
-        await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
+        result = await ddsne_module.delete_dataset_nodes_and_edges(dataset_id, user_id)
 
     unified.delete_by_dataset_id.assert_awaited_once_with(str(dataset_id))
     legacy_delete.assert_not_called()
+    assert result == DeletedGraphElements()
 
 
 async def test_delete_data_old_graph_uses_legacy():

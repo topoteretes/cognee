@@ -10,7 +10,6 @@ from tenacity import (
     retry,
     stop_after_delay,
     wait_exponential_jitter,
-    retry_if_not_exception_type,
     before_sleep_log,
 )
 import litellm
@@ -23,6 +22,10 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingException,
 )
 
+from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    embedding_retry_condition,
+)
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.infrastructure.databases.vector.embeddings.utils import (
@@ -152,14 +155,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # ~2 minutes of user wall clock on a mis-typed API key. Superset of
         # the LLM adapter exclusion set (adds PermissionDeniedError); see
         # cognee/infrastructure/llm/structured_output_framework/litellm_instructor/llm/openai/adapter.py.
-        retry=retry_if_not_exception_type(
-            (
-                EmbeddingContextWindowTooSmallError,
-                litellm.exceptions.NotFoundError,
-                litellm.exceptions.AuthenticationError,
-                litellm.exceptions.PermissionDeniedError,
-                asyncio.CancelledError,
-            )
+        # Budget exhaustion is terminal as well, but it is classified by
+        # predicate rather than by class: see embeddings/retry_config.py.
+        retry=embedding_retry_condition(
+            EmbeddingContextWindowTooSmallError,
+            litellm.exceptions.NotFoundError,
+            litellm.exceptions.AuthenticationError,
+            litellm.exceptions.PermissionDeniedError,
+            asyncio.CancelledError,
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -248,6 +251,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 
         except litellm.exceptions.BadRequestError as error:
+            # A spend cap can arrive as a 400 depending on how the proxy maps it, and this
+            # clause catches every BadRequestError before the conversion further down, so
+            # without this the same failure surfaces as a raw provider error on one
+            # transport status and as the 402 on another. Ahead of the length check because
+            # a budget rejection carries no length wording, so it would fall through to the
+            # bare re-raise below and never reach any conversion at all.
+            raise_if_budget_exhausted(error)
+
             # ContextWindowExceededError subclasses BadRequestError. litellm raises
             # it for chat context-length errors, but the embeddings API returns a
             # plain BadRequestError for over-length input (OpenAI 400: "maximum input
@@ -319,7 +330,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.PermissionDeniedError,
         ):
             # Terminal auth failures must reach tenacity unwrapped so
-            # ``retry_if_not_exception_type`` can short-circuit the backoff
+            # ``embedding_retry_condition`` can short-circuit the backoff
             # ladder. Deliberately diverges from the EmbeddingException
             # contract of the other branches: keeping the litellm class (and
             # its message) intact lets the CLI's first-run remediation match
@@ -335,6 +346,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:
+            # A proxy spend cap lands here, either as litellm's own
+            # BudgetExceededError or as the plain RateLimitError the client gets
+            # for a proxy 429. Raise the same actionable 402 the LLM path does,
+            # so the failure is not buried under the endpoint-and-settings
+            # message below, which points at the wrong problem entirely.
+            raise_if_budget_exhausted(error)
+
             # Fall back to a clear, actionable message for connectivity/misconfiguration issues
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",

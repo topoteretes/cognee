@@ -107,6 +107,10 @@ def get_slack_channels_router():
         An empty list means unrestricted (the default) — channel scoping is
         opt-in, so a workspace that never visits this settings screen keeps
         working everywhere, exactly as before this feature existed.
+
+        ## Request Parameters
+        - **channelIds** (List[str]): Slack channel IDs allowed to run slash commands; an
+          empty list removes all channel restrictions.
         """
         credential = _connected_credential_or_404(
             await get_active_credential_for_user(user.id, PROVIDER)
@@ -129,6 +133,10 @@ def get_slack_channels_router():
         Backs the ``/link-slack`` frontend page — the browser session here
         (not anything typed into Slack) is what proves which cognee account
         the invoking Slack member should be linked to.
+
+        ## Request Parameters
+        - **code** (str): Magic-link code issued by /cognee-link, confirmed to bind the
+          Slack member to this account.
         """
         linked = await confirm_link(payload.code, user.id)
         if not linked:

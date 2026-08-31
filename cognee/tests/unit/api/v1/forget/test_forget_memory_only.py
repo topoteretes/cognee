@@ -9,10 +9,13 @@ Covers:
 """
 
 import importlib
-import pytest
 from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElements
 
 # Import the actual module (not the function) to access private helpers
 forget_module = importlib.import_module("cognee.api.v1.forget.forget")
@@ -116,8 +119,9 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     session = _FakeSession([data_a, data_b])
     engine = _FakeEngine(session)
 
-    mock_delete = AsyncMock()
+    mock_delete = AsyncMock(return_value=DeletedGraphElements(node_ids={"node_deleted"}))
     mock_reset_status = AsyncMock()
+    mock_invalidate_deleted_data = AsyncMock()
     monkeypatch.setattr(
         forget_module,
         "_resolve_dataset_id",
@@ -129,6 +133,14 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
             delete_dataset_nodes_and_edges_module,
             "delete_dataset_nodes_and_edges",
             mock_delete,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.invalidate_sessions_for_dataset",
+            AsyncMock(),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.invalidate_sessions_for_deleted_data",
+            mock_invalidate_deleted_data,
         ),
         patch(
             "cognee.infrastructure.databases.relational.get_relational_engine",
@@ -148,6 +160,12 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
     assert result["data_records_reset"] == 2
 
     mock_delete.assert_awaited_once_with(DATASET_ID, USER.id)
+    mock_invalidate_deleted_data.assert_awaited_once_with(
+        DATASET_ID,
+        {"node_deleted"},
+        set(),
+        user_id=USER.id,
+    )
     mock_reset_status.assert_awaited_once_with(
         dataset_id=DATASET_ID,
         user=USER,
@@ -184,7 +202,7 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
         patch.object(
             delete_dataset_nodes_and_edges_module,
             "delete_dataset_nodes_and_edges",
-            AsyncMock(),
+            AsyncMock(return_value=DeletedGraphElements()),
         ),
         patch(
             "cognee.infrastructure.databases.relational.get_relational_engine",
