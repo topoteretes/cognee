@@ -251,6 +251,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return handle_embedding_response(text, embedding_response, self.dimensions)
 
         except litellm.exceptions.BadRequestError as error:
+            # A spend cap can arrive as a 400 depending on how the proxy maps it, and this
+            # clause catches every BadRequestError before the conversion further down, so
+            # without this the same failure surfaces as a raw provider error on one
+            # transport status and as the 402 on another. Ahead of the length check because
+            # a budget rejection carries no length wording, so it would fall through to the
+            # bare re-raise below and never reach any conversion at all.
+            raise_if_budget_exhausted(error)
+
             # ContextWindowExceededError subclasses BadRequestError. litellm raises
             # it for chat context-length errors, but the embeddings API returns a
             # plain BadRequestError for over-length input (OpenAI 400: "maximum input

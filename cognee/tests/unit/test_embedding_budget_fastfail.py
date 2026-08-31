@@ -156,11 +156,12 @@ async def test_litellm_proxy_budget_rejection_bypasses_retry(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_litellm_budget_rejection_as_bad_request_bypasses_retry(monkeypatch):
-    """A budget rejection arriving as a 400 still fails fast.
+    """A budget rejection arriving as a 400 gets the same 402 as every other shape.
 
-    This shape is re-raised unchanged by the ``BadRequestError`` handler, ahead
-    of the 402 conversion, so it keeps the litellm class. What matters is that
-    the retry predicate classifies it: no ladder either way.
+    The proxy's transport status must not decide the API error family: this is the
+    same spend cap as the 429 above, so the caller must not have to handle two
+    types for it. The ``BadRequestError`` clause catches this before the handler
+    that converts, so the conversion has to happen inside that clause.
     """
     monkeypatch.setenv("MOCK_EMBEDDING", "false")
     engine = LiteLLMEmbeddingEngine(dimensions=4)
@@ -177,10 +178,12 @@ async def test_litellm_budget_rejection_as_bad_request_bypasses_retry(monkeypatc
 
     monkeypatch.setattr(litellm, "aembedding", _raise_bad_request_budget)
 
-    with pytest.raises(litellm.exceptions.BadRequestError):
+    with pytest.raises(LLMPaymentRequiredError) as exc_info:
         await engine.embed_text(["hello world"])
 
     assert calls["count"] == 1
+    assert exc_info.value.status_code == 402
+    assert "Budget has been exceeded" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
