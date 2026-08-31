@@ -86,20 +86,31 @@ export function readRuntimeConfig(): Partial<RuntimeConfig> {
   // Re-check the URL on the way out of the DOM, with the same rule the server
   // applied on the way in. The client should not trust document content it did
   // not verify itself: this value reaches href attributes, so an unvalidated
-  // "javascript:" here would be an XSS sink. Anything unusable degrades to the
+  // "javascript:" here would be an XSS sink.
+  //
+  // The scheme is not carried over from the input, it is picked from the two
+  // literals below and the rest is rebuilt from the parsed parts. That leaves
+  // no way for the document to choose the scheme, and it is why static
+  // analysis can see the result is safe. Query and fragment are dropped; a
+  // backend base URL has no use for them. Anything unusable degrades to the
   // caller's own fallback rather than throwing.
-  const backendUrl = parsed.backendUrl?.trim();
-  if (!backendUrl) return {};
-  if (!/^https?:\/\//i.test(backendUrl)) return {};
+  const raw = parsed.backendUrl?.trim();
+  if (!raw) return {};
 
+  let url: URL;
   try {
-    const { protocol } = new URL(backendUrl);
-    if (protocol !== "http:" && protocol !== "https:") return {};
+    url = new URL(raw);
   } catch {
     return {};
   }
 
-  return { backendUrl: stripTrailingSlash(backendUrl) };
+  if (url.protocol === "https:") {
+    return { backendUrl: stripTrailingSlash(`https://${url.host}${url.pathname}`) };
+  }
+  if (url.protocol === "http:") {
+    return { backendUrl: stripTrailingSlash(`http://${url.host}${url.pathname}`) };
+  }
+  return {};
 }
 
 /**

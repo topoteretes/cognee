@@ -114,6 +114,20 @@ describe("readRuntimeConfig", () => {
 
     expect(readRuntimeConfig()).toEqual({ backendUrl: "http://cognee:8000" });
   });
+
+  it("rebuilds the URL rather than passing the document's string through", () => {
+    // The scheme comes from a literal, never from the document, which is what
+    // makes the value safe to put in an href.
+    renderConfigElement(JSON.stringify({ backendUrl: "HTTPS://Cognee.Example.com:8443/api" }));
+
+    expect(readRuntimeConfig()).toEqual({ backendUrl: "https://cognee.example.com:8443/api" });
+  });
+
+  it("drops query and fragment, which a backend base URL has no use for", () => {
+    renderConfigElement(JSON.stringify({ backendUrl: "http://cognee:8000/?a=1#x" }));
+
+    expect(readRuntimeConfig()).toEqual({ backendUrl: "http://cognee:8000" });
+  });
 });
 
 describe("stripTrailingSlash", () => {
