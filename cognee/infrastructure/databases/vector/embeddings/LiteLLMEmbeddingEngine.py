@@ -41,8 +41,15 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 # BadRequestError (e.g. OpenAI 400 "maximum input length is 8192 tokens"). Match
 # those by message so the split/pool recovery below can handle them too. Kept
 # narrow to length/token-limit phrasings so genuinely-bad requests still fail fast.
+# Vertex reports oversized batches two ways depending on which limit is hit:
+# the per-prediction instance cap ("2048 instance(s) is allowed per prediction")
+# and the per-model batch cap ("a batchSize value of 1234 but the supported
+# range is from 1 (inclusive) to 251 (exclusive)" -- "too many instances").
 _EMBED_LENGTH_ERROR_RE = re.compile(
-    r"maximum\s+input\s+length|instance\(s\)\s+is\s+allowed\s+per\s+prediction",
+    r"maximum\s+input\s+length"
+    r"|instance\(s\)\s+is\s+allowed\s+per\s+prediction"
+    r"|too\s+many\s+instances"
+    r"|batchsize\s+value\s+of",
     re.IGNORECASE,
 )
 
@@ -262,9 +269,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # ContextWindowExceededError subclasses BadRequestError. litellm raises
             # it for chat context-length errors, but the embeddings API returns a
             # plain BadRequestError for over-length input (OpenAI 400: "maximum input
-            # length is 8192 tokens"; Vertex AI 400: "2048 instance(s) is allowed per
-            # prediction"). Recover (split + pool) for both; re-raise any
-            # other BadRequest unchanged so genuinely bad requests still fail fast.
+            # length is 8192 tokens"). Vertex words batch-limit 400s differently
+            # depending on which cap is hit: the per-prediction instance cap
+            # ("2048 instance(s) is allowed per prediction") or the per-model
+            # batch cap ("too many instances" / "batchSize value of 1234 but the
+            # supported range is ... to 251 (exclusive)"). Recover (split + pool)
+            # for all of these; re-raise any other BadRequest unchanged so
+            # genuinely bad requests still fail fast.
             if not (
                 isinstance(error, litellm.exceptions.ContextWindowExceededError)
                 or _EMBED_LENGTH_ERROR_RE.search(str(error))
