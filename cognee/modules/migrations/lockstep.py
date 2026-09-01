@@ -83,13 +83,15 @@ def current_head(script_location: str | None = None) -> str:
 
 def revision_exists(revision: str, script_location: str | None = None) -> bool:
     from alembic.script import ScriptDirectory
+    from alembic.script.revision import ResolutionError
 
     from cognee.modules.migrations.startup import _build_alembic_config
 
     script = ScriptDirectory.from_config(_build_alembic_config(script_location))
     try:
         return script.get_revision(revision) is not None
-    except Exception:
+    except ResolutionError:
+        # The one outcome that MEANS "not in the chain"; anything else raises.
         return False
 
 
