@@ -2,7 +2,8 @@
 
 This module provides tools for scraping web content, managing scraping jobs, and storing
 data in a graph database. It includes classes and functions for crawling web pages using
-BeautifulSoup or Tavily, defining data models, and handling scraping configurations.
+BeautifulSoup, Tavily, or Keenable, defining data models, and handling scraping
+configurations.
 """
 
 from .utils import fetch_page_content
@@ -26,7 +27,6 @@ def __getattr__(name):
 
 
 __all__ = [
-    "BeautifulSoupCrawler",
     "fetch_page_content",
     "cron_web_scraper_task",
     "web_scraper_task",

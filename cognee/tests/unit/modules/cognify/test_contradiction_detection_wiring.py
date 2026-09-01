@@ -12,6 +12,7 @@ chunk_size are passed so no ontology/LLM setup runs).
 import importlib
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,6 +22,11 @@ from cognee.api.v1.cognify.cognify import get_default_tasks
 from cognee.api.v1.remember.remember import remember
 from cognee.modules.cognify.config import CognifyConfig
 from cognee.tasks.graph.models import Contradiction, ContradictionList
+
+# Patching by the dotted string "cognee.api.v1.serve.state…" fails on
+# Python 3.10: `cognee.api.v1.serve` is shadowed by the re-exported serve()
+# function, and pre-3.11 mock walks attributes instead of importing modules.
+from cognee.api.v1.serve import state as serve_state_module
 
 # `from cognee.api.v1.cognify import cognify` would resolve to the re-exported
 # cognify FUNCTION; grab the actual module objects for patching.
@@ -40,13 +46,13 @@ _mod_engine_setup = importlib.import_module("cognee.modules.engine.operations.se
 _pkg_add = importlib.import_module("cognee.api.v1.add")
 _mod_users_methods = importlib.import_module("cognee.modules.users.methods")
 
-# The canonical pre-detection task order.
+# The canonical pre-detection task order. The legacy DLT task left this
+# list when legacy DLT rows got their own cognify route (SDK-38).
 _BASE_SEQUENCE = [
     "classify_documents",
     "extract_chunks_from_documents",
     "extract_graph_and_summarize",
     "add_data_points",
-    "extract_dlt_fk_edges",
 ]
 
 
@@ -132,7 +138,15 @@ class TestRememberInheritsTheFlag:
 
         def _fake_executor(run_in_background=False):
             async def _run(**executor_kwargs):
-                captured["tasks"] = [task.executable.__name__ for task in executor_kwargs["tasks"]]
+                tasks_arg = executor_kwargs["tasks"]
+                # cognify passes a per-item resolver as ``tasks``; resolve a
+                # plain text item to obtain the standard list.
+                resolved = (
+                    tasks_arg(SimpleNamespace(system_metadata=None, extension="txt"))
+                    if callable(tasks_arg)
+                    else tasks_arg
+                )
+                captured["tasks"] = [task.executable.__name__ for task in resolved]
                 return {}
 
             return _run

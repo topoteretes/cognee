@@ -173,7 +173,7 @@ class CogneeApiClient:
     def search(
         self,
         query: str,
-        search_type: str = "GRAPH_COMPLETION",
+        search_type: str = "HYBRID_COMPLETION",
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
     ) -> list:
@@ -312,13 +312,14 @@ class CogneeApiClient:
     def recall(
         self,
         query: str,
-        search_type: Optional[str] = "GRAPH_COMPLETION",
+        search_type: Optional[str] = "HYBRID_COMPLETION",
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
         system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
         node_name: Optional[list[str]] = None,
         only_context: bool = False,
+        context_format: str = "context",
         verbose: bool = False,
     ) -> list:
         # search_type=None opts the server into auto-routing (session-only
@@ -328,6 +329,7 @@ class CogneeApiClient:
             "search_type": search_type,
             "top_k": top_k,
             "only_context": only_context,
+            "context_format": context_format,
             "verbose": verbose,
         }
         if datasets:

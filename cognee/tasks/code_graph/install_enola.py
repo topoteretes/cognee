@@ -31,18 +31,19 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("enola")
 
-ENOLA_PINNED_VERSION = "0.1.34"
+ENOLA_PINNED_VERSION = "0.3.13"
 
 _RELEASE_URL_TEMPLATE = "https://github.com/enola-labs/enola/releases/download/v{version}/{asset}"
 
 # SHA-256 of each release archive, pinned from the .sha256 files published
-# alongside the v0.1.34 release assets. Bumping ENOLA_PINNED_VERSION requires
+# alongside the v0.3.13 release assets. Bumping ENOLA_PINNED_VERSION requires
 # re-pinning these.
 ENOLA_RELEASE_CHECKSUMS = {
-    "darwin-arm64": "d0a5a59426a58848b3867557a624012dd01b74c426c87064808b4b71611f9c22",
-    "linux-amd64": "bbdef9309512ba27b6cba64aaa30bcd7c4119204d03c477192cd76663fa87cd4",
-    "linux-arm64": "2d092e45d43f66236d50c91ce363bbf73b783cda5ee69e5d0385ac32b073e288",
-    "windows-amd64": "ea38eebbb9726319484cbfe9b4e69b509c8fee0430921d828e6b12b00be9b3c4",
+    "darwin-arm64": "f395dfaa213a816539f4178d1519bd13117764eb9b0cd0029b3d319040c0aba7",
+    "darwin-amd64": "50292c297831a2e77fd6fb9617f307219141496fa4cea09dd64511e7919291dd",
+    "linux-amd64": "870cb18f589620171b195812aa44a9883b7234206fbab95d42dc20069942ed9e",
+    "linux-arm64": "bb86c297a3f6a0071a6a4b4c180e08bf836e42c4e98fab258d9d763ad626e2b0",
+    "windows-amd64": "8d4a0a03b1f17af7f5174722e542fa06da2b8101d4f6fd09537e6d176b774a17",
 }
 
 _FALSEY = {"false", "0", "no", "off"}
@@ -103,18 +104,29 @@ def _download(url: str, destination: Path) -> None:
 
 
 def _extract_single_binary(archive_path: Path, destination: Path) -> None:
-    """Extract the archive's single binary member without trusting member paths."""
+    """Extract the archive's single enola binary member without trusting member paths.
+
+    Releases up to 0.1.x shipped the binary alone; 0.3.x adds LICENSE and
+    NOTICE next to it. Exactly one top-level `enola*` member must exist, and
+    no member name may contain a path separator or start with a dot.
+    """
     with tarfile.open(archive_path, "r:gz") as archive:
         members = [member for member in archive.getmembers() if member.isreg()]
-        if len(members) != 1 or "/" in members[0].name or members[0].name.startswith("."):
+        if any("/" in member.name or member.name.startswith(".") for member in members):
             names = [member.name for member in archive.getmembers()]
             raise EnolaInstallError(
                 message=f"Unexpected enola archive layout {names}; refusing to extract."
             )
-        extracted = archive.extractfile(members[0])
+        binaries = [member for member in members if member.name.startswith("enola")]
+        if len(binaries) != 1:
+            names = [member.name for member in archive.getmembers()]
+            raise EnolaInstallError(
+                message=f"Unexpected enola archive layout {names}; refusing to extract."
+            )
+        extracted = archive.extractfile(binaries[0])
         if extracted is None:
             raise EnolaInstallError(
-                message=f"Could not read '{members[0].name}' from the enola archive."
+                message=f"Could not read '{binaries[0].name}' from the enola archive."
             )
         with open(destination, "wb") as binary_file:
             binary_file.write(extracted.read())

@@ -19,6 +19,15 @@ from cognee.tasks.ingestion.resolve_dlt_sources import resolve_dlt_sources
 from cognee.tasks.ingestion.utils import materialize_stream_for_background
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.modules.observability import (
+    new_span,
+    MEMORY_SYSTEM,
+    MEMORY_OPERATION,
+    MEMORY_COLLECTION,
+    COGNEE_DATASET_NAME,
+    record_operation_duration,
+    increment_items_stored,
+)
 
 logger = get_logger()
 
@@ -170,6 +179,11 @@ async def add(
         Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
 
+        # Add a single url and keenable extract ingestion method
+        Make sure to set KEENABLE_API_KEY = YOUR_KEENABLE_API_KEY as a environment variable
+        (Tavily takes precedence if both keys are set.)
+        await cognee.add("https://example.com")
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
@@ -186,6 +200,7 @@ async def add(
         - VECTOR_DB_PROVIDER: "lancedb" (default), "pgvector"
         - GRAPH_DATABASE_PROVIDER: "ladybug" (default), "neo4j"
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
+        - KEENABLE_API_KEY: YOUR_KEENABLE_API_KEY
 
     """
     # Route to remote instance if connected via serve()
@@ -208,6 +223,40 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
+
+    await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset_id or dataset_name, user)
+
+    import time as _time
+
+    _add_start_ns = _time.monotonic_ns()
+
+    with new_span("memory.store") as _span:
+        _span.set_attribute(MEMORY_SYSTEM, "cognee")
+        _span.set_attribute(MEMORY_OPERATION, "store")
+        _span.set_attribute(MEMORY_COLLECTION, dataset_name or "main_dataset")
+        _span.set_attribute(COGNEE_DATASET_NAME, dataset_name or "main_dataset")
+
+    user, authorized_dataset = await resolve_authorized_user_dataset(
+        dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
+
+    # The dataset is resolved (created if needed) and write-checked above; hand
+    # its id to the ingestion task so it does not resolve the name again on
+    # every item (the pipeline also passes the dataset via ctx — this keeps the
+    # non-pipeline fallback on the cheap branch too).
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(
@@ -215,17 +264,11 @@ async def add(
             dataset_name,
             user,
             node_set,
-            dataset_id,
+            authorized_dataset.id,
             preferred_loaders,
             importance_weight,
         ),
     ]
-
-    await setup()
-
-    user, authorized_dataset = await resolve_authorized_user_dataset(
-        dataset_name=dataset_name, dataset_id=dataset_id, user=user
-    )
 
     # Expand DLT resources (and auto-detected CSV/connection strings) into
     # standard DataItems before the pipeline sees them. orphan_cleanup (when
@@ -236,6 +279,7 @@ async def add(
         data,
         dataset_name=dataset_name,
         user=user,
+        dataset_id=authorized_dataset.id,
         **kwargs,
     )
 
@@ -251,7 +295,9 @@ async def add(
         data = await materialize_stream_for_background(data)
 
     await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+        authorized_dataset.id,
+        user,
+        pipeline_names=["add_pipeline", "cognify_pipeline"],
     )
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -282,6 +328,16 @@ async def add(
     # run_pipeline_blocking returns {dataset_id: PipelineRunInfo} but callers
     # expect a single PipelineRunInfo (add always processes one dataset).
     if isinstance(result, dict) and len(result) == 1:
-        return next(iter(result.values()))
+        result = next(iter(result.values()))
+
+    _duration_ms = (_time.monotonic_ns() - _add_start_ns) / 1_000_000
+    _attrs = {
+        "memory.system": "cognee",
+        "memory.operation": "store",
+        "memory.collection": dataset_name or "main_dataset",
+    }
+    record_operation_duration(_duration_ms, _attrs)
+    item_count = len(data) if hasattr(data, "__len__") else 1
+    increment_items_stored(item_count, _attrs)
 
     return result

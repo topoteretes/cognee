@@ -69,6 +69,17 @@ def test_dict_wrapper_is_unwrapped():
     assert records[0].external_id == "lm-1"
 
 
+def test_empty_wrapper_alias_does_not_shadow_the_populated_one():
+    source = LangMemSource({"memories": [], "data": _SAMPLE})
+    records = _collect(source)
+
+    assert [r.external_id for r in records] == ["lm-1", "lm-2"]
+
+
+def test_all_empty_wrapper_aliases_yield_nothing_without_raising():
+    assert _collect(LangMemSource({"memories": [], "results": []})) == []
+
+
 def test_file_path_is_read():
     path = Path(__file__).parent / "langmem_sample_dump.json"
     path.write_text(json.dumps(_SAMPLE), encoding="utf-8")

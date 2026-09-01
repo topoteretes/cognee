@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,7 +24,56 @@ class ResponseGraphEntry(SearchResultItem):
     source: Literal["graph"]
 
 
+class ResponseCodeEntry(SearchResultItem):
+    """One deterministic code-graph fact from the recall "code" scope.
+
+    Same normalized shape as graph entries (kind CODE, payload under
+    ``raw``) — only the source discriminator differs, so callers can
+    route code facts separately from semantic graph results.
+    """
+
+    source: Literal["code"]
+
+
+class ResponseToolEntry(BaseModel):
+    """One tool invocation's result from the recall "tools" scope.
+
+    Generic across tools: ``tool_name`` discriminates the tool (only
+    ``text_to_sql`` in v1) and ``structured`` carries the tool-specific
+    payload, so adding a tool never changes this union. Secrets (connection
+    strings) never appear here.
+    """
+
+    source: Literal["tools"]
+    tool_name: str
+    question: str
+    text: str
+    success: bool = True
+    error: Optional[str] = None
+    structured: Optional[dict] = None
+
+
+class ResponseMarkerEntry(BaseModel):
+    """System-generated marker (not data), e.g. "memory still warming up".
+
+    ``text`` carries a human-readable message so generic consumers that fall
+    back to text rendering display something sensible.
+    """
+
+    source: Literal["system"]
+    status: str
+    text: str
+    datapoint_count: int
+    threshold: int
+
+
 RecallResponse = Annotated[
-    ResponseQAEntry | ResponseAgentTraceEntry | ResponseSessionContextEntry | ResponseGraphEntry,
+    ResponseQAEntry
+    | ResponseAgentTraceEntry
+    | ResponseSessionContextEntry
+    | ResponseGraphEntry
+    | ResponseCodeEntry
+    | ResponseToolEntry
+    | ResponseMarkerEntry,
     Field(discriminator="source"),
 ]

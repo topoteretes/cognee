@@ -1,15 +1,30 @@
+import asyncio
 import os
+from functools import lru_cache
 from typing import Any, Optional
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+
+logger = get_logger(__name__)
+
+MAX_OCR_TEXT_LENGTH = 8000
 
 
 class ImageLoader(LoaderInterface):
     """
-    Core image file loader that handles basic image file formats.
+    Core image file loader.
+
+    Transcribes images with a vision LLM using an extraction-oriented prompt (disable via
+    IMAGE_EXTRACTION_ENABLED=false). When IMAGE_OCR_ENABLED is set, text from a local OCR pass
+    (rapidocr-onnxruntime) is appended to the transcription.
     Supports optional EXIF metadata extraction and perceptual-hash deduplication
     when the corresponding env vars are enabled.
     """
@@ -18,7 +33,7 @@ class ImageLoader(LoaderInterface):
 
     @property
     def supported_extensions(self) -> list[str]:
-        """Supported text file extensions."""
+        """Supported image file extensions."""
         return [
             "png",
             "dwg",
@@ -43,7 +58,7 @@ class ImageLoader(LoaderInterface):
 
     @property
     def supported_mime_types(self) -> list[str]:
-        """Supported MIME types for text content."""
+        """Supported MIME types for image content."""
         return [
             "image/png",
             "image/vnd.dwg",
@@ -64,24 +79,15 @@ class ImageLoader(LoaderInterface):
         ]
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
-        """
-        Check if this loader can handle the given file.
-
-        Args:
-            extension: File extension
-            mime_type: Optional MIME type
-
-        Returns:
-            True if file can be handled, False otherwise
-        """
+        """Check if file can be handled by this loader."""
         if extension in self.supported_extensions and mime_type in self.supported_mime_types:
             return True
 
         return False
 
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
-        Load and process the image file.
+        Transcribe the image and return the extracted text.
 
         When IMAGE_EXIF_ENABLED=true, extracts EXIF metadata (timestamp, camera
         make/model, GPS coordinates) from the image and appends it to the
@@ -93,16 +99,14 @@ class ImageLoader(LoaderInterface):
         performed when this flag is on.
 
         Args:
-            file_path: Path to the file to load
-            **kwargs: Additional configuration (unused)
+            file_path: Path to the image file
+            **kwargs: Additional arguments (e.g. persist)
 
         Returns:
-            LoaderResult containing the file content and metadata
+            Path to the stored text file, or the text itself when persist=False
 
         Raises:
-            FileNotFoundError: If file doesn't exist
-            UnicodeDecodeError: If file cannot be decoded with specified encoding
-            OSError: If file cannot be read
+            FileNotFoundError: If the file does not exist
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -115,10 +119,27 @@ class ImageLoader(LoaderInterface):
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
         content_parts = []
 
-        # --- Step 1: Vision-LLM transcription (existing) ---
-        result = await LLMGateway.transcribe_image(file_path)
-        transcript = result.choices[0].message.content
-        content_parts.append(transcript)
+        # --- Step 1: Vision-LLM transcription ---
+        prompt, max_completion_tokens, reasoning_effort = self._transcription_overrides()
+        result = await LLMGateway.transcribe_image(
+            file_path,
+            prompt=prompt,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+        content = result.choices[0].message.content or ""
+        if not content:
+            logger.warning(
+                f"Empty image transcription for {file_path}; "
+                "try raising IMAGE_TRANSCRIPTION_MAX_COMPLETION_TOKENS."
+            )
+
+        if self._ocr_enabled():
+            ocr_text = await self._extract_ocr_text(file_path)
+            if ocr_text:
+                content = f"{content}\n\n[OCR extracted text]\n{ocr_text}"
+
+        content_parts.append(content)
 
         # --- Step 2: Optional EXIF metadata extraction ---
         if os.environ.get("IMAGE_EXIF_ENABLED", "false").lower() == "true":
@@ -147,7 +168,7 @@ class ImageLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, combined_content)
+        result = await store_derived_text(storage, storage_file_name, combined_content)
 
         # If dedup is enabled, store the hash for future comparison
         if (
@@ -156,7 +177,64 @@ class ImageLoader(LoaderInterface):
         ):
             self._store_hash(image_hash)
 
-        return full_file_path
+        return result
+
+    def _ocr_enabled(self) -> bool:
+        """Whether OCR extraction is enabled via the IMAGE_OCR_ENABLED env flag."""
+        return os.getenv("IMAGE_OCR_ENABLED", "false").lower() == "true"
+
+    def _transcription_overrides(self) -> tuple[str | None, int | None, str | None]:
+        """Return the configured extraction prompt, token cap, and reasoning effort (on by
+        default); set IMAGE_EXTRACTION_ENABLED=false for (None, None, None) to keep the legacy
+        caption prompt."""
+        if os.getenv("IMAGE_EXTRACTION_ENABLED", "true").lower() == "false":
+            return None, None, None
+        llm_config = get_llm_config()
+        prompt_path = llm_config.image_transcription_prompt_path
+        if os.path.isabs(prompt_path):
+            base_directory = os.path.dirname(prompt_path)
+            prompt_path = os.path.basename(prompt_path)
+        else:
+            base_directory = None
+        prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+        return (
+            prompt,
+            llm_config.image_transcription_max_completion_tokens,
+            llm_config.image_transcription_reasoning_effort,
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_ocr_engine() -> Any:
+        """Build the RapidOCR engine once (cached). Requires the rapidocr-onnxruntime dependency."""
+        try:
+            from rapidocr_onnxruntime import RapidOCR  # ty: ignore[unresolved-import]
+        except ImportError as e:
+            raise ImportError(
+                "rapidocr-onnxruntime is required for image OCR. "
+                'Install with: pip install "cognee[rapidocr]"'
+            ) from e
+
+        # Disable the 180-degree angle classifier: it only helps fully upside-down text
+        # (rare for screenshots/charts/scans) and otherwise false-flips upright lines.
+        return RapidOCR(use_cls=False)
+
+    async def _extract_ocr_text(self, file_path: str) -> str:
+        """Run local OCR on the image, returning extracted text (empty string on OCR failure)."""
+        engine = self._get_ocr_engine()
+        try:
+            # RapidOCR is blocking CPU work; offload it so the event loop stays free.
+            ocr_result, _ = await asyncio.to_thread(engine, file_path)
+        except Exception as e:
+            logger.error(f"OCR failed for {file_path}: {e}")
+            return ""
+        if not ocr_result:
+            return ""
+        # Each result row is [bounding_box, text, confidence]; keep the recognized text.
+        text = "\n".join(line[1] for line in ocr_result).strip()
+        if len(text) > MAX_OCR_TEXT_LENGTH:
+            text = text[: MAX_OCR_TEXT_LENGTH - 3] + "..."
+        return text
 
     # ------------------------------------------------------------------
     #  EXIF extraction helpers
@@ -178,7 +256,7 @@ class ImageLoader(LoaderInterface):
 
         try:
             with Image.open(file_path) as img:
-                exif_data = img._getexif()
+                exif_data = img._getexif()  # ty:ignore[unresolved-attribute]
         except Exception:
             return None
 
@@ -272,7 +350,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     """
     from PIL import Image  # ty: ignore[unresolved-import]
 
-    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)  # ty:ignore[unresolved-attribute]
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
     bits: list[str] = []

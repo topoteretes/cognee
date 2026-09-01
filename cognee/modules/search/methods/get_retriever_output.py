@@ -1,150 +1,107 @@
-from inspect import Parameter, signature
-
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.observability import (
-    COGNEE_RESULT_COUNT,
-    COGNEE_RESULT_SUMMARY,
-    COGNEE_SEARCH_TYPE,
-    new_span,
-)
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
+from cognee.modules.retrieval.context_preview import ContextPreview, build_context_preview
+from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
+from cognee.modules.search.methods.hybrid_deferral import (
+    hybrid_deferral_reason,
+    reject_hybrid_graph_only_knobs,
+)
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations.select_search_type import select_search_type
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import ContextFormat, SearchType
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-async def _effective_search_type(query_type: SearchType, query_text: str) -> SearchType:
-    """Resolve FEELING_LUCKY to the retriever type that will actually run."""
+async def _effective_search_type(
+    query_type: SearchType, query_text: str, kwargs: dict, graph_is_empty: bool
+) -> SearchType:
+    """Resolve FEELING_LUCKY and hybrid deferral to the retriever type that will actually run."""
     if query_type is SearchType.FEELING_LUCKY:
-        return await select_search_type(query_text)
-    return query_type
+        if graph_is_empty:
+            resolved = SearchType.HYBRID_COMPLETION
+        else:
+            resolved = await select_search_type(query_text)
+    else:
+        resolved = query_type
+
+    if resolved is SearchType.HYBRID_COMPLETION:
+        reject_hybrid_graph_only_knobs(kwargs)
+        reason = await hybrid_deferral_reason(kwargs, graph_is_empty=graph_is_empty)
+        if reason:
+            logger.info("Deferring HYBRID_COMPLETION to GRAPH_COMPLETION: %s", reason)
+            # Payload.search_type records this. search() strips it; only_context
+            # and verbose callers that parse shape must pin query_type.
+            return SearchType.GRAPH_COMPLETION
+    return resolved
 
 
-def _method_accepts_kwarg(method, name: str) -> bool:
-    parameters = signature(method).parameters.values()
-    return any(
-        parameter.kind == Parameter.VAR_KEYWORD or parameter.name == name
-        for parameter in parameters
-    )
+def _dataset_fields(kwargs: dict) -> dict:
+    """The dataset identity every SearchResultPayload carries, absent when unscoped."""
+    dataset = kwargs.get("dataset")
+    return {
+        "dataset_name": dataset.name if dataset else None,
+        "dataset_id": dataset.id if dataset else None,
+        "dataset_tenant_id": dataset.tenant_id if dataset else None,
+    }
 
 
 async def get_retriever_output(
     query_type: SearchType, query_text: str, **kwargs
 ) -> SearchResultPayload:
-    effective_query_type = await _effective_search_type(query_type, query_text)
+    # Validate the output knob before any retrieval runs, through the same parse the
+    # API layer uses, so every entry point raises the same error for the same input.
+    context_format = ContextFormat.parse(kwargs.get("context_format"))
 
     graph_engine = await get_graph_engine()
-    is_empty = await graph_engine.is_empty()
-
-    if is_empty:
+    graph_is_empty = await graph_engine.is_empty()
+    if graph_is_empty:
         logger.warning("Search attempt on an empty knowledge graph")
+
+    effective_query_type = await _effective_search_type(
+        query_type, query_text, kwargs, graph_is_empty
+    )
 
     retriever_instance = await get_search_type_retriever_instance(
         query_type=effective_query_type, query_text=query_text, **kwargs
     )
 
-    retriever_class = type(retriever_instance).__name__
     only_context = kwargs.get("only_context", False)
-    effective_query = query_text
-    turn_preparation = None
+    retrieved_objects, context, completion = await run_session_aware_completion(
+        retriever_instance,
+        raw_query=query_text,
+        original_search_type=query_type,
+        only_context=only_context,
+        search_type_for_spans=effective_query_type,
+    )
 
-    if not only_context and getattr(retriever_instance, "supports_session_turn_preparation", True):
-        turn_preparation = await retriever_instance.prepare_session_turn_for_retrieval(query_text)
-        if not turn_preparation.should_answer:
-            return SearchResultPayload(
-                result_object=None,
-                context=None,
-                completion=[turn_preparation.response_to_user or "Got it."],
-                search_type=effective_query_type,
-                only_context=False,
-                dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
-                dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
-                dataset_tenant_id=kwargs.get("dataset").tenant_id
-                if kwargs.get("dataset")
-                else None,
-            )
-        effective_query = turn_preparation.effective_query or query_text
-
-    # Get raw result objects from retriever and forward to context and completion methods to avoid duplicate retrievals.
-    with new_span("cognee.retrieval.get_objects") as span:
-        span.set_attribute("cognee.retrieval.retriever", retriever_class)
-        span.set_attribute(COGNEE_SEARCH_TYPE, effective_query_type.value)
-        retrieved_objects = await retriever_instance.get_retrieved_objects(query=effective_query)
-        obj_count = _count_retrieved_objects(retrieved_objects)
-        span.set_attribute(COGNEE_RESULT_COUNT, obj_count)
-        span.set_attribute(
-            COGNEE_RESULT_SUMMARY,
-            f"{retriever_class} retrieved {obj_count} object(s)",
+    preview = ContextPreview()
+    if only_context and context_format is ContextFormat.PROMPT:
+        # The caller's session_id is passed explicitly: non-generative retrievers do not
+        # keep one, and the preview must describe the session that was asked about.
+        # shared_history is the fan-out's single conversation-history read, when the
+        # caller made one.
+        preview = await build_context_preview(
+            retriever_instance,
+            query=query_text,
+            context=context,
+            session_id=kwargs.get("session_id"),
+            shared_history=kwargs.get("shared_history"),
         )
 
-    # Centralized access tracking for all retriever types
-    if retrieved_objects:
-        await update_node_access_timestamps(retrieved_objects)
-
-    # Handle raw result object to extract context information
-    with new_span("cognee.retrieval.get_context") as span:
-        span.set_attribute("cognee.retrieval.retriever", retriever_class)
-        context = await retriever_instance.get_context_from_objects(
-            query=effective_query, retrieved_objects=retrieved_objects
-        )
-        if isinstance(context, str):
-            span.set_attribute("cognee.retrieval.context_length", len(context))
-        elif isinstance(context, list):
-            span.set_attribute("cognee.retrieval.context_items", len(context))
-
-    completion = None
-    if not only_context:  # If only_context is True, skip completion. Performance optimization.
-        # Handle raw result and context object to handle completion operation
-        with new_span("cognee.retrieval.get_completion") as span:
-            span.set_attribute("cognee.retrieval.retriever", retriever_class)
-            completion_kwargs = {
-                "query": query_text,
-                "retrieved_objects": retrieved_objects,
-                "context": context,
-            }
-            completion_method = retriever_instance.get_completion_from_context
-            if _method_accepts_kwarg(completion_method, "effective_query"):
-                completion_kwargs["effective_query"] = effective_query
-            if _method_accepts_kwarg(completion_method, "turn_preparation"):
-                completion_kwargs["turn_preparation"] = turn_preparation
-            completion = await completion_method(**completion_kwargs)
-            if isinstance(completion, str):
-                span.set_attribute("cognee.retrieval.completion_length", len(completion))
-            span.set_attribute(
-                COGNEE_RESULT_SUMMARY,
-                f"{retriever_class} generated completion",
-            )
-
-    search_result = SearchResultPayload(
+    return SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
         search_type=effective_query_type,
         only_context=only_context,
-        dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
-        dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
-        dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
+        question=query_text,
+        context_format=context_format,
+        session_context=preview.session_context or None,
+        user_prompt=preview.user_prompt,
+        system_prompt=preview.system_prompt,
+        **_dataset_fields(kwargs),
     )
-
-    return search_result
-
-
-def _count_retrieved_objects(retrieved_objects) -> int:
-    if retrieved_objects is None:
-        return 0
-    if isinstance(retrieved_objects, list):
-        return len(retrieved_objects)
-    if isinstance(retrieved_objects, dict):
-        list_counts = [
-            len(value) for value in retrieved_objects.values() if isinstance(value, list)
-        ]
-        if list_counts:
-            return sum(list_counts)
-        return 1
-    return 1

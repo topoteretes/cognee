@@ -43,10 +43,6 @@ share/python-wheels/
 cognee-mcp/.python-version
 MANIFEST
 
-# cognee-mcp app bundle (built by `npm run build` under cognee-mcp/apps-src/).
-# Generated artifact — see cognee-mcp/README.md for the build step.
-cognee-mcp/src/app_bundles/
-
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -211,3 +207,9 @@ deployment/helm/values-local.yml
 
 # Performance test results
 cognee/tests/performance/results
+
+# Local `helm template` output — generated, not checked in
+rendered.yaml
+
+# enola code-graph snapshots (written into any repository enola scans)
+.enola/

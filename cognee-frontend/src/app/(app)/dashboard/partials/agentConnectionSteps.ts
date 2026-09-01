@@ -4,6 +4,7 @@ import {
   CODEX_HOOKS_ENABLE,
   CODEX_MARKETPLACE_ADD,
   CODEX_PLUGIN_INSTALL,
+  OPENCODE_PLUGIN_SETUP,
   OPENCLAW_SKILL_INSTALL,
   GENERIC_SKILL_INSTALL,
   UPLOAD_MEMORY_PROMPT,
@@ -22,7 +23,7 @@ export interface AciStepDef {
   skillContent?: string;
 }
 
-export type AciAgentKey = "upload" | "claude-code" | "codex" | "openclaw" | "api-mcp";
+export type AciAgentKey = "upload" | "claude-code" | "codex" | "opencode" | "openclaw" | "api-mcp";
 
 export interface AciCardConfig {
   key: AciAgentKey;
@@ -33,6 +34,7 @@ export interface AciCardConfig {
 export const CARDS_CFG: AciCardConfig[] = [
   { key: "claude-code", name: "Claude Code",   description: "Give Claude Code persistent memory across all your projects" },
   { key: "codex",       name: "Codex",         description: "Connect OpenAI Codex to your knowledge graph via the Cognee plugin" },
+  { key: "opencode",    name: "OpenCode",      description: "Give OpenCode persistent memory with the Cognee plugin" },
   { key: "openclaw",    name: "Openclaw",       description: "Connect Openclaw to your knowledge graph via AGENTS.md" },
   { key: "api-mcp",     name: "API / MCP",      description: "Connect any agent or app via the REST API or MCP" },
   { key: "upload",      name: "Company Brain",  description: "Upload PDFs, docs, and data to build your knowledge graph" },
@@ -108,6 +110,32 @@ export function getSteps(key: AciAgentKey, opts: StepOptions): AciStepDef[] {
     {
       title: "You're all set",
       description: "The Cognee plugin hooks into Codex's lifecycle — no curl or manual API calls — and captures your session as you work. When a session ends (e.g. /exit), it consolidates that session into your Cognee Cloud knowledge graph, and every new session automatically recalls it back. Sessions are disposable; your memory isn't.",
+    },
+  ];
+
+  if (key === "opencode") return [
+    credStep,
+    {
+      title: "Install the Cognee plugin",
+      description: "Run the OpenCode plugin setup command in your terminal, then restart OpenCode.",
+      codeBlocks: [{ code: OPENCODE_PLUGIN_SETUP }],
+    },
+    {
+      title: "Upload something to Cognee",
+      description: "Pick one and paste it into OpenCode — it stores the content in your Cognee memory so you can recall it in the next step.",
+      codeBlocks: [
+        { label: "Option A · Your existing memory", code: UPLOAD_MEMORY_PROMPT },
+        { label: "Option B · Try it with a sample", code: UPLOAD_SAMPLE_PROMPT },
+      ],
+    },
+    {
+      title: "Recall it from Cognee",
+      description: "Open a fresh OpenCode session and ask the question below. Answering from the new session proves it is recalling your Cognee memory.",
+      codeBlocks: [{ code: RECALL_SAMPLE_PROMPT }],
+    },
+    {
+      title: "You're all set",
+      description: "The Cognee plugin captures OpenCode sessions as you work and recalls relevant knowledge in new sessions. Your sessions are disposable; your memory isn't.",
     },
   ];
 

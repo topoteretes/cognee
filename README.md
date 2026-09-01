@@ -112,7 +112,7 @@ Let’s try Cognee in just a few lines of code.
 
 ### Step 1: Install Cognee
 
-You can install Cognee with **pip**, **poetry**, **uv**, or your preferred Python package manager.
+You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
 ```bash
 uv pip install cognee
@@ -181,6 +181,23 @@ cognee-cli -ui
 > Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
 > required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.
 
+### Performance tuning
+
+Cognee's defaults favor memory quality over raw latency. Two knobs matter:
+
+- **`AUTO_FEEDBACK=false`** removes the one LLM call cognee makes after each answered
+  query to self-tune its memory. Reads get faster and cheaper; session memory itself
+  keeps working. Turn it back on when you want memory that improves from conversation
+  signals.
+- **`CACHING=false`** disables session memory entirely — `remember(session_id=...)`
+  stops working and `recall()` loses conversation context. Only set this if you don't
+  use session memory at all. **If you're benchmarking cognee, leave it on** — turning
+  it off benchmarks cognee with its memory layer removed.
+
+A third flag, `DATASET_QUEUE_ENABLED=false`, removes the per-process concurrency guard
+on datasets; it saves a little latency but risks file-lock leaks and resource
+exhaustion when multiple datasets run in parallel — leave it on for servers.
+
 ## Run with Docker
 
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
@@ -202,14 +219,20 @@ cp .env.template .env   # then edit .env and set LLM_API_KEY
 docker compose up
 
 # Optional profiles (combine as needed):
-docker compose --profile ui up        # + frontend on http://localhost:3000
+docker compose --profile ui up        # + UI on http://localhost:3000
 docker compose --profile mcp up       # + MCP server on http://localhost:8001
 docker compose --profile postgres up  # + Postgres/PGVector
 docker compose --profile neo4j up     # + Neo4j
+
+# Backend, MCP server and UI together
+docker compose --profile mcp --profile ui up
 ```
 
 > The `cognee` and `cognee-mcp` services publish different host ports (`8000` vs `8001`),
 > so you can run both at once.
+
+> The `ui` profile runs the published `cognee/cognee-ui` image. To build the UI from
+> your working tree instead, with hot reload, use `--profile ui-dev`.
 
 ### Option B — Pull the prebuilt image (no clone required)
 
@@ -223,7 +246,28 @@ docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee:main
 # MCP server (HTTP transport)
 docker pull cognee/cognee-mcp:main
 docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+
+# UI (http://localhost:3000)
+docker pull cognee/cognee-ui:main
+docker run -p 3000:3000 --rm -it cognee/cognee-ui:main
 ```
+
+The UI needs no configuration when the backend is reachable at port 8000 on the same
+host you browse to: it derives the backend address from the page URL. Point it
+somewhere else with `COGNEE_BACKEND_URL`, which is read when the container starts, so
+one image works against any backend:
+
+```bash
+docker run -p 3000:3000 -e COGNEE_BACKEND_URL=https://cognee.example.com \
+  --rm -it cognee/cognee-ui:main
+
+# What backend did this container resolve?
+curl http://localhost:3000/api/runtime-config
+```
+
+The browser talks to the backend directly, so `COGNEE_BACKEND_URL` must be the address
+as seen from the browser, and the backend must allow the UI's origin through
+`CORS_ALLOWED_ORIGINS`.
 
 See the [MCP server README](cognee-mcp/README.md) for SSE/stdio transports, optional
 extras, and MCP client configuration.
@@ -332,6 +376,11 @@ Agent: "Here's how senior analysts solved a similar retention query.
 
 Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
 
+> **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph
+> state in a single Postgres service.
+>
+> Interested in production use of Postgres as a graph database? Book a call with our sales team at our [website](https://www.cognee.ai)
+>
 | Memory layer | Traditional stack | cognee on Postgres |
 | --- | --- | --- |
 | Relationships | Neo4j or another graph database | cognee's Postgres graph backend |
@@ -341,7 +390,7 @@ Graph memory traditionally means operating a stack — a graph database for rela
 
 The graph still exists — it just lives inside the same Postgres-backed memory layer as the text, metadata, and embeddings, so retrieval moves between similarity and structure without crossing service boundaries. In our CI benchmarks, Postgres search ran ~10% faster than the separate graph-plus-vector setup.
 
-Postgres is the default we recommend for most deployments, but you can still swap in dedicated backends when a workload needs them (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
+Postgres is a solid default for the relational, vector, and session layers, and you can swap in dedicated backends for any of them when a workload needs it (Neo4j and Neptune for graphs, Redis for sessions, pgvector and LanceDB for vectors, plus Qdrant, ChromaDB, Weaviate, and Milvus via community adapters). For the graph layer specifically, keep to a graph-native backend in production — the Postgres graph store is still a demo feature. Local development stays fully embedded — SQLite, LanceDB, and Kuzudb — with no extra services to stand up.
 
 ```bash
 pip install "cognee[postgres]"
@@ -350,7 +399,7 @@ pip install "cognee[postgres]"
 ```bash
 DB_PROVIDER=postgres
 VECTOR_DB_PROVIDER=pgvector
-GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_PROVIDER=postgres_demo
 CACHE_BACKEND=postgres
 
 DB_HOST=localhost
@@ -375,6 +424,25 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 | **Islo** | Isolated cloud sandboxes (SDK) | See `distributed/deploy/islo_sandbox.py` |
 
 See the [`distributed/`](distributed/) folder for deploy scripts, worker configurations, and additional details.
+
+### Multi-tenant deployments
+
+With `ENABLE_BACKEND_ACCESS_CONTROL=true` (the default), each user+dataset combination
+gets its own isolated graph and vector databases. Not every backend supports this:
+
+| Layer | Isolation supported | Not supported |
+|---|---|---|
+| Graph | Ladybug/Kuzu (default), Neo4j*, Postgres (demo), Turso | Neptune, remote Ladybug |
+| Vector | LanceDB (default), PGVector, Turso | Neptune Analytics, community adapters |
+| Relational | — | SQLite/Postgres is always one shared database (users, permissions, registry) |
+
+\* Neo4j isolation creates one database per dataset inside your DBMS, which requires an
+edition with multi-database support (Enterprise or Aura).
+
+Both your graph **and** vector backends must support isolation — if either doesn't,
+cognee raises an error naming the unsupported backend rather than silently falling
+back to shared databases. To run an unsupported backend, deploy
+single-tenant with `ENABLE_BACKEND_ACCESS_CONTROL=false`.
 
 ## Use Cognee in Other Languages
 

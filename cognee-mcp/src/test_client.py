@@ -25,7 +25,7 @@ SEARCH_TRANSFORM_TOOLS = {"search_tools", "call_tool"}
 EXPECTED_TOOLS = set(registry.names_with_tag(DEFAULT_TAG)) | SEARCH_TRANSFORM_TOOLS
 
 # Registered but not advertised in default mode; must still be callable by name.
-HIDDEN_TOOL = "list_datasets_json"
+HIDDEN_TOOL = "cognify_status"
 
 
 class CogneeTestClient:
@@ -100,7 +100,7 @@ class CogneeTestClient:
                     raise AssertionError(f"Direct call failed: {self._content_text(direct)}")
 
                 found = await session.call_tool(
-                    "search_tools", arguments={"query": "list the datasets"}
+                    "search_tools", arguments={"query": "check ingestion status"}
                 )
                 if HIDDEN_TOOL not in self._content_text(found):
                     raise AssertionError(f"search_tools did not surface {HIDDEN_TOOL}")

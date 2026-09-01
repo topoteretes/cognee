@@ -7,6 +7,7 @@ deterministically extracts an architectural graph from a codebase.
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -182,8 +183,89 @@ def parse_enola_snapshot(
         except (json.JSONDecodeError, OSError):
             logger.warning("Could not parse receipt.json in %s; ignoring it.", snapshot_dir)
 
-    logger.info("Parsed %d fact(s) from %s", len(facts), facts_path)
+    insight_facts = _synthesize_insight_facts(snapshot_dir)
+    if insight_facts:
+        facts = facts + insight_facts
+
+    logger.info(
+        "Parsed %d fact(s) (%d from insights.json) from %s",
+        len(facts),
+        len(insight_facts),
+        facts_path,
+    )
     return facts, receipt
+
+
+def _synthesize_insight_facts(snapshot_dir: Path) -> list:
+    """Convert insights.json explainer findings into fact dicts.
+
+    enola 0.3.x explainers (hotspots, god-class, dependency-depth, ...) write
+    architecture findings to insights.json. Each becomes a synthetic fact of
+    kind "insight" whose relations point at the evidence facts it cites, so
+    the ordinary fact-mapping and edge-resolution paths handle it. A missing
+    or unparseable insights.json is not an error (0.1.x snapshots may lack it).
+    """
+    insights_path = snapshot_dir / "insights.json"
+    if not insights_path.is_file():
+        return []
+    try:
+        with open(insights_path, "r", encoding="utf-8") as insights_file:
+            insights = json.load(insights_file)
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Could not parse insights.json in %s; ignoring it.", snapshot_dir)
+        return []
+    if not isinstance(insights, list):
+        return []
+
+    facts = []
+    for insight in insights:
+        if not isinstance(insight, dict):
+            continue
+        title = insight.get("title")
+        if not isinstance(title, str) or not title:
+            continue
+        props = {
+            key: insight[key]
+            for key in ("source", "confidence", "description", "suggested_actions")
+            if insight.get(key) is not None
+        }
+        relations = []
+        evidence = insight.get("evidence")
+        for entry in evidence if isinstance(evidence, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            target = entry.get("symbol") or entry.get("fact") or entry.get("file")
+            if isinstance(target, str) and target:
+                relations.append({"kind": "evidences", "target": target})
+        facts.append(
+            {
+                "kind": "insight",
+                "name": title,
+                "props": props,
+                "relations": relations,
+            }
+        )
+    return facts
+
+
+def snapshot_identity(snapshot_dir: Union[str, Path], receipt: Optional[dict]) -> Optional[str]:
+    """Stable identity of a snapshot's content, used for incremental skip.
+
+    Prefers receipt.json's snapshot_id — a SHA-256 over enola's byte-stable
+    fact serialization, so an unchanged tree produces an unchanged id. Falls
+    back to hashing facts.jsonl directly when the receipt is missing. Returns
+    None when neither is available; callers must then treat the snapshot as
+    changed (load fully, never skip).
+    """
+    if receipt:
+        snapshot_id = receipt.get("snapshot_id")
+        if isinstance(snapshot_id, str) and snapshot_id:
+            return snapshot_id
+    facts_path = Path(snapshot_dir) / "facts.jsonl"
+    try:
+        return "sha256:" + hashlib.sha256(facts_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def normalize_relation(relation: dict) -> Optional[Tuple[str, str]]:

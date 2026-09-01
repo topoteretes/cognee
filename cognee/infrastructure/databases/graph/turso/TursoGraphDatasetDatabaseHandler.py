@@ -6,7 +6,7 @@ from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
-    evict_graph_engine,
+    graph_engine_cache,
 )
 from cognee.modules.users.models import User, DatasetDatabase
 
@@ -63,14 +63,29 @@ class TursoGraphDatasetDatabaseHandler:
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase) -> None:
         dataset_url = str(dataset_database.graph_database_url or "")
+        graph_db_name = dataset_database.graph_database_name
 
-        evict_graph_engine(
-            graph_database_provider="turso",
-            graph_file_path="",
-            graph_database_url=dataset_url,
-            graph_database_key="",
-        )
+        # The engine cache key ensure_graph_memory_cleared's get_graph_engine()
+        # resolves (built generically from graph_file_path/graph_database_name/
+        # handler name by apply_database_context_variables) differs from the
+        # narrower key an exact-match evict() here would target (graph_file_path=
+        # "", no graph_database_name, default handler name) -- an exact-key evict
+        # would miss the live cache entry and leave a stale engine with an open
+        # connection to the file this method is about to remove. Evict by
+        # database name instead, same pattern LadybugDatasetDatabaseHandler.
+        # delete_dataset uses, and wait for any in-flight close (this adapter is
+        # file-based, same reasoning as Ladybug's) before touching the file below.
+        if graph_db_name:
+            await graph_engine_cache.aevict_for_database(graph_db_name)
 
-        # Remove the dataset's libSQL file.
-        if dataset_url.startswith("/") and os.path.exists(dataset_url):
+        # Remove the dataset's libSQL file and its WAL-mode companions. This
+        # adapter runs PRAGMA journal_mode=WAL, so SQLite keeps write-ahead-log
+        # state in "<file>-wal"/"<file>-shm" until a clean close checkpoints
+        # them into the main file -- leaving them behind risks stale data
+        # surviving under a same-name recreate.
+        if dataset_url and os.path.isabs(dataset_url) and os.path.exists(dataset_url):
             os.remove(dataset_url)
+            for suffix in ("-wal", "-shm"):
+                companion_path = dataset_url + suffix
+                if os.path.exists(companion_path):
+                    os.remove(companion_path)
