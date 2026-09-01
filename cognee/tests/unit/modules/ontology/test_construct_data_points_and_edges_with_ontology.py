@@ -1,11 +1,15 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
 import cognee.modules.ontology.construct_data_points_and_edges_with_ontology as ontology_module
 
 from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.observability import capture
+from cognee.modules.observability.capture import KIND_EXTRACTION_FUZZY_MATCH, KIND_RUN_MANIFEST
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     add_ontology_data_points_and_edges,
@@ -302,3 +306,107 @@ def test_strict_mode_logs_one_aggregate_drop_summary(monkeypatch):
     # 1 of 4 nodes dropped, 1 of 1 edges dropped, across 2 graphs.
     assert warning_args[1:3] == (1, 4)
     assert warning_args[4:7] == (1, 1, 2)
+
+
+# --- eval capture: extraction.fuzzy_match (SDK-529) ------------------------------
+
+
+def _make_two_chunk_graphs():
+    first = KnowledgeGraph(
+        nodes=[
+            Node(id="w", name="Widget", type="Gadget", description="matched on both"),
+            Node(id="g", name="Ghost", type="Phantom", description="matched on neither"),
+        ],
+        edges=[],
+    )
+    second = KnowledgeGraph(
+        nodes=[
+            Node(id="w2", name="widget", type="Gadget", description="already looked up"),
+            Node(id="n", name="Nomatch", type="Gadget", description="new name, known type"),
+        ],
+        edges=[],
+    )
+    return [first, second]
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_match_events_are_aggregated_per_chunk(fake_capture_sink):
+    chunks = [_make_chunk(), _make_chunk()]
+    graphs = _make_two_chunk_graphs()
+    run_id = uuid4()
+
+    with capture.run_scope(run_id, uuid4(), kind="pipeline"):
+        canonicalize_extracted_graphs(chunks, graphs, _StubResolver())
+    await capture.drain()
+
+    # Canonicalization itself is unchanged.
+    assert graphs[0].nodes[0].name == "widget_canonical"
+    assert graphs[0].nodes[0].type == "gadget"
+
+    events = [r for r in fake_capture_sink.records if r["kind"] == KIND_EXTRACTION_FUZZY_MATCH]
+    assert [event["payload"]["chunk_index"] for event in events] == [0, 1]
+    assert {event["run_id"] for event in events} == {str(run_id)}
+    first, second = (event["payload"] for event in events)
+
+    # One event for the chunk, listing every lookup it triggered — hits and misses.
+    assert first["chunk_id"] == str(chunks[0].id)
+    assert [
+        (m["category"], m["extracted"], m["normalized"], m["canonical"], m["matched"])
+        for m in first["matches"]
+    ] == [
+        ("classes", "Gadget", "gadget", "gadget", True),
+        ("individuals", "Widget", "widget", "widget_canonical", True),
+        ("classes", "Phantom", "phantom", None, False),
+        ("individuals", "Ghost", "ghost", None, False),
+    ]
+    assert first["matches"][1]["uri"] == "https://example.test/ontology#widget_canonical"
+    assert first["matches"][2]["uri"] is None
+    assert (first["lookups"], first["count"]) == (4, 2)
+
+    # The lookup is shared across the batch: "gadget" and "widget" were resolved by
+    # the first chunk, so the second chunk only reports the name it introduced.
+    assert first["chunk_id"] != second["chunk_id"]
+    assert [(m["category"], m["normalized"], m["matched"]) for m in second["matches"]] == [
+        ("individuals", "nomatch", False)
+    ]
+    assert (second["lookups"], second["count"]) == (1, 0)
+    # Plain scalars only.
+    json.dumps([event["payload"] for event in events])
+
+    [manifest] = [r for r in fake_capture_sink.records if r["kind"] == KIND_RUN_MANIFEST]
+    assert manifest["payload"]["counters"]["extraction.fuzzy_lookups"] == 5
+    assert manifest["payload"]["counters"]["extraction.fuzzy_matches"] == 2
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_match_emits_nothing_for_a_chunk_that_triggered_no_lookup(fake_capture_sink):
+    graphs = [
+        KnowledgeGraph(
+            nodes=[Node(id="a", name="Widget", type="Gadget", description="d")], edges=[]
+        ),
+        KnowledgeGraph(
+            nodes=[Node(id="b", name="widget", type="gadget", description="d")], edges=[]
+        ),
+    ]
+
+    canonicalize_extracted_graphs([_make_chunk(), _make_chunk()], graphs, _StubResolver())
+    await capture.drain()
+
+    events = [r for r in fake_capture_sink.records if r["kind"] == KIND_EXTRACTION_FUZZY_MATCH]
+    assert [event["payload"]["chunk_index"] for event in events] == [0]
+
+
+def test_fuzzy_match_capture_off_collects_nothing(monkeypatch, capture_reset):
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("no fuzzy-match payload may be built while capture is off")
+
+    monkeypatch.setattr(ontology_module, "_emit_fuzzy_matches", _boom)
+    graphs = _make_two_chunk_graphs()
+
+    canonicalize_extracted_graphs([_make_chunk(), _make_chunk()], graphs, _StubResolver())
+
+    assert capture.is_active() is False
+    assert not capture.hook._buffer
+    assert graphs[0].nodes[0].name == "widget_canonical"

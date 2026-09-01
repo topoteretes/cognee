@@ -365,7 +365,11 @@ async def cognify(
         }
 
         def resolve_cognify_tasks(data_item):
-            return tasks_by_route[cognify_route_for(data_item)]
+            item_tasks = tasks_by_route[cognify_route_for(data_item)]
+            # Eval capture (SDK-529): the resolver runs inside the pipeline's run
+            # scope, which the task lists above were built outside of.
+            _note_chunking_config(item_tasks)
+            return item_tasks
 
         result = await pipeline_executor_func(
             pipeline=run_pipeline,
@@ -395,6 +399,33 @@ async def cognify(
         record_operation_duration(_duration_ms, _attrs)
 
         return result
+
+
+def _note_chunking_config(tasks: list[Task]) -> None:
+    """Record the chunker and chunk size a task list runs with on the eval-capture manifest.
+
+    SDK-529. Called from the per-item task resolver rather than at task construction:
+    the pipeline run scope only exists inside ``run_tasks``, so a note taken while the
+    task lists are built would land on no scope. Both values are read off the list's
+    ``extract_chunks_from_documents`` task (present in the standard, temporal and DLT
+    lists; absent from the code lists, which chunk nothing). The lazy import keeps
+    ``import cognee`` free of the capture package; a no-op while capture is off.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    if not eval_capture.is_active():
+        return
+
+    for task in tasks:
+        if task.executable is extract_chunks_from_documents:
+            params = task.default_params["kwargs"]
+            chunker = params.get("chunker")
+            eval_capture.note(
+                "chunking.chunker",
+                None if chunker is None else getattr(chunker, "__name__", type(chunker).__name__),
+            )
+            eval_capture.note("chunking.chunk_size", params.get("max_chunk_size"))
+            return
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
