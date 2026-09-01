@@ -194,24 +194,6 @@ async def run_relational_downgrade(target: str, script_location: Optional[str] =
     logger.info("Relational schema downgraded (target %s).", target)
 
 
-async def run_relational_stamp(revision: str = "head", script_location: Optional[str] = None):
-    """Record an Alembic revision without running any migration.
-    ``script_location`` overrides the Alembic scripts dir.
-
-    Used after ``create_database`` builds a fresh schema with
-    ``Base.metadata.create_all``: that schema already IS head, so we stamp it
-    instead of replaying every historical migration.
-    """
-
-    def _stamp():
-        from alembic import command
-
-        command.stamp(_build_alembic_config(script_location), revision)
-
-    await asyncio.to_thread(_stamp)
-    logger.info("Stamped fresh relational schema at %s.", revision)
-
-
 async def _relational_schema_exists() -> bool:
     """True if the relational database already holds cognee's schema.
 
@@ -225,8 +207,10 @@ async def _relational_schema_exists() -> bool:
       - ``alembic_version`` is Alembic's own marker, so it still identifies a
         migration-managed DB even if the ``users`` table is renamed or
         restructured in the future.
-    Only when NEITHER exists is the database genuinely empty — the one state
-    where create_all + stamp head is safe.
+    Only when NEITHER exists is the database genuinely empty — routed to
+    ``create_database()``, which prepares the storage and builds the schema by
+    running the migration chain. A wrong "empty" verdict is benign now: both
+    branches converge on the same guarded chain.
     """
     from sqlalchemy import inspect
 
@@ -295,12 +279,14 @@ async def apply_all_migrations(
             # Existing database: apply pending migrations up to relational_target.
             await run_relational_migrations(relational_target, script_location)
         else:
-            # Fresh database: create_all builds the schema at HEAD, so stamp head
-            # rather than replaying history. A partial relational_target only makes
-            # sense for an existing DB — a fresh one is head by construction.
-            logger.info("Fresh database: creating schema and stamping at head.")
-            await get_relational_engine().create_database()
-            await run_relational_stamp("head", script_location)
+            # Fresh database: prepare the storage and build the schema by
+            # running the ENTIRE chain — the initial revision carries the
+            # frozen base schema. No stamp is written: alembic_version only
+            # ever records revisions that actually executed. A partial
+            # relational_target only makes sense for an existing DB — a fresh
+            # one is built to head.
+            logger.info("Fresh database: building the schema from the migration chain.")
+            await get_relational_engine().create_database(script_location)
 
         return await run_database_migrations(data_target)
 

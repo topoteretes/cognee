@@ -658,10 +658,20 @@ class SQLAlchemyAdapter:
                 logger.error(f"Error dropping database tables: {e}")
                 raise e
 
-    async def create_database(self):
+    async def create_database(self, script_location: Optional[str] = None):
         """
-        Create the database if it does not exist, ensuring necessary directories are in place
-        for SQLite.
+        Create the database by applying the Alembic migration chain: prepare the
+        storage (SQLite directory, pgvector extension), then ``alembic upgrade
+        head``. The initial revision carries the frozen base schema and every
+        revision is existence-guarded, so the chain builds the complete schema
+        on an empty database and no-ops per revision on an existing one. There
+        is no stamping: ``alembic_version`` only ever records revisions that
+        actually executed.
+
+        ``script_location`` overrides the Alembic scripts directory (falls back
+        to ``COGNEE_ALEMBIC_PATH``, then cognee's packaged chain). The chain
+        resolves its engine via ``get_relational_engine()``, so call this on the
+        globally configured adapter — the one every cognee code path uses.
         """
         if self.engine.dialect.name == "sqlite":
             db_directory = path.dirname(self.db_path)
@@ -681,8 +691,11 @@ class SQLAlchemyAdapter:
                 and self.engine.dialect.name == "postgresql"
             ):
                 await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-            if len(Base.metadata.tables.keys()) > 0:
-                await connection.run_sync(Base.metadata.create_all)
+
+        # Imported at call time: the migrations module sits above this adapter layer.
+        from cognee.modules.migrations.startup import run_relational_migrations
+
+        await run_relational_migrations("head", script_location)
 
     async def delete_database(self):
         """
