@@ -5,13 +5,16 @@ from pydantic import BaseModel
 
 from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.infrastructure.llm.extraction import extract_summary
+from cognee.infrastructure.llm.extraction.extract_summary import extract_summary_with_provenance
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.tasks.summarization.models import TextSummary
 
 
 from cognee.modules.pipelines.tasks.task import task_summary
+
+# Stage label on the summary.generated events (SDK-529).
+CAPTURE_STAGE = "summarize_text"
 
 
 @task_summary("Summarized {n} chunk(s)")
@@ -25,6 +28,12 @@ async def summarize_text(
     configuration. It processes the data chunks asynchronously and returns summaries for
     each chunk. If the provided list of data chunks is empty, it simply returns the list as
     is.
+
+    While eval capture is active (SDK-529) every summary also carries its provenance —
+    the model id, the fingerprint of the summarization prompt and the fingerprint of the
+    source chunk text — and one ``summary.generated`` event per chunk is emitted (ids,
+    fingerprints and a character count only; never the summary or chunk text). With
+    capture off nothing is hashed or emitted and the provenance fields stay ``None``.
 
     Parameters:
     -----------
@@ -54,21 +63,73 @@ async def summarize_text(
         cognee_config = get_cognify_config()
         summarization_model = cognee_config.summarization_model
 
+    # Lazy on purpose: ``import cognee`` must not load the capture package.
+    from cognee.modules.observability import capture as eval_capture
+
+    # One global read, hoisted out of the per-chunk loop.
+    active = eval_capture.is_active()
+
     with pipeline_stage("summarization"):
-        chunk_summaries = await asyncio.gather(
-            *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+        results = await asyncio.gather(
+            *[
+                extract_summary_with_provenance(chunk.text, summarization_model)
+                for chunk in data_chunks
+            ]
         )
 
-    summaries = [
-        TextSummary(
+    # Every chunk reads the same prompt file, so its fingerprint is computed once.
+    prompt_fingerprints: dict[str, str] = {}
+    summaries: list[TextSummary] = []
+
+    for chunk, (llm_output, prompt_text, model_name) in zip(data_chunks, results):
+        provenance: dict[str, str] = {}
+        if active:
+            # The sanctioned snapshot cost: sha256 of the chunk text (and of each
+            # distinct prompt) — only while capturing.
+            prompt_fingerprint = prompt_fingerprints.get(prompt_text)
+            if prompt_fingerprint is None:
+                prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
+                prompt_fingerprints[prompt_text] = prompt_fingerprint
+            provenance = {
+                "model": model_name,
+                "prompt_fingerprint": prompt_fingerprint,
+                "source_text_hash": eval_capture.prompt_fingerprint(chunk.text),
+            }
+
+        summary = TextSummary(
             id=uuid5(chunk.id, "TextSummary"),
             made_from=chunk,
             source_chunk_id=str(chunk.id),
             belongs_to_set=chunk.belongs_to_set,
-            text=chunk_summaries[chunk_index].summary,
+            text=llm_output.summary,
             importance_weight=chunk.importance_weight,
+            **provenance,
         )
-        for (chunk_index, chunk) in enumerate(data_chunks)
-    ]
+        summaries.append(summary)
+
+        if active:
+            _emit_summary_generated(eval_capture, summary, chunk)
+
+    if active:
+        # Once per run, not per chunk: the stage model and prompt are run-wide.
+        eval_capture.note("summarization.model", summaries[0].model)
+        eval_capture.note("summarization.prompt_fingerprint", summaries[0].prompt_fingerprint)
 
     return summaries
+
+
+def _emit_summary_generated(eval_capture, summary: TextSummary, chunk: DocumentChunk) -> None:
+    """Buffer one ``summary.generated`` event: ids, fingerprints and a size — no text."""
+    eval_capture.emit(
+        eval_capture.KIND_SUMMARY_GENERATED,
+        {
+            "chunk_id": str(chunk.id),
+            "summary_id": str(summary.id),
+            "model": summary.model,
+            "prompt_fingerprint": summary.prompt_fingerprint,
+            "source_text_hash": summary.source_text_hash,
+            "summary_chars": len(summary.text),
+        },
+        payload_kind="json",
+        stage=CAPTURE_STAGE,
+    )

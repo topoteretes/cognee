@@ -35,6 +35,14 @@ class TextSummary(DataPoint):
     source_chunk_id: Optional[str] = None
     summarized_in: Optional[GlobalContextSummary] = None
     global_context_bucket_id: Optional[str] = None
+    # Eval-capture provenance (SDK-529): the model id and prompt fingerprint that
+    # produced this summary and the fingerprint of the source chunk text. Filled
+    # by ``summarize_text`` only while capture is active, None otherwise. Plain
+    # node properties — deliberately kept out of ``index_fields`` so they are
+    # never embedded.
+    model: Optional[str] = None
+    prompt_fingerprint: Optional[str] = None
+    source_text_hash: Optional[str] = None
     metadata: dict = {"index_fields": ["text"]}
     importance_weight: Optional[float] = 0.5
 
