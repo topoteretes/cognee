@@ -50,19 +50,39 @@ otherwise freeze concurrent recall coroutines; inside atexit handlers the
 executor is gone and it runs inline. Each sink write is bounded by
 ``SINK_TIMEOUT_S`` so a wedged sink cannot pin the flusher forever.
 
-``_in_flight`` counts popped-but-undelivered events per loop, so ``drain()``
-waits for a batch the flusher is still serializing — but only on loops that
-are running: a batch stranded on a loop that stopped, or was closed without
-cancelling its tasks (pytest-asyncio 0.21), can never complete and must not
-turn every later ``drain()`` into a full timeout. ``drain(timeout)`` is
-authoritative inside a batch too: sink writes are bounded by what is left of
-the budget and whatever could not be delivered goes back to the head of the
-buffer for the flusher / the atexit hook.
+Every timed wait on the flusher and drain paths goes through ``_wait_bounded``,
+never ``asyncio.wait_for``: on CPython < 3.12 ``wait_for`` swallows a
+cancellation that lands in the same loop iteration as the inner awaitable's
+completion (bpo-42130), and a flusher that loses its cancel never leaves its
+``while True`` — ``asyncio.run()``'s teardown and ``shutdown()`` then wait for
+it forever, and a caller cancelled mid-``drain()`` runs on past its own
+cancellation.
+
+A flusher cancelled from outside — ``asyncio.run`` / uvicorn tearing the loop
+down, ``shutdown()`` — stays in ``_flushers`` as a tombstone: its loop is going
+away, so no replacement is started on it. A late emit there (a ``run_tasks``
+generator finalized by ``shutdown_asyncgens()`` after the runner cancelled all
+tasks, a ``record_operation`` ``finally`` on a cancelled main task) would
+otherwise start a fresh flusher that the closing loop destroys mid-batch; the
+event stays in the deque for the next ``drain()`` or the atexit hook instead.
+
+``_in_flight`` holds the batches popped but not yet delivered, per loop, so
+``drain()`` can wait for a batch the flusher is still serializing — but only on
+loops that are running: a batch on a loop that stopped can never complete
+while it is stopped and must not turn every later ``drain()`` into a full
+timeout. A batch stranded on a loop that was CLOSED without cancelling its
+tasks (pytest-asyncio 0.21, a ``run_until_complete`` driver that never resumed)
+goes back to the head of the buffer when the loop is pruned, so it reaches the
+next drain / the atexit hook instead of vanishing with the dead task.
+``drain(timeout)`` is authoritative inside a batch too: sink writes are bounded
+by what is left of the budget and whatever could not be delivered goes back to
+the head of the buffer for the flusher / the atexit hook.
 
 Delivery is at-least-once: a cancelled flush (``asyncio.run`` teardown, uvicorn
-shutdown) or a drain whose budget ran out mid-write re-buffers the group that
-was being written along with the rest, so a consumer may see the same record
-twice. Blob names are collision-free, so nothing is overwritten.
+shutdown), a drain whose budget ran out mid-write, or a batch recovered from a
+dead loop re-buffers the group that was being written along with the rest, so
+a consumer may see the same record twice. Blob names are collision-free, so
+nothing is overwritten.
 """
 
 from __future__ import annotations
@@ -74,7 +94,7 @@ import random
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, TypeVar
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -88,6 +108,8 @@ if TYPE_CHECKING:
 
 logger = get_logger("eval_capture")
 
+T = TypeVar("T")
+
 # Knobs. Defaults mirror CaptureConfig; _load_knobs() overwrites them from the
 # environment once per process, _configure() from tests.
 _FIELDS = CaptureConfig.model_fields
@@ -98,6 +120,9 @@ SAMPLE_RATE: float = _FIELDS["cognee_capture_sample_rate"].default
 SINK_TIMEOUT_S: float = _FIELDS["cognee_capture_sink_timeout_s"].default
 # Floor for the interval tick: a non-positive interval would spin the flusher.
 _MIN_FLUSH_INTERVAL_S: float = 0.01
+# How long shutdown() / _reset_for_tests() wait for a cancelled flusher to
+# finish: a regression that loses the cancel must fail a test, not hang it.
+_CANCEL_GRACE_S: float = 1.0
 
 # Module state.
 _sink: CaptureSink | None = None
@@ -106,11 +131,15 @@ _buffer: collections.deque[CaptureEvent] = collections.deque()
 # Process-global, monotonic, approximate (lock-free on the emit path). Reported
 # once per manifest as a delta, never logged per drop.
 _dropped: int = 0
-# Events popped from the buffer but not yet delivered (serializing or awaiting
-# the sink), keyed by the loop doing the work. A loop runs in one thread at a
-# time, so each key is only ever mutated by its owner thread — no lock needed.
-# drain() waits on the RUNNING loops' counts only (see _in_flight_live()).
-_in_flight: dict[asyncio.AbstractEventLoop, int] = {}
+# Batches popped from the buffer but not yet delivered (serializing or awaiting
+# the sink), keyed by the loop doing the work. Each entry is the batch's slot
+# list — an event until its group is acknowledged, None afterwards — so the
+# undelivered remainder is always reachable from here, not only from the frame
+# of the task doing the flush. A loop runs in one thread at a time, so each
+# key is only ever mutated by its owner thread; other threads only read, or
+# pop the key of a CLOSED loop (which no thread runs any more). drain() waits
+# on the RUNNING loops' counts only (see _in_flight_live()).
+_in_flight: dict[asyncio.AbstractEventLoop, list[list[CaptureEvent | None]]] = {}
 _atexit_registered: bool = False
 
 # The active manifest scope (owned here so manifest.py can import it without a
@@ -127,6 +156,8 @@ class _Flusher:
     # callback instead of one per emit.
     wake_pending: bool = False
     # Bound right after creation: the flush task needs the flusher, the flusher the task.
+    # A task that ended cancelled turns this entry into a tombstone for its
+    # loop (see _ensure_flusher).
     task: asyncio.Task = field(init=False)
 
 
@@ -207,10 +238,15 @@ def _register_atexit() -> None:
 
 
 def _flush_at_exit() -> None:
+    if _sink is None:
+        return
+    # Batches stranded on loops that were closed without cancelling their tasks
+    # go back to the buffer first, so they are part of what gets persisted.
+    _prune_closed_loops()
     # Only batches on a loop that is still running (a daemon thread's) can
-    # complete here; anything stranded on a stopped or closed loop cannot, and
-    # waiting for it would just add a full timeout to every interpreter exit.
-    if _sink is None or not (_buffer or _in_flight_live()):
+    # complete here; anything on a stopped loop cannot, and waiting for it
+    # would just add a full timeout to every interpreter exit.
+    if not (_buffer or _in_flight_live()):
         return
     if _get_running_loop() is not None:
         return
@@ -261,6 +297,7 @@ def register_capture_sink(sink: CaptureSink | None) -> None:
     An explicit registration overrides env auto-registration of the SINK
     (mirrors ``register_activity_sink`` semantics); the tuning knobs
     (``COGNEE_CAPTURE_QUEUE_SIZE`` etc.) still come from the environment.
+    Registering a sink re-arms flushing on loops ``shutdown()`` stopped.
     """
     global _sink, _initialized
     if not _initialized:
@@ -271,6 +308,7 @@ def register_capture_sink(sink: CaptureSink | None) -> None:
             logger.debug("capture config unavailable, keeping default knobs (%s)", exc)
     _sink = sink
     if sink is not None:
+        _forget_stopped_flushers()
         _register_atexit()
 
 
@@ -382,12 +420,22 @@ def _enqueue(event: CaptureEvent) -> None:
 
 
 def _ensure_flusher(loop: asyncio.AbstractEventLoop) -> _Flusher | None:
-    """Return this loop's live flusher, starting one if absent or done()."""
+    """Return this loop's live flusher, starting one if absent or crashed.
+
+    ``None`` for a loop whose flusher was CANCELLED: that is the runner tearing
+    the loop down (``asyncio.run``, uvicorn) or ``shutdown()``, and a fresh
+    flusher started on a closing loop is destroyed with its popped batch. The
+    cancelled entry stays as a tombstone until the loop is closed and pruned,
+    or a sink is (re)registered. A flusher that CRASHED is replaced.
+    """
     flusher = _flushers.get(loop)
-    if flusher is None or flusher.task.done():
-        # A done() flusher (crashed, cancelled) is treated as absent.
-        flusher = _start_flusher(loop)
-    return flusher
+    if flusher is not None:
+        task = flusher.task
+        if not task.done():
+            return flusher
+        if task.cancelled():
+            return None
+    return _start_flusher(loop)
 
 
 def ensure_flusher() -> None:
@@ -420,33 +468,55 @@ def _start_flusher(loop: asyncio.AbstractEventLoop) -> _Flusher | None:
 
     _flushers[loop] = flusher
 
-    def _discard(_task: asyncio.Task) -> None:
-        if _flushers.get(loop) is flusher:
-            _flushers.pop(loop, None)
+    def _on_done(task: asyncio.Task) -> None:
+        if _flushers.get(loop) is not flusher:
+            return
+        if task.cancelled():
+            # Keep the entry as a tombstone (see _ensure_flusher): the loop
+            # is going away, no replacement is started on it.
+            return
+        _flushers.pop(loop, None)
+        # A crash (a BaseException out of a sink) ended the task; retrieving
+        # the exception here keeps asyncio's "Task exception was never
+        # retrieved" ERROR out of the logs. The next emit starts a replacement.
+        exc = task.exception()
+        if exc is not None:
+            logger.debug("capture flusher stopped (%r)", exc)
 
-    flusher.task.add_done_callback(_discard)
+    flusher.task.add_done_callback(_on_done)
     return flusher
 
 
 def _prune_closed_loops() -> None:
-    """Forget flushers and in-flight batches stranded on closed loops.
+    """Forget flushers on closed loops; re-buffer the batches stranded there.
 
     Explicit because ``add_done_callback`` never fires for a task parked on a
-    closed loop. The events such a task had popped can never be delivered (the
-    task was destroyed with its loop), so they are counted as dropped. A loop
-    that merely stopped keeps its entries: it may run again (a driver calling
-    ``run_until_complete`` repeatedly) and its task is still cancellable by
-    ``shutdown()`` / ``_reset_for_tests()``; ``_any_live_flusher()`` and
-    ``_in_flight_live()`` skip it while it is not running.
+    closed loop. A batch such a task had popped can never be acknowledged (the
+    task died with its loop), so its undelivered slots go back to the head of
+    the buffer for the next drain / the atexit hook — at-least-once: a group
+    whose sink write completed but whose acknowledgement never ran is written
+    again. A loop that merely stopped keeps its entries: it may run again (a
+    driver calling ``run_until_complete`` repeatedly) and its task is still
+    cancellable by ``shutdown()`` / ``_reset_for_tests()``;
+    ``_any_live_flusher()`` and ``_in_flight_live()`` skip it while it is not
+    running.
     """
-    global _dropped
-    # Snapshot the items — another thread may be mutating the dicts.
-    for stale_loop, stale in list(_flushers.items()):
-        if stale_loop.is_closed() or stale.task.done():
+    # Snapshot the keys — another thread may be mutating the dicts. Only a
+    # closed loop's entries are touched, and no thread runs a closed loop.
+    for stale_loop in list(_flushers):
+        if stale_loop.is_closed():
             _flushers.pop(stale_loop, None)
     for stale_loop in list(_in_flight):
         if stale_loop.is_closed():
-            _dropped += _in_flight.pop(stale_loop, 0)
+            for pending in _in_flight.pop(stale_loop, ()):
+                _requeue(pending)
+
+
+def _forget_stopped_flushers() -> None:
+    """Drop tombstones so flushing can resume on their loops (sink re-registered)."""
+    for loop, flusher in list(_flushers.items()):
+        if flusher.task.done():
+            _flushers.pop(loop, None)
 
 
 def _any_live_flusher() -> _Flusher | None:
@@ -467,23 +537,37 @@ def _any_live_flusher() -> _Flusher | None:
 # ---------------------------------------------------------------------------
 
 
-def _in_flight_add(loop: asyncio.AbstractEventLoop, count: int) -> None:
+def _track_in_flight(loop: asyncio.AbstractEventLoop, pending: list[CaptureEvent | None]) -> None:
     # Only ever called from ``loop``'s own thread (see _in_flight).
-    total = _in_flight.get(loop, 0) + count
-    if total > 0:
-        _in_flight[loop] = total
-    else:
+    _in_flight.setdefault(loop, []).append(pending)
+
+
+def _untrack_in_flight(loop: asyncio.AbstractEventLoop, pending: list[CaptureEvent | None]) -> None:
+    batches = _in_flight.get(loop)
+    if batches is None:
+        return  # already recovered by _prune_closed_loops (loop closed under us)
+    for index, candidate in enumerate(batches):
+        if candidate is pending:
+            del batches[index]
+            break
+    if not batches:
         _in_flight.pop(loop, None)
+
+
+def _count_pending(batches: list[list[CaptureEvent | None]]) -> int:
+    return sum(1 for pending in list(batches) for event in pending if event is not None)
 
 
 def _in_flight_total() -> int:
     """Popped-but-undelivered events on every loop (tests, diagnostics)."""
-    return sum(list(_in_flight.values()))
+    return sum(_count_pending(batches) for batches in list(_in_flight.values()))
 
 
 def _in_flight_live() -> int:
     """Popped-but-undelivered events on loops that can still deliver them."""
-    return sum(count for loop, count in list(_in_flight.items()) if loop.is_running())
+    return sum(
+        _count_pending(batches) for loop, batches in list(_in_flight.items()) if loop.is_running()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -491,12 +575,44 @@ def _in_flight_live() -> int:
 # ---------------------------------------------------------------------------
 
 
+async def _wait_bounded(awaitable: Awaitable[T], timeout: float | None) -> T:
+    """``asyncio.wait_for`` that cannot swallow the caller's cancellation.
+
+    On CPython < 3.12 ``wait_for`` returns the inner result instead of raising
+    when the cancel lands in the same loop iteration as the inner completion
+    (bpo-42130): ``Task.cancel()`` consumed the request and it is lost. Here
+    the caller parks on ``asyncio.wait``, whose waiter future carries the
+    cancellation straight through. Like ``wait_for``, a timeout cancels the
+    inner awaitable and waits for that cancellation to land before raising
+    ``asyncio.TimeoutError``, so the inner is never left running.
+    """
+    future = asyncio.ensure_future(awaitable)
+    if timeout is None:
+        # A direct await propagates a racing cancel correctly (it is wait_for's
+        # `if fut.done(): return fut.result()` that does not).
+        return await future
+    try:
+        done, _pending = await asyncio.wait({future}, timeout=timeout)
+    except asyncio.CancelledError:
+        # The caller was cancelled: take the inner down with it, and — like
+        # wait_for — do not return while it may still be running.
+        if not future.done():
+            future.cancel()
+            await asyncio.wait({future})
+        raise
+    if not done:
+        future.cancel()
+        await asyncio.wait({future})
+        raise asyncio.TimeoutError
+    return future.result()
+
+
 async def _flush_loop(flusher: _Flusher) -> None:
     wake = flusher.wake
     while True:
         try:
             try:
-                await asyncio.wait_for(wake.wait(), FLUSH_INTERVAL_S)
+                await _wait_bounded(wake.wait(), FLUSH_INTERVAL_S)
             except asyncio.TimeoutError:
                 pass  # interval tick
             wake.clear()
@@ -540,7 +656,11 @@ def _serialize_batch(batch: list[CaptureEvent]) -> list[dict]:
 
         scope = event.scope
         run_id = event.run_id or (scope.run_id if scope is not None else None)
-        dataset_id = event.dataset_id or (scope.dataset_id if scope is not None else None)
+        # A scope without a dataset of its own (an operation recorded inside a
+        # pipeline task) is attributed to the enclosing run's dataset.
+        dataset_id = event.dataset_id or (
+            scope.resolved_dataset_id() if scope is not None else None
+        )
         records.append(
             {
                 "kind": event.kind,
@@ -555,10 +675,17 @@ def _serialize_batch(batch: list[CaptureEvent]) -> list[dict]:
 
 
 def _requeue(pending: list[CaptureEvent | None]) -> None:
-    """Put the not-yet-delivered events back at the head of the buffer, in order."""
+    """Put the not-yet-delivered events back at the head of the buffer, in order.
+
+    The slots are blanked so the batch counts as nothing in flight afterwards:
+    an event is always in exactly one of the buffer, a tracked batch, the sink,
+    or ``_dropped``.
+    """
     leftovers = [event for event in pending if event is not None]
     if leftovers:
         _buffer.extendleft(reversed(leftovers))
+        for index in range(len(pending)):
+            pending[index] = None
 
 
 def _remaining(deadline: float | None) -> float | None:
@@ -578,9 +705,10 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
     buffer for the flusher / the atexit hook (at-least-once, see the module
     docstring). The flusher passes no deadline.
 
-    The popped events are counted in ``_in_flight`` for this loop from pop to
+    The popped events are tracked in ``_in_flight`` for this loop from pop to
     delivery so ``drain()`` can wait for a batch another consumer is still
-    serializing.
+    serializing, and so ``_prune_closed_loops`` can recover the batch if the
+    loop dies under it.
     """
     global _dropped
     buffer = _buffer
@@ -602,16 +730,16 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
         return len(batch)
 
     loop = asyncio.get_running_loop()
-    # Events not yet handed to the sink; on cancellation or a spent deadline these go back.
+    # One slot per event, blanked as its group is acknowledged; on cancellation
+    # or a spent deadline the rest goes back to the buffer.
     pending: list[CaptureEvent | None] = list(batch)
-    outstanding = len(batch)
-    _in_flight_add(loop, outstanding)
+    _track_in_flight(loop, pending)
     try:
         records: list[dict] | None = None
         remaining = _remaining(deadline)
         if remaining is None or remaining > 0:
             try:
-                records = await asyncio.wait_for(run_off_loop(_serialize_batch, batch), remaining)
+                records = await _wait_bounded(run_off_loop(_serialize_batch, batch), remaining)
             except asyncio.TimeoutError:
                 pass  # budget spent while serializing: the whole batch goes back
 
@@ -631,7 +759,7 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
                     bound = min(bound, remaining)
                 group = [records[index] for index in indexes]
                 try:
-                    await asyncio.wait_for(sink(group), bound)
+                    await _wait_bounded(sink(group), bound)
                 except asyncio.TimeoutError as exc:
                     if deadline is not None and time.monotonic() >= deadline:
                         break  # the caller's budget ran out, not the sink's: retry later
@@ -640,27 +768,27 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
                     logger.debug("capture sink failed (%s)", exc)
                 for index in indexes:
                     pending[index] = None
-                outstanding -= len(indexes)
-                _in_flight_add(loop, -len(indexes))
                 # Let other coroutines interleave between sink writes.
                 await asyncio.sleep(0)
 
         # Deadline leftovers (never any for the flusher, which has no deadline).
         _requeue(pending)
-    except asyncio.CancelledError:
-        # asyncio.run teardown / uvicorn shutdown: do not lose the popped batch.
-        _requeue(pending)
-        raise
     except Exception as exc:
         # Not re-queued: a deterministic failure would pin the head of the
         # buffer forever. Account for the loss instead of hiding it.
         lost = sum(1 for event in pending if event is not None)
         _dropped += lost
         logger.debug("capture flush failed, %d event(s) dropped (%s)", lost, exc)
+    except BaseException:
+        # Cancellation (asyncio.run teardown, uvicorn shutdown, a cancelled
+        # drain() caller) or a KeyboardInterrupt/SystemExit escaping a sink:
+        # do not lose the popped batch.
+        _requeue(pending)
+        raise
     finally:
         # Whatever was not delivered is either back in the buffer or dropped:
         # in no case is it still in flight.
-        _in_flight_add(loop, -outstanding)
+        _untrack_in_flight(loop, pending)
     return len(batch)
 
 
@@ -670,6 +798,9 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
 
 
 async def _drain_until(deadline: float) -> None:
+    # Batches stranded on loops closed since the last pass go back to the
+    # buffer first, so this drain covers them too.
+    _prune_closed_loops()
     # (a) Inline on the calling loop: flush what is buffered NOW. The deque is
     # the coordination point — popleft is atomic, so a concurrently running
     # flusher and this drain simply split the work (blob names are
@@ -683,11 +814,10 @@ async def _drain_until(deadline: float) -> None:
             break  # the flusher took the rest; never spin
         budget -= popped
     # (b) Wait for batches other consumers hold (popped, serializing or
-    # awaiting their sink): plain int counters, no foreign-loop futures — and
-    # only on loops that are running. A batch stranded on a stopped or closed
-    # loop can never complete; waiting for it would turn every later drain()
-    # in the process into a full timeout.
-    _prune_closed_loops()
+    # awaiting their sink): plain counters, no foreign-loop futures — and only
+    # on loops that are running. A batch on a stopped loop cannot complete
+    # while it is stopped; waiting for it would turn every later drain() in
+    # the process into a full timeout.
     while _in_flight_live() > 0 and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
 
@@ -695,10 +825,11 @@ async def _drain_until(deadline: float) -> None:
 async def drain(timeout: float = 5.0) -> None:
     """Flush the events buffered so far, then wait for in-flight batches.
 
-    Never requires a flusher to exist, never raises, and returns within about
-    ``timeout`` — the budget is enforced inside a batch too, per sink write —
-    even under a continuous producer or a wedged sink (leftovers stay with the
-    flusher / the atexit hook).
+    Never requires a flusher to exist, never raises (a cancellation of the
+    caller propagates, as it must), and returns within about ``timeout`` — the
+    budget is enforced inside a batch too, per sink write — even under a
+    continuous producer or a wedged sink (leftovers stay with the flusher /
+    the atexit hook).
     """
     try:
         await _drain_until(time.monotonic() + timeout)
@@ -709,9 +840,13 @@ async def drain(timeout: float = 5.0) -> None:
 async def shutdown(timeout: float = 5.0) -> None:
     """Drain, stop every flusher, then deliver anything a cancelled flush put back.
 
-    For process teardown (FastAPI lifespan, tests), not the request path.
+    For process teardown (FastAPI lifespan, tests), not the request path. The
+    stopped flushers stay registered as tombstones, so an emit that arrives
+    after shutdown (one more request during a lifespan shutdown) does not
+    start a new flusher: it stays in the deque for the atexit hook.
     """
     deadline = time.monotonic() + timeout
+    grace = min(timeout, _CANCEL_GRACE_S)
     await drain(timeout)
     current_loop = _get_running_loop()
     same_loop_tasks: list[asyncio.Task] = []
@@ -719,23 +854,16 @@ async def shutdown(timeout: float = 5.0) -> None:
         if flusher.loop is current_loop and not flusher.task.done():
             same_loop_tasks.append(flusher.task)
         _cancel_flusher(flusher, wait=False)
-    _flushers.clear()
     if same_loop_tasks:
-        await asyncio.gather(*same_loop_tasks, return_exceptions=True)
+        # Bounded: a flusher that failed to honour its cancel must not hang teardown.
+        await asyncio.wait(same_loop_tasks, timeout=grace)
     # A flusher cancelled mid-batch re-buffered it; no flusher is left to pick
     # it up, so deliver it here rather than leaving it to the atexit hook.
     if _buffer:
         try:
-            await _drain_until(max(deadline, time.monotonic() + min(timeout, 1.0)))
+            await _drain_until(max(deadline, time.monotonic() + grace))
         except Exception as exc:
             logger.debug("capture drain failed (%s)", exc)
-
-
-async def _await_cancelled(task: asyncio.Task) -> None:
-    try:
-        await task
-    except (asyncio.CancelledError, Exception):
-        pass
 
 
 def _cancel_flusher(flusher: _Flusher, *, wait: bool) -> None:
@@ -752,9 +880,11 @@ def _cancel_flusher(flusher: _Flusher, *, wait: bool) -> None:
     else:
         flusher.task.cancel()
         if wait:
-            # Deliver the cancellation so the task is not destroyed while pending.
+            # Deliver the cancellation so the task is not destroyed while
+            # pending. Bounded: a regression that loses the cancel must fail a
+            # test, not hang the suite.
             try:
-                loop.run_until_complete(_await_cancelled(flusher.task))
+                loop.run_until_complete(asyncio.wait({flusher.task}, timeout=_CANCEL_GRACE_S))
             except Exception:
                 pass
 

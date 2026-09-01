@@ -13,8 +13,14 @@ qualify. Delivery is at-least-once: a flush cancelled or cut off by
 sink may receive the same records twice (``StorageSink`` never overwrites —
 blob names are collision-free — so consumers that need exactly-once counts
 should dedupe on ``(run_id, kind, ts)``). Sinks must raise ``Exception``
-subclasses only; a ``BaseException`` from a sink escapes the flusher's
-never-raise guards by design.
+subclasses only: a ``BaseException`` from a sink re-buffers the batch and ends
+the flusher (the next emit starts a replacement). A sink must let
+``CancelledError`` propagate — the flusher cancels a write that outlives
+``SINK_TIMEOUT_S`` or a ``drain()`` budget and waits for that cancel to land.
+Sinks must not depend on the default executor or on threads: the atexit drain
+runs after ``threading._shutdown()``, when ``asyncio.to_thread`` raises and the
+write is lost; ``StorageSink`` goes through ``run_off_loop``, which falls back
+to an inline call there.
 """
 
 from __future__ import annotations

@@ -54,6 +54,21 @@ class RunScope:
         under ``nodataset/`` — the manifest is authoritative."""
         self.dataset_id = dataset_id
 
+    def resolved_dataset_id(self) -> UUID | str | None:
+        """This run's dataset, or the nearest enclosing run's when it has none.
+
+        A ``record_operation``-wrapped search executed by a pipeline task opens an
+        operation scope with no dataset of its own inside a pipeline scope that
+        knows it; attributing to the parent keeps ``nodataset/`` for runs that
+        are genuinely dataset-less.
+        """
+        scope: RunScope | None = self
+        while scope is not None:
+            if scope.dataset_id is not None:
+                return scope.dataset_id
+            scope = scope.parent
+        return None
+
     def note(self, key: str, value: Any) -> None:
         self.fields[key] = value
 
@@ -62,13 +77,19 @@ class RunScope:
 
     def to_manifest(self) -> dict[str, Any]:
         ended_at = time.time()
+        dataset_id = self.resolved_dataset_id()
+        parent = self.parent
+        parent_run_id = None if parent is None or parent.run_id is None else str(parent.run_id)
         return {
             # Fields first so the envelope keys below always win: a note() under
             # "run_id" or "kind" cannot re-file the manifest, and a note()
             # under "counters" is not silently discarded.
             **self.fields,
             "run_id": None if self.run_id is None else str(self.run_id),
-            "dataset_id": None if self.dataset_id is None else str(self.dataset_id),
+            # Lets a nested run (an operation recorded inside a pipeline task)
+            # be joined to its enclosing run offline.
+            "parent_run_id": parent_run_id,
+            "dataset_id": None if dataset_id is None else str(dataset_id),
             "kind": self.kind,
             "sampled": self.sampled,
             "started_at": self.started_at,
@@ -101,7 +122,7 @@ class RunScope:
                 self.to_manifest(),
                 payload_kind="json",
                 run_id=self.run_id,
-                dataset_id=self.dataset_id,
+                dataset_id=self.resolved_dataset_id(),
             )
         except Exception as exc:
             hook.logger.debug("capture manifest emit failed (%s)", exc)

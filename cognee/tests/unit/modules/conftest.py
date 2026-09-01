@@ -74,7 +74,7 @@ class FakeCaptureSink:
 
 
 @pytest.fixture
-def capture_reset(event_loop):
+def capture_reset(event_loop, monkeypatch):
     """Reset eval-capture module state around a test (SDK-529).
 
     Depends on ``event_loop`` so this teardown runs BEFORE pytest-asyncio closes
@@ -85,9 +85,14 @@ def capture_reset(event_loop):
     pytest-asyncio 0.23 and removed in 1.0. The ``dev`` extra pins ``<0.22``;
     moving past it means replacing this ordering trick (e.g. a loop-scoped
     fixture or an ``asyncio`` ``pytest_fixture_post_finalizer`` hook).
-    """
-    from cognee.modules.observability.capture import hook
 
+    Also detaches ``CaptureConfig`` from the repo ``.env`` so a developer's
+    ``COGNEE_CAPTURE_*`` settings cannot flip the off-path tests; the tests set
+    the environment they need explicitly.
+    """
+    from cognee.modules.observability.capture import CaptureConfig, hook
+
+    monkeypatch.setitem(CaptureConfig.model_config, "env_file", None)
     hook._reset_for_tests()
     yield
     hook._reset_for_tests()

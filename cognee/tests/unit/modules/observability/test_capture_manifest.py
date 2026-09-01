@@ -117,6 +117,33 @@ def test_nested_scopes_restore_the_parent():
 
 
 @pytest.mark.asyncio
+async def test_nested_operation_inherits_the_enclosing_dataset(fake_capture_sink):
+    pipeline_run = uuid4()
+    dataset_id = uuid4()
+    operation_id = uuid4()
+
+    # A record_operation-wrapped search executed by a pipeline task: the
+    # operation scope has no dataset of its own, the enclosing run knows it.
+    with capture.run_scope(pipeline_run, dataset_id, kind="pipeline"):
+        with capture.run_scope(operation_id, kind="operation") as inner:
+            assert inner.dataset_id is None
+            assert inner.resolved_dataset_id() == dataset_id
+            capture.emit(KIND_RETRIEVAL_CANDIDATES, [{"id": "n1"}], payload_kind="json")
+
+    await capture.drain()
+
+    [candidates] = [r for r in fake_capture_sink.records if r["kind"] == KIND_RETRIEVAL_CANDIDATES]
+    assert candidates["run_id"] == str(operation_id)
+    assert candidates["dataset_id"] == str(dataset_id)  # not filed under nodataset/
+    manifests = {m["run_id"]: m for m in _manifests(fake_capture_sink)}
+    inner_manifest = manifests[str(operation_id)]
+    assert inner_manifest["dataset_id"] == str(dataset_id)
+    assert inner_manifest["payload"]["dataset_id"] == str(dataset_id)
+    assert inner_manifest["payload"]["parent_run_id"] == str(pipeline_run)  # joinable offline
+    assert manifests[str(pipeline_run)]["payload"]["parent_run_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_manifest_is_emitted_even_when_the_body_raises(fake_capture_sink):
     with pytest.raises(RuntimeError):
         with capture.run_scope(uuid4(), kind="pipeline"):
