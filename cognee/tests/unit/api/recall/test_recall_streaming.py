@@ -302,7 +302,14 @@ def test_a_failure_before_any_output_keeps_its_status_code(client, monkeypatch):
         )
 
     assert response.status_code == 422
-    assert "scope must be one of" in response.json()["error"]
+    # Deliberately does NOT assert the message text. The router rebuilds it
+    # rather than echoing the exception, so a ValueError raised deeper in the
+    # recall path cannot leak its text to the client (SDK-463). What this test
+    # owns is the status code and the transport: a failure decided before the
+    # first byte stays JSON and keeps its real status, instead of becoming a
+    # 200 carrying an error frame.
+    assert "text/event-stream" not in response.headers.get("content-type", "")
+    assert response.json()["error"]
 
 
 def test_a_cognee_error_before_output_is_left_to_the_global_handler(client, monkeypatch):
