@@ -85,10 +85,18 @@ async def add_data_points(
                 visited_properties=visited_properties,
             )
             for data_point in data_points
-        ]
+        ],
+        return_exceptions=True,
     )
 
-    for result_nodes, result_edges in results:
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.error(
+                "Error processing data point in add_data_points, skipping.",
+                exc_info=result,
+            )
+            continue
+        result_nodes, result_edges = result
         nodes.extend(result_nodes)
         edges.extend(result_edges)
 
@@ -195,7 +203,11 @@ async def add_data_points(
                 [node.model_copy(deep=True) for node in nodes],
                 vector_engine=vector_engine,
             ),
+            return_exceptions=True,
         )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     if use_hybrid:
         await graph_engine.add_edges_with_vectors(edges)
@@ -210,6 +222,9 @@ async def add_data_points(
             ),
             index_graph_edges(edges, vector_engine=vector_engine),
         )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
@@ -231,7 +246,11 @@ async def add_data_points(
                     pipeline_run_id=fold_run_arg,
                 ),
                 index_graph_edges(custom_edges, vector_engine=vector_engine),
+                return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
 
         edges.extend(custom_edges)
 
