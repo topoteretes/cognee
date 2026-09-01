@@ -136,6 +136,28 @@ class EmbeddingContextWindowTooSmallError(EmbeddingException):
         super().__init__(message, name, status_code)
 
 
+class EmbeddingCredentialsError(EmbeddingException):
+    """
+    Raised when the embedding endpoint rejects the request's credentials.
+
+    Covers both directions: credentials the server does not accept (401) and
+    credentials it accepts but does not permit for this model or organization
+    (403). Neither can clear inside a retry window, so engines raise this
+    instead of the provider's own class: keeping the failure inside the
+    ``CogneeApiError`` family is what lets the API return an actionable 422
+    rather than a 500, while listing it as terminal is what stops the backoff
+    ladder. The provider's own message is carried through as *message*.
+    """
+
+    def __init__(
+        self,
+        message: str = "Embedding endpoint rejected the credentials.",
+        name: str = "EmbeddingCredentialsError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class MissingQueryParameterError(CogneeValidationError):
     """
     Raised when neither 'query_text' nor 'query_vector' is provided,
