@@ -1,0 +1,95 @@
+"""A chunk that yields an already-stored relationship edge must still own it.
+
+``integrate_chunk_graphs`` asks the graph which candidate edges already exist
+and does not attach those to the data points again. Ownership is collected
+from the attached model, so the second chunk to state a fact never becomes an
+owner of its edge — the edge stays owned by whichever chunk first created it.
+
+With chunk-scoped deletion that is a data-loss path: when the first producer's
+chunk is deleted (an incremental edit, or ``delete_data`` on the first document)
+the edge has no owner left and is hard-deleted, although a live chunk still
+states the fact. Reproduced end to end in
+``tests/integration/api/update/test_chunk_ownership_semantics.py``; this pins
+the seam in isolation.
+"""
+
+import asyncio
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+
+from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.data.processing.document_types import TextDocument
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node
+from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
+from cognee.tasks.storage.chunk_ownership import collect_chunk_ownership
+
+
+def _chunk(document, text: str) -> DocumentChunk:
+    return DocumentChunk(
+        id=uuid4(),
+        text=text,
+        chunk_size=4,
+        chunk_index=0,
+        cut_type="paragraph_end",
+        is_part_of=document,
+        contains=[],
+    )
+
+
+def _extracted_fact() -> KnowledgeGraph:
+    return KnowledgeGraph(
+        nodes=[
+            Node(id="alice", name="alice", type="kinda", description="alice"),
+            Node(id="queen", name="queen", type="kindq", description="queen"),
+        ],
+        edges=[Edge(source_node_id="alice", target_node_id="queen", relationship_name="precedes")],
+    )
+
+
+async def _integrate(edge_already_stored: bool):
+    document = TextDocument(
+        id=uuid4(),
+        name="doc",
+        raw_data_location="doc.txt",
+        mime_type="text/plain",
+        external_metadata="{}",
+    )
+    chunk = _chunk(document, "Alice met Queen again today.")
+
+    async def existing(edge_identities):
+        return set(edge_identities) if edge_already_stored else set()
+
+    with patch(
+        "cognee.tasks.graph.extract_graph_from_data.find_existing_edge_identities",
+        AsyncMock(side_effect=existing),
+    ):
+        (chunk,) = await integrate_chunk_graphs([chunk], [_extracted_fact()], KnowledgeGraph, None)
+
+    dataset_id, data_id = uuid4(), uuid4()
+    ownership = await collect_chunk_ownership([chunk], dataset_id, data_id)
+    # ``contains`` entries are ``(Edge, Entity)`` tuples once edge text is attached.
+    entities = {}
+    for item in chunk.contains:
+        entity = item[1] if isinstance(item, tuple) else item
+        entities[entity.name] = entity
+    edge_key = (str(entities["alice"].id), str(entities["queen"].id), "precedes")
+    chunk_key = make_chunk_source_ref_key(dataset_id, data_id, chunk.id)
+    return ownership.edge_owners.get(edge_key), chunk_key
+
+
+def test_new_edge_is_owned_by_its_producing_chunk():
+    owners, chunk_key = asyncio.run(_integrate(edge_already_stored=False))
+    assert owners == [chunk_key], (
+        "a freshly created edge must be owned by the chunk that yielded it"
+    )
+
+
+def test_already_stored_edge_is_still_owned_by_its_producing_chunk():
+    owners, chunk_key = asyncio.run(_integrate(edge_already_stored=True))
+    assert owners == [chunk_key], (
+        "the chunk's extraction yielded alice -[precedes]-> queen, but because the edge "
+        "already exists in the graph it was not attached and the chunk owns nothing for it "
+        f"(owners recorded: {owners}). When the edge's first producer is deleted, the edge "
+        "is hard-deleted while this chunk still states the fact."
+    )

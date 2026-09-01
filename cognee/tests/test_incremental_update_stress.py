@@ -6,34 +6,48 @@ paragraph merges and splits, reorders, duplicated content and edits to one
 occurrence of it, region growth and collapse, unicode and whitespace-only
 changes, an unchanged resubmit, half-document replacement, mass append, head
 deletion, and finally total replacement — until NOTHING of the original text
-remains. After every single iteration the whole system is verified:
+remains. A second, small document that shares entities with the first sits in
+the same dataset throughout, so cross-document sharing is exercised by every
+deletion. After every single iteration the whole system is verified:
 
-  - the Data row keeps its id and its stored text is byte-identical to the
-    submitted version;
+  - the Data rows keep their ids and their stored text is byte-identical to
+    the submitted version;
   - the graph's chunks tile that text exactly, with contiguous indexes and
     correct content hashes;
   - chunks whose content survived keep their node ids; replaced chunks are
     gone from graph AND vector store;
-  - the set of live Entity nodes equals exactly the entities extractable
-    from the CURRENT text — nothing stale survives, nothing new is missing;
-  - every live chunk has exactly one summary; no summary references a dead
-    chunk;
-  - every chunk-scoped (v2) source ref — on nodes and edges — points at a
-    LIVE chunk; the document node keeps its v1 ref only;
-  - vector rows exist for live artifacts and are gone for dead ones, and
-    their chunk_index payloads agree with the graph;
+  - the graph equals EXACTLY the structure the live chunk texts imply —
+    entities, entity types, ``is_a``, ``contains``, ``precedes`` relationships,
+    one summary per chunk, ``made_from``, ``is_part_of`` — so nothing stale
+    survives (no ghost entities, no relationship without supporting text) and
+    nothing live is missing (no fact deleted while a chunk still states it);
+  - ownership is exact: every entity's chunk-scoped (v2) owners are the
+    chunks that contain it and every relationship's owners are the chunks
+    whose text states it, every v2 ref points at a LIVE chunk, the document
+    nodes keep their v1 refs only, and no artifact is ref-less;
+  - vector rows exist for live artifacts and are gone for dead ones in every
+    collection (chunks, summaries, entities, entity types, triplets), and the
+    chunk_index payloads agree with the graph;
   - each genuine incremental update logs exactly one pipeline run; the
     unchanged resubmit logs none.
 
-Runs on the default local stack (kuzu + lancedb + sqlite) with a
-deterministic mock LLM (proper-noun extraction) and mock embeddings —
-CI-safe, no API keys required.
+After the ten iterations the mutated document is deleted outright: nothing of
+it may be stranded while the second document stays intact; deleting the second
+document must then leave the graph and every vector collection empty.
+
+Runs on the default local stack (kuzu + lancedb + sqlite) with a deterministic
+mock LLM and mock embeddings — CI-safe, no API keys required. The mock
+extracts every capitalised word of four or more letters as an entity typed by
+its first letter and links consecutive entities in a chunk with a ``precedes``
+edge; relationship edges are what make ownership and deletion non-trivial, so
+a mock without them verifies nothing about either.
 """
 
 import asyncio
 import hashlib
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 FIXTURE = Path(__file__).parent / "test_data" / "alice_in_wonderland.txt"
@@ -42,12 +56,36 @@ CHUNK_TOKENS = 80
 
 # Deterministic "extraction": proper-noun-shaped words of 4+ letters. Applied
 # to chunk text by the mock LLM and to expected text by the verifier, so the
-# expected entity set is computable from the document alone.
+# expected graph is computable from the document alone.
 NOUN = re.compile(r"\b[A-Z][a-z]{3,}\b")
+
+# The second document: shares entities with the original text (Alice, Rabbit,
+# Queen, Hatter) and with the synthetic replacement paragraphs (Clockwork,
+# Garden, Meridian, Observatory, Automaton), plus some of its own.
+DOC_B = (
+    "Alice met the Rabbit near the Queen's garden.\n\n"
+    "The Clockwork Garden report belongs to the Meridian Observatory archive.\n\n"
+    "Zephyr the Automaton and Quill the librarian catalogued every Hatter riddle.\n\n"
+    "Alice, the Rabbit and the Queen argued with Zephyr about the Meridian lens."
+)
+
+
+def _nouns_ordered(text: str) -> list:
+    return [word.lower() for word in NOUN.findall(text)]
 
 
 def _nouns(text: str) -> set:
-    return {word.lower() for word in NOUN.findall(text)}
+    return set(_nouns_ordered(text))
+
+
+def _kind(name: str) -> str:
+    return f"kind{name[0]}"
+
+
+def _pairs(text: str) -> set:
+    """Consecutive distinct entities in a chunk: the relationships it states."""
+    names = _nouns_ordered(text)
+    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
 
 
 def _setup_environment() -> None:
@@ -64,6 +102,7 @@ def _setup_environment() -> None:
         GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
+        TRIPLET_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
@@ -90,6 +129,7 @@ def _setup_environment() -> None:
             "create_embedding_engine",
         ),
         ("cognee.infrastructure.llm.config", "get_llm_config"),
+        ("cognee.modules.cognify.config", "get_cognify_config"),
     ]:
         try:
             getattr(importlib.import_module(module_name), factory_name).cache_clear()
@@ -97,15 +137,19 @@ def _setup_environment() -> None:
             pass
 
     from cognee.infrastructure.llm.LLMGateway import LLMGateway
-    from cognee.shared.data_models import KnowledgeGraph, Node, SummarizedContent
+    from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 
     @staticmethod
     async def _mock_acreate(text_input, system_prompt, response_model, **kwargs):
         if isinstance(response_model, type) and issubclass(response_model, KnowledgeGraph):
-            names = sorted(_nouns(str(text_input)))
+            text = str(text_input)
+            names = sorted(_nouns(text))
             return KnowledgeGraph(
-                nodes=[Node(id=n, name=n, type="Character", description=n) for n in names],
-                edges=[],
+                nodes=[Node(id=n, name=n, type=_kind(n), description=n) for n in names],
+                edges=[
+                    Edge(source_node_id=a, target_node_id=b, relationship_name="precedes")
+                    for a, b in sorted(_pairs(text))
+                ],
             )
         if isinstance(response_model, type) and issubclass(response_model, SummarizedContent):
             digest = hashlib.sha256(str(text_input).encode()).hexdigest()[:12]
@@ -268,30 +312,58 @@ async def _incremental_run_count(dataset_id):
     return len({row.pipeline_run_id for row in rows})
 
 
-async def _graph_state(graph, data_id):
-    """(chunks_by_id, summaries, entities, doc_props) from the live graph."""
-    nodes, edges = await graph.get_graph_data()
-    props_by_id = {str(node_id): props for node_id, props in nodes}
+def _label(props: dict, node_id: str, doc_ids: set) -> str:
+    """A node's meaning, independent of its id: what the graph MUST contain."""
+    kind = props.get("type")
+    if node_id in doc_ids:
+        return f"doc:{node_id}"
+    if kind == "DocumentChunk":
+        return f"chunk:{node_id}"
+    if kind == "TextSummary":
+        return f"summary:{props.get('source_chunk_id')}"
+    if kind == "Entity":
+        return f"entity:{props.get('name')}"
+    if kind == "EntityType":
+        return f"type:{props.get('name')}"
+    return f"{kind}:{node_id}"
 
-    chunk_ids = set()
-    for source_id, target_id, relationship_name, _props in edges:
-        if relationship_name == "is_part_of" and str(target_id) == str(data_id):
-            chunk_ids.add(str(source_id))
 
-    chunks = {
-        node_id: props
-        for node_id, props in props_by_id.items()
-        if node_id in chunk_ids and props.get("type") == "DocumentChunk"
-    }
-    summaries = {
-        node_id: props
-        for node_id, props in props_by_id.items()
-        if props.get("type") == "TextSummary"
-    }
-    entities = {
-        node_id: props for node_id, props in props_by_id.items() if props.get("type") == "Entity"
-    }
-    return chunks, summaries, entities, props_by_id.get(str(data_id))
+def _expected_structure(chunks_by_doc: dict):
+    """The exact node and edge set the live chunk texts imply."""
+    nodes, edges = set(), set()
+    for doc_id, chunks in chunks_by_doc.items():
+        nodes.add(f"doc:{doc_id}")
+        for chunk_id, text in chunks:
+            nodes.add(f"chunk:{chunk_id}")
+            nodes.add(f"summary:{chunk_id}")
+            edges.add((f"chunk:{chunk_id}", "is_part_of", f"doc:{doc_id}"))
+            edges.add((f"summary:{chunk_id}", "made_from", f"chunk:{chunk_id}"))
+            for name in _nouns(text):
+                nodes.add(f"entity:{name}")
+                nodes.add(f"type:{_kind(name)}")
+                edges.add((f"chunk:{chunk_id}", "contains", f"entity:{name}"))
+                edges.add((f"entity:{name}", "is_a", f"type:{_kind(name)}"))
+            for a, b in _pairs(text):
+                edges.add((f"entity:{a}", "precedes", f"entity:{b}"))
+    return nodes, edges
+
+
+def _triplet_id(source_id: str, relationship: str, target_id: str) -> str:
+    from cognee.modules.engine.utils import generate_node_id
+
+    return str(generate_node_id(source_id + relationship + target_id))
+
+
+async def _rows_present(vector, collection: str, ids) -> set:
+    ids = list(ids)
+    if not ids or not await vector.has_collection(collection):
+        return set()
+    found = set()
+    for start in range(0, len(ids), 500):
+        for row in await vector.retrieve(collection, ids[start : start + 500]):
+            payload = getattr(row, "payload", None) or {}
+            found.add(str(getattr(row, "id", payload.get("id"))))
+    return found
 
 
 async def _verify(
@@ -300,14 +372,22 @@ async def _verify(
     graph,
     vector,
     dataset,
-    data_id,
-    expected_text,
-    prev_chunk_ids,
-    prev_entity_ids,
+    doc_texts,
+    prev,
     summary,
     runs_before,
     expect_run,
+    ownership_report,
 ):
+    """Verify the ENTIRE dataset against what its documents' texts imply.
+
+    ``doc_texts`` maps every live data id to the text it must hold; ``prev``
+    is the state this function returned last time (None at baseline).
+    Structural failures (ghosts, lost facts, stale refs) fail immediately —
+    they are the harm. Ownership-exactness violations are the CAUSE and are
+    appended to ``ownership_report`` so the run can first show the harm they
+    produce; the run asserts the report is empty at the end.
+    """
     from sqlalchemy import select
 
     from cognee.infrastructure.databases.provenance import parse_source_ref_key
@@ -315,37 +395,56 @@ async def _verify(
     from cognee.modules.chunking.chunk_id import chunk_content_hash
     from cognee.modules.data.models import Data
 
-    # -- Data row: same id, published text is byte-identical ---------------- #
+    doc_ids = {str(doc_id) for doc_id in doc_texts}
+
+    # -- Data rows: same ids, published text is byte-identical --------------- #
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
-        row = (await session.execute(select(Data).filter(Data.id == data_id))).scalar_one_or_none()
-    assert row is not None, f"{label}: the Data row must keep its id"
-    stored_text = Path(row.raw_data_location.replace("file://", "")).read_text(encoding="utf-8")
-    assert stored_text == expected_text, f"{label}: stored text must equal the submitted text"
+        for data_id, expected_text in doc_texts.items():
+            row = (
+                await session.execute(select(Data).filter(Data.id == data_id))
+            ).scalar_one_or_none()
+            assert row is not None, f"{label}: the Data row {data_id} must keep its id"
+            stored = Path(row.raw_data_location.replace("file://", "")).read_text(encoding="utf-8")
+            assert stored == expected_text, f"{label}: stored text must equal the submitted text"
 
-    # -- Graph chunks: tiling, contiguity, hashes --------------------------- #
-    chunks, summaries, entities, doc_props = await _graph_state(graph, data_id)
-    assert doc_props is not None, f"{label}: document node must exist"
-    assert doc_props.get("type") == "TextDocument", label
+    # -- Graph snapshot ----------------------------------------------------- #
+    nodes, edges = await graph.get_graph_data()
+    node_props = {str(node_id): props for node_id, props in nodes}
+    edge_props = {(str(s), str(t), str(r)): (p or {}) for s, t, r, p in edges}
+    labels = {node_id: _label(props, node_id, doc_ids) for node_id, props in node_props.items()}
 
-    ordered = sorted(chunks.items(), key=lambda item: int(item[1]["chunk_index"]))
-    indexes = [int(props["chunk_index"]) for _, props in ordered]
-    assert indexes == list(range(len(ordered))), (
-        f"{label}: chunk_index must be contiguous 0..n-1, got {indexes}"
-    )
-    tiled = "".join(props["text"] for _, props in ordered)
-    assert tiled == expected_text, (
-        f"{label}: graph chunks must tile the stored text exactly "
-        f"(graph {len(tiled)} chars vs expected {len(expected_text)})"
-    )
-    for node_id, props in ordered:
-        assert props.get("content_hash") == chunk_content_hash(props["text"]), (
-            f"{label}: chunk {node_id} content_hash must match its text"
+    # -- Chunks per document: tiling, contiguity, hashes -------------------- #
+    chunks_by_doc = {}
+    for data_id, expected_text in doc_texts.items():
+        doc_id = str(data_id)
+        assert doc_id in node_props and node_props[doc_id].get("type") == "TextDocument", (
+            f"{label}: document node {doc_id} must exist"
         )
+        chunk_ids = {s for (s, t, r) in edge_props if r == "is_part_of" and t == doc_id}
+        chunks = [
+            (cid, node_props[cid]) for cid in chunk_ids if labels.get(cid, "").startswith("chunk:")
+        ]
+        chunks.sort(key=lambda item: int(item[1]["chunk_index"]))
+        indexes = [int(props["chunk_index"]) for _, props in chunks]
+        assert indexes == list(range(len(chunks))), (
+            f"{label}: chunk_index of {doc_id} must be contiguous 0..n-1, got {indexes}"
+        )
+        tiled = "".join(props["text"] for _, props in chunks)
+        assert tiled == expected_text, (
+            f"{label}: graph chunks of {doc_id} must tile the stored text exactly "
+            f"(graph {len(tiled)} chars vs expected {len(expected_text)})"
+        )
+        for node_id, props in chunks:
+            assert props.get("content_hash") == chunk_content_hash(props["text"]), (
+                f"{label}: chunk {node_id} content_hash must match its text"
+            )
+        chunks_by_doc[doc_id] = [(cid, props["text"]) for cid, props in chunks]
 
-    current_ids = set(chunks)
-    dead_ids = prev_chunk_ids - current_ids
-    added_ids = current_ids - prev_chunk_ids
+    all_chunk_ids = {cid for chunks in chunks_by_doc.values() for cid, _ in chunks}
+    prev_chunk_ids = prev["chunks"] if prev else set()
+    dead_ids = prev_chunk_ids - all_chunk_ids
+    added_ids = all_chunk_ids - prev_chunk_ids
 
     # -- Update summary agrees with the observed id-diff -------------------- #
     if summary is not None:
@@ -360,7 +459,7 @@ async def _verify(
             # being reused — the known reuse-gate miss under occurrence
             # drift, demonstrated by the reorder in iteration 04. That is
             # wasted spend, not wrongness — correctness is pinned by the
-            # tiling/entity/vector/ref asserts. Here we pin only that the
+            # structure/ownership/vector asserts. Here we pin only that the
             # graph never changes MORE than the summary accounts for.
             assert len(added_ids) <= summary["added_chunks"], (
                 f"{label}: graph gained {len(added_ids)} chunks but the "
@@ -371,72 +470,147 @@ async def _verify(
                 f"summary reports only {summary['deleted_chunks']} deleted"
             )
         else:
-            assert current_ids == prev_chunk_ids, f"{label}: unchanged must not touch chunks"
+            assert all_chunk_ids == prev_chunk_ids, f"{label}: unchanged must not touch chunks"
 
-    # -- Entities: live set equals exactly what the current text yields ----- #
-    expected_entities = set()
-    for _, props in ordered:
-        expected_entities |= _nouns(props["text"])
-    live_entities = {str(props.get("name")) for props in entities.values()}
-    assert live_entities == expected_entities, (
-        f"{label}: live entities must equal the current text's entities; "
-        f"stale={sorted(live_entities - expected_entities)[:5]} "
-        f"missing={sorted(expected_entities - live_entities)[:5]}"
+    # -- Exact structure: the graph IS what the live texts imply ------------ #
+    expected_nodes, expected_edges = _expected_structure(chunks_by_doc)
+    live_nodes = {lab for lab in labels.values() if not lab.startswith("NodeSet")}
+    live_edges = {
+        (labels[s], r, labels[t])
+        for (s, t, r) in edge_props
+        if s in labels
+        and t in labels
+        and not labels[s].startswith("NodeSet")
+        and not labels[t].startswith("NodeSet")
+    }
+    duplicated = [lab for lab, count in Counter(labels.values()).items() if count > 1]
+    assert not duplicated, f"{label}: two nodes for one meaning: {duplicated[:5]}"
+    stale_nodes = sorted(live_nodes - expected_nodes)
+    if stale_nodes:
+        refs_by_node = await graph.find_node_source_refs_by_dataset(str(dataset.id))
+        by_label = {lab: node_id for node_id, lab in labels.items()}
+        explained = []
+        for lab in stale_nodes[:6]:
+            owners = {
+                str(parse_source_ref_key(r).chunk_id)
+                for r in refs_by_node.get(by_label[lab], [])
+                if parse_source_ref_key(r).version == 2
+            }
+            explained.append(f"{lab} (contained by no live chunk, owned by {len(owners)} chunks)")
+        raise AssertionError(
+            f"{label}: {len(stale_nodes)} STALE node(s) that no live chunk yields — ghosts kept "
+            f"alive by ownership refs from chunks that do not contain them: {explained}"
+        )
+    missing_nodes = sorted(expected_nodes - live_nodes)
+    assert not missing_nodes, f"{label}: {len(missing_nodes)} node(s) missing: {missing_nodes[:8]}"
+    stale_edges = sorted(live_edges - expected_edges)
+    assert not stale_edges, (
+        f"{label}: {len(stale_edges)} STALE edge(s) with no supporting text: {stale_edges[:8]}"
+    )
+    missing_edges = sorted(expected_edges - live_edges)
+    assert not missing_edges, (
+        f"{label}: {len(missing_edges)} live fact(s) LOST — deleted although a live chunk "
+        f"still states them: {missing_edges[:8]}"
     )
 
-    # -- Summaries: exactly one per live chunk, none for dead chunks -------- #
-    summary_sources = [str(props.get("source_chunk_id")) for props in summaries.values()]
-    assert sorted(summary_sources) == sorted(current_ids), (
-        f"{label}: summaries must map 1:1 onto live chunks "
-        f"({len(summary_sources)} summaries vs {len(current_ids)} chunks)"
-    )
+    # -- Ownership: exact, live, and never absent ---------------------------- #
+    refs_by_node = await graph.find_node_source_refs_by_dataset(str(dataset.id))
+    refs_by_edge = await graph.find_edge_source_refs_by_dataset(str(dataset.id))
+    edge_refs = {
+        (str(e.source_id), str(e.target_id), str(e.relationship_name)): refs
+        for e, refs in refs_by_edge.items()
+    }
+
+    def v2_owners(refs):
+        return {
+            str(parse_source_ref_key(r).chunk_id)
+            for r in refs
+            if parse_source_ref_key(r).version == 2
+        }
+
+    containing, stating = {}, {}
+    for chunks in chunks_by_doc.values():
+        for chunk_id, text in chunks:
+            for name in _nouns(text):
+                containing.setdefault(f"entity:{name}", set()).add(chunk_id)
+            for a, b in _pairs(text):
+                stating.setdefault((f"entity:{a}", f"entity:{b}"), set()).add(chunk_id)
+
+    for node_id, props in node_props.items():
+        lab = labels[node_id]
+        if lab.startswith("NodeSet"):
+            continue
+        refs = refs_by_node.get(node_id, [])
+        assert refs, f"{label}: {lab} has NO source refs — invisible to every deletion path"
+        for ref in refs:
+            parsed = parse_source_ref_key(ref)
+            assert str(parsed.data_id) in doc_ids, (
+                f"{label}: {lab} refs unknown document {parsed.data_id}"
+            )
+            if parsed.version == 2:
+                assert str(parsed.chunk_id) in all_chunk_ids, (
+                    f"{label}: {lab} carries a v2 ref to dead chunk {parsed.chunk_id}"
+                )
+        if lab.startswith("doc:"):
+            assert all(parse_source_ref_key(r).version == 1 for r in refs), (
+                f"{label}: document node must carry v1 refs only"
+            )
+        elif lab.startswith("chunk:"):
+            assert node_id in v2_owners(refs), f"{label}: chunk {node_id} must own itself"
+        elif lab.startswith("entity:"):
+            owners = v2_owners(refs)
+            if owners != containing[lab]:
+                ownership_report.append(
+                    f"{label}: {lab} contained by {len(containing[lab])} chunks, owned by "
+                    f"{len(owners)} (surplus {len(owners - containing[lab])}, "
+                    f"missing {len(containing[lab] - owners)})"
+                )
+    for (s, t, r), props in edge_props.items():
+        if labels.get(s, "").startswith("NodeSet") or labels.get(t, "").startswith("NodeSet"):
+            continue
+        refs = edge_refs.get((s, t, r), [])
+        assert refs, f"{label}: edge {(labels[s], r, labels[t])} has NO source refs"
+        owners = v2_owners(refs)
+        for chunk_id in owners:
+            assert chunk_id in all_chunk_ids, (
+                f"{label}: edge {(labels[s], r, labels[t])} carries a v2 ref to dead chunk {chunk_id}"
+            )
+        if r == "precedes":
+            key = (labels[s], labels[t])
+            if owners != stating[key]:
+                ownership_report.append(
+                    f"{label}: {key[0]} -> {key[1]} stated by {len(stating[key])} chunks, "
+                    f"owned by {len(owners)}"
+                )
 
     # -- Vector store: live rows exist and agree; dead rows are gone -------- #
-    live_rows = await vector.retrieve("DocumentChunk_text", list(current_ids))
-    assert len(live_rows) == len(current_ids), (
-        f"{label}: vector rows for live chunks ({len(live_rows)}/{len(current_ids)})"
-    )
-    for scored in live_rows:
-        payload = getattr(scored, "payload", None) or {}
-        row_id = str(getattr(scored, "id", payload.get("id")))
+    live_ids = {
+        "DocumentChunk_text": set(all_chunk_ids),
+        "TextSummary_text": {n for n, lab in labels.items() if lab.startswith("summary:")},
+        "Entity_name": {n for n, lab in labels.items() if lab.startswith("entity:")},
+        "EntityType_name": {n for n, lab in labels.items() if lab.startswith("type:")},
+        "Triplet_text": {
+            _triplet_id(s, r, t)
+            for (s, t, r) in edge_props
+            if not labels.get(s, "").startswith("NodeSet")
+        },
+    }
+    for collection, ids in live_ids.items():
+        found = await _rows_present(vector, collection, ids)
+        assert found == ids, f"{label}: {collection}: {len(ids - found)} live row(s) missing"
+    if prev is not None:
+        for collection, ids in prev["live_ids"].items():
+            dead = ids - live_ids[collection]
+            stale = await _rows_present(vector, collection, dead)
+            assert not stale, f"{label}: {collection}: {len(stale)} dead row(s) still present"
+    chunk_index = {cid: int(node_props[cid]["chunk_index"]) for cid in all_chunk_ids}
+    for row in await vector.retrieve("DocumentChunk_text", list(all_chunk_ids)):
+        payload = getattr(row, "payload", None) or {}
+        row_id = str(getattr(row, "id", payload.get("id")))
         if "chunk_index" in payload:
-            assert int(payload["chunk_index"]) == int(chunks[row_id]["chunk_index"]), (
+            assert int(payload["chunk_index"]) == chunk_index[row_id], (
                 f"{label}: vector chunk_index for {row_id} disagrees with the graph"
             )
-    if dead_ids:
-        stale = await vector.retrieve("DocumentChunk_text", list(dead_ids))
-        assert not stale, f"{label}: dead chunks must leave no vector rows ({len(stale)} found)"
-    dead_entities = prev_entity_ids - set(entities)
-    if dead_entities:
-        stale = await vector.retrieve("Entity_name", list(dead_entities))
-        assert not stale, f"{label}: dead entities must leave no vector rows"
-
-    # -- v2 refs: every chunk-scoped ref points at a LIVE chunk ------------- #
-    refs_by_node = await graph.find_node_source_refs_by_dataset(str(dataset.id))
-    for node_id, refs in refs_by_node.items():
-        for ref in refs:
-            parsed = parse_source_ref_key(ref)
-            if parsed.version == 2:
-                assert str(parsed.chunk_id) in current_ids, (
-                    f"{label}: node {node_id} carries a v2 ref to dead chunk {parsed.chunk_id}"
-                )
-    doc_refs = refs_by_node.get(str(data_id), [])
-    assert doc_refs and all(parse_source_ref_key(r).version == 1 for r in doc_refs), (
-        f"{label}: document node must carry v1 refs only"
-    )
-    refs_by_edge = await graph.find_edge_source_refs_by_dataset(str(dataset.id))
-    for edge, refs in refs_by_edge.items():
-        for ref in refs:
-            parsed = parse_source_ref_key(ref)
-            if parsed.version == 2:
-                assert str(parsed.chunk_id) in current_ids, (
-                    f"{label}: edge {edge} carries a v2 ref to dead chunk {parsed.chunk_id}"
-                )
-    for chunk_id in current_ids:
-        chunk_refs = [parse_source_ref_key(r) for r in refs_by_node.get(chunk_id, [])]
-        assert any(p.version == 2 and str(p.chunk_id) == chunk_id for p in chunk_refs), (
-            f"{label}: chunk {chunk_id} must own itself via its v2 ref"
-        )
 
     # -- Run bookkeeping ---------------------------------------------------- #
     runs_after = await _incremental_run_count(dataset.id)
@@ -445,7 +619,11 @@ async def _verify(
         f"expected +{1 if expect_run else 0}"
     )
 
-    return current_ids, set(entities)
+    return {
+        "chunks": all_chunk_ids,
+        "live_ids": live_ids,
+        "entities": {lab.split(":", 1)[1] for lab in live_nodes if lab.startswith("entity:")},
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -457,11 +635,15 @@ async def main():
     _setup_environment()
 
     import cognee
+    from cognee.api.v1.datasets import datasets as datasets_api
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine_async
+    from cognee.modules.cognify.config import get_cognify_config
     from cognee.modules.data.methods import get_datasets
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.users.methods import get_default_user
+
+    assert get_cognify_config().triplet_embedding, "triplet embeddings must be on for this run"
 
     raw = FIXTURE.read_text(encoding="utf-8")
     paragraphs = [p.strip() for p in raw.split("\n\n") if p.strip()][:PARAGRAPHS_USED]
@@ -469,30 +651,36 @@ async def main():
     text = "\n\n".join(paragraphs)
 
     await cognee.add(text, dataset_name="alice_stress")
+    await cognee.add(DOC_B, dataset_name="alice_stress")
     user = await get_default_user()
     dataset = next(d for d in await get_datasets(user.id) if d.name == "alice_stress")
     await cognee.cognify(datasets=[dataset.id], chunk_size=CHUNK_TOKENS)
-    data_id = (await get_dataset_data(dataset.id))[0].id
+    ids_by_text = {}
+    for row in await get_dataset_data(dataset.id):
+        stored = Path(row.raw_data_location.replace("file://", "")).read_text(encoding="utf-8")
+        ids_by_text[stored] = row.id
+    data_id, doc_b = ids_by_text[text], ids_by_text[DOC_B]
 
     graph = await get_graph_engine()
     vector = await get_vector_engine_async()
+    doc_texts = {data_id: text, doc_b: DOC_B}
 
+    ownership_report = []
     runs_before = await _incremental_run_count(dataset.id)
-    chunk_ids, entity_ids = await _verify(
+    state = await _verify(
         "baseline",
         graph=graph,
         vector=vector,
         dataset=dataset,
-        data_id=data_id,
-        expected_text=text,
-        prev_chunk_ids=set(),
-        prev_entity_ids=set(),
+        doc_texts=doc_texts,
+        prev=None,
         summary=None,
         runs_before=runs_before,
         expect_run=False,
+        ownership_report=ownership_report,
     )
-    assert len(chunk_ids) >= 30, f"need a real corpus; got only {len(chunk_ids)} chunks"
-    print(f"baseline verified: {len(chunk_ids)} chunks, {len(entity_ids)} entities")
+    assert len(state["chunks"]) >= 30, f"need a real corpus; got only {len(state['chunks'])} chunks"
+    print(f"baseline verified: {len(state['chunks'])} chunks, {len(state['entities'])} entities")
 
     for label, operation in OPERATIONS:
         paragraphs = operation(paragraphs)
@@ -501,22 +689,22 @@ async def main():
 
         runs_before = await _incremental_run_count(dataset.id)
         summary = await cognee.update(data_id, new_text, dataset.id, user=user)
+        doc_texts[data_id] = new_text
 
-        chunk_ids, entity_ids = await _verify(
+        state = await _verify(
             label,
             graph=graph,
             vector=vector,
             dataset=dataset,
-            data_id=data_id,
-            expected_text=new_text,
-            prev_chunk_ids=chunk_ids,
-            prev_entity_ids=entity_ids,
+            doc_texts=doc_texts,
+            prev=state,
             summary=summary,
             runs_before=runs_before,
             expect_run=expect_run,
+            ownership_report=ownership_report,
         )
         text = new_text
-        print(f"iteration {label}: verified ({len(chunk_ids)} chunks)")
+        print(f"iteration {label}: verified ({len(state['chunks'])} chunks)")
 
     # ----- Final state: NOTHING of the original document remains ----------- #
     for paragraph in original_paragraphs:
@@ -527,7 +715,45 @@ async def main():
     assert "Alice" not in text and "alice" not in _nouns(text), (
         "the final document must contain no trace of Alice"
     )
+    # ...but the entities the SECOND document shares with it are still live.
+    for name in _nouns(DOC_B):
+        assert name in state["entities"], f"entity {name!r} owned by the second document vanished"
     print("stress run complete: nothing of the original document remains")
+
+    # ----- Delete the mutated document outright ----------------------------- #
+    await datasets_api.delete_data(dataset_id=dataset.id, data_id=data_id, user=user)
+    del doc_texts[data_id]
+    runs_before = await _incremental_run_count(dataset.id)
+    state = await _verify(
+        "delete mutated document",
+        graph=graph,
+        vector=vector,
+        dataset=dataset,
+        doc_texts=doc_texts,
+        prev=state,
+        summary=None,
+        runs_before=runs_before,
+        expect_run=False,
+        ownership_report=ownership_report,
+    )
+    print("deleted the mutated document: second document intact, nothing stranded")
+
+    # ----- Delete the last document: everything must go -------------------- #
+    await datasets_api.delete_data(dataset_id=dataset.id, data_id=doc_b, user=user)
+    nodes, _ = await graph.get_graph_data()
+    leftovers = [(str(n), p.get("type")) for n, p in nodes if p.get("type") != "NodeSet"]
+    assert not leftovers, f"graph not empty after deleting the last document: {leftovers[:5]}"
+    for collection, ids in state["live_ids"].items():
+        stale = await _rows_present(vector, collection, ids)
+        assert not stale, f"{collection}: {len(stale)} row(s) survived deleting the last document"
+    print("deleted the last document: graph and vector stores empty")
+
+    # ----- The contract behind every check above ---------------------------- #
+    assert not ownership_report, (
+        f"ownership is not exact in {len(ownership_report)} place(s) — a chunk must own "
+        f"exactly what its own extraction produced; first few: {ownership_report[:6]}"
+    )
+    print("ownership exact at every step")
 
 
 if __name__ == "__main__":

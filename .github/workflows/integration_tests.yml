@@ -190,3 +190,25 @@ jobs:
 
       - name: Run Deletion & Misc Tests
         run: uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/
+
+  integration-api-update:
+    name: Integration - Update API (chunk-level updates, ownership)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    env:
+      ENV: 'dev'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Mocked LLM and embeddings: no secrets. Covers the incremental update
+      # flow end to end and the chunk-ownership deletion semantics.
+      - name: Run Update API Tests
+        run: uv run pytest cognee/tests/integration/api/
