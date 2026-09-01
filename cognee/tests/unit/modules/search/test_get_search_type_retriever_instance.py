@@ -161,6 +161,25 @@ async def test_chunks_retriever_receives_nodeset_filter_arguments():
 
 
 @pytest.mark.asyncio
+async def test_summaries_retriever_receives_nodeset_filter_arguments():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.SUMMARIES,
+        query_text="land cover",
+        top_k=30,
+        node_name=["KEN", "src_type:figure"],
+        node_name_filter_operator="AND",
+    )
+
+    assert isinstance(retriever_instance, SummariesRetriever)
+    assert retriever_instance.top_k == 30
+    assert retriever_instance.node_name == ["KEN", "src_type:figure"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
 async def test_rag_completion_retriever_receives_nodeset_filter_arguments():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.completion_retriever import CompletionRetriever
