@@ -101,6 +101,25 @@ def test_create_database_is_idempotent():
     assert asyncio.run(_reflect()) == before
 
 
+def test_concurrent_creators_take_turns_on_the_alembic_command():
+    """Every creation path now runs the chain, and callers CAN overlap
+    (create_db_and_tables alongside run_migrations). Alembic's command
+    machinery is process-global and not thread-safe — overlapping commands
+    in worker threads corrupt each other's context — so concurrent creators
+    must serialize, and each still ends at a complete, head-stamped schema."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    _point_cognee_at_fresh_dirs()
+
+    async def create_four_at_once():
+        engine = get_relational_engine()
+        await asyncio.gather(*(engine.create_database() for _ in range(4)))
+
+    asyncio.run(create_four_at_once())
+    built = asyncio.run(_reflect())
+    assert "alembic_version" in built and "user_id" in built["pipeline_runs"]
+
+
 def test_chain_heals_a_legacy_create_all_database_without_bookkeeping():
     """A database built by create_all with NO alembic_version (the legacy /
     pre-Alembic shape) replays the chain from base: every guarded revision

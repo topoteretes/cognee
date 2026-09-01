@@ -37,8 +37,44 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# Named enum types the frozen schema uses. On Postgres a type outlives DROP
+# TABLE, so a recreated database (prune + setup) already has them: the types
+# are created up front with checkfirst, and the columns are told not to create
+# them again (Alembic's create_table would otherwise emit an unconditional
+# CREATE TYPE). Mirrors the chain's own pattern in 211ab850ef3d.
+_ENUM_TYPES = {
+    "pipelinerunstatus": (
+        "DATASET_PROCESSING_INITIATED",
+        "DATASET_PROCESSING_STARTED",
+        "DATASET_PROCESSING_COMPLETED",
+        "DATASET_PROCESSING_ERRORED",
+    ),
+    "syncstatus": ("STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"),
+}
+
+
+def _enum(name: str):
+    values = _ENUM_TYPES[name]
+    if op.get_bind().dialect.name == "postgresql":
+        from sqlalchemy.dialects import postgresql
+
+        return postgresql.ENUM(*values, name=name, create_type=False)
+    return sa.Enum(*values, name=name)
+
+
+def _create_enum_types_if_missing(bind) -> None:
+    if bind.dialect.name != "postgresql":
+        return
+    from sqlalchemy.dialects import postgresql
+
+    for name, values in _ENUM_TYPES.items():
+        postgresql.ENUM(*values, name=name).create(bind, checkfirst=True)
+
+
 def upgrade() -> None:
-    _existing = set(sa.inspect(op.get_bind()).get_table_names())
+    bind = op.get_bind()
+    _existing = set(sa.inspect(bind).get_table_names())
+    _create_enum_types_if_missing(bind)
 
     if "data" not in _existing:
         op.create_table(
@@ -135,9 +171,7 @@ def upgrade() -> None:
         op.create_table(
             "graph_metrics",
             sa.Column("id", sa.UUID(), nullable=False),
-            sa.Column(
-                "has_full_metrics", sa.Boolean(), server_default=sa.false(), nullable=False
-            ),
+            sa.Column("has_full_metrics", sa.Boolean(), server_default=sa.false(), nullable=False),
             sa.Column("num_tokens", sa.Integer(), nullable=True),
             sa.Column("num_nodes", sa.Integer(), nullable=True),
             sa.Column("num_edges", sa.Integer(), nullable=True),
@@ -272,17 +306,7 @@ def upgrade() -> None:
             "pipeline_runs",
             sa.Column("id", sa.UUID(), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column(
-                "status",
-                sa.Enum(
-                    "DATASET_PROCESSING_INITIATED",
-                    "DATASET_PROCESSING_STARTED",
-                    "DATASET_PROCESSING_COMPLETED",
-                    "DATASET_PROCESSING_ERRORED",
-                    name="pipelinerunstatus",
-                ),
-                nullable=True,
-            ),
+            sa.Column("status", _enum("pipelinerunstatus"), nullable=True),
             sa.Column("pipeline_run_id", sa.UUID(), nullable=True),
             sa.Column("pipeline_name", sa.String(), nullable=True),
             sa.Column("pipeline_id", sa.UUID(), nullable=True),
@@ -514,13 +538,7 @@ def upgrade() -> None:
             "sync_operations",
             sa.Column("id", sa.UUID(), nullable=False),
             sa.Column("run_id", sa.Text(), nullable=True),
-            sa.Column(
-                "status",
-                sa.Enum(
-                    "STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", name="syncstatus"
-                ),
-                nullable=True,
-            ),
+            sa.Column("status", _enum("syncstatus"), nullable=True),
             sa.Column("progress_percentage", sa.Integer(), nullable=True),
             sa.Column("dataset_ids", sa.JSON(), nullable=True),
             sa.Column("dataset_names", sa.JSON(), nullable=True),
@@ -764,7 +782,14 @@ def upgrade() -> None:
             sa.Column("is_superuser", sa.Boolean(), nullable=False),
             sa.Column("is_verified", sa.Boolean(), nullable=False),
             sa.ForeignKeyConstraint(["id"], ["principals.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["parent_user_id"], ["users.id"], ondelete="SET NULL"),
+            # Named as 7c5d4e2f8a91 names it, so its existence guard recognizes
+            # this constraint instead of adding a second, auto-named copy.
+            sa.ForeignKeyConstraint(
+                ["parent_user_id"],
+                ["users.id"],
+                ondelete="SET NULL",
+                name="fk_users_parent_user_id_users",
+            ),
             sa.ForeignKeyConstraint(
                 ["tenant_id"],
                 ["tenants.id"],

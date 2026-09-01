@@ -28,6 +28,7 @@ and a FAILED run does not set the flag, so the next call retries.
 import asyncio
 import logging
 import os
+import threading
 import importlib.resources as pkg_resources
 from typing import Optional
 
@@ -56,6 +57,13 @@ def _get_startup_lock() -> asyncio.Lock:
 
 MIGRATIONS_PACKAGE = "cognee"
 MIGRATIONS_DIR_NAME = "alembic"
+
+# Alembic's EnvironmentContext installs module-global proxies (``alembic.op``,
+# ``alembic.context``) for the duration of a command; two commands in
+# concurrent worker threads corrupt each other (KeyError on exit). Every
+# database-creation path now runs the chain, so concurrent creators
+# (create_db_and_tables alongside run_migrations) must take turns here.
+_alembic_command_lock = threading.Lock()
 
 
 class MigrationError(Exception):
@@ -159,7 +167,8 @@ async def run_relational_migrations(target: str = "head", script_location: Optio
     def _upgrade():
         from alembic import command
 
-        command.upgrade(_build_alembic_config(script_location), target)
+        with _alembic_command_lock:
+            command.upgrade(_build_alembic_config(script_location), target)
 
     try:
         await asyncio.to_thread(_upgrade)
@@ -183,7 +192,8 @@ async def run_relational_downgrade(target: str, script_location: Optional[str] =
     def _downgrade():
         from alembic import command
 
-        command.downgrade(_build_alembic_config(script_location), target)
+        with _alembic_command_lock:
+            command.downgrade(_build_alembic_config(script_location), target)
 
     try:
         await asyncio.to_thread(_downgrade)
