@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 from cognee.context_global_variables import llm_config as llm_config_ctx
+from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.config import get_llm_config, get_llm_context_config
 from cognee.modules.observability import capture
 from cognee.modules.observability.capture import (
@@ -42,6 +43,13 @@ class _UndumpableGraph(KnowledgeGraph):
 
     def model_dump(self, *args, **kwargs):
         raise AssertionError("model_dump must not run while capture is off")
+
+
+class _PersonGraph(DataPoint):
+    """A custom DataPoint-derived graph_model, as cognify accepts."""
+
+    name: str
+    metadata: dict = {"index_fields": ["name"]}
 
 
 class _StubResolver(BaseOntologyResolver):
@@ -99,7 +107,7 @@ def no_edge_lookup(monkeypatch):
     monkeypatch.setattr(egd_module, "find_existing_edge_identities", AsyncMock(return_value=set()))
 
 
-async def _run_extraction(chunks, graphs, resolver=None, ontology_mode=None):
+async def _run_extraction(chunks, graphs, resolver=None, ontology_mode=None, graph_model=None):
     async def fake_calc(data_chunks, graph_model, custom_prompt, **kwargs):
         return graphs
 
@@ -109,7 +117,7 @@ async def _run_extraction(chunks, graphs, resolver=None, ontology_mode=None):
 
     return await extract_graph_from_data(
         chunks,
-        type(graphs[0]),
+        graph_model or type(graphs[0]),
         config={"ontology_config": ontology_config},
         calculate_chunk_graphs=fake_calc,
     )
@@ -220,6 +228,41 @@ async def test_chunk_graph_snapshot_survives_ontology_canonicalization(
     assert event["payload"]["graph"]["nodes"][0]["name"] == "Dave"
 
 
+@pytest.mark.asyncio
+async def test_chunk_graph_snapshot_of_a_datapoint_graph_model_is_plain_json(fake_capture_sink):
+    """A custom DataPoint-derived graph_model is dumped before integrate_chunk_graphs
+    attaches the live instance to its chunk: the payload is acyclic JSON, not the
+    DataPoint (whose ``contains`` recursion the payload rules forbid)."""
+    chunk = _make_chunk("custom model")
+    graphs = [_PersonGraph(name="Dave")]
+
+    await _run_extraction([chunk], graphs)
+    await capture.drain()
+
+    [event] = _records(fake_capture_sink, KIND_EXTRACTION_CHUNK_GRAPH)
+    graph = event["payload"]["graph"]
+    assert isinstance(graph, dict)
+    assert graph["name"] == "Dave"
+    assert graph["type"] == "_PersonGraph"
+    assert graph["id"] == str(graphs[0].id)
+    assert "contains" not in graph
+    json.dumps(event["payload"])
+    # The live instance was attached afterwards; the snapshot is not it.
+    assert chunk.contains is graphs[0]
+
+
+@pytest.mark.asyncio
+async def test_chunk_graph_is_none_for_a_non_model_chunk_graph(fake_capture_sink):
+    chunk = _make_chunk()
+
+    await _run_extraction([chunk], [{"name": "Dave"}], graph_model=_PersonGraph)
+    await capture.drain()
+
+    [event] = _records(fake_capture_sink, KIND_EXTRACTION_CHUNK_GRAPH)
+    assert event["payload"]["chunk_id"] == str(chunk.id)
+    assert event["payload"]["graph"] is None
+
+
 # ---------------------------------------------------------------------------
 # E6: dropped duplicates, one event per chunk graph that dropped
 # ---------------------------------------------------------------------------
@@ -253,11 +296,37 @@ async def test_one_dropped_duplicates_event_per_chunk_that_dropped(
         (e["payload"]["chunk_index"], e["payload"]["dropped_node_ids"], e["payload"]["count"])
         for e in events
     ] == [(0, ["dup"], 1), (2, ["x", "x"], 2)]
+    assert [e["payload"]["chunk_id"] for e in events] == [str(chunks[0].id), str(chunks[2].id)]
     assert {event["run_id"] for event in events} == {str(run_id)}
     assert {event["stage"] for event in events} == {"extract_graph_from_data"}
 
     [manifest] = _records(fake_capture_sink, KIND_RUN_MANIFEST)
     assert manifest["payload"]["counters"]["extraction.dropped_duplicate_nodes"] == 3
+
+
+@pytest.mark.asyncio
+async def test_dropped_duplicates_carry_the_chunk_id_across_batches(
+    fake_capture_sink, no_edge_lookup
+):
+    """One run, two batches: chunk_index restarts at 0 for each, so only chunk_id joins a
+    dropped-duplicates event to its chunk_graph record."""
+    first_chunk, second_chunk = _make_chunk("batch one"), _make_chunk("batch two")
+
+    with capture.run_scope(uuid4(), uuid4(), kind="pipeline"):
+        await _run_extraction([first_chunk], [_graph_with_duplicate()])
+        await _run_extraction([second_chunk], [_graph_with_duplicate()])
+    await capture.drain()
+
+    dropped = _records(fake_capture_sink, KIND_EXTRACTION_DROPPED_DUPLICATES)
+    chunk_graphs = _records(fake_capture_sink, KIND_EXTRACTION_CHUNK_GRAPH)
+    assert [e["payload"]["chunk_index"] for e in dropped] == [0, 0]
+    assert [e["payload"]["chunk_id"] for e in dropped] == [
+        str(first_chunk.id),
+        str(second_chunk.id),
+    ]
+    assert [e["payload"]["chunk_id"] for e in dropped] == [
+        e["payload"]["chunk_id"] for e in chunk_graphs
+    ]
 
 
 @pytest.mark.asyncio
@@ -337,3 +406,33 @@ async def test_extract_content_graph_notes_the_stage_routed_model(monkeypatch, f
         llm_config_ctx.reset(token)
 
     assert scope.fields["extraction.model"] == "test/extraction-model"
+
+
+@pytest.mark.asyncio
+async def test_extract_content_graph_fingerprints_per_call_and_only_inside_a_scope(
+    monkeypatch, fake_capture_sink
+):
+    """No process-wide memo: a cached fingerprint would outlive runs and tests, so the
+    off-path "never hashes" stubs would stop biting for any prompt seen before. And with
+    no run scope open ``note()`` would discard the value, so nothing is hashed at all."""
+    monkeypatch.setattr(
+        ecg_module.LLMGateway, "acreate_structured_output", AsyncMock(return_value=_clean_graph())
+    )
+    real_fingerprint = capture.prompt_fingerprint
+    hashed = []
+
+    def _counting(text):
+        hashed.append(text)
+        return real_fingerprint(text)
+
+    monkeypatch.setattr(capture, "prompt_fingerprint", _counting)
+
+    await ecg_module.extract_content_graph("text", KnowledgeGraph, custom_prompt="p")
+    assert hashed == []
+
+    with capture.run_scope(uuid4(), uuid4(), kind="pipeline") as scope:
+        await ecg_module.extract_content_graph("text", KnowledgeGraph, custom_prompt="p")
+        await ecg_module.extract_content_graph("text", KnowledgeGraph, custom_prompt="p")
+
+    assert hashed == ["p", "p"]
+    assert scope.fields["extraction.prompt_fingerprint"] == real_fingerprint("p")

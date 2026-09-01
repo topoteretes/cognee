@@ -36,20 +36,24 @@ logger = get_logger("extract_graph_from_data")
 
 
 def _remove_duplicate_extracted_nodes_by_id(
+    data_chunks: List[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
 ) -> None:
     """Keep the first extracted node for each graph-local ID.
 
     Eval capture (SDK-529): while capture is active, every chunk graph that lost nodes
     emits ONE ``extraction.dropped_duplicates`` event carrying the dropped ids, and the
-    run manifest counts them under ``extraction.dropped_duplicate_nodes``. Nothing is
-    collected when capture is off.
+    run manifest counts them under ``extraction.dropped_duplicate_nodes``. The event
+    carries ``chunk_id`` as the join key to its ``extraction.chunk_graph`` record:
+    ``chunk_index`` is the position within this batch and restarts at 0 for every
+    batch of a run, so it alone cannot identify the chunk. Nothing is collected when
+    capture is off.
     """
     from cognee.modules.observability import capture as eval_capture
 
     active = eval_capture.is_active()
 
-    for chunk_index, extracted_graph in enumerate(extracted_graphs):
+    for chunk_index, (chunk, extracted_graph) in enumerate(zip(data_chunks, extracted_graphs)):
         if not extracted_graph:
             continue
 
@@ -72,6 +76,7 @@ def _remove_duplicate_extracted_nodes_by_id(
             eval_capture.emit(
                 eval_capture.KIND_EXTRACTION_DROPPED_DUPLICATES,
                 {
+                    "chunk_id": str(chunk.id),
                     "chunk_index": chunk_index,
                     "dropped_node_ids": dropped_node_ids,
                     "count": len(dropped_node_ids),
@@ -88,9 +93,13 @@ def _capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) 
     Runs right after extraction and BEFORE ``_remove_duplicate_extracted_nodes_by_id``
     and the ontology canonicalization, both of which mutate the graphs in place — so
     the payload is a ``model_dump(mode="json")`` taken now, never the live object or a
-    ``model_copy``. ``chunk_index`` is the position in this batch (the index the
-    dropped-duplicates and fuzzy-match events use too); ``chunk_size_chars`` records
-    the chunk boundary. A structural no-op (no dump, no allocation) when capture is off.
+    ``model_copy``. That holds for a custom DataPoint-derived ``graph_model`` too: at
+    this point the graph is the freshly validated LLM output, not yet attached to its
+    chunk (``integrate_chunk_graphs`` does that afterwards), so the dump is acyclic; a
+    non-model graph dumps as ``None``. ``chunk_id`` is the join key shared with the
+    dropped-duplicates and fuzzy-match events; ``chunk_index`` is the position in this
+    batch (it restarts at 0 per batch); ``chunk_size_chars`` records the chunk boundary.
+    A structural no-op (no dump, no allocation) when capture is off.
     """
     from cognee.modules.observability import capture as eval_capture
 
@@ -233,7 +242,7 @@ async def integrate_chunk_graphs(
 
         return data_chunks
 
-    _remove_duplicate_extracted_nodes_by_id(chunk_graphs)
+    _remove_duplicate_extracted_nodes_by_id(data_chunks, chunk_graphs)
 
     if ontology_resolver is None:
         data_points_by_id, edges_by_identity = construct_data_points_and_edges(

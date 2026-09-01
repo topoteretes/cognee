@@ -399,6 +399,7 @@ async def test_one_pipeline_run_and_one_search_yield_every_capture_kind(
     for event, graph_event in zip(dropped, chunk_graphs):
         expected_id = graph_event["payload"]["graph"]["nodes"][0]["id"]
         assert event["payload"] == {
+            "chunk_id": graph_event["payload"]["chunk_id"],
             "chunk_index": graph_event["payload"]["chunk_index"],
             "dropped_node_ids": [expected_id],
             "count": 1,

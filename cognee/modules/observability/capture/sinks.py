@@ -96,6 +96,13 @@ class StorageSink:
     Every file carries the same record envelope (``kind``, ``run_id``,
     ``dataset_id``, ``stage``, ``ts``, ``payload``); the manifest's fields live
     under ``payload``. Nothing is written to the relational DB.
+
+    Runs on the flusher task only, never on an emit path. Encoding (the CPU-heavy
+    part) is pushed off-loop; the ``store()`` call itself is awaited on the loop,
+    and ``LocalFileStorage.store`` is an ``async def`` with a blocking body
+    (makedirs, write, rename) — sub-millisecond for a gzipped batch on local disk,
+    unbounded on a slow network filesystem. That is pre-existing storage-layer
+    behaviour this sink inherits rather than introduces.
     """
 
     def __init__(self, storage: StorageManager, root: str = "") -> None:

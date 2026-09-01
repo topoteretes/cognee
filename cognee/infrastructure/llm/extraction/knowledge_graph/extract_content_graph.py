@@ -1,5 +1,4 @@
 import os
-from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel
@@ -20,31 +19,22 @@ def _note_extraction_config(system_prompt: str) -> None:
     Eval capture (SDK-529). The model is the one every LLM call in this context is
     routed to — the stage-merged config that ``pipeline_stage("extraction")`` bound,
     or the global config outside a stage — resolved exactly as ``LLMGateway`` resolves
-    it. The import is lazy so ``import cognee`` never loads the capture package, and
-    the fingerprint (a sha256 over the rendered prompt) is only computed while capture
-    is active - and once per distinct prompt, not once per chunk; ``note()`` itself is
-    a no-op without a run scope.
+    it. The import is lazy so ``import cognee`` never loads the capture package.
+
+    The fingerprint (a sha256 over the rendered prompt; ~2.5 us for the 2.4 KB default
+    prompt) is computed per call, and only while capture is active AND a run scope is
+    open — without a scope ``note()`` would discard it, so nothing is hashed. It is
+    deliberately not memoized: a process-wide cache outlives runs (and tests), so a
+    regressed ``is_active()`` guard would go unnoticed for any prompt seen before.
     """
     from cognee.modules.observability import capture as eval_capture
 
-    if not eval_capture.is_active():
+    if not eval_capture.is_active() or eval_capture.current_scope() is None:
         return
     eval_capture.note("extraction.model", get_llm_context_config().llm_model)
-    eval_capture.note("extraction.prompt_fingerprint", _prompt_fingerprint(system_prompt))
-
-
-@lru_cache(maxsize=8)
-def _prompt_fingerprint(system_prompt: str) -> str:
-    """Fingerprint of one rendered extraction prompt, memoized per distinct prompt text.
-
-    ``extract_content_graph`` runs once per chunk and every chunk of a batch renders
-    the same prompt, so the sha256 is paid once per prompt rather than once per chunk
-    (the economy ``summarize_text`` applies to its prompt). Only reached while capture
-    is active; a ``custom_prompt`` gets its own entry.
-    """
-    from cognee.modules.observability import capture as eval_capture
-
-    return eval_capture.prompt_fingerprint(system_prompt)
+    eval_capture.note(
+        "extraction.prompt_fingerprint", eval_capture.prompt_fingerprint(system_prompt)
+    )
 
 
 async def extract_content_graph(
