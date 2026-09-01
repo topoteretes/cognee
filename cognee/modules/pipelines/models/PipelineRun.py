@@ -30,7 +30,7 @@ class PipelineRun(Base):
         # Covers get_pipeline_status.py / get_pipeline_progress.py's
         # ROW_NUMBER() lookup of each dataset's latest run for a pipeline
         # (filter on dataset_id + pipeline_name, order by created_at DESC).
-        # See alembic/versions/d1e2f3a4b5c6_add_pipeline_runs_status_index.py
+        # See alembic/versions/ae2b0f7722e3_add_pipeline_runs_status_index.py
         # for the migration that adds this to existing databases.
         Index(
             "ix_pipeline_runs_dataset_pipeline_created_at",

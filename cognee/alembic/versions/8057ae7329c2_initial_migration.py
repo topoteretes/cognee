@@ -15,7 +15,7 @@ chain instead of stamping, and ``alembic_version`` only ever records
 revisions that actually executed.
 
 The DDL below is a frozen snapshot rendered by Alembic's autogenerate engine
-from the certified model surface at chain head d1e2f3a4b5c6 (2026-09-01; a
+from the certified model surface at chain head ae2b0f7722e3 (2026-09-01; a
 real chain-migrated database was verified to match the models exactly).
 FROZEN means frozen: never regenerate this body from live models — a future
 model change ships as a NEW migration at the head of the chain, exactly as
