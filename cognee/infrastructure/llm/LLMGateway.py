@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
@@ -81,14 +82,21 @@ async def _record_session_usage_after(
 
 
 async def _fail_fast_on_quota(coro: Coroutine) -> T:
-    """Convert provider quota/billing exhaustion into ``LLMQuotaExceededError``.
+    """Convert provider quota/billing exhaustion into an actionable error.
 
     Runs at the single choke point every structured-output call flows through,
     so it is provider- and framework-agnostic.
+
+    Budget exhaustion is checked first, and here rather than only in the
+    adapters: each instructor adapter catches ``InstructorRetryException`` in a
+    clause that precedes its own budget handler, and the plain-text path
+    (``response_model is str``) bypasses those handlers altogether. Classifying
+    at this choke point gives every adapter and both paths the same 402.
     """
     try:
         return await coro
     except Exception as error:
+        raise_if_budget_exhausted(error)
         raise_if_quota_error(error)
         raise
 

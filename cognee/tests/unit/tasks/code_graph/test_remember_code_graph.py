@@ -40,7 +40,9 @@ async def test_single_repo_runs_code_graph_pipeline(code_remember_env):
         content_type="code",
     )
 
-    code_remember_env["resolve"].assert_awaited_once_with("https://github.com/org/repo")
+    code_remember_env["resolve"].assert_awaited_once_with(
+        "https://github.com/org/repo", credentials=None
+    )
     code_remember_env["pipeline"].assert_awaited_once()
     call = code_remember_env["pipeline"].await_args
     assert call.kwargs["dataset"] == "my_code"

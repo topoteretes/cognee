@@ -36,14 +36,22 @@ def run_git_command(command: list[str]) -> str:
         sys.exit(1)
 
 
-def get_latest_release_tag() -> str | None:
-    """Get the latest release tag."""
+def get_latest_release_tag(exclude: str | None = None) -> str | None:
+    """Get the latest release tag.
+
+    ``exclude`` skips a tag by name — used to ignore the tag of the release
+    currently being cut, which the release workflow pushes before generating
+    notes. Without it the newest tag is the release itself and the notes
+    would compare the release against itself (issue #4661).
+    """
     try:
         # Get the latest tag that matches version pattern (vX.Y.Z)
         command = ["git", "tag", "--sort=-version:refname", "--list", "v*"]
         tags = run_git_command(command)
-        if tags:
-            return tags.split("\n")[0]
+        for tag in tags.split("\n"):
+            tag = tag.strip()
+            if tag and tag != exclude:
+                return tag
         return None
     except Exception:
         return None
@@ -520,8 +528,10 @@ async def main():
     # Determine base ref (what to compare against)
     base_ref = args.base
     if not base_ref:
-        # Use latest release tag as base
-        latest_tag = get_latest_release_tag()
+        # Use latest release tag as base, excluding the tag of the version being
+        # released — the release workflow pushes the new tag before this script
+        # runs, so the newest tag can be the release itself (issue #4661).
+        latest_tag = get_latest_release_tag(exclude=f"v{version}")
         if latest_tag:
             base_ref = latest_tag
             print(f"Using latest release tag as base: {base_ref}", file=sys.stderr)
@@ -546,12 +556,30 @@ async def main():
     dep_changes = get_dependency_changes(base_ref, target_ref)
     compat_info = get_compatibility_info(target_ref)
 
-    # Generate release notes with LLM, fall back to commit-based notes
-    notes = await generate_release_notes_with_llm(diff, commits, base_ref, target_ref, version)
+    changed_files = run_git_command(["git", "diff", "--name-only", f"{base_ref}...{target_ref}"])
 
-    if notes is None:
-        print("Falling back to commit-based release notes.", file=sys.stderr)
+    if not commits.strip() and not changed_files.strip():
+        # An empty comparison means the base is wrong (e.g. the release compared
+        # against its own tag, issue #4661). Never hand an empty diff to the
+        # LLM — it fabricates plausible-sounding notes for changes that are not
+        # in the release.
+        print(
+            f"Warning: no commits or file changes between {base_ref} and {target_ref}; "
+            "skipping LLM generation to avoid fabricated notes.",
+            file=sys.stderr,
+        )
         notes = generate_fallback_notes(commits, version)
+        notes.summary = (
+            f"No code changes detected between {base_ref} and {target_ref}. "
+            "If this is unexpected, the release notes comparison base is likely wrong."
+        )
+    else:
+        # Generate release notes with LLM, fall back to commit-based notes
+        notes = await generate_release_notes_with_llm(diff, commits, base_ref, target_ref, version)
+
+        if notes is None:
+            print("Falling back to commit-based release notes.", file=sys.stderr)
+            notes = generate_fallback_notes(commits, version)
 
     # Format as markdown
     title = get_release_title(notes, version)

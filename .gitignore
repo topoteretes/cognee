@@ -210,3 +210,6 @@ cognee/tests/performance/results
 
 # Local `helm template` output — generated, not checked in
 rendered.yaml
+
+# enola code-graph snapshots (written into any repository enola scans)
+.enola/

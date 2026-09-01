@@ -23,6 +23,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
     PipelineRunErrored,
+    PipelineRunProgress,
 )
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     get_from_queue,
@@ -364,6 +365,25 @@ def get_cognify_router() -> APIRouter:
                 continue
 
             try:
+                # Progress ticks are cheap and frequent — send the event's own
+                # fields directly instead of recomputing the (expensive) graph
+                # snapshot on every one. That recompute is only meaningful for
+                # Started/Yield/Completed/Errored, where the graph has actually
+                # changed shape.
+                if isinstance(pipeline_run_info, PipelineRunProgress):
+                    await websocket.send_json(
+                        {
+                            "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
+                            "status": pipeline_run_info.status,
+                            "completed_items": pipeline_run_info.completed_items,
+                            "total_items": pipeline_run_info.total_items,
+                            "current_stage": pipeline_run_info.current_stage,
+                            "stage_index": pipeline_run_info.stage_index,
+                            "stage_total": pipeline_run_info.stage_total,
+                        }
+                    )
+                    continue
+
                 await websocket.send_json(
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),

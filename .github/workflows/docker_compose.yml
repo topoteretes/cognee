@@ -3,6 +3,11 @@ name: test | docker compose
 on:
   workflow_call:
 
+# Least-privilege token (OSSF Scorecard: Token-Permissions). This workflow only
+# checks out the repo and builds/runs images locally — no GITHUB_TOKEN writes.
+permissions:
+  contents: read
+
 env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
   # Profiles exercised by the full-stack e2e: the default `cognee` service plus
@@ -15,13 +20,13 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@master
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
       with:
         enable-cache: true
 
