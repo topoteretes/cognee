@@ -227,20 +227,36 @@ async def _relational_schema_exists() -> bool:
         restructured in the future.
     Only when NEITHER exists is the database genuinely empty — routed to
     ``create_database()``, which prepares the storage and builds the schema by
-    running the migration chain. A wrong "empty" verdict is benign now: both
-    branches converge on the same guarded chain.
+    running the migration chain (nothing is stamped: every recorded revision
+    executed). A wrong "empty" verdict is therefore benign — both branches
+    converge on the same guarded chain.
+
+    A failed inspection still RAISES instead of answering: "cannot inspect" is
+    not "empty", and a server still starting up or a transient connection
+    failure must surface as the error it is. The one genuinely-fresh case that
+    used to surface as an exception (a local SQLite database whose file does
+    not exist yet) is decided as the filesystem fact it is, before connecting.
     """
     from sqlalchemy import inspect
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    try:
-        async with get_relational_engine().engine.connect() as connection:
-            tables = await connection.run_sync(
-                lambda sync_conn: inspect(sync_conn).get_table_names()
-            )
-    except Exception:
-        return False  # cannot inspect (e.g. brand-new SQLite file) -> treat as empty
+    engine = get_relational_engine()
+
+    # Brand-new local SQLite database: the file is not there yet
+    # (create_database() creates the directory and file). S3-backed SQLite is
+    # excluded — its engine connects to a local temp file that always exists,
+    # and a fresh S3 database reports empty through the inspection below.
+    if (
+        engine.engine.dialect.name == "sqlite"
+        and engine.db_path
+        and "s3://" not in engine.db_path
+        and not os.path.exists(engine.db_path)
+    ):
+        return False
+
+    async with engine.engine.connect() as connection:
+        tables = await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
     return "users" in tables or "alembic_version" in tables
 
 
