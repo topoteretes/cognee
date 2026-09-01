@@ -8,10 +8,14 @@ fresh databases were provisioned with a schema that disagreed with the revision
 they were stamped at, and nothing noticed until the missing columns failed at
 runtime, eleven days later.
 
-This test makes the assertion checkable at PR time, WITHOUT replaying the
-historical chain (the early revisions assume the base schema of their own era,
-and no migration ever created the base tables — the chain is a delta log, not
-a creation history). It runs as a STANDALONE e2e check in CI (the 'Migration/Model Lockstep Guard'
+This suite makes the assertion checkable at PR time, two ways. The initial
+migration now creates the base schema (guarded create_all), turning the chain
+into a self-sufficient creation history — safe because every DDL-bearing
+revision is inspector-guarded (audited file by file). That enables the
+whole-history probe: `alembic upgrade head` on an empty database, compared
+against the models. The frozen-baseline probe complements it, catching the
+direction the whole-history replay cannot see (a model change with no
+migration), for everything after the freeze. It runs as a STANDALONE e2e check in CI (the 'Migration/Model Lockstep Guard'
 job in e2e_tests.yml) so a lockstep break is visible as its own failed check,
 not buried in a shard. The mechanics live in ``cognee.modules.migrations.lockstep``
 so downstream deployments with a vendored chain and extra models (e.g. cognee
@@ -73,6 +77,51 @@ class TestMigrationModelLockstep(unittest.TestCase):
             f"Baseline anchor is invalid: {problem}. If migration history was rewritten "
             "on purpose, re-certify the schema and regenerate schema_baseline.json "
             "(see module docstring).",
+        )
+
+    def test_entire_chain_from_empty_database_matches_the_models(self):
+        """Whole-history probe: the initial migration now creates the base
+        schema (guarded create_all), so `alembic upgrade head` on an EMPTY
+        database builds the chain's complete idea of the schema. Anything it
+        contains that the models do not declare — wherever in history it was
+        introduced, including a chain paired with an older package downstream
+        — fails here. `notebooks` is the one known, accepted legacy table
+        (model removed, drop migration never written).
+
+        The reverse direction (model change without a migration) is invisible
+        to this probe by construction and is covered by the baseline test
+        below."""
+        expected = lockstep.collect_model_schema()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            actual = asyncio.run(
+                lockstep.replay_entire_chain(
+                    f"sqlite+aiosqlite:///{tmp_dir}/full_chain.db",
+                    script_location=SCRIPT_LOCATION,
+                )
+            )
+
+        problems = [
+            problem
+            for problem in lockstep.compare_schemas(
+                expected,
+                actual,
+                ignored_tables=lockstep.DEFAULT_IGNORED_TABLES | lockstep.LEGACY_CHAIN_ONLY_TABLES,
+            )
+            # Whole-history replay builds its base FROM the models, so "models
+            # declare X that no migration creates" is structurally impossible
+            # here and would only echo baseline-test findings; keep this probe
+            # focused on its one detectable direction.
+            if "no migration creates" not in problem and "no migration adds" not in problem
+        ]
+        self.assertEqual(
+            problems,
+            [],
+            "\n\nThe chain, replayed from an empty database, disagrees with the models:\n  - "
+            + "\n  - ".join(problems)
+            + "\n\nA migration added something no model declares. Fresh databases built by "
+            "create_all will LACK it while stamped as having it (the mis-stamp incident). "
+            "Ship the model change and its migration in the same PR.",
         )
 
     def test_migrations_since_baseline_keep_chain_and_models_in_lockstep(self):

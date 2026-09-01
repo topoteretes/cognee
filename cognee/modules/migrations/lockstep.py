@@ -52,6 +52,12 @@ from sqlalchemy import inspect
 # Alembic's own bookkeeping lives outside the models on purpose.
 DEFAULT_IGNORED_TABLES = frozenset({"alembic_version"})
 
+# Tables the chain creates that no model declares anymore — known, accepted
+# legacy (the Notebook model was removed without its drop migration ever being
+# written; audited 2026-09-01, the chain's only such table). Full-chain
+# replays ignore these; writing the drop migration retires the entry.
+LEGACY_CHAIN_ONLY_TABLES = frozenset({"notebooks"})
+
 
 def register_upstream_models() -> None:
     """Import every ``cognee.modules.<x>.models`` package so ``Base.metadata``
@@ -208,12 +214,9 @@ async def replay_from_baseline(
     what matters is that the migrations added since the freeze run for real
     against a base that predates them.
     """
-    from unittest.mock import patch
-
     from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
         SQLAlchemyAdapter,
     )
-    from cognee.modules.migrations.startup import run_relational_migrations
 
     adapter = SQLAlchemyAdapter(database_url)
     ignored = set(ignored_tables)
@@ -239,38 +242,84 @@ async def replay_from_baseline(
                 {"revision": baseline["baseline_revision"]},
             )
 
-        # The replay must run against THIS database, whatever the ambient
-        # config says. Both engine-resolution styles present in this chain are
-        # pinned: env.py and most migrations import the package attribute,
-        # while some migrations import the submodule's attribute directly
-        # (e.g. 1d0bb7fede17) — patch both. Migrations that call app helpers
-        # which bound the resolver at their own import time remain out of
-        # reach; keep new migrations on one of the two import styles.
-        with (
-            patch(
-                "cognee.infrastructure.databases.relational.get_relational_engine",
-                return_value=adapter,
-            ),
-            patch(
-                "cognee.infrastructure.databases.relational.get_relational_engine."
-                "get_relational_engine",
-                return_value=adapter,
-            ),
-        ):
-            await run_relational_migrations("head", script_location)
-
-        async with adapter.engine.connect() as connection:
-            return await connection.run_sync(
-                lambda sync_conn: {
-                    table: sorted(
-                        column["name"] for column in inspect(sync_conn).get_columns(table)
-                    )
-                    for table in inspect(sync_conn).get_table_names()
-                    if table not in ignored
-                }
-            )
+        await _upgrade_head_pinned_to(adapter, script_location)
+        return await _reflect_names(adapter, ignored)
     finally:
         await adapter.engine.dispose()
+
+
+async def replay_entire_chain(
+    database_url: str,
+    script_location: str | None = None,
+    ignored_tables: Iterable[str] = DEFAULT_IGNORED_TABLES | LEGACY_CHAIN_ONLY_TABLES,
+) -> dict[str, list[str]]:
+    """Run ``alembic upgrade head`` on an EMPTY database — the entire chain
+    from its initial revision — and reflect the resulting tables and columns.
+
+    Possible only because the initial migration creates the base schema
+    (guarded ``create_all``): the chain is a self-sufficient creation history.
+    Every revision above the base is inspector-guarded, so each either does
+    its genuine first run or no-ops (audited file by file; the replay runs
+    clean end to end).
+
+    This is the whole-history lockstep probe: it catches a chain that adds
+    anything the models do not declare, wherever in history the divergence
+    lives — including a downstream deployment whose vendored chain is paired
+    with an older pinned package (the mis-stamp incident pairing). The
+    reverse direction (a model change with no migration) is invisible here,
+    because the base is built from the models themselves — that direction
+    belongs to the frozen-baseline test.
+    """
+    from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+        SQLAlchemyAdapter,
+    )
+
+    adapter = SQLAlchemyAdapter(database_url)
+    try:
+        await _upgrade_head_pinned_to(adapter, script_location)
+        return await _reflect_names(adapter, set(ignored_tables))
+    finally:
+        await adapter.engine.dispose()
+
+
+async def _upgrade_head_pinned_to(adapter, script_location: str | None) -> None:
+    """Run ``alembic upgrade head`` with the engine pinned to ``adapter``.
+
+    The replay must run against THIS database, whatever the ambient config
+    says. Both engine-resolution styles present in this chain are pinned:
+    env.py and most migrations import the package attribute, while some
+    migrations import the submodule's attribute directly (e.g. 1d0bb7fede17)
+    — patch both. Migrations that call app helpers which bound the resolver
+    at their own import time remain out of reach; keep new migrations on one
+    of the two import styles.
+    """
+    from unittest.mock import patch
+
+    from cognee.modules.migrations.startup import run_relational_migrations
+
+    with (
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine",
+            return_value=adapter,
+        ),
+        patch(
+            "cognee.infrastructure.databases.relational.get_relational_engine."
+            "get_relational_engine",
+            return_value=adapter,
+        ),
+    ):
+        await run_relational_migrations("head", script_location)
+
+
+async def _reflect_names(adapter, ignored: set[str]) -> dict[str, list[str]]:
+    async with adapter.engine.connect() as connection:
+        return await connection.run_sync(
+            lambda sync_conn: {
+                table: sorted(column["name"] for column in inspect(sync_conn).get_columns(table))
+                for table in inspect(sync_conn).get_table_names()
+                if table not in ignored
+            }
+        )
 
 
 def compare_schemas(
