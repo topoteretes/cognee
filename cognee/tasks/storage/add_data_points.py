@@ -273,31 +273,41 @@ async def add_data_points(
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
-    _record_storage_delta(nodes, edge_count, custom_edge_count, pipeline_run_id)
+    _record_graph_metrics(len(nodes), edge_count + custom_edge_count)
+    _emit_storage_delta(nodes, edge_count, custom_edge_count, pipeline_run_id)
 
     return data_points
 
 
-def _record_storage_delta(
+def _record_graph_metrics(node_count: int, total_edges: int) -> None:
+    """Report the nodes/edges this call wrote to the OTel graph counters.
+
+    Unconditional and independent of eval capture: these are the ordinary
+    process metrics, ``_NullInstrument`` no-ops without a meter provider. The
+    counters were previously defined but never called from anywhere; this is
+    their first live call site.
+    """
+    attributes = {MEMORY_SYSTEM: "cognee", MEMORY_OPERATION: "process"}
+    increment_graph_nodes(node_count, attributes)
+    increment_graph_edges(total_edges, attributes)
+
+
+def _emit_storage_delta(
     nodes: List[DataPoint],
     edge_count: int,
     custom_edge_count: int,
     pipeline_run_id: Any,
 ) -> None:
-    """Report what this call wrote: OTel counters always, eval capture when active.
+    """Buffer this call's ``storage.delta`` eval-capture event (SDK-529).
 
     ``add_data_points`` is the one choke point every graph write goes through
     (cognify, memify, the code-graph route, every backend path above), so the
-    per-run node/edge delta is taken here once rather than in each caller. The
-    OTel counters are ``_NullInstrument`` no-ops without a meter provider. The
-    capture branch is a structural no-op when capture is off: one global read,
-    then return — no id list, no type histogram, no event.
+    per-run node/edge delta is taken here once rather than in each caller. A
+    structural no-op when capture is off: one global read, then return — no id
+    list, no type histogram, no event.
     """
     node_count = len(nodes)
     total_edges = edge_count + custom_edge_count
-    attributes = {MEMORY_SYSTEM: "cognee", MEMORY_OPERATION: "process"}
-    increment_graph_nodes(node_count, attributes)
-    increment_graph_edges(total_edges, attributes)
 
     # Lazy on purpose: ``import cognee`` must not load the capture package.
     from cognee.modules.observability import capture as eval_capture

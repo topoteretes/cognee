@@ -110,12 +110,18 @@ class RunScope:
         Manifests get headroom past the queue bound (up to ``2 * QUEUE_SIZE``
         buffered events in total): an overflowing run must still report
         ``dropped_events``, but the buffer stays finite under a wedged sink.
+
+        An unsampled run still gets its manifest. Sampling gates ``retrieval.*``
+        payloads (see ``should_capture``), not the record that identifies the run:
+        every other kind is captured at full rate regardless, so suppressing the
+        manifest would leave those events — and any nested pipeline manifest
+        pointing here via ``parent_run_id`` — joined to a run that no consumer can
+        resolve. The decision is on the payload as ``sampled`` instead, so an
+        offline consumer can filter on it.
         """
         if self.finished:
             return
         self.finished = True
-        if not self.sampled:
-            return
         try:
             hook._emit_manifest(
                 KIND_RUN_MANIFEST,

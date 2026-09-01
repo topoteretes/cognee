@@ -1,8 +1,8 @@
 """Capture sinks (SDK-529).
 
-A sink is a bare async callable taking a list of already-serialized records
-(shape-compatible with ``ActivitySink``). Sinks are invoked only from the
-background flusher or from ``drain()``/``shutdown()``, never inline from
+A sink is a bare async callable taking a list of already-serialized records:
+``async def sink(records: list[dict]) -> None``. Sinks are invoked only from
+the background flusher or from ``drain()``/``shutdown()``, never inline from
 ``emit()``.
 
 Contract for implementations: usable from any loop/thread — two flushers on
@@ -14,9 +14,13 @@ sink may receive the same records twice (``StorageSink`` never overwrites —
 blob names are collision-free — so consumers that need exactly-once counts
 should dedupe on ``(run_id, kind, ts)``). Sinks must raise ``Exception``
 subclasses only: a ``BaseException`` from a sink re-buffers the batch and ends
-the flusher (the next emit starts a replacement). A sink must let
-``CancelledError`` propagate — the flusher cancels a write that outlives
-``SINK_TIMEOUT_S`` or a ``drain()`` budget and waits for that cancel to land.
+the flusher (the next emit starts a replacement). ``KeyboardInterrupt`` and
+``SystemExit`` are the exception to that: asyncio's ``Task.__step`` re-raises
+both out of the event loop, so they escape past the flusher and cannot be
+contained here. A sink must let ``CancelledError`` propagate — the flusher
+cancels a write that outlives ``SINK_TIMEOUT_S`` or a ``drain()`` budget and
+waits ``_CANCEL_GRACE_S`` for that cancel to land before abandoning the write
+and re-buffering the batch.
 Sinks must not depend on the default executor or on threads: the atexit drain
 runs after ``threading._shutdown()``, when ``asyncio.to_thread`` raises and the
 write is lost; ``StorageSink`` goes through ``run_off_loop``, which falls back
@@ -140,5 +144,3 @@ class StorageSink:
                 io.BytesIO(blob),
                 overwrite=True,
             )
-
-    write = __call__

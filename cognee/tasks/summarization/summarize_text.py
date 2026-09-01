@@ -29,11 +29,14 @@ async def summarize_text(
     each chunk. If the provided list of data chunks is empty, it simply returns the list as
     is.
 
-    While eval capture is active (SDK-529) every summary also carries its provenance —
-    the model id, the fingerprint of the summarization prompt and the fingerprint of the
-    source chunk text — and one ``summary.generated`` event per chunk is emitted (ids,
-    fingerprints and a character count only; never the summary or chunk text). With
-    capture off nothing is hashed or emitted and the provenance fields stay ``None``.
+    While eval capture is active (SDK-529) one ``summary.generated`` event per chunk is
+    emitted, carrying that summary's provenance — the model id, the fingerprint of the
+    summarization prompt and the fingerprint of the source chunk text — alongside the
+    chunk and summary ids and a character count; never the summary or chunk text. The
+    provenance is computed for the event only and is deliberately NOT stored on the
+    ``TextSummary`` node: the event is keyed by ``summary_id``, so offline joins have it
+    either way, and graph content must not depend on whether capture happened to be on.
+    With capture off nothing is hashed and nothing is emitted.
 
     Parameters:
     -----------
@@ -80,10 +83,13 @@ async def summarize_text(
     # Every chunk reads the same prompt file, so its fingerprint is computed once.
     prompt_fingerprints: dict[str, str] = {}
     summaries: list[TextSummary] = []
+    # Run-wide provenance for the manifest; the stage model and prompt are the
+    # same for every chunk, so the last chunk's values describe the run.
+    run_model: Optional[str] = None
+    run_prompt_fingerprint: Optional[str] = None
 
     for chunk, (llm_output, prompt_text, model_name) in zip(data_chunks, results):
-        # Provenance stays None unless capture is active.
-        model: Optional[str] = None
+        # Capture-only provenance; never stored on the node.
         prompt_fingerprint: Optional[str] = None
         source_text_hash: Optional[str] = None
         if active:
@@ -93,7 +99,6 @@ async def summarize_text(
             if prompt_fingerprint is None:
                 prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
                 prompt_fingerprints[prompt_text] = prompt_fingerprint
-            model = model_name
             source_text_hash = eval_capture.prompt_fingerprint(chunk.text)
 
         summary = TextSummary(
@@ -103,33 +108,42 @@ async def summarize_text(
             belongs_to_set=chunk.belongs_to_set,
             text=llm_output.summary,
             importance_weight=chunk.importance_weight,
-            model=model,
-            prompt_fingerprint=prompt_fingerprint,
-            source_text_hash=source_text_hash,
         )
         summaries.append(summary)
 
         if active:
-            _emit_summary_generated(eval_capture, summary, chunk)
+            _emit_summary_generated(
+                summary, chunk, model_name, prompt_fingerprint, source_text_hash
+            )
+            run_model, run_prompt_fingerprint = model_name, prompt_fingerprint
 
     if active:
-        # Once per run, not per chunk: the stage model and prompt are run-wide.
-        eval_capture.note("summarization.model", summaries[0].model)
-        eval_capture.note("summarization.prompt_fingerprint", summaries[0].prompt_fingerprint)
+        # Once per run, not per chunk. Taken from the locals that produced the
+        # summaries, not from the node (which no longer carries them).
+        eval_capture.note("summarization.model", run_model)
+        eval_capture.note("summarization.prompt_fingerprint", run_prompt_fingerprint)
 
     return summaries
 
 
-def _emit_summary_generated(eval_capture, summary: TextSummary, chunk: DocumentChunk) -> None:
+def _emit_summary_generated(
+    summary: TextSummary,
+    chunk: DocumentChunk,
+    model: Optional[str],
+    prompt_fingerprint: Optional[str],
+    source_text_hash: Optional[str],
+) -> None:
     """Buffer one ``summary.generated`` event: ids, fingerprints and a size — no text."""
+    from cognee.modules.observability import capture as eval_capture
+
     eval_capture.emit(
         eval_capture.KIND_SUMMARY_GENERATED,
         {
             "chunk_id": str(chunk.id),
             "summary_id": str(summary.id),
-            "model": summary.model,
-            "prompt_fingerprint": summary.prompt_fingerprint,
-            "source_text_hash": summary.source_text_hash,
+            "model": model,
+            "prompt_fingerprint": prompt_fingerprint,
+            "source_text_hash": source_text_hash,
             "summary_chars": len(summary.text),
         },
         payload_kind="json",

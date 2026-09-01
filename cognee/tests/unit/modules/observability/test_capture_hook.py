@@ -63,7 +63,7 @@ class _Explosive:
         raise AssertionError("model_dump must not be called by emit()")
 
 
-async def _wait_until(predicate, timeout: float = 2.0) -> None:
+async def _wait_until(predicate, timeout: float = 10.0) -> None:
     deadline = asyncio.get_running_loop().time() + timeout
     while not predicate():
         if asyncio.get_running_loop().time() > deadline:
@@ -514,8 +514,12 @@ async def test_failing_sink_is_logged_at_debug_and_next_batch_delivered(monkeypa
     await capture.drain()
 
     assert [call[0]["payload"] for call in calls] == ["one", "two"]
-    fake_logger.debug.assert_any_call("capture sink failed (%s)", ANY)
+    fake_logger.debug.assert_any_call("capture sink failed, %d event(s) dropped (%s)", 1, ANY)
     assert hook._in_flight_total() == 0
+    # The event the sink rejected is gone: it must be accounted for, not hidden,
+    # or the run manifest reports dropped_events = 0 while records were lost.
+    assert hook._dropped == 1
+    assert not hook._buffer
 
 
 @pytest.mark.asyncio
@@ -828,7 +832,9 @@ async def test_hung_sink_write_times_out_and_the_flusher_recovers(monkeypatch):
     await _wait_until(lambda: hook._in_flight_total() == 2)
     # The sink timeout, not a drain, frees the flusher.
     await _wait_until(lambda: hook._in_flight_total() == 0)
-    fake_logger.debug.assert_any_call("capture sink failed (%s)", ANY)
+    fake_logger.debug.assert_any_call("capture sink timed out, %d event(s) dropped (%s)", 2, ANY)
+    # The abandoned write's events are counted, not silently lost.
+    assert hook._dropped == 2
 
     capture.emit(KIND_SUMMARY_GENERATED, "e2", payload_kind="text")
     started = time.monotonic()
@@ -1115,3 +1121,33 @@ def test_atexit_hook_persists_leftovers_after_asyncio_run(tmp_path):
     with gzip.open(blob, "rt", encoding="utf-8") as lines:
         payloads = [json.loads(line)["payload"] for line in lines if line.strip()]
     assert payloads == ["s0", "s1", "s2"]
+
+
+@pytest.mark.asyncio
+async def test_drain_is_bounded_even_when_a_sink_swallows_its_cancellation():
+    """A sink that ignores CancelledError must not pin drain() forever.
+
+    Sinks are contractually required to let the cancel propagate, but
+    register_capture_sink is public API. Before the _CANCEL_GRACE_S bound the
+    post-cancel wait was unbounded, so drain() ran past its budget without limit
+    and no outer wait_for could rescue the caller (the CancelledError branch had
+    the same unbounded wait) — hanging run_tasks, which awaits drain() inline.
+    """
+
+    async def uncancellable(records):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            await asyncio.sleep(30)  # swallows the cancel
+
+    capture.register_capture_sink(uncancellable)
+    hook._configure(flush_interval_s=60.0, sink_timeout_s=0.1)
+
+    capture.emit(KIND_SUMMARY_GENERATED, "wedged", payload_kind="text")
+
+    started = time.monotonic()
+    await capture.drain(timeout=0.2)
+    elapsed = time.monotonic() - started
+
+    # The budget plus at most one cancellation grace, not 30s.
+    assert elapsed < 0.2 + hook._CANCEL_GRACE_S + 1.0

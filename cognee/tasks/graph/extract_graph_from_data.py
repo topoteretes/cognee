@@ -48,14 +48,21 @@ def _remove_duplicate_extracted_nodes_by_id(
     ``chunk_index`` is the position within this batch and restarts at 0 for every
     batch of a run, so it alone cannot identify the chunk. Nothing is collected when
     capture is off.
+
+    The loop runs over ``extracted_graphs``, never over ``zip(...)``: deduplication is
+    the caller's contract and must cover every graph even if the two lists ever differ
+    in length (reachable through the ``calculate_chunk_graphs`` hook). Only the capture
+    event needs a chunk, so a graph without one is deduplicated silently.
     """
     from cognee.modules.observability import capture as eval_capture
 
     active = eval_capture.is_active()
 
-    for chunk_index, (chunk, extracted_graph) in enumerate(zip(data_chunks, extracted_graphs)):
+    for chunk_index, extracted_graph in enumerate(extracted_graphs):
         if not extracted_graph:
             continue
+
+        chunk = data_chunks[chunk_index] if chunk_index < len(data_chunks) else None
 
         nodes_by_id = {}
         dropped_node_ids = [] if active else None
@@ -72,7 +79,7 @@ def _remove_duplicate_extracted_nodes_by_id(
         if len(nodes_by_id) != len(extracted_graph.nodes):
             extracted_graph.nodes = list(nodes_by_id.values())
 
-        if dropped_node_ids:
+        if dropped_node_ids and chunk is not None:
             eval_capture.emit(
                 eval_capture.KIND_EXTRACTION_DROPPED_DUPLICATES,
                 {
@@ -93,13 +100,18 @@ def _capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) 
     Runs right after extraction and BEFORE ``_remove_duplicate_extracted_nodes_by_id``
     and the ontology canonicalization, both of which mutate the graphs in place — so
     the payload is a ``model_dump(mode="json")`` taken now, never the live object or a
-    ``model_copy``. That holds for a custom DataPoint-derived ``graph_model`` too: at
-    this point the graph is the freshly validated LLM output, not yet attached to its
-    chunk (``integrate_chunk_graphs`` does that afterwards), so the dump is acyclic; a
-    non-model graph dumps as ``None``. ``chunk_id`` is the join key shared with the
-    dropped-duplicates and fuzzy-match events; ``chunk_index`` is the position in this
-    batch (it restarts at 0 per batch); ``chunk_size_chars`` records the chunk boundary.
-    A structural no-op (no dump, no allocation) when capture is off.
+    ``model_copy``. ``chunk_id`` is the join key shared with the dropped-duplicates and
+    fuzzy-match events; ``chunk_index`` is the position in this batch (it restarts at 0
+    per batch); ``chunk_size_chars`` records the chunk boundary. A structural no-op (no
+    dump, no allocation) when capture is off.
+
+    The whole per-chunk payload build is guarded, because the graph is an object this
+    function does not own: the standard route hands it freshly validated LLM output,
+    but the ``calculate_chunk_graphs`` extension hook and a custom DataPoint-derived
+    ``graph_model`` (``arbitrary_types_allowed``) can supply a graph whose dump raises —
+    a reference cycle or a non-JSON-native field value. Capture never breaks the
+    extraction it observes, so a graph that will not dump costs its own event and
+    nothing else.
     """
     from cognee.modules.observability import capture as eval_capture
 
@@ -107,9 +119,8 @@ def _capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) 
         return
 
     for chunk_index, (chunk, chunk_graph) in enumerate(zip(data_chunks, chunk_graphs)):
-        eval_capture.emit(
-            eval_capture.KIND_EXTRACTION_CHUNK_GRAPH,
-            {
+        try:
+            payload = {
                 "chunk_id": str(chunk.id),
                 "chunk_index": chunk_index,
                 "chunk_size_chars": len(chunk.text),
@@ -118,7 +129,15 @@ def _capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) 
                     if isinstance(chunk_graph, BaseModel)
                     else None
                 ),
-            },
+            }
+        except Exception as exc:
+            # Capture never breaks the extraction it observes.
+            logger.debug("chunk graph capture skipped (%s)", exc)
+            continue
+
+        eval_capture.emit(
+            eval_capture.KIND_EXTRACTION_CHUNK_GRAPH,
+            payload,
             payload_kind="json",
             stage="extract_graph_from_data",
         )

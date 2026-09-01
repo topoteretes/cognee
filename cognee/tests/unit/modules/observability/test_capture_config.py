@@ -14,7 +14,6 @@ from cognee.modules.observability.capture import (
     CaptureConfig,
     get_capture_config,
     hook,
-    prompt_file_fingerprint,
     prompt_fingerprint,
 )
 
@@ -129,17 +128,10 @@ def test_bad_batch_size_in_env_disables_capture_instead_of_freezing(clean_captur
     assert hook.BATCH_SIZE == 64
 
 
-def test_prompt_fingerprints(tmp_path):
+def test_prompt_fingerprints():
     assert prompt_fingerprint("hello") == "sha256:2cf24dba5fb0a30e"
     assert prompt_fingerprint("hello") != prompt_fingerprint("hello!")
-
-    prompt_path = tmp_path / "prompt.txt"
-    prompt_path.write_text("hello", encoding="utf-8")
-    assert prompt_file_fingerprint(str(prompt_path)) == prompt_fingerprint("hello")
-
-    prompt_path.write_text("changed", encoding="utf-8")
-    os.utime(prompt_path, (1_700_000_000, 1_700_000_000))  # force a distinct mtime
-    assert prompt_file_fingerprint(str(prompt_path)) == prompt_fingerprint("changed")
+    assert prompt_fingerprint("") == prompt_fingerprint("")
 
 
 def test_import_cognee_does_not_import_capture_package():

@@ -91,6 +91,7 @@ import asyncio
 import atexit
 import collections
 import random
+import threading
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -127,6 +128,12 @@ _CANCEL_GRACE_S: float = 1.0
 # Module state.
 _sink: CaptureSink | None = None
 _initialized: bool = False
+# Serializes the one-time initialization only. is_active() reads _initialized
+# BEFORE taking it, so the warm path stays a plain global read with no locking.
+# Reentrant + _initializing: initialization imports the storage chain, and a
+# re-entrant is_active() from inside it must read "off", never deadlock.
+_init_lock = threading.RLock()
+_initializing: bool = False
 _buffer: collections.deque[CaptureEvent] = collections.deque()
 # Process-global, monotonic, approximate (lock-free on the emit path). Reported
 # once per manifest as a delta, never logged per drop.
@@ -266,22 +273,38 @@ def _ensure_initialized() -> None:
     ``is_active()`` — never from ``emit()``. A failing initialization (bad
     env, unreachable storage) logs once and leaves capture off: capture must
     never break the operation it observes.
-    """
-    global _initialized, _sink
-    if _initialized:
-        return
-    _initialized = True
-    try:
-        config = get_capture_config()
-        _load_knobs(config)
-        if config.cognee_capture_enabled and _sink is None:
-            # Lazy: keeps this module free of the storage/base_config import chain.
-            from cognee.infrastructure.files.storage import get_file_storage
 
-            _sink = StorageSink(get_file_storage(config.cognee_capture_dir))
-            _register_atexit()
-    except Exception as exc:
-        logger.warning("eval capture disabled: initialization failed (%s)", exc)
+    Runs under ``_init_lock`` and publishes ``_initialized`` only once ``_sink``
+    is installed. cognee reaches ``is_active()`` from ``to_thread`` workers and
+    the dataset-queue thread, and this body imports the storage chain (hundreds
+    of ms cold); publishing the flag first would make every concurrent caller
+    in that window see capture as OFF and silently skip a run's early events.
+    """
+    global _initialized, _sink, _initializing
+    with _init_lock:
+        # Re-check under the lock: a thread that waited here while another did
+        # the work must not redo it. _initializing catches the re-entrant case,
+        # which the RLock would otherwise let recurse.
+        if _initialized or _initializing:
+            return
+        _initializing = True
+        try:
+            config = get_capture_config()
+            _load_knobs(config)
+            if config.cognee_capture_enabled and _sink is None:
+                # Lazy: keeps this module free of the storage/base_config import chain.
+                from cognee.infrastructure.files.storage import get_file_storage
+
+                _sink = StorageSink(get_file_storage(config.cognee_capture_dir))
+                _register_atexit()
+        except Exception as exc:
+            logger.warning("eval capture disabled: initialization failed (%s)", exc)
+        finally:
+            # Set LAST, and inside the lock: a concurrent is_active() must never
+            # see _initialized True while _sink is still None, or it would skip
+            # capture for the whole (import-chain-long) initialization window.
+            _initialized = True
+            _initializing = False
 
 
 def is_active() -> bool:
@@ -294,9 +317,9 @@ def is_active() -> bool:
 def register_capture_sink(sink: CaptureSink | None) -> None:
     """Process-wide sink registration; last wins, ``None`` clears.
 
-    An explicit registration overrides env auto-registration of the SINK
-    (mirrors ``register_activity_sink`` semantics); the tuning knobs
-    (``COGNEE_CAPTURE_QUEUE_SIZE`` etc.) still come from the environment.
+    An explicit registration overrides env auto-registration of the SINK; the
+    tuning knobs (``COGNEE_CAPTURE_QUEUE_SIZE`` etc.) still come from the
+    environment.
     Registering a sink re-arms flushing on loops ``shutdown()`` stopped.
     """
     global _sink, _initialized
@@ -585,6 +608,15 @@ async def _wait_bounded(awaitable: Awaitable[T], timeout: float | None) -> T:
     cancellation straight through. Like ``wait_for``, a timeout cancels the
     inner awaitable and waits for that cancellation to land before raising
     ``asyncio.TimeoutError``, so the inner is never left running.
+
+    Unlike ``wait_for``, that post-cancel wait is itself bounded by
+    ``_CANCEL_GRACE_S``. A sink that swallows ``CancelledError`` (out of
+    contract, but ``register_capture_sink`` is public API) would otherwise pin
+    the flusher forever and blow every ``drain()`` budget without limit — and
+    because the same wait sits on the ``CancelledError`` branch, no outer
+    ``wait_for`` could rescue the caller either. Giving up on the cancel leaves
+    the inner running, so the caller must treat the batch as undelivered
+    (``_flush_one_batch`` re-buffers it).
     """
     future = asyncio.ensure_future(awaitable)
     if timeout is None:
@@ -598,11 +630,11 @@ async def _wait_bounded(awaitable: Awaitable[T], timeout: float | None) -> T:
         # wait_for — do not return while it may still be running.
         if not future.done():
             future.cancel()
-            await asyncio.wait({future})
+            await asyncio.wait({future}, timeout=_CANCEL_GRACE_S)
         raise
     if not done:
         future.cancel()
-        await asyncio.wait({future})
+        await asyncio.wait({future}, timeout=_CANCEL_GRACE_S)
         raise asyncio.TimeoutError
     return future.result()
 
@@ -763,9 +795,17 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
                 except asyncio.TimeoutError as exc:
                     if deadline is not None and time.monotonic() >= deadline:
                         break  # the caller's budget ran out, not the sink's: retry later
-                    logger.debug("capture sink failed (%s)", exc)
+                    # The sink blew SINK_TIMEOUT_S; its write was cancelled and
+                    # the slots are blanked below, so these events are gone.
+                    # Account for the loss instead of hiding it: a run whose sink
+                    # is wedged must not report dropped_events = 0.
+                    _dropped += len(indexes)
+                    logger.debug(
+                        "capture sink timed out, %d event(s) dropped (%s)", len(indexes), exc
+                    )
                 except Exception as exc:
-                    logger.debug("capture sink failed (%s)", exc)
+                    _dropped += len(indexes)
+                    logger.debug("capture sink failed, %d event(s) dropped (%s)", len(indexes), exc)
                 for index in indexes:
                     pending[index] = None
                 # Let other coroutines interleave between sink writes.
@@ -781,8 +821,9 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
         logger.debug("capture flush failed, %d event(s) dropped (%s)", lost, exc)
     except BaseException:
         # Cancellation (asyncio.run teardown, uvicorn shutdown, a cancelled
-        # drain() caller) or a KeyboardInterrupt/SystemExit escaping a sink:
-        # do not lose the popped batch.
+        # drain() caller) or a custom BaseException escaping a sink: do not lose
+        # the popped batch. KeyboardInterrupt/SystemExit from a sink do NOT
+        # reach here - asyncio re-raises those out of the loop itself.
         _requeue(pending)
         raise
     finally:
@@ -829,7 +870,10 @@ async def drain(timeout: float = 5.0) -> None:
     caller propagates, as it must), and returns within about ``timeout`` — the
     budget is enforced inside a batch too, per sink write — even under a
     continuous producer or a wedged sink (leftovers stay with the flusher /
-    the atexit hook).
+    the atexit hook). "About" is ``timeout`` plus at most one
+    ``_CANCEL_GRACE_S``: a write cut off by the budget is cancelled, and a sink
+    that does not let that cancel land is abandoned after the grace rather than
+    waited on forever.
     """
     try:
         await _drain_until(time.monotonic() + timeout)

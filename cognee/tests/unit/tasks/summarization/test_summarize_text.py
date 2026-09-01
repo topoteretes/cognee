@@ -90,9 +90,7 @@ async def test_summarize_text_leaves_provenance_unset_when_capture_is_off(monkey
     [summary] = await summarize_text_module.summarize_text([_chunk()], summarization_model=object)
 
     assert capture.is_active() is False
-    assert summary.model is None
-    assert summary.prompt_fingerprint is None
-    assert summary.source_text_hash is None
+    assert summary.text == f"Summary of {summary.made_from.text}"
     hashing.assert_not_called()
     assert not capture.hook._buffer
 
@@ -107,10 +105,10 @@ async def test_summarize_text_populates_provenance_and_emits_one_event_per_chunk
 
     assert len(summaries) == 2
     for chunk, summary in zip(chunks, summaries):
-        assert summary.model == MODEL
-        assert summary.prompt_fingerprint == capture.prompt_fingerprint(PROMPT)
-        assert summary.source_text_hash == capture.prompt_fingerprint(chunk.text)
         assert summary.text == f"Summary of {chunk.text}"
+        # Provenance rides the event, never the persisted node.
+        for field in ("model", "prompt_fingerprint", "source_text_hash"):
+            assert not hasattr(summary, field)
 
     await capture.drain()
 
@@ -165,21 +163,19 @@ async def test_summarize_text_returns_empty_input_without_touching_capture(
     assert not capture.hook._buffer
 
 
-def test_text_summary_provenance_fields_are_not_embedded():
-    summary = TextSummary(
-        text="Short summary",
-        made_from=_chunk(),
-        model=MODEL,
-        prompt_fingerprint="sha256:0000000000000000",
-        source_text_hash="sha256:1111111111111111",
-    )
+def test_text_summary_node_carries_no_capture_provenance():
+    """Graph content must not depend on whether capture happened to be on.
+
+    The provenance the design partner needs is on the ``summary.generated`` event,
+    keyed by ``summary_id``; the node schema stays free of telemetry fields.
+    """
+    summary = TextSummary(text="Short summary", made_from=_chunk())
+
+    for name in ("model", "prompt_fingerprint", "source_text_hash"):
+        assert name not in TextSummary.model_fields
 
     # The embedding index is unchanged: only the summary text is embedded.
     assert TextSummary.model_fields["metadata"].default == {"index_fields": ["text"]}
     assert summary.metadata["index_fields"] == ["text"]
     assert DataPoint.get_embeddable_property_names(summary) == ["text"]
     assert DataPoint.get_embeddable_properties(summary) == ["Short summary"]
-    for name in ("model", "prompt_fingerprint", "source_text_hash"):
-        assert name in TextSummary.model_fields
-        assert TextSummary.model_fields[name].default is None
-        assert name not in summary.metadata["index_fields"]

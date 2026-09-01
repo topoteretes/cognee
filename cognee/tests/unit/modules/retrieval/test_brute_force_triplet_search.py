@@ -1537,3 +1537,66 @@ async def test_candidates_capture_failure_never_breaks_the_search(monkeypatch, f
     assert results == [edge]
     await capture.drain()
     assert _candidate_events(fake_capture_sink) == []
+
+
+@pytest.mark.asyncio
+async def test_missing_distances_fall_back_to_the_triplet_distance_penalty(fake_capture_sink):
+    """Every ``score`` fallback path, which the well-formed fixtures never exercise.
+
+    The penalty machinery exists because triplet endpoints frequently carry no
+    distance for a given query, so a regression that hardcoded the default or
+    returned 0.0 would silently corrupt the ranking-input score in every captured
+    record. Covered here: a missing ``vector_distance`` key, a list too short for
+    this query index, a non-numeric entry, and a pool row with no ``.score``.
+    """
+    edge = _capture_edge("a", "b", "knows", ([0.5], [1.5], [2.5]))
+    del edge.node2.attributes["vector_distance"]  # missing key -> penalty
+    edge.attributes["vector_distance"] = []  # too short for index 0 -> penalty
+
+    short = _capture_edge("c", "d", "likes", ([0.25], [0.25], [0.25]))
+    short.node1.attributes["vector_distance"] = ["not-a-number"]  # TypeError/ValueError -> penalty
+
+    class _NoScore:
+        id = "no-score"
+
+    engine = _capture_vector_engine(single={"Entity_name": [_NoScore()]})
+
+    results = await _capture_search(
+        engine,
+        _capture_fragment([edge, short]),
+        query="q",
+        node_name=None,
+        triplet_distance_penalty=9.0,
+    )
+    assert results == [edge, short]
+
+    await capture.drain()
+    [event] = _candidate_events(fake_capture_sink)
+    payload = event["payload"]
+
+    # node1 keeps its 0.5; edge and node2 both fall back to the explicit 9.0.
+    assert payload["top_k"][0]["score"] == pytest.approx(0.5 + 9.0 + 9.0)
+    # node1's entry is non-numeric -> penalty; the other two are real.
+    assert payload["top_k"][1]["score"] == pytest.approx(9.0 + 0.25 + 0.25)
+    # A pool row with no .score falls back to the same penalty.
+    assert payload["pool"] == [{"id": "no-score", "collection": "Entity_name", "score": 9.0}]
+
+
+@pytest.mark.asyncio
+async def test_the_default_penalty_is_used_when_none_is_passed(fake_capture_sink):
+    """``triplet_distance_penalty=None`` means the 6.5 retrieval default, not 0.0."""
+    edge = _capture_edge("a", "b", "knows", ([0.5], [1.5], [2.5]))
+    del edge.node2.attributes["vector_distance"]
+    engine = _capture_vector_engine(single={"Entity_name": [MockScoredResult("a", 0.1)]})
+
+    await _capture_search(
+        engine,
+        _capture_fragment([edge]),
+        query="q",
+        node_name=None,
+        triplet_distance_penalty=None,
+    )
+
+    await capture.drain()
+    [event] = _candidate_events(fake_capture_sink)
+    assert event["payload"]["top_k"][0]["score"] == pytest.approx(0.5 + 1.5 + 6.5)

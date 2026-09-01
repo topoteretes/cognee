@@ -240,13 +240,18 @@ async def test_sample_rate_zero_unsamples_operation_scopes_only(fake_capture_sin
         assert capture.should_capture(KIND_RETRIEVAL_CANDIDATES) is False
         assert capture.should_capture(KIND_EXTRACTION_CHUNK_GRAPH) is True
     await capture.drain()
-    assert _manifests(fake_capture_sink) == []
+    # Sampling gates retrieval.* payloads, never the manifest: the kinds that are
+    # still captured at full rate would otherwise name an unresolvable run.
+    unsampled = _manifests(fake_capture_sink)
+    assert len(unsampled) == 1
+    assert unsampled[0]["payload"]["sampled"] is False
 
     with capture.run_scope(uuid4(), kind="pipeline") as scope:
         assert scope.sampled is True
         assert capture.should_capture(KIND_RETRIEVAL_CANDIDATES) is True
     await capture.drain()
-    assert len(_manifests(fake_capture_sink)) == 1
+    assert len(_manifests(fake_capture_sink)) == 2
+    assert _manifests(fake_capture_sink)[1]["payload"]["sampled"] is True
 
     # No active scope: fall back to the rate.
     assert capture.should_capture(KIND_RETRIEVAL_CANDIDATES) is False

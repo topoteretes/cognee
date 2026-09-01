@@ -524,12 +524,12 @@ async def test_the_same_run_with_capture_off_is_a_structural_no_op(
     assert not capture.hook._flushers
     # 3 chunks x (extraction + summarization) LLM calls, same as with capture on.
     assert fakes.llm.await_count == 6
-    # The stored summaries carry no provenance when capture is off.
+    # Stored summaries never carry capture provenance, on or off.
     written_nodes = fakes.graph_engine.add_nodes.await_args.args[0]
     summaries = [node for node in written_nodes if node.type == "TextSummary"]
     assert len(summaries) == 3
     assert all(
-        (node.model, node.prompt_fingerprint, node.source_text_hash) == (None, None, None)
+        not any(hasattr(node, f) for f in ("model", "prompt_fingerprint", "source_text_hash"))
         for node in summaries
     )
 

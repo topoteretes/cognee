@@ -78,12 +78,12 @@ async def test_layout_roundtrip_manifest_and_nodataset(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_successive_writes_never_clobber_and_write_alias_exists(tmp_path):
+async def test_successive_writes_never_clobber(tmp_path):
     sink = StorageSink(StorageManager(LocalFileStorage(str(tmp_path))))
     run_id = str(uuid4())
 
     await sink([_record(KIND_SUMMARY_GENERATED, run_id, None, "a")])
-    await sink.write([_record(KIND_SUMMARY_GENERATED, run_id, None, "b")])
+    await sink([_record(KIND_SUMMARY_GENERATED, run_id, None, "b")])
 
     blobs = sorted((tmp_path / "nodataset" / run_id / KIND_SUMMARY_GENERATED).glob("*.jsonl.gz"))
     assert len(blobs) == 2

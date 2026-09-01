@@ -45,6 +45,14 @@ class _UndumpableGraph(KnowledgeGraph):
         raise AssertionError("model_dump must not run while capture is off")
 
 
+class _RaisingDumpGraph(KnowledgeGraph):
+    """A graph whose ``model_dump(mode="json")`` blows up, as a cyclic or
+    arbitrary-typed caller-supplied graph_model does in practice."""
+
+    def model_dump(self, *args, **kwargs):
+        raise ValueError("Circular reference detected (id repeated)")
+
+
 class _PersonGraph(DataPoint):
     """A custom DataPoint-derived graph_model, as cognify accepts."""
 
@@ -436,3 +444,66 @@ async def test_extract_content_graph_fingerprints_per_call_and_only_inside_a_sco
 
     assert hashed == ["p", "p"]
     assert scope.fields["extraction.prompt_fingerprint"] == real_fingerprint("p")
+
+
+# ---------------------------------------------------------------------------
+# Capture never breaks the extraction it observes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_graph_that_cannot_be_dumped_costs_its_event_not_the_run(
+    fake_capture_sink, no_edge_lookup
+):
+    """A caller-supplied graph_model can hold a reference cycle or a non-JSON-native
+    value, and ``model_dump(mode="json")`` then raises. That must cost the one event,
+    never the extraction — turning capture on must not convert a working cognify into
+    a hard failure."""
+    chunks = [_make_chunk("first"), _make_chunk("second")]
+    graphs = [_RaisingDumpGraph(nodes=[], edges=[]), _clean_graph()]
+
+    result = await _run_extraction(chunks, graphs)
+
+    assert result == chunks
+    await capture.drain()
+
+    # The good chunk still reports; the undumpable one is simply absent.
+    events = _records(fake_capture_sink, KIND_EXTRACTION_CHUNK_GRAPH)
+    assert [event["payload"]["chunk_id"] for event in events] == [str(chunks[1].id)]
+    assert events[0]["payload"]["graph"]["nodes"][0]["name"] == "Dave"
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_without_an_id_costs_its_event_not_the_run(fake_capture_sink, no_edge_lookup):
+    """extract_graph_from_data validates only ``.text`` on its chunks, so a duck-typed
+    chunk can reach the emit point without an ``id``."""
+    bad = MagicMock()
+    del bad.id  # everything else a chunk needs, but no id
+    bad.text = "no id here"
+    bad.contains = None
+    bad.belongs_to_set = []
+    good = _make_chunk("fine")
+
+    result = await _run_extraction([bad, good], [_clean_graph(), _clean_graph()])
+
+    assert result == [bad, good]
+    await capture.drain()
+    events = _records(fake_capture_sink, KIND_EXTRACTION_CHUNK_GRAPH)
+    assert [event["payload"]["chunk_id"] for event in events] == [str(good.id)]
+    assert not hasattr(bad, "id")
+
+
+@pytest.mark.asyncio
+async def test_ontology_mode_falls_back_to_the_configured_mode(
+    monkeypatch, fake_capture_sink, no_edge_lookup
+):
+    """A None per-call mode is reported as the configured ONTOLOGY_MODE, not as None."""
+    monkeypatch.setattr(egd_module, "get_configured_ontology_mode", lambda *a, **k: "strict")
+
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        await _run_extraction([_make_chunk()], [_clean_graph()], resolver=_StubResolver())
+
+    assert scope.fields["ontology.mode"] == "strict"
+    assert scope.fields["ontology.resolver"] == "_StubResolver"
+    assert scope.fields["ontology.matching_strategy"] == "FuzzyMatchingStrategy"
+    assert scope.fields["ontology.threshold"] == 0.9

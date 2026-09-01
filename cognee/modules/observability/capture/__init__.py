@@ -45,7 +45,7 @@ from .events import (
 )
 from .hook import drain, emit, is_active, register_capture_sink, should_capture, shutdown
 from .manifest import RunScope, bump, current_scope, note, run_scope
-from .prompt_hash import prompt_file_fingerprint, prompt_fingerprint
+from .prompt_hash import prompt_fingerprint
 from .sinks import CaptureSink, StorageSink
 
 __all__ = [
@@ -69,7 +69,6 @@ __all__ = [
     "get_capture_config",
     "is_active",
     "note",
-    "prompt_file_fingerprint",
     "prompt_fingerprint",
     "register_capture_sink",
     "run_scope",
