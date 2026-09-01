@@ -89,7 +89,10 @@ def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
 
 
-db_engine = get_relational_engine()
+# The engine to migrate: an adapter handed in through config.attributes (an
+# adapter's create_database() builds ITS OWN database, not the global one),
+# else the globally configured engine.
+db_engine = config.attributes.get("relational_engine") or get_relational_engine()
 
 # Use the LIVE engine's URL, not db_uri: for S3-backed SQLite the adapter
 # pulls the database to a local temp file and connects to THAT (db_uri still

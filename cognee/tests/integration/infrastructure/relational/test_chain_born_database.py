@@ -101,6 +101,28 @@ def test_create_database_is_idempotent():
     assert asyncio.run(_reflect()) == before
 
 
+def test_create_database_builds_the_adapters_own_database():
+    """A directly constructed adapter (the shape every unit-test fixture uses)
+    must get its OWN database built — the chain runs against that adapter,
+    not against whatever the global configuration points at."""
+    from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+        SQLAlchemyAdapter,
+    )
+
+    _point_cognee_at_fresh_dirs()  # the global engine points somewhere else
+    own = Path(tempfile.mkdtemp()) / "own.db"
+    adapter = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{own}")
+
+    async def build_and_reflect():
+        await adapter.create_database()
+        async with adapter.engine.connect() as connection:
+            return await connection.run_sync(lambda c: set(sa.inspect(c).get_table_names()))
+
+    tables = asyncio.run(build_and_reflect())
+    assert {"users", "data", "pipeline_runs", "alembic_version"} <= tables
+    assert not asyncio.run(_reflect()), "the global database must be untouched"
+
+
 def test_concurrent_creators_take_turns_on_the_alembic_command():
     """Every creation path now runs the chain, and callers CAN overlap
     (create_db_and_tables alongside run_migrations). Alembic's command

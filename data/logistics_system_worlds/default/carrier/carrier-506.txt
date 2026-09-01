@@ -1,0 +1,1 @@
+Rhein Cargo is a carrier in Germany. It supports freight_rail transport across domestic, intercontinental shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 25000.0 kg, reliability score is 3, and base delay is 1 day(s).

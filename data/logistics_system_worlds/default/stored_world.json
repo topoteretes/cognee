@@ -1,0 +1,965 @@
+{
+  "retailers": [
+    {
+      "retailer_id": "retailer-3311",
+      "name": "Mercury Market",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "handling_fee": 2.5,
+      "processing_days": 1,
+      "origin_post_office_id": "po-1260"
+    },
+    {
+      "retailer_id": "retailer-2388",
+      "name": "Northwind Retail",
+      "region": "us_north",
+      "shipping_range": "intercontinental",
+      "handling_fee": 2.5,
+      "processing_days": 0,
+      "origin_post_office_id": "po-8406"
+    },
+    {
+      "retailer_id": "retailer-8192",
+      "name": "Coastal Commerce",
+      "region": "france",
+      "shipping_range": "regional",
+      "handling_fee": 4.0,
+      "processing_days": 0,
+      "origin_post_office_id": "po-8317"
+    },
+    {
+      "retailer_id": "retailer-7986",
+      "name": "Urban Cart",
+      "region": "italy",
+      "shipping_range": "intercontinental",
+      "handling_fee": 9.0,
+      "processing_days": 2,
+      "origin_post_office_id": "po-6958"
+    },
+    {
+      "retailer_id": "retailer-9892",
+      "name": "Pioneer Fulfillment",
+      "region": "italy",
+      "shipping_range": "domestic",
+      "handling_fee": 2.5,
+      "processing_days": 0,
+      "origin_post_office_id": "po-6958"
+    },
+    {
+      "retailer_id": "retailer-3163",
+      "name": "Maple Street Supply",
+      "region": "us_north",
+      "shipping_range": "domestic",
+      "handling_fee": 6.5,
+      "processing_days": 2,
+      "origin_post_office_id": "po-8406"
+    },
+    {
+      "retailer_id": "retailer-4608",
+      "name": "Summit Supply",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "handling_fee": 9.0,
+      "processing_days": 2,
+      "origin_post_office_id": "po-1260"
+    },
+    {
+      "retailer_id": "retailer-6211",
+      "name": "Atlas Bazaar",
+      "region": "poland",
+      "shipping_range": "regional",
+      "handling_fee": 9.0,
+      "processing_days": 1,
+      "origin_post_office_id": "po-5046"
+    },
+    {
+      "retailer_id": "retailer-3187",
+      "name": "Vertex Mercantile",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "handling_fee": 9.0,
+      "processing_days": 1,
+      "origin_post_office_id": "po-1260"
+    },
+    {
+      "retailer_id": "retailer-2480",
+      "name": "Harbor Goods",
+      "region": "us_west",
+      "shipping_range": "domestic",
+      "handling_fee": 9.0,
+      "processing_days": 2,
+      "origin_post_office_id": "po-9296"
+    }
+  ],
+  "users": [
+    {
+      "user_id": "user-3432",
+      "name": "Lucas Meyer",
+      "tier": "business",
+      "region": "poland",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "domestic"
+    },
+    {
+      "user_id": "user-9687",
+      "name": "Elena Rossi",
+      "tier": "standard",
+      "region": "us_east",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "domestic"
+    },
+    {
+      "user_id": "user-2509",
+      "name": "Priya Nair",
+      "tier": "business",
+      "region": "germany",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "regional"
+    },
+    {
+      "user_id": "user-1992",
+      "name": "Omar Hassan",
+      "tier": "standard",
+      "region": "italy",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "domestic"
+    },
+    {
+      "user_id": "user-6607",
+      "name": "Ethan Cole",
+      "tier": "enterprise",
+      "region": "us_west",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "intercontinental"
+    },
+    {
+      "user_id": "user-3395",
+      "name": "Daniel Brooks",
+      "tier": "standard",
+      "region": "poland",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "regional"
+    },
+    {
+      "user_id": "user-6452",
+      "name": "Jonah Patel",
+      "tier": "standard",
+      "region": "us_central",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "intercontinental"
+    },
+    {
+      "user_id": "user-8430",
+      "name": "Lea Schneider",
+      "tier": "enterprise",
+      "region": "france",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "domestic"
+    },
+    {
+      "user_id": "user-9736",
+      "name": "Hana Suzuki",
+      "tier": "business",
+      "region": "poland",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "domestic"
+    },
+    {
+      "user_id": "user-4662",
+      "name": "Chloe Martin",
+      "tier": "enterprise",
+      "region": "poland",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "regional"
+    },
+    {
+      "user_id": "user-7242",
+      "name": "Noah Fischer",
+      "tier": "enterprise",
+      "region": "us_east",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "domestic"
+    },
+    {
+      "user_id": "user-6811",
+      "name": "Maya West",
+      "tier": "business",
+      "region": "italy",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "regional"
+    },
+    {
+      "user_id": "user-5212",
+      "name": "Sofia Novak",
+      "tier": "business",
+      "region": "italy",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "regional"
+    },
+    {
+      "user_id": "user-7713",
+      "name": "Ava Chen",
+      "tier": "business",
+      "region": "us_west",
+      "weekend_delivery_eligible": false,
+      "default_shipping_range": "regional"
+    },
+    {
+      "user_id": "user-6391",
+      "name": "Mateo Alvarez",
+      "tier": "enterprise",
+      "region": "france",
+      "weekend_delivery_eligible": true,
+      "default_shipping_range": "regional"
+    }
+  ],
+  "packages": [
+    {
+      "package_id": "pkg-15335",
+      "description": "retail replenishment",
+      "weight_kg": 25.0,
+      "shipping_range": "regional",
+      "category": "perishable",
+      "priority": "standard",
+      "retailer_id": "retailer-7986",
+      "retailer_name": "Urban Cart",
+      "user_id": "user-3395",
+      "user_name": "Daniel Brooks",
+      "insured": true,
+      "current_state": "received_at_origin_hub",
+      "last_known_location": "Italy Regional Sorting Center",
+      "current_post_office_id": "po-6958",
+      "current_post_office_name": "Italy Regional Sorting Center",
+      "route_post_office_ids": [
+        "po-6958",
+        "po-6958"
+      ],
+      "route_post_office_names": [
+        "Italy Regional Sorting Center",
+        "Italy Regional Sorting Center"
+      ],
+      "status_history": [
+        "created",
+        "sent",
+        "received_at_origin_hub"
+      ]
+    },
+    {
+      "package_id": "pkg-97659",
+      "description": "medical samples",
+      "weight_kg": 150.0,
+      "shipping_range": "domestic",
+      "category": "hazardous",
+      "priority": "economy",
+      "retailer_id": "retailer-6211",
+      "retailer_name": "Atlas Bazaar",
+      "user_id": "user-3432",
+      "user_name": "Lucas Meyer",
+      "insured": false,
+      "current_state": "out_for_delivery",
+      "last_known_location": "Poland Sorting Center",
+      "current_post_office_id": "po-5046",
+      "current_post_office_name": "Poland Sorting Center",
+      "route_post_office_ids": [
+        "po-5046",
+        "po-5046",
+        "po-5046",
+        "po-5046"
+      ],
+      "route_post_office_names": [
+        "Poland Sorting Center",
+        "Poland Sorting Center",
+        "Poland Sorting Center",
+        "Poland Sorting Center"
+      ],
+      "status_history": [
+        "created",
+        "sent",
+        "received_at_origin_hub",
+        "at_sorting_center",
+        "in_transit",
+        "out_for_delivery"
+      ]
+    },
+    {
+      "package_id": "pkg-16439",
+      "description": "consumer electronics",
+      "weight_kg": 5.0,
+      "shipping_range": "regional",
+      "category": "perishable",
+      "priority": "standard",
+      "retailer_id": "retailer-8192",
+      "retailer_name": "Coastal Commerce",
+      "user_id": "user-4662",
+      "user_name": "Chloe Martin",
+      "insured": true,
+      "current_state": "created",
+      "last_known_location": "France Regional Sorting Center",
+      "current_post_office_id": "po-8317",
+      "current_post_office_name": "France Regional Sorting Center",
+      "route_post_office_ids": [
+        "po-8317"
+      ],
+      "route_post_office_names": [
+        "France Regional Sorting Center"
+      ],
+      "status_history": [
+        "created"
+      ]
+    },
+    {
+      "package_id": "pkg-33345",
+      "description": "home office equipment",
+      "weight_kg": 1.0,
+      "shipping_range": "regional",
+      "category": "fragile",
+      "priority": "economy",
+      "retailer_id": "retailer-8192",
+      "retailer_name": "Coastal Commerce",
+      "user_id": "user-4662",
+      "user_name": "Chloe Martin",
+      "insured": false,
+      "current_state": "received_at_origin_hub",
+      "last_known_location": "France Regional Sorting Center",
+      "current_post_office_id": "po-8317",
+      "current_post_office_name": "France Regional Sorting Center",
+      "route_post_office_ids": [
+        "po-8317",
+        "po-8317"
+      ],
+      "route_post_office_names": [
+        "France Regional Sorting Center",
+        "France Regional Sorting Center"
+      ],
+      "status_history": [
+        "created",
+        "sent",
+        "received_at_origin_hub"
+      ]
+    },
+    {
+      "package_id": "pkg-55273",
+      "description": "winter apparel",
+      "weight_kg": 900.0,
+      "shipping_range": "regional",
+      "category": "perishable",
+      "priority": "economy",
+      "retailer_id": "retailer-8192",
+      "retailer_name": "Coastal Commerce",
+      "user_id": "user-5212",
+      "user_name": "Sofia Novak",
+      "insured": true,
+      "current_state": "sent",
+      "last_known_location": "France Regional Sorting Center",
+      "current_post_office_id": "po-8317",
+      "current_post_office_name": "France Regional Sorting Center",
+      "route_post_office_ids": [
+        "po-8317"
+      ],
+      "route_post_office_names": [
+        "France Regional Sorting Center"
+      ],
+      "status_history": [
+        "created",
+        "sent"
+      ]
+    }
+  ],
+  "post_offices": [
+    {
+      "post_office_id": "po-1260",
+      "name": "Germany Warehouse A",
+      "office_type": "origin_warehouse",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": false
+    },
+    {
+      "post_office_id": "po-2253",
+      "name": "Germany Warehouse B",
+      "office_type": "origin_warehouse",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": false
+    },
+    {
+      "post_office_id": "po-9059",
+      "name": "Germany Hub",
+      "office_type": "origin_hub",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-5259",
+      "name": "Germany Sorting Center",
+      "office_type": "sorting_center",
+      "region": "germany",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-5046",
+      "name": "Poland Sorting Center",
+      "office_type": "sorting_center",
+      "region": "poland",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-8406",
+      "name": "US North Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "us_north",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-3960",
+      "name": "US South Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "us_south",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-7018",
+      "name": "US East Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "us_east",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-9296",
+      "name": "US West Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "us_west",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-5937",
+      "name": "US Central Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "us_central",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-8317",
+      "name": "France Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "france",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-6228",
+      "name": "Netherlands Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "netherlands",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-2305",
+      "name": "Spain Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "spain",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    },
+    {
+      "post_office_id": "po-6958",
+      "name": "Italy Regional Sorting Center",
+      "office_type": "sorting_center",
+      "region": "italy",
+      "shipping_range": "domestic",
+      "supports_cold_chain": true,
+      "supports_hazardous_materials": true
+    }
+  ],
+  "carriers": [
+    {
+      "carrier_id": "carrier-403",
+      "company_name": "Great Lakes Logistics",
+      "region": "us_north",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 5,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-452",
+      "company_name": "NorthStar Freight",
+      "region": "us_north",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 500.0,
+      "reliability_score": 2,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-368",
+      "company_name": "Sunbelt Cargo",
+      "region": "us_south",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 25000.0,
+      "reliability_score": 4,
+      "base_delay_days": 0
+    },
+    {
+      "carrier_id": "carrier-183",
+      "company_name": "Magnolia Transport",
+      "region": "us_south",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 25000.0,
+      "reliability_score": 3,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-349",
+      "company_name": "Atlantic Route Logistics",
+      "region": "us_east",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 4,
+      "base_delay_days": 0
+    },
+    {
+      "carrier_id": "carrier-655",
+      "company_name": "HarborLine Freight",
+      "region": "us_east",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 10000.0,
+      "reliability_score": 3,
+      "base_delay_days": 2
+    },
+    {
+      "carrier_id": "carrier-188",
+      "company_name": "Pacific Horizon Logistics",
+      "region": "us_west",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 5,
+      "base_delay_days": 0
+    },
+    {
+      "carrier_id": "carrier-123",
+      "company_name": "Sierra Freight Lines",
+      "region": "us_west",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 25000.0,
+      "reliability_score": 5,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-249",
+      "company_name": "Heartland Shipping",
+      "region": "us_central",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 10000.0,
+      "reliability_score": 3,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-828",
+      "company_name": "Prairie State Logistics",
+      "region": "us_central",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 10000.0,
+      "reliability_score": 2,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-506",
+      "company_name": "Rhein Cargo",
+      "region": "germany",
+      "supported_modes": [
+        "freight_rail"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 25000.0,
+      "reliability_score": 3,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-133",
+      "company_name": "Bavaria Freight",
+      "region": "germany",
+      "supported_modes": [
+        "freight_rail"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 25000.0,
+      "reliability_score": 2,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-831",
+      "company_name": "Hexagon Transit",
+      "region": "france",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 10000.0,
+      "reliability_score": 4,
+      "base_delay_days": 0
+    },
+    {
+      "carrier_id": "carrier-951",
+      "company_name": "Lyon Freight Solutions",
+      "region": "france",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 25000.0,
+      "reliability_score": 4,
+      "base_delay_days": 2
+    },
+    {
+      "carrier_id": "carrier-460",
+      "company_name": "DeltaLink Logistics",
+      "region": "netherlands",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 500.0,
+      "reliability_score": 3,
+      "base_delay_days": 0
+    },
+    {
+      "carrier_id": "carrier-233",
+      "company_name": "Tulip Freight Services",
+      "region": "netherlands",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 2,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-568",
+      "company_name": "Iberia Cargo Partners",
+      "region": "spain",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 10000.0,
+      "reliability_score": 5,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-962",
+      "company_name": "Sol Freight",
+      "region": "spain",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": true,
+      "max_weight_kg": 500.0,
+      "reliability_score": 2,
+      "base_delay_days": 2
+    },
+    {
+      "carrier_id": "carrier-223",
+      "company_name": "Lombardy Logistics",
+      "region": "italy",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 5,
+      "base_delay_days": 1
+    },
+    {
+      "carrier_id": "carrier-315",
+      "company_name": "Italia Cargo Line",
+      "region": "italy",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 2,
+      "base_delay_days": 2
+    },
+    {
+      "carrier_id": "carrier-526",
+      "company_name": "Vistula Freight",
+      "region": "poland",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "regional"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 4,
+      "base_delay_days": 2
+    },
+    {
+      "carrier_id": "carrier-965",
+      "company_name": "Mazovia Logistics",
+      "region": "poland",
+      "supported_modes": [
+        "flight",
+        "shipment",
+        "freight_rail",
+        "truck"
+      ],
+      "shipping_ranges": [
+        "domestic",
+        "intercontinental"
+      ],
+      "temperature_controlled": true,
+      "hazardous_certified": true,
+      "weekend_operations": false,
+      "max_weight_kg": 3000.0,
+      "reliability_score": 3,
+      "base_delay_days": 2
+    }
+  ]
+}

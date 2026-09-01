@@ -1,0 +1,1 @@
+Tulip Freight Services is a carrier in Netherlands. It supports flight, shipment, freight_rail, truck transport across domestic, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 3000.0 kg, reliability score is 2, and base delay is 1 day(s).

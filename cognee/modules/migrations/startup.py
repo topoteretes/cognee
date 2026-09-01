@@ -122,7 +122,7 @@ def _auto_migrations_enabled() -> bool:
     return os.getenv("ENABLE_AUTO_MIGRATIONS", "true").lower() not in ("false", "0", "no")
 
 
-def _build_alembic_config(script_location: Optional[str] = None):
+def _build_alembic_config(script_location: Optional[str] = None, engine=None):
     """Alembic Config for the relational schema migrations.
 
     ``script_location`` — the directory holding ``env.py`` + ``versions/`` —
@@ -132,6 +132,10 @@ def _build_alembic_config(script_location: Optional[str] = None):
     env var → package default. (The alembic.ini is always cognee's packaged,
     boilerplate one; only the script location moves.) ``configure_logger`` is off
     so env.py doesn't fileConfig()-reset the host process's loggers.
+
+    ``engine`` — the relational adapter to migrate, handed to env.py through
+    ``config.attributes``; ``None`` means the globally configured engine. An
+    adapter's ``create_database()`` passes itself, so it builds ITS database.
     """
     from alembic.config import Config
 
@@ -149,13 +153,17 @@ def _build_alembic_config(script_location: Optional[str] = None):
     config = Config(alembic_ini_path)
     config.set_main_option("script_location", script_location)
     config.attributes["configure_logger"] = False
+    if engine is not None:
+        config.attributes["relational_engine"] = engine
     return config
 
 
-async def run_relational_migrations(target: str = "head", script_location: Optional[str] = None):
+async def run_relational_migrations(
+    target: str = "head", script_location: Optional[str] = None, engine=None
+):
     """Apply the Alembic relational-schema migrations up to ``target`` (default
-    head), in-process. ``script_location`` overrides the Alembic scripts dir (see
-    ``_build_alembic_config``).
+    head), in-process. ``script_location`` overrides the Alembic scripts dir and
+    ``engine`` the database to migrate (see ``_build_alembic_config``).
 
     Run in a worker thread (env.py drives an async engine via asyncio.run, which
     needs a thread with no running loop), NOT a subprocess: env.py resolves the
@@ -168,7 +176,7 @@ async def run_relational_migrations(target: str = "head", script_location: Optio
         from alembic import command
 
         with _alembic_command_lock:
-            command.upgrade(_build_alembic_config(script_location), target)
+            command.upgrade(_build_alembic_config(script_location, engine), target)
 
     try:
         await asyncio.to_thread(_upgrade)

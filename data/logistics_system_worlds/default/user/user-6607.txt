@@ -1,0 +1,1 @@
+Ethan Cole is a enterprise customer in US West. Weekend delivery eligibility is True, and the default shipping range is intercontinental.

@@ -669,9 +669,8 @@ class SQLAlchemyAdapter:
         actually executed.
 
         ``script_location`` overrides the Alembic scripts directory (falls back
-        to ``COGNEE_ALEMBIC_PATH``, then cognee's packaged chain). The chain
-        resolves its engine via ``get_relational_engine()``, so call this on the
-        globally configured adapter — the one every cognee code path uses.
+        to ``COGNEE_ALEMBIC_PATH``, then cognee's packaged chain). The chain runs
+        against THIS adapter's database.
         """
         if self.engine.dialect.name == "sqlite":
             db_directory = path.dirname(self.db_path)
@@ -695,7 +694,7 @@ class SQLAlchemyAdapter:
         # Imported at call time: the migrations module sits above this adapter layer.
         from cognee.modules.migrations.startup import run_relational_migrations
 
-        await run_relational_migrations("head", script_location)
+        await run_relational_migrations("head", script_location, engine=self)
 
     async def delete_database(self):
         """

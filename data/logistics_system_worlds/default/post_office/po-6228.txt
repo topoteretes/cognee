@@ -1,0 +1,1 @@
+Netherlands Regional Sorting Center is a sorting_center in Netherlands. It supports domestic shipping, cold chain support is True, and hazardous materials support is True.

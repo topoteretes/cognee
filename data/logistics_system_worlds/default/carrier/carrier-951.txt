@@ -1,0 +1,1 @@
+Lyon Freight Solutions is a carrier in France. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 25000.0 kg, reliability score is 4, and base delay is 2 day(s).
