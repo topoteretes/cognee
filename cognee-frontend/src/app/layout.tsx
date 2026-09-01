@@ -9,6 +9,7 @@ import theme from "@/ui/theme/theme";
 import { Notifications } from "@mantine/notifications";
 import { OsPreferenceProvider } from "@/ui/layout/OsPreferenceContext";
 import QueryProvider from "@/modules/query/QueryProvider";
+import RuntimeConfigScript from "@/modules/config/RuntimeConfigScript";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,6 +20,11 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
+// RuntimeConfigScript below reads COGNEE_BACKEND_URL at render time. Without
+// this, the pages that Next can prerender would bake the value in at build
+// time and ignore whatever the container was started with.
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Cognee",
@@ -32,6 +38,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full" {...mantineHtmlProps}>
+      <head>
+        <RuntimeConfigScript />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased h-full`}
       >
