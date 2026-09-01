@@ -364,6 +364,88 @@ async def test_session_delete_failure_is_nonfatal(session_manager):
 
 
 @pytest.mark.asyncio
+async def test_data_delete_purges_unattributed_default_session_end_to_end(session_manager):
+    """The COG-6292 leak, wired through the real listing queries: an unscoped
+    search's turns live in the plain ``default_session`` row (``dataset_id``
+    NULL, no dataset suffix), which dataset-scoped listing can never find. A
+    data-level delete must discover that row via the real ``dataset_id IS
+    NULL`` query — no listing helpers mocked — and remove the turns that used
+    the deleted elements, so the session read path that feeds recall/search
+    history has nothing left to replay."""
+    from datetime import datetime, timezone
+    from uuid import UUID
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.session_lifecycle.models import SessionRecord
+
+    dataset_id = uuid4()
+    user_uuid = UUID(USER_ID)
+    unattributed_session = "default_session"
+
+    # Session-cache state: one turn contaminated by the deleted node, one clean.
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        unattributed_session,
+        question="What does the deleted note say?",
+        context="deleted note context",
+        answer="answer derived from the deleted note",
+        qa_id="qa_deleted_fact",
+        used_graph_element_ids={"node_ids": ["node_deleted"]},
+    )
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        unattributed_session,
+        question="Unrelated question",
+        context="c",
+        answer="unrelated answer",
+        qa_id="qa_clean",
+        used_graph_element_ids={"node_ids": ["node_other"]},
+    )
+
+    # Relational state: the suffix-less default-session row with no attribution.
+    now = datetime.now(timezone.utc)
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+    async with engine.get_async_session() as session:
+        session.add(
+            SessionRecord(
+                session_id=unattributed_session,
+                user_id=user_uuid,
+                dataset_id=None,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        await session.commit()
+
+    try:
+        with patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ):
+            result = await invalidate_sessions_for_deleted_data(
+                dataset_id, {"node_deleted"}, set(), user_id=user_uuid
+            )
+
+        # The unattributed session was found through the real query and only
+        # the contaminated turn was removed.
+        assert result["sessions_considered"] >= 1
+        assert result["qa_entries_deleted"] == 1
+        surviving = await session_manager.get_session(
+            user_id=USER_ID, session_id=unattributed_session
+        )
+        assert [entry.qa_id for entry in surviving] == ["qa_clean"]
+    finally:
+        async with engine.get_async_session() as session:
+            row = await session.get(SessionRecord, (unattributed_session, user_uuid))
+            if row:
+                await session.delete(row)
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_list_unattributed_sessions_returns_null_dataset_id_rows():
     """The listing query is dataset_id IS NULL, with no user filter."""
     from datetime import datetime, timezone

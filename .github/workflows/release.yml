@@ -200,6 +200,40 @@ jobs:
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
+      - name: Build and push Dev UI Docker Image
+        if: ${{ github.ref_name == 'dev' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: ./cognee-frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: cognee/cognee-ui:${{ needs.release-github.outputs.version }}
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-ui:buildcache
+          cache-to: type=registry,ref=cognee/cognee-ui:buildcache,mode=max
+
+      - name: Build and push Main UI Docker Image
+        if: ${{ github.ref_name == 'main' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: ./cognee-frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: |
+            cognee/cognee-ui:${{ needs.release-github.outputs.version }}
+            cognee/cognee-ui:latest
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-ui:buildcache
+          cache-to: type=registry,ref=cognee/cognee-ui:buildcache,mode=max
+
       - name: Check MCP lockfile ships the released cognee version
         # The MCP image installs cognee from PyPI via cognee-mcp/uv.lock, which
         # can only be re-locked after the new version is published — a manual

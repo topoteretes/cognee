@@ -591,7 +591,10 @@ Configuration:
 ONTOLOGY_RESOLVER=rdflib  # Default: uses rdflib and OWL files
 MATCHING_STRATEGY=fuzzy   # Default: fuzzy matching with 80% similarity
 ONTOLOGY_FILE_PATH=/path/to/your/ontology.owl  # Full path to ontology file
+ONTOLOGY_MODE=annotate    # Default: enrich only. strict drops entities with no ontology grounding
 ```
+
+`ONTOLOGY_MODE=strict` keeps an entity when either its type matches an ontology class or its name matches an individual, and drops the rest (plus their edges). It prunes only the graph — chunk text stays stored/embedded, so CHUNKS/RAG_COMPLETION can still surface dropped entities. It expects an ontology covering the corpus's vocabulary (a small ontology drops most entities; an aggregate dropped/retained count is logged), and an empty/missing ontology file with strict on is a hard error. The mode can also be set per call via `config={"ontology_config": {"ontology_mode": "strict", ...}}`.
 
 Implementation: `cognee/modules/ontology/`
 

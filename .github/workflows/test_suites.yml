@@ -224,6 +224,11 @@ jobs:
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
+  ui-docker-ci-test:
+    name: UI Docker CI test
+    uses: ./.github/workflows/frontend_docker_build_test.yml
+    secrets: inherit
+
   temporal-graph-tests:
     name: Temporal Graph Test
     needs: [ build-ci-env ]
@@ -271,6 +276,7 @@ jobs:
       mcp-test,
       docker-compose-test,
       docker-ci-test,
+      ui-docker-ci-test,
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
@@ -297,6 +303,7 @@ jobs:
                 "${{ needs.mcp-test.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
+                "${{ needs.ui-docker-ci-test.result }}" == "success" &&
                 "${{ needs.temporal-graph-tests.result }}" == "success" &&
                 "${{ needs.search-db-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" ]]; then

@@ -18,7 +18,10 @@ from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingCo
 from cognee.infrastructure.llm.config import LLMConfig
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -296,7 +299,13 @@ async def cognify(
         await run_migrations_and_block(datasets, user)
 
         resolved_resolver = get_configured_ontology_resolver(config)
-        config = {"ontology_config": {"ontology_resolver": resolved_resolver}}
+        resolved_ontology_mode = get_configured_ontology_mode(config)
+        config = {
+            "ontology_config": {
+                "ontology_resolver": resolved_resolver,
+                "ontology_mode": resolved_ontology_mode,
+            }
+        }
 
         if dry_run:
             if temporal_cognify:
