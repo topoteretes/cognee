@@ -136,7 +136,7 @@ async def test_manifest_survives_a_full_buffer_and_reports_the_drops(fake_captur
             capture.emit(KIND_SUMMARY_GENERATED, f"s{index}", payload_kind="text")
         assert hook._dropped == 3
         assert len(hook._buffer) == 2
-    # The manifest bypasses the bound: it is the record that reports the drops.
+    # The manifest gets headroom past the bound: it is the record that reports the drops.
     assert len(hook._buffer) == 3
 
     await capture.drain()
@@ -144,6 +144,20 @@ async def test_manifest_survives_a_full_buffer_and_reports_the_drops(fake_captur
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["run_id"] == str(run_id)
     assert manifest["payload"]["dropped_events"] == 3
+
+
+def test_manifests_are_bounded_past_queue_size(fake_capture_sink):
+    # A sync caller with no loop anywhere: nothing can flush, so every completed
+    # run's manifest stays buffered. Manifests bypass QUEUE_SIZE, but not 2x it.
+    hook._configure(queue_size=4)
+
+    for index in range(50):
+        with capture.run_scope(f"run-{index}", kind="pipeline"):
+            pass
+
+    assert len(hook._buffer) == 2 * hook.QUEUE_SIZE
+    assert hook._dropped == 50 - 2 * hook.QUEUE_SIZE
+    assert not hook._flushers
 
 
 @pytest.mark.asyncio

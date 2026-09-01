@@ -284,8 +284,10 @@ async def run_tasks(
                     tokens_out=run_usage.tokens_out,
                 )
 
-                # A pipeline run is seconds-to-minutes and LLM-bound, so one sink
-                # write is noise here; drain() swallows its own exceptions.
+                # A pipeline run is seconds-to-minutes and LLM-bound, so a drain
+                # is noise here: it returns within its timeout even under a
+                # wedged sink (leftovers stay with the flusher / the atexit
+                # hook) and swallows its own exceptions.
                 if eval_capture.is_active():
                     if capture_scope is not None:
                         capture_scope.finish()
@@ -335,6 +337,7 @@ async def run_tasks(
                     tokens_out=run_usage.tokens_out,
                 )
 
+                # Same bound as on the success path: within drain()'s timeout.
                 if eval_capture.is_active():
                     if capture_scope is not None:
                         capture_scope.finish()

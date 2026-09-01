@@ -8,12 +8,20 @@ background flusher or from ``drain()``/``shutdown()``, never inline from
 Contract for implementations: usable from any loop/thread — two flushers on
 different loops (run_sync's thread, the dataset-queue reaper thread) can call a
 sink concurrently — so no loop-bound clients. ``StorageManager`` Local/S3
-qualify.
+qualify. Delivery is at-least-once: a flush cancelled or cut off by
+``drain()``'s budget mid-write is re-buffered and written again later, so a
+sink may receive the same records twice (``StorageSink`` never overwrites —
+blob names are collision-free — so consumers that need exactly-once counts
+should dedupe on ``(run_id, kind, ts)``). Sinks must raise ``Exception``
+subclasses only; a ``BaseException`` from a sink escapes the flusher's
+never-raise guards by design.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import functools
 import gzip
 import io
 import itertools
@@ -35,20 +43,27 @@ T = TypeVar("T")
 async def run_off_loop(func: Callable[..., T], /, *args: Any) -> T:
     """Run pure-CPU work in a worker thread, inline once the executor is gone.
 
-    Serialization and gzip run via ``asyncio.to_thread`` so they never freeze
-    concurrent coroutines. Inside atexit handlers ``threading._shutdown()`` has
-    already run and the default executor refuses new work with
-    ``RuntimeError`` ("cannot schedule new futures after interpreter
-    shutdown") — raised at submit time, before ``func`` starts. Falling back to
-    an inline call there is what lets the atexit drain persist the batch it
-    popped instead of silently losing it. Shared by the flusher and
-    ``StorageSink``. (Should ``func`` itself raise ``RuntimeError``, the inline
-    retry re-raises it.)
+    Serialization and gzip run in the default executor (the body of
+    ``asyncio.to_thread``) so they never freeze concurrent coroutines. Inside
+    atexit handlers ``threading._shutdown()`` has already run and the executor
+    refuses new work with ``RuntimeError`` ("cannot schedule new futures after
+    interpreter shutdown") — raised at SUBMIT time, before ``func`` starts.
+    Falling back to an inline call there is what lets the atexit drain persist
+    the batch it popped instead of silently losing it. Shared by the flusher
+    and ``StorageSink``.
+
+    Only the submit-time failure triggers the fallback: an error raised by
+    ``func`` itself in the worker thread — a ``RecursionError`` (a
+    ``RuntimeError`` subclass) on a pathologically deep payload, say —
+    propagates instead of being retried on the event loop.
     """
+    loop = asyncio.get_running_loop()
+    context = contextvars.copy_context()
     try:
-        return await asyncio.to_thread(func, *args)
+        future = loop.run_in_executor(None, functools.partial(context.run, func, *args))
     except RuntimeError:
         return func(*args)
+    return await future
 
 
 # Process-wide blob sequence: together with time_ns and pid this makes blob

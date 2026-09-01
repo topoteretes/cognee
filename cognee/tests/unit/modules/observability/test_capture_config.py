@@ -9,9 +9,11 @@ from pathlib import Path
 import pytest
 
 from cognee.base_config import get_base_config
+from cognee.modules.observability import capture
 from cognee.modules.observability.capture import (
     CaptureConfig,
     get_capture_config,
+    hook,
     prompt_file_fingerprint,
     prompt_fingerprint,
 )
@@ -98,6 +100,33 @@ def test_sample_rate_out_of_range_raises(clean_capture_env, monkeypatch):
 def test_sink_timeout_must_be_positive(clean_capture_env):
     with pytest.raises(ValueError, match=r"SINK_TIMEOUT_S must be positive, got 0\.0"):
         CaptureConfig(cognee_capture_sink_timeout_s=0.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("cognee_capture_queue_size", 0, r"QUEUE_SIZE must be at least 1, got 0"),
+        ("cognee_capture_batch_size", 0, r"BATCH_SIZE must be at least 1, got 0"),
+        ("cognee_capture_batch_size", -3, r"BATCH_SIZE must be at least 1, got -3"),
+        ("cognee_capture_flush_interval_s", 0.0, r"FLUSH_INTERVAL_S must be positive, got 0\.0"),
+        ("cognee_capture_flush_interval_s", -1.0, r"FLUSH_INTERVAL_S must be positive, got -1\.0"),
+    ],
+)
+def test_degenerate_queue_knobs_are_rejected(clean_capture_env, field, value, message):
+    # A batch size of 0 made the flusher pop nothing and spin without yielding.
+    with pytest.raises(ValueError, match=message):
+        CaptureConfig(**{field: value})
+
+
+def test_bad_batch_size_in_env_disables_capture_instead_of_freezing(clean_capture_env, monkeypatch):
+    monkeypatch.setenv("COGNEE_CAPTURE_ENABLED", "true")
+    monkeypatch.setenv("COGNEE_CAPTURE_BATCH_SIZE", "0")
+    get_capture_config.cache_clear()
+
+    # The bad knob is rejected at initialization: capture stays off and the
+    # cached knobs keep their defaults, so the observed operation is unaffected.
+    assert capture.is_active() is False
+    assert hook.BATCH_SIZE == 64
 
 
 def test_prompt_fingerprints(tmp_path):

@@ -49,6 +49,21 @@ class CaptureConfig(BaseSettings):
                 "COGNEE_CAPTURE_SINK_TIMEOUT_S must be positive, "
                 f"got {self.cognee_capture_sink_timeout_s}"
             )
+        # A batch size of 0 would make every flush pop nothing — and a flusher
+        # that pops nothing without suspending monopolises its event loop.
+        if self.cognee_capture_queue_size < 1:
+            raise ValueError(
+                f"COGNEE_CAPTURE_QUEUE_SIZE must be at least 1, got {self.cognee_capture_queue_size}"
+            )
+        if self.cognee_capture_batch_size < 1:
+            raise ValueError(
+                f"COGNEE_CAPTURE_BATCH_SIZE must be at least 1, got {self.cognee_capture_batch_size}"
+            )
+        if self.cognee_capture_flush_interval_s <= 0:
+            raise ValueError(
+                "COGNEE_CAPTURE_FLUSH_INTERVAL_S must be positive, "
+                f"got {self.cognee_capture_flush_interval_s}"
+            )
 
         if not self.cognee_capture_dir:
             # Lazy on purpose — see the module docstring.

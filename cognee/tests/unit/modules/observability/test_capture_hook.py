@@ -33,6 +33,7 @@ from cognee.modules.observability.capture import (
     get_capture_config,
     hook,
 )
+from cognee.modules.observability.capture.sinks import run_off_loop
 from cognee.shared.data_models import KnowledgeGraph
 
 pytestmark = pytest.mark.usefixtures("capture_reset")
@@ -116,6 +117,25 @@ def test_off_by_default_costs_nothing(monkeypatch):
     assert capture.current_scope() is None
 
 
+def test_emit_before_any_is_active_never_initializes(monkeypatch):
+    # With this set, an emit() that lazily initialized would auto-register a
+    # sink and buffer the event; the contract is that only is_active() may.
+    monkeypatch.setenv("COGNEE_CAPTURE_ENABLED", "true")
+
+    def forbidden():
+        raise AssertionError("emit() must never reach _ensure_initialized()")
+
+    monkeypatch.setattr(hook, "_ensure_initialized", forbidden)
+
+    capture.emit(KIND_SUMMARY_GENERATED, _Explosive())
+    capture.emit(KIND_RUN_MANIFEST, {"kind": "pipeline"}, payload_kind="json")
+
+    assert hook._initialized is False
+    assert hook._sink is None
+    assert not hook._buffer
+    assert not hook._flushers
+
+
 def test_auto_registers_storage_sink_from_env(monkeypatch, tmp_path):
     monkeypatch.setenv("COGNEE_CAPTURE_ENABLED", "true")
     monkeypatch.setenv("DATA_ROOT_DIRECTORY", str(tmp_path))
@@ -177,6 +197,7 @@ def test_register_capture_sink_keeps_the_caller_sink_but_loads_env_knobs(monkeyp
 @pytest.mark.asyncio
 async def test_drain_delivers_all_payload_kinds(fake_capture_sink):
     run_id = uuid4()
+    other_run = uuid4()
     graph = _graph(["alice"])
 
     capture.emit(KIND_EXTRACTION_CHUNK_GRAPH, graph, run_id=run_id)
@@ -188,22 +209,28 @@ async def test_drain_delivers_all_payload_kinds(fake_capture_sink):
         stage="fuzzy",
     )
     capture.emit(KIND_SUMMARY_GENERATED, "a summary", payload_kind="text", run_id=run_id)
+    # Same kind under another run: must land in its own sink call.
+    capture.emit(KIND_SUMMARY_GENERATED, "other run", payload_kind="text", run_id=other_run)
 
     await capture.drain()
 
     records = fake_capture_sink.records
-    assert len(records) == 3
-    by_kind = {record["kind"]: record for record in records}
+    assert len(records) == 4
+    by_kind = {record["kind"]: record for record in records if record["run_id"] == str(run_id)}
     assert by_kind[KIND_EXTRACTION_CHUNK_GRAPH]["payload"] == graph.model_dump(mode="json")
     assert isinstance(by_kind[KIND_EXTRACTION_CHUNK_GRAPH]["payload"], dict)
     assert by_kind[KIND_EXTRACTION_FUZZY_MATCH]["payload"] == {"matches": [{"a": "b"}]}
     assert by_kind[KIND_EXTRACTION_FUZZY_MATCH]["stage"] == "fuzzy"
     assert by_kind[KIND_SUMMARY_GENERATED]["payload"] == "a summary"
-    assert all(record["run_id"] == str(run_id) for record in records)
+    [other] = [record for record in records if record["run_id"] == str(other_run)]
+    assert other["payload"] == "other run"
     assert all(record["dataset_id"] is None for record in records)
     assert all(isinstance(record["ts"], float) for record in records)
-    # Sink batches are grouped by (run_id, kind).
-    assert all(len({r["kind"] for r in call}) == 1 for call in fake_capture_sink.calls)
+    # Sink batches are grouped by (run_id, kind): four groups, one call each.
+    assert len(fake_capture_sink.calls) == 4
+    assert all(
+        len({(r["run_id"], r["kind"]) for r in call}) == 1 for call in fake_capture_sink.calls
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -369,14 +396,23 @@ async def test_emit_never_serializes_on_the_hot_path(fake_capture_sink):
 async def test_model_dump_snapshot_survives_later_mutation(fake_capture_sink):
     graph = _graph(["alice", "bob"])
 
-    capture.emit(KIND_EXTRACTION_CHUNK_GRAPH, graph.model_dump(mode="json"), payload_kind="json")
+    capture.emit(
+        KIND_EXTRACTION_CHUNK_GRAPH,
+        graph.model_dump(mode="json"),
+        payload_kind="json",
+        stage="snapshot",
+    )
+    # Negative control: by reference, emit() holds the object and never copies
+    # (a "helpful" deep copy inside emit() is forbidden on cost grounds).
+    capture.emit(KIND_EXTRACTION_CHUNK_GRAPH, graph, payload_kind="pydantic", stage="reference")
     for node in graph.nodes:
         node.name = node.name.upper()
 
     await capture.drain()
 
-    [record] = fake_capture_sink.records
-    assert [node["name"] for node in record["payload"]["nodes"]] == ["alice", "bob"]
+    by_stage = {record["stage"]: record for record in fake_capture_sink.records}
+    assert [n["name"] for n in by_stage["snapshot"]["payload"]["nodes"]] == ["alice", "bob"]
+    assert [n["name"] for n in by_stage["reference"]["payload"]["nodes"]] == ["ALICE", "BOB"]
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +461,7 @@ async def test_failing_sink_is_logged_at_debug_and_next_batch_delivered(monkeypa
 
     assert [call[0]["payload"] for call in calls] == ["one", "two"]
     fake_logger.debug.assert_any_call("capture sink failed (%s)", ANY)
-    assert hook._in_flight == 0
+    assert hook._in_flight_total() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +531,7 @@ async def test_drain_waits_for_a_batch_the_flusher_is_serializing(
         capture.emit(KIND_SUMMARY_GENERATED, f"e{index}", payload_kind="text")
     await _wait_until(entered.is_set)  # flusher popped 4, parked in the worker thread
     assert len(hook._buffer) == 4
-    assert hook._in_flight == 1
+    assert hook._in_flight_total() == 4  # counted per event, from pop to delivery
 
     async def release_later():
         await asyncio.sleep(0.1)
@@ -507,7 +543,7 @@ async def test_drain_waits_for_a_batch_the_flusher_is_serializing(
 
     # Both halves landed before drain returned: its own 4 inline, the flusher's 4 awaited.
     assert sorted(r["payload"] for r in fake_capture_sink.records) == [f"e{i}" for i in range(8)]
-    assert hook._in_flight == 0
+    assert hook._in_flight_total() == 0
 
 
 @pytest.mark.asyncio
@@ -529,7 +565,7 @@ async def test_shutdown_recovers_a_batch_cancelled_mid_serialization(
     assert sorted(r["payload"] for r in fake_capture_sink.records) == [f"e{i}" for i in range(8)]
     assert not hook._buffer
     assert not hook._flushers
-    assert hook._in_flight == 0
+    assert hook._in_flight_total() == 0
 
 
 @pytest.mark.asyncio
@@ -575,9 +611,9 @@ async def test_hung_sink_write_times_out_and_the_flusher_recovers(monkeypatch):
 
     capture.emit(KIND_SUMMARY_GENERATED, "e0", payload_kind="text")
     capture.emit(KIND_SUMMARY_GENERATED, "e1", payload_kind="text")
-    await _wait_until(lambda: hook._in_flight == 1)
+    await _wait_until(lambda: hook._in_flight_total() == 2)
     # The sink timeout, not a drain, frees the flusher.
-    await _wait_until(lambda: hook._in_flight == 0)
+    await _wait_until(lambda: hook._in_flight_total() == 0)
     fake_logger.debug.assert_any_call("capture sink failed (%s)", ANY)
 
     capture.emit(KIND_SUMMARY_GENERATED, "e2", payload_kind="text")
@@ -611,9 +647,197 @@ async def test_flush_failure_before_the_sink_is_accounted_not_requeued(monkeypat
     # forever; the batch is dropped and counted instead of vanishing silently.
     assert not hook._buffer
     assert hook._dropped == 1
-    assert hook._in_flight == 0
+    assert hook._in_flight_total() == 0
     assert delivered == []
     fake_logger.debug.assert_any_call("capture flush failed, %d event(s) dropped (%s)", 1, ANY)
+
+
+@pytest.mark.asyncio
+async def test_events_orphaned_by_clearing_the_sink_are_counted_as_dropped(fake_capture_sink):
+    capture.emit(KIND_SUMMARY_GENERATED, "one", payload_kind="text")
+    capture.emit(KIND_SUMMARY_GENERATED, "two", payload_kind="text")
+    capture.register_capture_sink(None)
+
+    await capture.drain()
+
+    # Nothing to deliver to; the loss is accounted, not hidden.
+    assert not hook._buffer
+    assert fake_capture_sink.records == []
+    assert hook._dropped == 2
+
+
+@pytest.mark.asyncio
+async def test_run_off_loop_does_not_retry_a_worker_failure_inline(monkeypatch):
+    calls = 0
+
+    def deep(_payload):
+        nonlocal calls
+        calls += 1
+        raise RecursionError("maximum recursion depth exceeded")
+
+    with pytest.raises(RecursionError):
+        await run_off_loop(deep, "payload")
+    # RecursionError is a RuntimeError subclass: a broad `except RuntimeError`
+    # around the whole call would re-run the failing work on the event loop.
+    assert calls == 1
+
+    # The submit-time fallback (executor gone at interpreter exit) still works.
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("cannot schedule new futures after interpreter shutdown")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", refuse)
+    assert await run_off_loop(lambda x: x * 2, 21) == 42
+
+
+# ---------------------------------------------------------------------------
+# drain()'s budget is authoritative inside a batch; stranded loops never pin it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_drain_deadline_bounds_sink_writes_inside_a_batch():
+    calls: list[list[dict]] = []
+
+    async def slow_sink(records):
+        calls.append(records)
+        await asyncio.sleep(1.0)  # every write takes 1 s (S3 under partition)
+
+    capture.register_capture_sink(slow_sink)
+    hook._configure(batch_size=64, flush_interval_s=60.0)  # SINK_TIMEOUT_S stays at 30 s
+
+    # Three (run_id, kind) groups in ONE batch -> three sequential sink writes.
+    for index in range(3):
+        capture.emit(
+            KIND_SUMMARY_GENERATED, f"g{index}", payload_kind="text", run_id=f"run-{index}"
+        )
+
+    started = time.monotonic()
+    await capture.drain(timeout=0.2)
+    elapsed = time.monotonic() - started
+
+    # Checked only between batches, this would take 3 x min(1 s, SINK_TIMEOUT_S).
+    assert elapsed < 0.6, elapsed
+    assert len(calls) == 1  # the budget ran out during the first write
+    # Nothing is lost: the cut-off group and the two never started are back, in order.
+    assert [event.payload for event in hook._buffer] == ["g0", "g1", "g2"]
+    assert hook._in_flight_total() == 0
+    assert hook._dropped == 0
+
+
+def test_a_batch_stranded_on_a_dead_loop_does_not_pin_later_drains():
+    async def wedged_sink(records):
+        await asyncio.Event().wait()  # never returns
+
+    capture.register_capture_sink(wedged_sink)
+    hook._configure(batch_size=1, flush_interval_s=60.0)
+    stranded = asyncio.new_event_loop()
+
+    async def emit_and_return():
+        capture.emit(KIND_SUMMARY_GENERATED, "stranded", payload_kind="text")  # BATCH_SIZE wake
+        await asyncio.sleep(0.05)  # the flusher popped it and is parked inside the sink
+
+    # run_until_complete returns with the flusher mid-write: the batch is stranded.
+    stranded.run_until_complete(emit_and_return())
+    [flusher] = hook._flushers.values()
+    assert flusher.loop is stranded and not flusher.task.done()
+    assert hook._in_flight_total() == 1
+
+    # (1) Stopped, not closed: a fresh loop's drain must not wait for it.
+    started = time.monotonic()
+    asyncio.run(capture.drain(timeout=1.0))
+    assert time.monotonic() - started < 0.5
+    assert hook._in_flight_total() == 1  # still owned by the stranded loop, not lost
+
+    # (2) Closed without cancelling (pytest-asyncio 0.21 style): the batch is
+    # gone for good, accounted as dropped, and still nobody waits for it.
+    flusher.task._log_destroy_pending = False  # stranded on purpose; no GC noise
+    stranded.close()
+    started = time.monotonic()
+    asyncio.run(capture.drain(timeout=1.0))
+    assert time.monotonic() - started < 0.5
+    assert hook._in_flight_total() == 0
+    assert hook._dropped == 1
+    assert not hook._flushers
+
+
+def test_thread_emits_wake_a_running_loop_not_a_stopped_one():
+    got: list[dict] = []
+
+    async def sink(records):
+        got.extend(records)
+
+    capture.register_capture_sink(sink)
+    hook._configure(batch_size=4, flush_interval_s=60.0)
+    stale = asyncio.new_event_loop()
+
+    async def open_scope_only():
+        with capture.run_scope("stale", kind="pipeline"):
+            pass  # scope entry started a flusher on this loop
+
+    stale.run_until_complete(open_scope_only())
+    # Stopped, not closed: it stays registered, first in insertion order.
+    assert next(iter(hook._flushers)) is stale
+
+    async def live_run():
+        with capture.run_scope("live", kind="pipeline"):
+
+            def worker():
+                for index in range(8):
+                    capture.emit(KIND_SUMMARY_GENERATED, f"t{index}", payload_kind="text")
+
+            thread = threading.Thread(target=worker)
+            thread.start()
+            thread.join()
+            # No drain and a 60 s interval: only the BATCH_SIZE wake can deliver
+            # these, and only if it reached THIS loop's flusher, not the stale one
+            # (a wake scheduled on a stopped loop never runs).
+            await _wait_until(lambda: len(got) >= 8, timeout=1.0)
+
+    try:
+        asyncio.run(live_run())
+        assert hook._flushers[stale].wake_pending is False
+    finally:
+        stale_flusher = hook._flushers.get(stale)
+        if stale_flusher is not None:
+            hook._cancel_flusher(stale_flusher, wait=True)
+        stale.close()
+
+
+def test_flusher_burst_loop_terminates_when_a_batch_pops_nothing(monkeypatch, fake_capture_sink):
+    # Bypass the clamp on purpose: this is the shape a misconfigured (or raced)
+    # flush takes — _flush_one_batch pops nothing and returns without suspending.
+    monkeypatch.setattr(hook, "BATCH_SIZE", 0)
+    finished = threading.Event()
+    outcome: dict = {}
+
+    async def scenario():
+        capture.emit(KIND_SUMMARY_GENERATED, "x", payload_kind="text")  # the wake fires at once
+        # A flusher spinning without yielding would never let this sleep return.
+        await asyncio.sleep(0.05)
+        started = time.monotonic()
+        await capture.drain(timeout=0.5)
+        outcome["drain_s"] = time.monotonic() - started
+        outcome["buffered"] = len(hook._buffer)
+
+    def runner():
+        try:
+            asyncio.run(scenario())
+        finally:
+            finished.set()
+
+    threading.Thread(target=runner, daemon=True).start()
+    # Off-thread with a hard wait so a regression fails instead of hanging pytest.
+    assert finished.wait(timeout=5.0), "the flusher monopolised its event loop"
+    assert outcome["drain_s"] < 0.2  # stopped on the empty pop, not at its deadline
+    assert outcome["buffered"] == 1  # inert, not fatal: nothing delivered, nothing lost
+
+
+def test_configure_clamps_degenerate_knobs():
+    hook._configure(queue_size=0, batch_size=-1, flush_interval_s=0.0)
+
+    assert hook.QUEUE_SIZE == 1
+    assert hook.BATCH_SIZE == 1
+    assert hook.FLUSH_INTERVAL_S == hook._MIN_FLUSH_INTERVAL_S
 
 
 # ---------------------------------------------------------------------------

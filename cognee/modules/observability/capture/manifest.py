@@ -86,8 +86,9 @@ class RunScope:
         closes (run_tasks: the scope encloses the terminal ``yield``) calls it
         right before the drain so the run's most important record is covered
         by that drain rather than left to the interval tick or the atexit hook.
-        Manifests bypass the queue bound: an overflowing run must still report
-        ``dropped_events``.
+        Manifests get headroom past the queue bound (up to ``2 * QUEUE_SIZE``
+        buffered events in total): an overflowing run must still report
+        ``dropped_events``, but the buffer stays finite under a wedged sink.
         """
         if self.finished:
             return
@@ -95,7 +96,7 @@ class RunScope:
         if not self.sampled:
             return
         try:
-            hook._emit_unbounded(
+            hook._emit_manifest(
                 KIND_RUN_MANIFEST,
                 self.to_manifest(),
                 payload_kind="json",
