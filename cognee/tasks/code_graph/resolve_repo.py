@@ -133,7 +133,19 @@ async def resolve_repo_source(
     works but is the legacy path.
     """
     if not is_remote_repo(spec):
-        path = Path(spec).expanduser()
+        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+        # Repo specs can arrive from outside the SDK (CLI arguments, API
+        # callers), so local paths take the same allowlist containment check
+        # as ingestion's local-file reads instead of dereferencing an
+        # arbitrary path.
+        try:
+            path = resolve_local_path(spec)
+        except ValueError:
+            raise CodeRepositoryError(
+                message=f"Repository path '{spec}' is outside the allowed local roots. "
+                "Add its root to COGNEE_ALLOWED_LOCAL_FILE_ROOTS to index it."
+            )
         if not path.is_dir():
             raise CodeRepositoryError(
                 message=f"Repository path '{spec}' is not a directory. "
@@ -148,6 +160,32 @@ async def resolve_repo_source(
         )
 
     url = str(spec)
+
+    # SSRF: the URL is caller-supplied and git runs server-side, so an http(s)
+    # remote must clear the same outbound check add()'s http items already clear --
+    # resolve the host and refuse internal/reserved addresses. Without it,
+    # repositories=['http://169.254.169.254/...'] issues the request from inside the
+    # VPC and git's stderr (returned to the caller below) distinguishes open ports,
+    # live hosts and auth failures: an authenticated internal port scanner.
+    #
+    # ssh:// and git@host: are deliberately not routed through it: that helper only
+    # understands http/https, and internal git servers over SSH are a legitimate and
+    # common setup. Non-http, non-ssh transports (file://, ext::, which git would
+    # execute) never reach here -- they do not match _REMOTE_PREFIXES and are handled
+    # as local paths above.
+    if url.lower().startswith(("http://", "https://")):
+        from cognee.tasks.web_scraper.ssrf_protection import (
+            SSRFProtectionError,
+            validate_outbound_url,
+        )
+
+        try:
+            await validate_outbound_url(url)
+        except SSRFProtectionError as error:
+            raise CodeRepositoryError(
+                message=f"Refusing to clone '{redact_repo_spec(url)}': {error}"
+            ) from error
+
     # Slug, remote, logs, and errors all use the credential-free URL: tokens
     # in the userinfo are short-lived, so persisting one anywhere would both
     # leak it and (via the slug) mint a new clone dir per sync.
@@ -155,13 +193,23 @@ async def resolve_repo_source(
     has_credentials = clean_url != url
 
     def _scrub(text: str) -> str:
-        # git error output often echoes the URL, token included.
-        return text.replace(url, clean_url) if has_credentials else text
+        # git error output often echoes the URL, token included. Strip the
+        # exact spec first, then any other URL userinfo git may print (e.g.
+        # a redirect target or a credential-helper rewrite of the URL).
+        if has_credentials:
+            text = text.replace(url, clean_url)
+        return re.sub(r"://[^/\s@]+@", "://", text)
 
     auth_env = _credential_env(credentials) if credentials else None
 
-    target = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
-    target = target / _clone_slug(clean_url)
+    base = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
+    target = base / _clone_slug(clean_url)
+    # The slug regex already forbids separators and dot-runs; keep an
+    # explicit containment check so a clone can never land outside the
+    # clones directory regardless of what the URL decomposed into.
+    base_real = os.path.realpath(base)
+    if not os.path.realpath(target).startswith(base_real.rstrip(os.sep) + os.sep):
+        raise CodeRepositoryError(message=f"Could not derive a safe clone name for {clean_url}.")
 
     if (target / ".git").is_dir():
         # Legacy URL-embedded credentials: fetch from the explicit URL
@@ -179,7 +227,16 @@ async def resolve_repo_source(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Cloning %s into %s", clean_url, target)
-    returncode, stderr = await _run_git(["clone", "--depth", "1", url, str(target)], env=auth_env)
+    # core.symlinks=false: git otherwise materializes symlinks committed in the
+    # remote, and nothing re-validates paths under the clone afterwards -- a repo
+    # containing '.enola -> ~/.ssh' would have the enola snapshot written through it,
+    # and 'mod.py -> /proc/self/environ' would be read into the code graph. With this
+    # set, git writes each symlink as a regular file containing its target path.
+    # Passed via -c on clone so it is persisted into the new repo's config and the
+    # later 'git pull --ff-only' honours it too.
+    returncode, stderr = await _run_git(
+        ["clone", "-c", "core.symlinks=false", "--depth", "1", url, str(target)], env=auth_env
+    )
     if returncode != 0:
         raise CodeRepositoryError(
             message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"

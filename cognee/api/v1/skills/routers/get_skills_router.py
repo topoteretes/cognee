@@ -99,6 +99,13 @@ def get_skills_router() -> APIRouter:
 
         JSON-native companion to ``POST /api/v1/remember`` (content_type=skills),
         for no-code clients. Reuses the same skills ingestion pipeline.
+
+        ## Request Parameters
+        - **dataset_id** (Optional[UUID]): Target dataset UUID (alternative to dataset_name).
+        - **dataset_name** (Optional[str]): Target dataset name (created if needed). Required unless
+          dataset_id is given.
+        - **skill_name** (Optional[str]): Name/slug for the skill (defaults to 'skill').
+        - **skills_text** (str): Inline SKILL.md markdown to ingest as a Skill node.
         """
         if not payload.dataset_name and payload.dataset_id is None:
             return JSONResponse(
@@ -153,7 +160,16 @@ def get_skills_router() -> APIRouter:
         offset: int = Query(default=0, ge=0, description="Number of skills to skip."),
         user: User = Depends(get_authenticated_user),
     ) -> list[dict]:
-        """Return the skills available in an authorized dataset, with publisher metadata."""
+        """Return the skills available in an authorized dataset, with publisher metadata.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID to scope the skills to. List your datasets via GET
+          /api/v1/datasets to find it.
+        - **include_inactive** (bool): Include skills whose is_active flag is false. Defaults to
+          False.
+        - **limit** (int): Max skills to return. Defaults to 200.
+        - **offset** (int): Number of skills to skip. Defaults to 0.
+        """
         send_telemetry(
             "Skills List API Endpoint Invoked",
             user,
@@ -196,7 +212,14 @@ def get_skills_router() -> APIRouter:
         dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
         user: User = Depends(get_authenticated_user),
     ):
-        """Return one skill, including its full procedure body."""
+        """Return one skill, including its full procedure body.
+
+        ## Path Parameters
+        - **skill_id** (str): ID of the skill (from GET /api/v1/skills/).
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the skill belongs to.
+        """
         from cognee.api.v1.skills.list_skills import get_skill
 
         try:
@@ -227,7 +250,14 @@ def get_skills_router() -> APIRouter:
         dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
         user: User = Depends(get_authenticated_user),
     ):
-        """Delete one skill (graph node + embeddings) from an authorized dataset."""
+        """Delete one skill (graph node + embeddings) from an authorized dataset.
+
+        ## Path Parameters
+        - **skill_id** (str): ID of the skill (from GET /api/v1/skills/).
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the skill belongs to.
+        """
         from cognee.api.v1.skills.list_skills import delete_skill
 
         try:

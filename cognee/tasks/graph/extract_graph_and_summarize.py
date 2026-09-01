@@ -1,4 +1,4 @@
-from typing import List, Type, Optional
+from typing import List, Literal, Type, Optional
 from pydantic import BaseModel
 import asyncio
 
@@ -16,6 +16,7 @@ async def extract_graph_and_summarize(
     custom_prompt: Optional[str] = None,
     ctx=None,
     summarization_model: Type[BaseModel] = None,
+    chunk_attachment: Optional[Literal["direct", "all"]] = None,
     **kwargs,
 ) -> List[TextSummary]:
     result_chunks = await asyncio.gather(
@@ -25,6 +26,7 @@ async def extract_graph_and_summarize(
             config=config,
             custom_prompt=custom_prompt,
             ctx=ctx,
+            chunk_attachment=chunk_attachment,
             **kwargs,
         ),
         summarize_text(

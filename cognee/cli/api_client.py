@@ -319,6 +319,7 @@ class CogneeApiClient:
         session_id: Optional[str] = None,
         node_name: Optional[list[str]] = None,
         only_context: bool = False,
+        context_format: str = "context",
         verbose: bool = False,
     ) -> list:
         # search_type=None opts the server into auto-routing (session-only
@@ -328,6 +329,7 @@ class CogneeApiClient:
             "search_type": search_type,
             "top_k": top_k,
             "only_context": only_context,
+            "context_format": context_format,
             "verbose": verbose,
         }
         if datasets:

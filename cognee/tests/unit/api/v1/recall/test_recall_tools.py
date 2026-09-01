@@ -254,6 +254,12 @@ async def test_invalid_tools_trigger_rejected(api_recall_mod):
 
 
 @pytest.mark.asyncio
+async def test_invalid_context_format_rejected(api_recall_mod):
+    with pytest.raises(CogneeValidationError, match="context_format"):
+        await api_recall_mod.recall(query_text="q", only_context=True, context_format="bogus")
+
+
+@pytest.mark.asyncio
 async def test_remote_client_forwards_tool_connections(monkeypatch, api_recall_mod):
     captured = {}
 

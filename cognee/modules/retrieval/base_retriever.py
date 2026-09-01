@@ -18,6 +18,12 @@ class BaseRetriever(ABC):
     # for search types whose contract is explicitly non-generative.
     supports_session_turn_preparation = True
 
+    # Whether get_completion_from_context sends exactly one prompt built from this
+    # retriever's (user_prompt_path, system_prompt_path). only_context previews render
+    # that pair; retrievers that never prompt an LLM, or that run several rounds on
+    # other templates, opt out so a preview does not invent a prompt for them.
+    supports_prompt_preview = True
+
     @abstractmethod
     async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
         """

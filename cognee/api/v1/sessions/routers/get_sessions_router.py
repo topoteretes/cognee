@@ -341,6 +341,16 @@ def get_sessions_router() -> APIRouter:
         Response envelope mirrors ``GET /api/v1/sessions``, with each
         session additionally carrying ``agent_type``, ``agent_source``,
         ``agent_session_name``, and ``origin_function``.
+
+        ## Query Parameters
+        - **descending** (bool): Sort in descending order. Defaults to True.
+        - **limit** (int): Page size (max 500). Defaults to 50.
+        - **offset** (int): Rows to skip for pagination. Defaults to 0.
+        - **order_by** (str): Column to sort by. Defaults to 'last_activity_at'.
+        - **range** (Literal['24h', '7d', '30d', 'all']): Time window filtered on last_activity_at:
+          24h, 7d, 30d, or all. Defaults to '30d'.
+        - **status** (Optional[str]): Effective-status filter: running, completed, failed, or
+          abandoned.
         """
         since = _range_since(range)
         try:
@@ -382,6 +392,10 @@ def get_sessions_router() -> APIRouter:
         member's spend. A regular member — or anyone with no tenant,
         i.e. single-user/local mode — just keeps the base scope rather
         than being denied outright.
+
+        ## Query Parameters
+        - **range** (Literal['24h', '7d', '30d', 'all']): Time window filtered on last_activity_at:
+          24h, 7d, 30d, or all. Defaults to '30d'.
         """
         since = _range_since(range)
         try:
@@ -408,6 +422,12 @@ def get_sessions_router() -> APIRouter:
         ),
         user: User = Depends(get_authenticated_user),
     ):
+        """Get session detail — GET /api/v1/sessions/{session_id}.
+
+        ## Path Parameters
+        - **session_id** (str): Client-supplied session identifier; the same value passed as
+          session_id to POST /api/v1/remember.
+        """
         permitted = await get_permitted_dataset_ids(user.id)
         visible_ids = await get_visible_user_ids(user.id)
         row = await get_session_row(
