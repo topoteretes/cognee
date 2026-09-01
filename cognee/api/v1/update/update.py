@@ -204,8 +204,11 @@ async def update(
             # The reason is a structured field, not just prose: an unsupported
             # chunker and a first ingestion produce the same sentence otherwise,
             # so a permanent misconfiguration is indistinguishable from a
-            # one-off in the logs.
-            logger.info(
+            # one-off in the logs. A warning, not info: the fallback re-extracts
+            # the whole document and the caller's response carries no hint of
+            # it (pipeline-run info instead of the incremental summary), so
+            # this line is the only place the downgrade and its cause show up.
+            logger.warning(
                 "chunk-level update not possible (%s); running full update",
                 refusal,
                 extra={"refusal_reason": refusal.reason.value},
