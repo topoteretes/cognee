@@ -1,10 +1,11 @@
 import asyncio
+import logging
 import re
 import sys
 import types
 from functools import lru_cache
 from pprint import pprint
-from typing import Any, Literal, Optional, Union, cast, get_args, get_origin
+from typing import Any, Literal, Union, cast, get_args, get_origin
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -18,10 +19,10 @@ from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
 from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.graph.utils.get_graph_from_model import collect_stored_data_points
-from cognee.shared.logging_utils import ERROR, get_logger, setup_logging
+from cognee.shared.logging_utils import ERROR, setup_logging
 from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 def _reference_target_type(annotation: Any) -> Any:
@@ -44,16 +45,21 @@ def from_identity_fields(model: type[BaseModel]) -> dict[str, type[DataPoint]]:
     return fields
 
 
-def _check_single_identity_field(target_type: type, owning_field: str) -> None:
-    identity = target_type._get_identity_fields() if issubclass(target_type, DataPoint) else None
+def _single_identity_field(target_type: type[DataPoint], owning_field: str) -> str:
+    identity = target_type._get_identity_fields()
     if not identity or len(identity) != 1:
         raise InvalidReferenceTypeError(
             f"{target_type.__name__} on {owning_field} needs exactly one identity_fields "
             f"entry, got {identity!r}"
         )
+    return identity[0]
 
 
-def _check_constructible_from_identity(target_type: type, owning_field: str) -> None:
+def _check_single_identity_field(target_type: type[DataPoint], owning_field: str) -> None:
+    _single_identity_field(target_type, owning_field)
+
+
+def _check_constructible_from_identity(target_type: type[DataPoint], owning_field: str) -> None:
     identity = set(target_type._get_identity_fields() or [])
     offending = [
         name
@@ -76,7 +82,7 @@ def _from_identity_llm_annotation(annotation: Any) -> Any:
     return str
 
 
-def _list_edge_inner(annotation: Any) -> type | None:
+def _list_edge_inner(annotation: Any) -> type[Edge] | None:
     """Return the Edge[...] class if this is list[Edge[...]], else None."""
     if get_origin(annotation) not in (list,):
         return None
@@ -84,6 +90,16 @@ def _list_edge_inner(annotation: Any) -> type | None:
     if isinstance(inner, type) and issubclass(inner, Edge):
         return inner
     return None
+
+
+def _edge_type_args(inner: type[Edge]) -> tuple[type[DataPoint], type[DataPoint], Any]:
+    metadata = getattr(inner, "__pydantic_generic_metadata__", None)
+    if not isinstance(metadata, dict):
+        raise InvalidReferenceTypeError(f"{inner!r} is not a parametrized Edge")
+    args = metadata.get("args")
+    if not isinstance(args, (list, tuple)) or len(args) < 3:
+        raise InvalidReferenceTypeError(f"{inner!r} is not a parametrized Edge")
+    return args[0], args[1], args[2]
 
 
 def edge_field_types(
@@ -95,7 +111,7 @@ def edge_field_types(
         inner = _list_edge_inner(field_info.annotation)
         if inner is None:
             continue
-        fields[name] = inner.__pydantic_generic_metadata__["args"]
+        fields[name] = _edge_type_args(inner)
     return fields
 
 
@@ -119,8 +135,8 @@ def _edge_row_model_for(
     target_type: type[DataPoint],
     rel_annotation: Any,
 ) -> type[BaseModel]:
-    source_id = source_type._get_identity_fields()[0]
-    target_id = target_type._get_identity_fields()[0]
+    source_id = _single_identity_field(source_type, field_name)
+    target_id = _single_identity_field(target_type, field_name)
     fields: dict[str, Any] = {
         "source": (
             str,
@@ -140,19 +156,20 @@ def _llm_edge_field(field_name: str, field_info: Any, default_value: Any) -> tup
     inner = _list_edge_inner(field_info.annotation)
     if inner is None:
         return None
-    source_type, target_type, naming = inner.__pydantic_generic_metadata__["args"]
+    source_type, target_type, naming = _edge_type_args(inner)
     _check_single_identity_field(source_type, field_name)
     _check_single_identity_field(target_type, field_name)
     rel_annotation = relationship_type_annotation(naming)
     row_model = _edge_row_model_for(field_name, source_type, target_type, rel_annotation)
+    list_annotation = types.GenericAlias(list, (row_model,))
     return (
-        list[row_model],
+        list_annotation,
         default_value if default_value is not PydanticUndefined else PydanticUndefined,
     )
 
 
 def _rewrite_from_identity(value: Any, target_type: type[DataPoint]) -> Any:
-    identity_field = target_type._get_identity_fields()[0]
+    identity_field = _single_identity_field(target_type, target_type.__name__)
     if value is None:
         return None
     if isinstance(value, list):
@@ -233,6 +250,15 @@ def _lookup_endpoint(index: dict, endpoint_type: type[DataPoint], identity_value
     return index.get((endpoint_type, endpoint_type.id_for(identity_value)))
 
 
+def _parametrized_edge(
+    source_type: type[DataPoint],
+    target_type: type[DataPoint],
+    rel_annotation: Any,
+) -> Any:
+    naming = rel_annotation if rel_annotation is not None else (str | None)
+    return Edge.__class_getitem__(cast("tuple[type[Any], ...]", (source_type, target_type, naming)))
+
+
 def _build_resolved_edge(
     row: dict,
     source_node: DataPoint,
@@ -244,8 +270,8 @@ def _build_resolved_edge(
 ) -> Edge:
     name = row.get("relationship_type")
     if rel_annotation is str:
-        name = generate_edge_name(name)
-    return Edge[source_type, target_type, rel_annotation or Optional[str]](
+        name = generate_edge_name(name if isinstance(name, str) else "")
+    return _parametrized_edge(source_type, target_type, rel_annotation)(
         source=source_node, target=target_node, relationship_type=name
     ).normalize(source_node, field_name, target=target_node)
 
@@ -529,7 +555,7 @@ if __name__ == "__main__":
         await visualize_graph()
         print("Visualization saved to ~/graph_visualization.html")
 
-    logger = setup_logging(log_level=ERROR)
+    setup_logging(log_level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

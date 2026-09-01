@@ -1,7 +1,7 @@
-from typing import Any, Generic, Optional
+from typing import Any, Generic, Optional, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
-from typing_extensions import TypeVar
+from typing_extensions import Self, TypeVar
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
@@ -35,7 +35,7 @@ class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
 
     source: Optional[Source] = None
     target: Optional[Target] = None
-    relationship_type: RelationshipType = None
+    relationship_type: RelationshipType = cast(Any, None)
 
     weight: float | None = None
     weights: dict[str, float] | None = None
@@ -55,7 +55,7 @@ class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
         owner: DataPoint,
         field_name: str,
         target: DataPoint | None = None,
-    ) -> "Edge":
+    ) -> Self:
         """Return an Edge with source, target and relationship_type filled from context.
 
         Source falls back to ``owner``, name to ``self.relationship_type or field_name``.

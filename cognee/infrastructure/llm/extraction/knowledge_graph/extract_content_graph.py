@@ -45,6 +45,6 @@ async def extract_content_graph(
         content, system_prompt, simplified_response_model, **kwargs
     )
 
-    if simplified_response_model is not response_model:
+    if isinstance(response_model, type) and issubclass(response_model, DataPoint):
         return await content_graph_to_data_point(content_graph, response_model)
     return content_graph
