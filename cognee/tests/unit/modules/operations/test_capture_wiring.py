@@ -142,6 +142,7 @@ async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log
 
     async def spy_drain(timeout=5.0):
         order.append("drain")
+        await real_drain(timeout)
 
     monkeypatch.setattr(capture, "drain", spy_drain)
 
@@ -162,15 +163,19 @@ async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log
     assert scope.run_id == pipeline_run_id
     assert scope.dataset_id == dataset.id
     assert scope.sampled is True
+    assert scope.finished is True
     assert capture.current_scope() is None
 
-    await real_drain()
-
+    # The run's own drain covered its manifest (finish() ran before it); the
+    # scope's exit — after the terminal yield — did not enqueue a duplicate.
+    assert not capture.hook._buffer
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["run_id"] == str(pipeline_run_id)
     assert manifest["dataset_id"] == str(dataset.id)
     assert manifest["payload"]["kind"] == "pipeline"
     assert manifest["payload"]["sampled"] is True
+    await real_drain()
+    assert len(_manifests(fake_capture_sink)) == 1
 
 
 @pytest.mark.asyncio
@@ -182,9 +187,11 @@ async def test_run_tasks_drains_once_on_the_error_path(
 
     order = []
     logs.error.side_effect = lambda *args, **kwargs: order.append("error")
+    real_drain = capture.drain
 
     async def spy_drain(timeout=5.0):
         order.append("drain")
+        await real_drain(timeout)
 
     monkeypatch.setattr(capture, "drain", spy_drain)
 
@@ -198,6 +205,11 @@ async def test_run_tasks_drains_once_on_the_error_path(
 
     assert order == ["error", "drain"]
     logs.complete.assert_not_awaited()
+    # The error path finishes the scope before draining too.
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["payload"]["kind"] == "pipeline"
+    await real_drain()
+    assert len(_manifests(fake_capture_sink)) == 1
 
 
 @pytest.mark.asyncio

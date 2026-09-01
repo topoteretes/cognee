@@ -80,6 +80,11 @@ def capture_reset(event_loop):
     Depends on ``event_loop`` so this teardown runs BEFORE pytest-asyncio closes
     the loop: pytest-asyncio 0.21.x closes loops without cancelling tasks, and a
     flusher task left behind would be destroyed while pending.
+
+    Version assumption: requesting ``event_loop`` directly is deprecated in
+    pytest-asyncio 0.23 and removed in 1.0. The ``dev`` extra pins ``<0.22``;
+    moving past it means replacing this ordering trick (e.g. a loop-scoped
+    fixture or an ``asyncio`` ``pytest_fixture_post_finalizer`` hook).
     """
     from cognee.modules.observability.capture import hook
 

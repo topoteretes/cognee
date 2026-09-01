@@ -3,6 +3,7 @@ pretty manifest.json per run, written through the normal StorageManager."""
 
 import gzip
 import json
+import re
 from uuid import uuid4
 
 import pytest
@@ -46,11 +47,14 @@ async def test_layout_roundtrip_manifest_and_nodataset(tmp_path):
             _record(KIND_SUMMARY_GENERATED, run_id, dataset_id, "s2", ts=2.0),
             _record(KIND_RUN_MANIFEST, run_id, dataset_id, {"run_id": run_id, "kind": "pipeline"}),
             _record(KIND_SUMMARY_GENERATED, run_id, None, "orphan"),
+            _record(KIND_SUMMARY_GENERATED, None, dataset_id, "runless"),
         ]
     )
 
     blobs = list((tmp_path / dataset_id / run_id / KIND_SUMMARY_GENERATED).glob("batch-*.jsonl.gz"))
     assert len(blobs) == 1
+    # Collision-free shape: batch-{ts_ns}-{pid}-{seq:06d}.jsonl.gz
+    assert re.fullmatch(r"batch-\d+-\d+-\d{6}\.jsonl\.gz", blobs[0].name), blobs[0].name
     lines = _read_jsonl_gz(blobs[0])
     assert [line["payload"] for line in lines] == ["s1", "s2"]
     assert lines[0]["kind"] == KIND_SUMMARY_GENERATED
@@ -68,6 +72,9 @@ async def test_layout_roundtrip_manifest_and_nodataset(tmp_path):
     )
     assert len(orphan_blobs) == 1
     assert [line["payload"] for line in _read_jsonl_gz(orphan_blobs[0])] == ["orphan"]
+
+    [runless_blob] = (tmp_path / dataset_id / "norun" / KIND_SUMMARY_GENERATED).glob("*.jsonl.gz")
+    assert [line["payload"] for line in _read_jsonl_gz(runless_blob)] == ["runless"]
 
 
 @pytest.mark.asyncio

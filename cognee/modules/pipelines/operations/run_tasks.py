@@ -90,7 +90,10 @@ async def run_tasks(
     # tasks, or a recorded operation called mid-pipeline) parent to THIS run,
     # mirroring how their tokens chain into run_usage.
     # Eval capture (SDK-529): lazy import keeps ``import cognee`` free of the
-    # capture package. Pipeline scopes are always sampled.
+    # capture package. Pipeline scopes are always sampled. The scope encloses
+    # the terminal yield, so its exit runs only after the consumer finishes the
+    # generator — later than the drain below; capture_scope.finish() before
+    # each drain gets the manifest in ahead of it (exit then skips the duplicate).
     from cognee.modules.observability import capture as eval_capture
 
     with (
@@ -100,7 +103,7 @@ async def run_tasks(
             eval_capture.run_scope(pipeline_run_id, dataset.id, kind="pipeline")
             if eval_capture.is_active()
             else nullcontext()
-        ),
+        ) as capture_scope,
     ):
         async with set_database_global_context_variables(
             dataset.id,
@@ -284,6 +287,8 @@ async def run_tasks(
                 # A pipeline run is seconds-to-minutes and LLM-bound, so one sink
                 # write is noise here; drain() swallows its own exceptions.
                 if eval_capture.is_active():
+                    if capture_scope is not None:
+                        capture_scope.finish()
                     await eval_capture.drain()
 
                 yield PipelineRunCompleted(
@@ -331,6 +336,8 @@ async def run_tasks(
                 )
 
                 if eval_capture.is_active():
+                    if capture_scope is not None:
+                        capture_scope.finish()
                     await eval_capture.drain()
 
                 yield PipelineRunErrored(

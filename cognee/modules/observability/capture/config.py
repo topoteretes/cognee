@@ -31,6 +31,9 @@ class CaptureConfig(BaseSettings):
     cognee_capture_batch_size: int = 64
     cognee_capture_flush_interval_s: float = 2.0
     cognee_capture_sample_rate: float = 1.0
+    # Upper bound on one sink write; a wedged sink (S3 under partition) must not
+    # pin the flusher and every later drain().
+    cognee_capture_sink_timeout_s: float = 30.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -40,6 +43,11 @@ class CaptureConfig(BaseSettings):
             raise ValueError(
                 "COGNEE_CAPTURE_SAMPLE_RATE must be in [0, 1], "
                 f"got {self.cognee_capture_sample_rate}"
+            )
+        if self.cognee_capture_sink_timeout_s <= 0:
+            raise ValueError(
+                "COGNEE_CAPTURE_SINK_TIMEOUT_S must be positive, "
+                f"got {self.cognee_capture_sink_timeout_s}"
             )
 
         if not self.cognee_capture_dir:
@@ -60,6 +68,7 @@ class CaptureConfig(BaseSettings):
             "cognee_capture_batch_size": self.cognee_capture_batch_size,
             "cognee_capture_flush_interval_s": self.cognee_capture_flush_interval_s,
             "cognee_capture_sample_rate": self.cognee_capture_sample_rate,
+            "cognee_capture_sink_timeout_s": self.cognee_capture_sink_timeout_s,
         }
 
 

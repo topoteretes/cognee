@@ -20,7 +20,7 @@ import itertools
 import json
 import os
 import time
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 
 from .events import KIND_RUN_MANIFEST
 
@@ -28,6 +28,28 @@ if TYPE_CHECKING:
     from cognee.infrastructure.files.storage import StorageManager
 
 CaptureSink = Callable[[list[dict]], Awaitable[None]]
+
+T = TypeVar("T")
+
+
+async def run_off_loop(func: Callable[..., T], /, *args: Any) -> T:
+    """Run pure-CPU work in a worker thread, inline once the executor is gone.
+
+    Serialization and gzip run via ``asyncio.to_thread`` so they never freeze
+    concurrent coroutines. Inside atexit handlers ``threading._shutdown()`` has
+    already run and the default executor refuses new work with
+    ``RuntimeError`` ("cannot schedule new futures after interpreter
+    shutdown") — raised at submit time, before ``func`` starts. Falling back to
+    an inline call there is what lets the atexit drain persist the batch it
+    popped instead of silently losing it. Shared by the flusher and
+    ``StorageSink``. (Should ``func`` itself raise ``RuntimeError``, the inline
+    retry re-raises it.)
+    """
+    try:
+        return await asyncio.to_thread(func, *args)
+    except RuntimeError:
+        return func(*args)
+
 
 # Process-wide blob sequence: together with time_ns and pid this makes blob
 # names collision-free across loops/threads/processes without coordination. A
@@ -81,8 +103,8 @@ class StorageSink:
                 continue
 
             # Encoding is pure CPU; keep it off the loop like the flusher's
-            # serialization step.
-            blob = await asyncio.to_thread(_encode_group, group)
+            # serialization step (inline at interpreter exit, see run_off_loop).
+            blob = await run_off_loop(_encode_group, group)
             blob_name = f"batch-{time.time_ns()}-{os.getpid()}-{next(_blob_sequence):06d}.jsonl.gz"
             # BytesIO, not raw bytes, honors the ``BinaryIO | str`` annotation.
             await self._storage.store(

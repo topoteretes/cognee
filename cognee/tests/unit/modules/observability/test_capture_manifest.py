@@ -126,6 +126,65 @@ async def test_manifest_is_emitted_even_when_the_body_raises(fake_capture_sink):
     assert len(_manifests(fake_capture_sink)) == 1
 
 
+@pytest.mark.asyncio
+async def test_manifest_survives_a_full_buffer_and_reports_the_drops(fake_capture_sink):
+    hook._configure(queue_size=2, flush_interval_s=60.0)
+    run_id = uuid4()
+
+    with capture.run_scope(run_id, uuid4(), kind="pipeline"):
+        for index in range(5):
+            capture.emit(KIND_SUMMARY_GENERATED, f"s{index}", payload_kind="text")
+        assert hook._dropped == 3
+        assert len(hook._buffer) == 2
+    # The manifest bypasses the bound: it is the record that reports the drops.
+    assert len(hook._buffer) == 3
+
+    await capture.drain()
+
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["run_id"] == str(run_id)
+    assert manifest["payload"]["dropped_events"] == 3
+
+
+@pytest.mark.asyncio
+async def test_finish_emits_the_manifest_once_and_exit_skips_the_duplicate(fake_capture_sink):
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        capture.bump("items", 2)
+        assert scope.finished is False
+        scope.finish()
+        assert scope.finished is True
+        # A caller that drains before its scope closes sees its own manifest.
+        await capture.drain()
+        [manifest] = _manifests(fake_capture_sink)
+        assert manifest["payload"]["counters"] == {"items": 2}
+        scope.finish()  # idempotent
+
+    await capture.drain()
+    assert len(_manifests(fake_capture_sink)) == 1
+
+
+@pytest.mark.asyncio
+async def test_note_cannot_overwrite_envelope_keys(fake_capture_sink):
+    run_id = uuid4()
+
+    with capture.run_scope(run_id, kind="pipeline"):
+        capture.note("run_id", "spoofed")
+        capture.note("kind", "spoofed")
+        capture.note("counters", "not a dict")
+        capture.note("model", "gpt-5-mini")
+        capture.bump("hits")
+
+    await capture.drain()
+
+    [manifest] = _manifests(fake_capture_sink)
+    payload = manifest["payload"]
+    assert manifest["run_id"] == str(run_id)  # filed under the real run
+    assert payload["run_id"] == str(run_id)
+    assert payload["kind"] == "pipeline"
+    assert payload["counters"] == {"hits": 1}
+    assert payload["model"] == "gpt-5-mini"
+
+
 # ---------------------------------------------------------------------------
 # 8: sampling
 # ---------------------------------------------------------------------------
