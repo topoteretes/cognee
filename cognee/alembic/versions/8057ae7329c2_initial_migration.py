@@ -158,7 +158,7 @@ def upgrade() -> None:
     if "global_database_version" not in _existing:
         op.create_table(
             "global_database_version",
-            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("id", sa.Integer(), autoincrement=False, nullable=False),
             sa.Column("cognee_version", sa.String(), nullable=True),
             sa.Column("global_migration_revision", sa.String(), nullable=True),
             sa.Column("global_migration_last_error", sa.String(), nullable=True),
