@@ -68,6 +68,10 @@ records, so the dataset (or item) can be re-cognified later.
                 )
                 return
 
+            if data_id and not dataset and not dataset_id:
+                fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+                return
+
             if args.everything and args.memory_only:
                 fmt.error(
                     "--memory-only has no effect with --everything: everything deletes all "

@@ -390,6 +390,9 @@ def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
     if not everything and not dataset and not dataset_id and not data_id:
         fmt.error("Specify --dataset or --dataset-id, --data-id with dataset, or --everything.")
         return
+    if data_id and not dataset and not dataset_id:
+        fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+        return
     if everything and memory_only:
         fmt.error(
             "--memory-only has no effect with --everything: everything deletes all "
