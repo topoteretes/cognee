@@ -6,19 +6,46 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useUser } from "@/modules/users/UserContext";
 import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
 
-export interface PipelineRun { id: string; pipeline_name: string; status: string; dataset_id: string | null; dataset_name: string | null; owner_email: string | null; created_at: string | null; pipeline_run_id: string | null }
+// `kind` is the backend's own discriminator between a pipeline run
+// (pipeline_name set) and a single memory operation — recall/search/remember/
+// forget/improve/delete/prune — which reports pipeline_name: null instead.
+// Every consumer that only cares about pipelines (the onboarding checklist,
+// the "ran <pipeline>" log line) must branch on `kind`, not on pipeline_name
+// truthiness, so it keeps working if the backend ever adds a third kind.
+export interface PipelineRun {
+  id: string;
+  pipeline_name: string | null;
+  status: string;
+  dataset_id: string | null;
+  dataset_name: string | null;
+  owner_id: string | null;
+  owner_email: string | null;
+  created_at: string | null;
+  pipeline_run_id: string | null;
+  kind: "pipeline" | "operation";
+  operation_name: string | null;
+  origin: string | null;
+  outcome: string | null;
+  // Independently nullable: null means "not measured", 0 means "measured
+  // zero" — never conflate the two when summing or displaying these.
+  tokens_in: number | null;
+  tokens_out: number | null;
+  started_at: string | null;
+  ended_at: string | null;
+  user_id: string | null;
+  session_id: string | null;
+  parent_operation_id: string | null;
+  background: boolean | null;
+}
 
 export type Range = "24h" | "7d" | "30d";
 
-export function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
+// Moved to utils so a page needing a relative time does not pull this whole
+// module in. Imported as well as re-exported: a bare `export ... from` would
+// not bring the name into this module's own scope, and it is used below.
+import { timeAgo } from "@/utils/timeAgo";
+
+export { timeAgo };
 
 function pipelineLabel(name: string): string {
   if (name.includes("cognify")) return "cognee.cognify";
@@ -310,6 +337,10 @@ export function AgentActivityTerminal({
   // Items without timestamps sort to the bottom (treated as newest) rather
   // than being dropped or pinned to 1970.
   for (const r of runs) {
+    // Operation rows (kind: "operation") carry pipeline_name: null — they're
+    // recall/search/remember/etc. reported directly, not a named pipeline,
+    // so they never belong in this "ran <pipeline>" line.
+    if (r.kind !== "pipeline" || !r.pipeline_name) continue;
     const pipelineName = r.pipeline_name.toLowerCase();
     if (!pipelineName.includes("search") && !pipelineName.includes("recall")) continue;
     allEvents.push({ kind: "run", r, ts: r.created_at ? new Date(r.created_at).getTime() : Number.MAX_SAFE_INTEGER });
@@ -808,7 +839,9 @@ export function AgentActivityTerminal({
                 const isError = r.status.includes("ERRORED");
                 const isRunning = r.status.includes("STARTED") || r.status.includes("INITIATED");
                 const outcome: Outcome = isRunning ? "running" : isError ? "error" : "done";
-                const label = pipelineLabel(r.pipeline_name);
+                // Defensive fallback only — the push above already guarantees
+                // pipeline_name is set for every "run" event reaching here.
+                const label = pipelineLabel(r.pipeline_name ?? r.operation_name ?? "activity");
                 const actor = ownerDisplayName(r.owner_email);
                 return (
                   <div key={`run-${r.pipeline_run_id ?? r.id}`} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>

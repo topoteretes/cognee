@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Loader } from "@mantine/core";
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import { trackEvent } from "@/modules/analytics";
@@ -99,8 +100,9 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose, pag
                   onClick={handleShareWithWorkspace}
                   disabled={sharing === workspacePrincipalId}
                   className="cursor-pointer hover:bg-[#5A0ED6]"
-                  style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: 12, fontWeight: 500 }}
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: 12, fontWeight: 500 }}
                 >
+                  {sharing === workspacePrincipalId && <Loader size={12} color="#fff" />}
                   {sharing === workspacePrincipalId ? "Sharing..." : "Share"}
                 </button>
               </>
@@ -136,8 +138,9 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose, pag
                       onClick={() => handleShare(a.id)}
                       disabled={isSharing}
                       className="cursor-pointer hover:bg-[#5A0ED6]"
-                      style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: 12, fontWeight: 500 }}
+                      style={{ display: "flex", alignItems: "center", gap: 6, background: "#6510F4", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: 12, fontWeight: 500 }}
                     >
+                      {isSharing && <Loader size={12} color="#fff" />}
                       {isSharing ? "Sharing..." : "Share"}
                     </button>
                   )}
