@@ -11,7 +11,9 @@ runtime, eleven days later.
 This test makes the assertion checkable at PR time, WITHOUT replaying the
 historical chain (the early revisions assume the base schema of their own era,
 and no migration ever created the base tables — the chain is a delta log, not
-a creation history). The mechanics live in ``cognee.modules.migrations.lockstep``
+a creation history). It runs as a STANDALONE e2e check in CI (the 'Migration/Model Lockstep Guard'
+job in e2e_tests.yml) so a lockstep break is visible as its own failed check,
+not buried in a shard. The mechanics live in ``cognee.modules.migrations.lockstep``
 so downstream deployments with a vendored chain and extra models (e.g. cognee
 cloud) can reuse them with their own baseline, model registration, and
 ``script_location``:
@@ -35,7 +37,7 @@ Re-freezing the baseline erases the guard's memory, so it is a deliberate act,
 done only when the head state is re-certified (e.g. a real chain-migrated
 database again matches the models exactly):
 
-    uv run python cognee/tests/integration/infrastructure/relational/test_migration_model_lockstep.py
+    uv run python cognee/tests/e2e/migrations/test_migration_model_lockstep.py
 
 regenerates ``schema_baseline.json`` at the current head. Never regenerate it
 to silence a failure — the failure IS the finding.
