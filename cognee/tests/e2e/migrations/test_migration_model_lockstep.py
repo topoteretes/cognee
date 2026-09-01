@@ -37,13 +37,14 @@ Re-freezing the baseline erases the guard's memory, so it is a deliberate act,
 done only when the head state is re-certified (e.g. a real chain-migrated
 database again matches the models exactly):
 
-    uv run python cognee/tests/e2e/migrations/test_migration_model_lockstep.py
+    uv run python cognee/tests/e2e/migrations/test_migration_model_lockstep.py --regenerate --force
 
 regenerates ``schema_baseline.json`` at the current head. Never regenerate it
 to silence a failure — the failure IS the finding.
 """
 
 import asyncio
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,19 +53,26 @@ from cognee.modules.migrations import lockstep
 
 BASELINE_PATH = Path(__file__).with_name("schema_baseline.json")
 
+# Pinned explicitly so the ambient COGNEE_ALEMBIC_PATH override (used by
+# vendored-chain deployments) can never retarget this upstream test at a
+# foreign migration chain.
+SCRIPT_LOCATION = lockstep.packaged_script_location()
+
 
 class TestMigrationModelLockstep(unittest.TestCase):
     def setUp(self):
         self.baseline = lockstep.load_baseline(BASELINE_PATH)
 
-    def test_baseline_revision_is_still_in_the_chain(self):
-        """A vanished baseline revision means history was edited; the guard's
-        anchor must then be re-frozen deliberately, not silently skipped."""
-        self.assertTrue(
-            lockstep.revision_exists(self.baseline["baseline_revision"]),
-            f"Baseline revision {self.baseline['baseline_revision']!r} is no longer in the "
-            "Alembic chain. If history was rewritten on purpose, re-certify the schema and "
-            "regenerate schema_baseline.json (see module docstring).",
+    def test_baseline_revision_is_a_valid_anchor(self):
+        """The anchor must resolve to EXACTLY the stored id and be an ancestor
+        of head — a history rewrite that breaks either means the guard must be
+        re-frozen deliberately, not silently skipped."""
+        problem = lockstep.anchor_error(self.baseline["baseline_revision"], SCRIPT_LOCATION)
+        self.assertIsNone(
+            problem,
+            f"Baseline anchor is invalid: {problem}. If migration history was rewritten "
+            "on purpose, re-certify the schema and regenerate schema_baseline.json "
+            "(see module docstring).",
         )
 
     def test_migrations_since_baseline_keep_chain_and_models_in_lockstep(self):
@@ -74,11 +82,15 @@ class TestMigrationModelLockstep(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             actual = asyncio.run(
                 lockstep.replay_from_baseline(
-                    self.baseline, f"sqlite+aiosqlite:///{tmp_dir}/lockstep.db"
+                    self.baseline,
+                    f"sqlite+aiosqlite:///{tmp_dir}/lockstep.db",
+                    script_location=SCRIPT_LOCATION,
                 )
             )
 
-        problems = lockstep.compare_schemas(expected, actual)
+        problems = lockstep.compare_schemas(
+            expected, actual, baseline_tables=self.baseline["tables"]
+        )
         self.assertEqual(
             problems,
             [],
@@ -90,10 +102,29 @@ class TestMigrationModelLockstep(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    generated = lockstep.generate_baseline(BASELINE_PATH)
+def _regenerate(force: bool) -> int:
+    """Deliberate re-freeze only — never a way to silence a failing guard."""
+    if BASELINE_PATH.exists() and not force:
+        print(
+            "Refusing to overwrite the existing schema_baseline.json: regenerating "
+            "erases the guard's memory and would certify whatever skew exists right "
+            "now. Re-certify the head schema first, then rerun with:\n"
+            f"  python {Path(__file__).name} --regenerate --force"
+        )
+        return 1
+    generated = lockstep.generate_baseline(BASELINE_PATH, script_location=SCRIPT_LOCATION)
     print(
         f"schema_baseline.json regenerated at revision {generated['baseline_revision']} "
         f"({len(generated['tables'])} tables). Commit it only alongside a re-certification "
         "of the head schema."
     )
+    return 0
+
+
+if __name__ == "__main__":
+    # Bare execution runs the tests — regeneration is behind an explicit flag,
+    # so the habitual "run the file to debug a failure" gesture can never
+    # silently rewrite the baseline.
+    if "--regenerate" in sys.argv:
+        sys.exit(_regenerate(force="--force" in sys.argv))
+    unittest.main()
