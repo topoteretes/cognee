@@ -227,18 +227,37 @@ async def _relational_schema_exists() -> bool:
         restructured in the future.
     Only when NEITHER exists is the database genuinely empty — the one state
     where create_all + stamp head is safe.
+
+    A failed inspection RAISES instead of answering: "cannot inspect" is not
+    "empty". Guessing "empty" would send a populated-but-unreachable database
+    (a server still starting up, a transient connection failure) into the
+    create_all + stamp-head bootstrap — create_all silently skips the existing
+    tables and the stamp then marks every pending migration as applied without
+    running it, leaving the database permanently mis-stamped at head. The one
+    genuinely-fresh case that used to surface as an exception (a local SQLite
+    database whose file does not exist yet) is decided as the filesystem fact
+    it is, before connecting.
     """
     from sqlalchemy import inspect
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    try:
-        async with get_relational_engine().engine.connect() as connection:
-            tables = await connection.run_sync(
-                lambda sync_conn: inspect(sync_conn).get_table_names()
-            )
-    except Exception:
-        return False  # cannot inspect (e.g. brand-new SQLite file) -> treat as empty
+    engine = get_relational_engine()
+
+    # Brand-new local SQLite database: the file is not there yet
+    # (create_database() creates the directory and file). S3-backed SQLite is
+    # excluded — its engine connects to a local temp file that always exists,
+    # and a fresh S3 database reports empty through the inspection below.
+    if (
+        engine.engine.dialect.name == "sqlite"
+        and engine.db_path
+        and "s3://" not in engine.db_path
+        and not os.path.exists(engine.db_path)
+    ):
+        return False
+
+    async with engine.engine.connect() as connection:
+        tables = await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
     return "users" in tables or "alembic_version" in tables
 
 
