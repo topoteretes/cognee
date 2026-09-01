@@ -128,6 +128,15 @@ async def lifespan(app: FastAPI):
 
     await close_telemetry_session()
 
+    # Flush buffered eval-capture events (SDK-529) and stop the flusher on the
+    # loop that owns it, rather than leaving the last requests' records to the
+    # atexit hook. Lazy import: ``import cognee`` must not load the capture
+    # package; is_active() keeps this a no-op when capture is off.
+    from cognee.modules.observability import capture as eval_capture
+
+    if eval_capture.is_active():
+        await eval_capture.shutdown()
+
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 

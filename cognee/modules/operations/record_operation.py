@@ -183,7 +183,10 @@ async def record_operation(
         # for the capture package; is_active() is one global read once
         # initialized, and the OFF path constructs no scope at all. No drain()
         # here: this wraps the user-facing recall/search path, and the manifest
-        # lands within FLUSH_INTERVAL_S like any other event.
+        # lands within FLUSH_INTERVAL_S like any other event. The manifest
+        # mirrors the row's attribution fields (operation, outcome,
+        # error_class) so a captured run can be filtered offline without
+        # joining back to ``pipeline_runs``.
         from cognee.modules.observability import capture as eval_capture
 
         capture_scope_cm = (
@@ -192,6 +195,8 @@ async def record_operation(
             else nullcontext()
         )
         with capture_scope_cm as capture_scope:
+            if capture_scope is not None:
+                capture_scope.note("operation", operation_name)
             try:
                 with parent_run_scope(context.operation_id):
                     yield context
@@ -204,6 +209,9 @@ async def record_operation(
                 if capture_scope is not None:
                     # Callers bind the dataset lazily via context.set_dataset().
                     capture_scope.set_dataset(context.dataset_id)
+                    capture_scope.note("outcome", outcome.value)
+                    # None on success, kept for a stable manifest shape.
+                    capture_scope.note("error_class", error_class)
                 _current_operation.reset(context_token)
                 try:
                     await _write_operation_row(
