@@ -178,6 +178,27 @@ async def test_an_empty_stream_returns_the_same_empty_string_as_the_blocking_cal
 
 
 @pytest.mark.asyncio
+async def test_include_usage_survives_caller_supplied_stream_options():
+    """include_usage must be forced on, not merely defaulted.
+
+    A caller-supplied stream_options dict is truthy, so replacing instead of
+    merging would silently drop include_usage. The provider then sends no usage
+    chunk, LiteLLM records no spend, and a streamed answer bills nothing.
+    """
+    sink = TokenSink()
+    seen: dict = {}
+    with (
+        _flag(True),
+        _active(sink),
+        patch(f"{STREAM_MODULE}.litellm.acompletion", new=_streaming_completion([_chunk("hi")], seen=seen)),
+    ):
+        await _stream(sink, [_chunk("hi")], stream_options={"other_key": "value"})
+
+    assert seen["stream_options"]["include_usage"] is True
+    assert seen["stream_options"]["other_key"] == "value"
+
+
+@pytest.mark.asyncio
 async def test_sampling_parameters_are_not_dropped():
     """drop_params is global to the call, so enabling it to tolerate one
     unsupported key would silently discard temperature/seed as well — the same

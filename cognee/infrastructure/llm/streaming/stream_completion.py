@@ -53,7 +53,12 @@ async def stream_text_completion(
     # A caller-supplied value would collide with the keyword below and raise
     # TypeError on every completion.
     merged_kwargs.pop("stream", None)
-    stream_options = merged_kwargs.pop("stream_options", None) or {"include_usage": True}
+    # Merge rather than replace: a caller-supplied dict is truthy, so `or` would
+    # drop include_usage entirely. Without it the provider sends no usage chunk,
+    # LiteLLM records no spend for the call, and the cloud credit guard bills
+    # nothing for a streamed answer — the failure the spend check exists to catch.
+    caller_options = merged_kwargs.pop("stream_options", None) or {}
+    stream_options = {**caller_options, "include_usage": True}
 
     parts: list[str] = []
     sink.begin_attempt()
