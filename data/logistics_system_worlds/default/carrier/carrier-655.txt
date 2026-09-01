@@ -1,1 +1,0 @@
-HarborLine Freight is a carrier in US East. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 10000.0 kg, reliability score is 3, and base delay is 2 day(s).

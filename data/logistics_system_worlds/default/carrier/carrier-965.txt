@@ -1,1 +1,0 @@
-Mazovia Logistics is a carrier in Poland. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 3000.0 kg, reliability score is 3, and base delay is 2 day(s).

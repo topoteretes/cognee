@@ -1,1 +1,0 @@
-Atlantic Route Logistics is a carrier in US East. It supports flight, shipment, freight_rail, truck transport across domestic, intercontinental, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is False, maximum weight is 3000.0 kg, reliability score is 4, and base delay is 0 day(s).

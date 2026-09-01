@@ -1,1 +1,0 @@
-Magnolia Transport is a carrier in US South. It supports flight, shipment, freight_rail, truck transport across domestic, regional shipping ranges. Temperature controlled support is True, hazardous certification is True, weekend operations is True, maximum weight is 25000.0 kg, reliability score is 3, and base delay is 1 day(s).

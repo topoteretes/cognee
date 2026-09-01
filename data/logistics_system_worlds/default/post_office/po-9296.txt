@@ -1,1 +1,0 @@
-US West Regional Sorting Center is a sorting_center in US West. It supports domestic shipping, cold chain support is True, and hazardous materials support is True.

@@ -1,1 +1,0 @@
-Ava Chen is a business customer in US West. Weekend delivery eligibility is False, and the default shipping range is regional.
