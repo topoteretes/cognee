@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   update-contributors:
+    if: github.repository == 'topoteretes/cognee'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -36,5 +37,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions@users.noreply.github.com"
           git add CONTRIBUTORS.md
+          if git diff --cached --quiet; then
+            echo "Contributor list is already up to date."
+            exit 0
+          fi
           git commit -m "Update contributors list"
           git push

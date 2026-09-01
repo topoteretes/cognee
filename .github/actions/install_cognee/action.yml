@@ -27,13 +27,13 @@ runs:
 
     - name: Set up Python
       if: steps.detect-env.outputs.in-container != 'true'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
 
     - name: Install uv
       if: steps.detect-env.outputs.in-container != 'true'
-      uses: astral-sh/setup-uv@v4
+      uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
 

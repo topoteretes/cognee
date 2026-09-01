@@ -28,17 +28,20 @@ env:
 jobs:
   ollama-tests:
     name: Ollama Tests
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
 
   llamacpp-tests:
     name: Llama-cpp Tests
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: llm
@@ -50,6 +53,7 @@ jobs:
 
   perf-small-mock:
     name: Performance — 50 Small Documents (mock LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -62,6 +66,7 @@ jobs:
 
   perf-wap-llm:
     name: Performance — War and Peace (real LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: llm
@@ -72,6 +77,7 @@ jobs:
 
   perf-wap-mock:
     name: Performance — War and Peace (mock LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -90,6 +96,7 @@ jobs:
   # (scripts/perf/fixtures/<label>/), so they land with that repo's PR.
   perf-henkel-llm:
     name: Performance — Henkel (real LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: llm
@@ -100,6 +107,7 @@ jobs:
 
   perf-henkel-mock:
     name: Performance — Henkel (mock LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -114,6 +122,7 @@ jobs:
   # artifact; a "real LLM" variant would re-extract 27 identical copies.
   perf-wap-large-mock:
     name: Performance — Medium graph — Artificial 100k nodes/edges (mock LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -134,6 +143,7 @@ jobs:
   # server-side on the tenant, so there is nothing to mock client-side.
   perf-small-cloud:
     name: Performance — 50 Small Documents (cloud)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_cloud.yml
     with:
       label: 50_small_documents
@@ -144,6 +154,7 @@ jobs:
 
   perf-wap-cloud:
     name: Performance — War and Peace (cloud)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_cloud.yml
     with:
       label: war_and_peace
@@ -153,6 +164,7 @@ jobs:
 
   perf-henkel-cloud:
     name: Performance — Henkel (cloud)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_cloud.yml
     with:
       label: henkel
@@ -164,6 +176,7 @@ jobs:
   # ══ orchestrator via cognee-cli bench (file_based, mock LLM, offline). ══════
   perf-rust-llm:
     name: Performance — Rust SDK — 50 Small Documents (real LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
@@ -173,6 +186,7 @@ jobs:
     secrets: inherit
   perf-rust:
     name: Performance — Rust SDK — 50 Small Documents (mock LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
@@ -183,6 +197,7 @@ jobs:
     secrets: inherit
   perf-rust-wap-llm:
     name: Performance — Rust SDK — War and Peace (real LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
@@ -192,6 +207,7 @@ jobs:
     secrets: inherit
   perf-rust-wap:
     name: Performance — Rust SDK — War and Peace (mock LLM)
+    if: github.repository == 'topoteretes/cognee'
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
@@ -222,7 +238,7 @@ jobs:
       perf-rust-wap-llm,
     ]
     runs-on: ubuntu-latest
-    if: ${{ !cancelled() }}
+    if: ${{ github.repository == 'topoteretes/cognee' && !cancelled() }}
     steps:
       # This job runs repo scripts (the Slack block renderer, the MotherDuck
       # ETL), so it needs a working tree.
@@ -335,7 +351,7 @@ jobs:
         # Posts on scheduled and manual (workflow_dispatch) runs. There is no
         # longer a pull_request trigger, so a workflow edit surfaces its reports
         # by being dispatched on the branch rather than by opening a PR.
-        uses: slackapi/slack-github-action@v2.1.0
+        uses: slackapi/slack-github-action@v4.0.0
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}

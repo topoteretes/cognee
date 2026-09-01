@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from typing import Any, ClassVar
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 try:
@@ -156,6 +156,14 @@ class LLMConfig(BaseSettings):
     llm_azure_use_managed_identity: bool = False
 
     llm_args: dict[str, Any] | None = None
+
+    @field_validator("llm_args", mode="before")
+    @classmethod
+    def empty_llm_args_to_none(cls, value: Any) -> Any:
+        """Treat an empty optional ``LLM_ARGS`` environment value as unset."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     baml_registry: Any | None = None
 
