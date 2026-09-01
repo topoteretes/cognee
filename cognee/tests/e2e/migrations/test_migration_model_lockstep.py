@@ -103,11 +103,7 @@ class TestMigrationModelLockstep(unittest.TestCase):
 
         problems = [
             problem
-            for problem in lockstep.compare_schemas(
-                expected,
-                actual,
-                ignored_tables=lockstep.DEFAULT_IGNORED_TABLES | lockstep.LEGACY_CHAIN_ONLY_TABLES,
-            )
+            for problem in lockstep.compare_schemas(expected, actual)
             # Whole-history replay builds its base FROM the models, so "models
             # declare X that no migration creates" is structurally impossible
             # here and would only echo baseline-test findings; keep this probe

@@ -49,14 +49,13 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-# Alembic's own bookkeeping lives outside the models on purpose.
-DEFAULT_IGNORED_TABLES = frozenset({"alembic_version"})
-
-# Tables the chain creates that no model declares anymore — known, accepted
-# legacy (the Notebook model was removed without its drop migration ever being
-# written; audited 2026-09-01, the chain's only such table). Full-chain
-# replays ignore these; writing the drop migration retires the entry.
-LEGACY_CHAIN_ONLY_TABLES = frozenset({"notebooks"})
+# Tables exempt from every comparison:
+# - alembic_version: Alembic's own bookkeeping, lives outside the models on purpose;
+# - notebooks: known, accepted legacy — the chain creates it but the Notebook
+#   model was removed without its drop migration ever being written (audited
+#   2026-09-01, the chain's only such table); writing that migration retires
+#   the entry.
+IGNORED_TABLES = frozenset({"alembic_version", "notebooks"})
 
 
 def register_upstream_models() -> None:
@@ -204,7 +203,7 @@ async def replay_from_baseline(
     baseline: dict,
     database_url: str,
     script_location: str | None = None,
-    ignored_tables: Iterable[str] = DEFAULT_IGNORED_TABLES,
+    ignored_tables: Iterable[str] = IGNORED_TABLES,
 ) -> dict[str, list[str]]:
     """Build the baseline snapshot as a real database stamped at the baseline
     revision, replay every migration above it through cognee's own runner, and
@@ -251,7 +250,7 @@ async def replay_from_baseline(
 async def replay_entire_chain(
     database_url: str,
     script_location: str | None = None,
-    ignored_tables: Iterable[str] = DEFAULT_IGNORED_TABLES | LEGACY_CHAIN_ONLY_TABLES,
+    ignored_tables: Iterable[str] = IGNORED_TABLES,
 ) -> dict[str, list[str]]:
     """Run ``alembic upgrade head`` on an EMPTY database — the entire chain
     from its initial revision — and reflect the resulting tables and columns.
@@ -326,7 +325,7 @@ def compare_schemas(
     expected: dict[str, list[str]],
     actual: dict[str, list[str]],
     baseline_tables: dict[str, list[str]] | None = None,
-    ignored_tables: Iterable[str] = DEFAULT_IGNORED_TABLES,
+    ignored_tables: Iterable[str] = IGNORED_TABLES,
 ) -> list[str]:
     """Describe every disagreement between the model schema (``expected``) and
     the chain-built schema (``actual``), in both directions. Empty = lockstep.
