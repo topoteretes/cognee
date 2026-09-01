@@ -1,3 +1,5 @@
+import re
+
 from cognee.exceptions.exceptions import CogneeValidationError
 
 
@@ -14,19 +16,56 @@ class LLMPaymentRequiredError(CogneeValidationError):
         super().__init__(message=message, name="LLMPaymentRequiredError", status_code=402)
 
 
-def is_budget_exhausted_error(e: Exception) -> bool:
-    """Return True if e signals LLM budget or payment exhaustion.
+# Message text is the only signal that reliably survives the wrapper exceptions
+# the instructor adapters raise: by the time a LiteLLM-proxy budget rejection
+# reaches us it is an ``InstructorRetryException`` whose deepest cause is a
+# client-side ``RateLimitError`` — a different class from
+# ``litellm.BudgetExceededError``, and one whose response body has already been
+# consumed, so the structured ``error.type`` check below cannot fire.
+#
+# LiteLLM raises ``BudgetExceededError`` with three distinct sentence shapes,
+# between them covering every budget scope:
+#   1. "Budget has been exceeded! [Scope=...] Current cost: X, Max budget: Y"
+#      -- virtual key, team member, team, project, organization, tag
+#   2. "ExceededBudget: [End ]User=<id> over budget. Spend=X, Budget=Y"
+#      -- internal-user and end-user budgets
+#   3. "LiteLLM {Virtual Key|End User}: <id>, exceeded budget for model=<m>"
+#      -- per-model budget caps
+#
+# One regex both detects and extracts, so a positive match always yields a
+# detail. Matching the WHOLE sentence — rather than checking for fragments
+# anywhere in the text — is what keeps this safe: ``str(InstructorRetryException)``
+# concatenates the model's own partial completions, so loose fragment matching
+# fires on any document that merely mentions an exceeded budget and a maximum
+# somewhere in several KB of unrelated prose. The bounded ``.{0,200}?`` spans
+# only the variable scope segment, keeps the scan linear, and caps the detail.
+_BUDGET_SENTENCE_RE = re.compile(
+    r"Budget has been exceeded!.{0,200}?Max budget:\s*[\d.]+"
+    r"|ExceededBudget:.{0,200}?Budget=[\d.]+"
+    r"|LiteLLM (?:Virtual Key|End User):.{0,200}?exceeded budget for model=\S{1,100}",
+    re.IGNORECASE | re.DOTALL,
+)
 
-    Three cases are handled:
-    1. Any provider returning HTTP 402 Payment Required directly.
-    2. litellm's own budget manager raising BudgetExceededError (status_code 429,
-       rate_limit_type "budget") when litellm is used as a library with a configured budget.
-    3. LiteLLM proxy (≥v1.x) returning HTTP 429 with a JSON body whose "error.type" field
-       equals "budget_exceeded". This is LiteLLM-proxy-specific: the proxy enforces virtual-key
-       and per-user spend caps and uses this response shape to distinguish budget exhaustion from
-       ordinary rate limiting. If LiteLLM changes this response format this branch silently falls
-       through, so callers should monitor for unhandled 429s after proxy upgrades.
-    """
+# The sentence can carry the virtual-key hash, key alias, and end-user / team /
+# organization IDs, and the detail is returned to API callers in the 402 body.
+# Spend and budget figures are kept — they are the caller's own, and are the
+# actionable part — but identifiers are masked.
+_BUDGET_IDENTIFIER_RE = re.compile(
+    r"\b(Virtual Key|End User|User|Team|Project|Organization|Tag|key_alias)(\s*[:=]\s*)([^\s,]+)",
+    re.IGNORECASE,
+)
+
+
+def _redact_budget_identifiers(sentence: str) -> str:
+    return _BUDGET_IDENTIFIER_RE.sub(r"\1\2<redacted>", sentence)
+
+
+def _has_budget_message(text: str) -> bool:
+    return _BUDGET_SENTENCE_RE.search(text) is not None
+
+
+def _is_budget_exhausted_link(e: BaseException) -> bool:
+    """Classify a single exception in a ``__cause__`` chain."""
     # Case 1: provider-level payment required
     if getattr(e, "status_code", None) == 402:
         return True
@@ -40,7 +79,8 @@ def is_budget_exhausted_error(e: Exception) -> bool:
     except ImportError:
         pass
 
-    # Case 3: LiteLLM proxy budget_exceeded encoded inside a 429
+    # Case 3: LiteLLM proxy budget_exceeded encoded inside a 429. Only reachable
+    # when the error is caught before the response body is consumed.
     if getattr(e, "status_code", None) == 429:
         response = getattr(e, "response", None)
         if response is not None:
@@ -52,7 +92,77 @@ def is_budget_exhausted_error(e: Exception) -> bool:
             except Exception:
                 pass
 
+    # Case 4: message text, the wrapper-proof fallback. ``str()`` is guarded
+    # because this runs inside tenacity's retry predicate, where an exception
+    # with a raising ``__str__`` would escape the retry machinery itself.
+    try:
+        text = str(e)
+    except Exception:
+        return False
+    return _has_budget_message(text)
+
+
+def is_budget_exhausted_error(e: BaseException) -> bool:
+    """Return True if e signals LLM budget or payment exhaustion.
+
+    Walks the ``__cause__`` chain, because adapters and instructor wrap the
+    provider error with ``raise ... from``. ``__context__`` is deliberately not
+    followed, so an unrelated error merely raised while handling a budget error
+    is not misclassified.
+
+    Four signals are checked per link: HTTP 402, ``litellm.BudgetExceededError``,
+    the LiteLLM proxy's ``error.type == "budget_exceeded"`` body, and finally the
+    message wording (see ``_BUDGET_SENTENCE_RE``).
+    """
+    seen: set[int] = set()
+    current: BaseException | None = e
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if _is_budget_exhausted_link(current):
+            return True
+        current = current.__cause__
     return False
+
+
+def budget_exhaustion_detail(e: BaseException) -> str | None:
+    """Pull the provider's own budget sentence out of a wrapped exception.
+
+    ``str(e)`` on an ``InstructorRetryException`` is long and embeds the model's
+    partial completions, so the sentence is extracted rather than passed whole,
+    and identifiers within it are masked before it reaches an API response.
+
+    Walks the ``__cause__`` chain like ``is_budget_exhausted_error``, since a
+    positive classification may come from a link below the outermost exception.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = e
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        try:
+            text = str(current)
+        except Exception:
+            text = ""
+        match = _BUDGET_SENTENCE_RE.search(text)
+        if match:
+            return _redact_budget_identifiers(match.group(0).strip())
+        current = current.__cause__
+    return None
+
+
+def raise_if_budget_exhausted(error: BaseException) -> None:
+    """Re-raise budget exhaustion as ``LLMPaymentRequiredError`` (HTTP 402).
+
+    Instructor reports provider failures as ``InstructorRetryException``, which
+    the adapters catch in an earlier ``except`` clause than their budget
+    handler. The check therefore has to happen at that re-raise site, or the
+    budget handler further down is never reached.
+    """
+    if not is_budget_exhausted_error(error):
+        return
+    detail = budget_exhaustion_detail(error)
+    if detail:
+        raise LLMPaymentRequiredError(f"LLM budget exhausted: {detail}") from error
+    raise LLMPaymentRequiredError() from error
 
 
 class LLMAPIKeyNotSetError(CogneeValidationError):

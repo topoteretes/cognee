@@ -150,3 +150,26 @@ async def test_documents_kept_with_llm_api_key(tmp_path, monkeypatch):
 
     assert {path.name for path in documents} == {"README.md", "notes.txt"}
     assert skip_count == 4
+
+
+@pytest.mark.asyncio
+async def test_symlinks_are_not_followed_into_the_manifest(tmp_path):
+    """rglob + is_file() both follow symlinks, and read_bytes() would then hash and
+    index the TARGET. A repo containing 'creds.py -> ~/.aws/credentials' must not
+    pull that file's contents into the code graph."""
+    from cognee.tasks.code_graph.code_repo import partition_repo_files
+
+    secret = tmp_path / "outside_secret.py"
+    secret.write_text("AWS_SECRET_ACCESS_KEY = 'leaked'")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text("[project]\nname='x'")
+    (repo / "real.py").write_text("x = 1")
+    (repo / "creds.py").symlink_to(secret)
+
+    covered, documents, skipped = partition_repo_files(repo)
+
+    indexed = {p.name for p in covered} | {p.name for p in documents}
+    assert "real.py" in indexed
+    assert "creds.py" not in indexed, "symlink was followed into the manifest"

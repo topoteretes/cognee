@@ -1,15 +1,15 @@
 import os
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import aliased
-
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.models import Dataset
-from cognee.modules.pipelines.methods import reset_pipeline_run_status
-from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.methods import (
+    get_latest_pipeline_runs_by_datasets,
+    reset_pipeline_run_status,
+)
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify.recovery")
@@ -56,33 +56,12 @@ async def recover_stale_cognify_runs_on_startup() -> None:
     db_engine = get_relational_engine()
 
     try:
-        async with db_engine.get_async_session() as session:
-            latest_per_dataset = (
-                select(
-                    PipelineRun,
-                    func.row_number()
-                    .over(
-                        partition_by=PipelineRun.dataset_id,
-                        order_by=PipelineRun.created_at.desc(),
-                    )
-                    .label("rn"),
-                )
-                .where(PipelineRun.pipeline_name == "cognify_pipeline")
-                .subquery()
-            )
-
-            latest_run = aliased(PipelineRun, latest_per_dataset)
-            recovery_candidates = (
-                (
-                    await session.execute(
-                        select(latest_run)
-                        .where(latest_per_dataset.c.rn == 1)
-                        .where(latest_run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+        latest_per_dataset = await get_latest_pipeline_runs_by_datasets(None, "cognify_pipeline")
+        recovery_candidates = [
+            run
+            for run in latest_per_dataset.values()
+            if run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED
+        ]
     except Exception:
         logger.error("Failed to recover latest cognify run which did not successfully finish.")
         return

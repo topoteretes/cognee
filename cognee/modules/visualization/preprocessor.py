@@ -186,6 +186,28 @@ def generate_provenance_colors(values):
     return color_map
 
 
+def build_node_set_colors(values) -> Dict[str, str]:
+    """The ``node_set`` color map: hue rotation, with memory sets pinned.
+
+    Split out of ``preprocess`` so a caller that derives the same map from
+    somewhere other than fetched graph nodes — ``build_brains_summary_payload``
+    reads the node sets relationally, without touching the graph — produces
+    colors identical to the ones the rendered graph uses, instead of
+    re-deriving the rule and drifting from it.
+
+    ``values`` are raw ``source_node_set`` values (a node set name, or the
+    comma-joined string a multi-set document carries); the returned map is
+    keyed by those same raw values.
+    """
+    color_map = generate_provenance_colors(values)
+    # Pin stable, meaningful colors for self-improvement node sets, overriding
+    # the hue-rotation only for sets actually present.
+    for set_name, color in _MEMORY_NODESET_COLORS.items():
+        if set_name in color_map:
+            color_map[set_name] = color
+    return color_map
+
+
 # UUID- or content-hash-shaped strings: never useful as display names.
 _IDENTIFIER_LIKE_RE = re.compile(
     r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32,64})$",
@@ -1373,14 +1395,9 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
     color_maps = {
         "task": generate_provenance_colors([n.get("source_task") for n in nodes]),
         "pipeline": generate_provenance_colors([n.get("source_pipeline") for n in nodes]),
-        "node_set": generate_provenance_colors([n.get("source_node_set") for n in nodes]),
+        "node_set": build_node_set_colors([n.get("source_node_set") for n in nodes]),
         "user": generate_provenance_colors([n.get("source_user") for n in nodes]),
     }
-    # Pin stable, meaningful colors for self-improvement node sets, overriding the
-    # hue-rotation only for sets actually present in this graph.
-    for set_name, color in _MEMORY_NODESET_COLORS.items():
-        if set_name in color_maps["node_set"]:
-            color_maps["node_set"][set_name] = color
 
     schema_graph = extract_schema_graph_data(nodes, links)
     build_operation_layer(schema_graph, nodes, links)

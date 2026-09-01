@@ -2888,8 +2888,9 @@ class LadybugAdapter(GraphDBInterface):
 
             # Fetch all nodes
             nodes_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)
-            WHERE n.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, {
                 name: n.name,
                 type: n.type,
@@ -2917,16 +2918,24 @@ class LadybugAdapter(GraphDBInterface):
 
             # Fetch all edges between the collected nodes
             edges_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)-[r]->(m:Node)
-            WHERE n.id IN $ids AND m.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edge_rows = await self.query(edges_query, {"ids": all_ids})
+            # The far endpoint is filtered here rather than with a second
+            # ``m.id IN $ids`` predicate: that predicate cannot use the primary
+            # key index and costs a table scan per id, which is the whole reason
+            # this query drives off UNWIND in the first place.
+            kept_ids = set(all_ids)
             formatted_edges = []
             for e in edge_rows:
                 if e and len(e) >= 3:
                     source_id = str(e[0])
                     target_id = str(e[1])
+                    if target_id not in kept_ids:
+                        continue
                     rel_type = str(e[2])
                     props = {}
                     if len(e) > 3 and e[3]:
@@ -3006,8 +3015,9 @@ class LadybugAdapter(GraphDBInterface):
         all_ids = list({*primary_ids, *neighbor_ids})
 
         nodes_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)
-            WHERE n.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, n.name, n.type, n.properties
         """
         node_rows = await self.query(nodes_query, {"ids": all_ids})
@@ -3022,13 +3032,19 @@ class LadybugAdapter(GraphDBInterface):
             nodes.append((node_id, data))
 
         edges_query = """
+            UNWIND $ids AS wanted
             MATCH (a:Node)-[r:EDGE]-(b:Node)
-            WHERE a.id IN $ids AND b.id IN $ids
+            WHERE a.id = wanted
             RETURN a.id, b.id, r.relationship_name, r.properties
         """
         edge_rows = await self.query(edges_query, {"ids": all_ids})
+        # See get_neighborhood: the far endpoint is filtered in Python because
+        # a second ``b.id IN $ids`` predicate would reintroduce the per-id scan.
+        kept_ids = set(all_ids)
         edges: List[Tuple[str, str, str, dict]] = []
         for from_id, to_id, rel_type, props in edge_rows:
+            if to_id not in kept_ids:
+                continue
             data = {}
             if props:
                 try:

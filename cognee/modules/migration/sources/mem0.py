@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Union
 
 from cognee.modules.migration.cogx import COGXMemory, COGXRecord, COGXScope, parse_timestamp
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 _CONTENT_KEYS = ("memory", "text", "data", "content")
 
@@ -32,7 +32,7 @@ class Mem0Source(MemorySource):
     def _load_raw(self) -> List[Dict[str, Any]]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if isinstance(data, dict):
             recognized = False
             for key in ("results", "memories", "items"):

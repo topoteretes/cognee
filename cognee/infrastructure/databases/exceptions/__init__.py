@@ -10,6 +10,7 @@ from .exceptions import (
     UnsupportedProvenanceCapability,
     DatabaseNotCreatedError,
     EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
     EmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,

@@ -158,30 +158,12 @@ async def generate_session_answer(
 
     Returns ``(answer, context_to_store, served_context_ids)``.
     """
-    conversation_history = await select_session_history(
+    conversation_history, served_ids = await build_session_prompt(
         session_manager,
-        user_id,
-        session_id,
-        query_text=answer_query,
+        user_id=user_id,
+        session_id=session_id,
+        query=answer_query,
     )
-
-    preference_lines = await load_preference_lines_safe()
-    served_ids: list[str] = []
-    active_context_block = ""
-    if session_manager.is_auto_feedback_enabled():
-        active_context_block, served_ids = await build_active_context_block_safe(
-            session_manager,
-            user_id=user_id,
-            session_id=session_id,
-            query=answer_query,
-            preference_lines=preference_lines,
-        )
-    elif preference_lines:
-        # No stored-entry guidance layer, but durable preferences still render
-        # through the same owner, budgets, and block shape.
-        active_context_block = render_preference_block(preference_lines)
-
-    conversation_history = compose_session_prompt(active_context_block, conversation_history)
 
     (
         answer,
@@ -200,6 +182,57 @@ async def generate_session_answer(
     return answer, context_to_store, served_ids or None
 
 
+async def build_session_prompt(
+    session_manager,
+    *,
+    user_id: str,
+    session_id: str,
+    query: str,
+    history: str | None = None,
+    stamp_served: bool = True,
+) -> tuple[str, list[str]]:
+    """Assemble the session layer of a completion prompt: guidance block, then history.
+
+    The single owner of this assembly. The sequential answer path calls it as-is; an
+    ``only_context`` preview calls it with ``stamp_served=False`` so it reads the same
+    layers without touching ``last_served_at``. One function, two modes — so the preview
+    cannot drift from what the real completion sends.
+
+    ``history`` lets a caller that has already loaded the conversation (once across a
+    dataset fan-out) skip the second read; ``None`` loads it here. Returns
+    ``(prompt, served_ids)``.
+    """
+    conversation_history = (
+        history
+        if history is not None
+        else await select_session_history(
+            session_manager,
+            user_id,
+            session_id,
+            query_text=query,
+        )
+    )
+
+    preference_lines = await load_preference_lines_safe()
+    served_ids: list[str] = []
+    active_context_block = ""
+    if session_manager.is_auto_feedback_enabled():
+        active_context_block, served_ids = await build_active_context_block_safe(
+            session_manager,
+            user_id=user_id,
+            session_id=session_id,
+            query=query,
+            preference_lines=preference_lines,
+            stamp_served=stamp_served,
+        )
+    elif preference_lines:
+        # No stored-entry guidance layer, but durable preferences still render
+        # through the same owner, budgets, and block shape.
+        active_context_block = render_preference_block(preference_lines)
+
+    return compose_session_prompt(active_context_block, conversation_history), served_ids
+
+
 async def build_active_context_block_safe(
     session_manager,
     *,
@@ -207,6 +240,7 @@ async def build_active_context_block_safe(
     session_id: str,
     query: str,
     preference_lines: list[str] | None = None,
+    stamp_served: bool = True,
 ) -> tuple[str, list[str]]:
     """Render the active session-context guidance block. Fail-open -> ("", [])."""
     try:
@@ -216,6 +250,7 @@ async def build_active_context_block_safe(
             session_id=session_id,
             query=query,
             preference_lines=preference_lines,
+            stamp_served=stamp_served,
         )
     except Exception as e:
         logger.warning("Active session-context block failed: %s", e)
