@@ -98,9 +98,6 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "ollama"
           LLM_API_KEY: "ollama"
-          # No /v1 suffix: LLM_PROVIDER=ollama makes litellm qualify the model
-          # as "ollama/phi4" and take its native route, which appends
-          # /api/generate to this base. A /v1/ here yields /v1/api/generate -> 404.
           LLM_ENDPOINT: "http://localhost:11434"
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
