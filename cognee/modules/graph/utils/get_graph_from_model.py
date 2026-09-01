@@ -51,6 +51,32 @@ def _simple_model_for(data_point_type, excluded_fields):
     return model
 
 
+def _belongs_to_set_names(belongs_to_set: list[Any]) -> list[str]:
+    """Nodeset names as a scalar property, so the vector database can filter on them."""
+    return [
+        node_set if isinstance(node_set, str) else node_set.name
+        for node_set in belongs_to_set
+        if isinstance(node_set, str) or hasattr(node_set, "name")
+    ]
+
+
+def _graph_node_from(data_point: DataPoint, field_edges: list[tuple[str, Edge]]) -> DataPoint:
+    """Graph node to write: leftover field values, edge fields stripped.
+
+    ``belongs_to_set`` is both: names stay on the node, and it still emits edges.
+    """
+    node_properties = {"id": data_point.id, "type": type(data_point).__name__}
+    for field_name, value in data_point.get_fields_without_edges():
+        node_properties[field_name] = value
+    stripped_field_names = set()
+    for field_name, _edge in field_edges:
+        if field_name == "belongs_to_set":
+            node_properties[field_name] = _belongs_to_set_names(data_point.belongs_to_set or [])
+            continue
+        stripped_field_names.add(field_name)
+    return _simple_model_for(type(data_point), stripped_field_names)(**node_properties)
+
+
 def _create_edge_properties(
     source_id: str, target_id: str, relationship_name: str, edge_metadata: Optional[Edge]
 ) -> Dict[str, Any]:
@@ -74,19 +100,19 @@ class _WalkState:
 
     added_nodes: Dict[str, bool]
     added_edges: Dict[str, bool]
-    # When present, collects the original DataPoint behind every node the walk stores.
-    # The returned nodes are ``copy_model`` copies with the relationship fields
-    # stripped, which a caller linking into the graph cannot use.
-    stored_originals: Optional[List[DataPoint]] = None
+    # When present, collects the DataPoint behind every graph node the walk writes.
+    # The returned nodes have edge fields stripped, so a caller linking into the
+    # graph cannot use them.
+    claimed_datapoints: Optional[List[DataPoint]] = None
 
     def claim_node(self, data_point) -> bool:
-        """True the first time this node is seen. Records the original with it."""
+        """True the first time this node is seen. Records the claimed datapoint."""
         node_id = str(data_point.id)
         if node_id in self.added_nodes:
             return False
         self.added_nodes[node_id] = True
-        if self.stored_originals is not None:
-            self.stored_originals.append(data_point)
+        if self.claimed_datapoints is not None:
+            self.claimed_datapoints.append(data_point)
         return True
 
     def claim_edge(self, source, target, relationship_name) -> bool:
@@ -120,10 +146,10 @@ def _walk_data_point(
     if not state.claim_node(data_point):
         return nodes, edges
 
-    properties, excluded, declared = data_point.graph_fields()
-    nodes.append(_simple_model_for(type(data_point), excluded)(**properties))
+    field_edges = data_point.get_edges_from_fields()
+    nodes.append(_graph_node_from(data_point, field_edges))
 
-    for _field_name, edge in declared:
+    for _field_name, edge in field_edges:
         for target in unwrap_transparent(edge.target):
             if state.claim_edge(edge.source, target, edge.relationship_type):
                 edges.append(

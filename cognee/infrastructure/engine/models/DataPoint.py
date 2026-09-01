@@ -15,15 +15,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _node_set_names(belongs_to_set: list[Any]) -> list[str]:
-    """Nodeset names as a scalar property, so the vector database can filter on them."""
-    return [
-        node_set if isinstance(node_set, str) else node_set.name
-        for node_set in belongs_to_set
-        if isinstance(node_set, str) or hasattr(node_set, "name")
-    ]
-
-
 # Define metadata type
 class MetaData(TypedDict):
     """
@@ -387,34 +378,25 @@ class DataPoint(BaseModel):
         """
         return cls.model_validate(data)
 
-    def graph_fields(self) -> tuple[dict[str, Any], set[str], list[tuple[str, "Edge"]]]:
-        """How this node maps onto the graph, in one pass over its fields.
+    def get_edges_from_fields(self) -> list[tuple[str, "Edge"]]:
+        """Return ``(field_name, edge)`` for every field that expands into graph edges.
 
-        Returns the scalar properties to store on it, the field names to strip from the
-        stored copy, and every relationship it declares as a normalized ``Edge``.
-
-        Targets are RAW: a transparent container is still a container here. Resolving one
-        is the walk's job, because "a container is never stored" is a storage fact.
+        Targets stay raw: a transparent container is still a container here.
         """
-        properties: dict[str, Any] = {"id": self.id, "type": type(self).__name__}
-        excluded: set[str] = set()
-        declared: list[tuple[str, "Edge"]] = []
+        return [
+            (field_name, edge)
+            for field_name, field_value in self
+            if field_name != "metadata"
+            for edge in self._edges_in_field(field_name, field_value)
+        ]
 
-        for field_name, field_value in self:
-            if field_name == "metadata":
-                continue
-            edges = self._edges_in_field(field_name, field_value)
-            if not edges:
-                properties[field_name] = field_value
-                continue
-            if field_name == "belongs_to_set":
-                properties[field_name] = _node_set_names(field_value)
-            else:
-                excluded.add(field_name)
-            for edge in edges:
-                declared.append((field_name, edge))
-
-        return properties, excluded, declared
+    def get_fields_without_edges(self) -> list[tuple[str, Any]]:
+        """Return ``(field_name, value)`` for fields that do not expand into edges."""
+        return [
+            (field_name, field_value)
+            for field_name, field_value in self
+            if field_name != "metadata" and not self._edges_in_field(field_name, field_value)
+        ]
 
     def _edges_in_field(self, field_name: str, value: Any) -> "list[Edge]":
         from cognee.infrastructure.engine.models.Edge import Edge

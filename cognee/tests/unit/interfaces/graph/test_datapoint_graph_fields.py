@@ -40,8 +40,16 @@ class Plain(DataPoint):
     name: str
 
 
-def _declared_by_name(declared):
-    return {name: edge for name, edge in declared}
+def _edges_by_field(data_point):
+    return {name: edge for name, edge in data_point.get_edges_from_fields()}
+
+
+def _leftover_names(data_point):
+    return {name for name, _ in data_point.get_fields_without_edges()}
+
+
+def _leftovers(data_point):
+    return dict(data_point.get_fields_without_edges())
 
 
 def test_nested_datapoint_and_list_are_named_after_the_field():
@@ -49,8 +57,8 @@ def test_nested_datapoint_and_list_are_named_after_the_field():
     other = Car(name="Golf")
     person = Owner(name="Alice", owns=car, cars=[other])
 
-    properties, excluded, declared = person.graph_fields()
-    by_name = _declared_by_name(declared)
+    by_name = _edges_by_field(person)
+    leftovers = _leftover_names(person)
 
     assert by_name["owns"].source is person
     assert by_name["owns"].target is car
@@ -58,24 +66,22 @@ def test_nested_datapoint_and_list_are_named_after_the_field():
     assert by_name["cars"].source is person
     assert by_name["cars"].target is other
     assert by_name["cars"].relationship_type == "cars"
-    assert "owns" in excluded
-    assert "cars" in excluded
-    assert "owns" not in properties
-    assert "cars" not in properties
+    assert "owns" not in leftovers
+    assert "cars" not in leftovers
+    assert leftovers >= {"name"}
 
 
 def test_tuple_edge_weight_and_purchased_name():
     car = Car(name="Beetle")
     person = Owner(name="Alice", purchased=(Edge(weight=0.8), car))
 
-    _, excluded, declared = person.graph_fields()
-    edge = _declared_by_name(declared)["purchased"]
+    edge = _edges_by_field(person)["purchased"]
     assert edge.relationship_type == "purchased"
     assert edge.weight == 0.8
-    assert "purchased" in excluded
+    assert "purchased" not in _leftover_names(person)
 
     person = Owner(name="Alice", purchased=(Edge(relationship_type="bought"), car))
-    edge = _declared_by_name(person.graph_fields()[2])["purchased"]
+    edge = _edges_by_field(person)["purchased"]
     assert edge.relationship_type == "bought"
 
 
@@ -83,13 +89,12 @@ def test_local_edge_fills_source_from_owner():
     car = Car(name="Beetle")
     person = Owner(name="Alice", extra=Edge(target=car, weight=0.8))
 
-    _, excluded, declared = person.graph_fields()
-    edge = _declared_by_name(declared)["extra"]
+    edge = _edges_by_field(person)["extra"]
     assert edge.source is person
     assert edge.target is car
     assert edge.relationship_type == "extra"
     assert edge.weight == 0.8
-    assert "extra" in excluded
+    assert "extra" not in _leftover_names(person)
 
 
 def test_explicit_edge_keeps_foreign_endpoints():
@@ -97,74 +102,64 @@ def test_explicit_edge_keeps_foreign_endpoints():
     bob = Person(name="Bob")
     graph = SocialGraph(friends_with=[Edge(source=alice, target=bob)])
 
-    _, excluded, declared = graph.graph_fields()
-    edge = _declared_by_name(declared)["friends_with"]
+    edge = _edges_by_field(graph)["friends_with"]
     assert edge.source is alice
     assert edge.target is bob
     assert graph not in (edge.source, edge.target)
-    assert "friends_with" in excluded
+    assert "friends_with" not in _leftover_names(graph)
 
 
-def test_edge_without_target_stays_a_property():
+def test_edge_without_target_stays_a_leftover_field():
     person = Owner(name="Alice", extra=Edge(weight=0.8))
-    properties, excluded, declared = person.graph_fields()
-    assert declared == []
-    assert "extra" not in excluded
-    assert properties["extra"].weight == 0.8
+    assert person.get_edges_from_fields() == []
+    assert _leftovers(person)["extra"].weight == 0.8
 
 
-def test_empty_tuple_targets_declare_nothing():
+def test_empty_tuple_targets_expand_to_nothing():
     person = Owner(name="Alice", empty_tuple=(Edge(weight=0.8), []))
-    properties, excluded, declared = person.graph_fields()
-    assert declared == []
-    assert "empty_tuple" not in excluded
-    assert "empty_tuple" in properties
+    assert person.get_edges_from_fields() == []
+    assert "empty_tuple" in _leftover_names(person)
 
 
 def test_normalize_keeps_mentors_on_verbatim():
     car = Car(name="Beetle")
     person = Owner(name="Alice", mentors=(Edge(relationship_type="Mentors On"), car))
-    edge = _declared_by_name(person.graph_fields()[2])["mentors"]
+    edge = _edges_by_field(person)["mentors"]
     assert edge.relationship_type == "Mentors On"
 
 
-def test_belongs_to_set_is_stored_and_declared():
+def test_belongs_to_set_expands_to_edges_and_is_not_a_leftover():
     node_set = NodeSet(name="team")
     person = Owner(name="Alice", belongs_to_set=[node_set])
-    properties, excluded, declared = person.graph_fields()
-    assert "belongs_to_set" not in excluded
-    assert properties["belongs_to_set"] == ["team"]
-    assert _declared_by_name(declared)["belongs_to_set"].target is node_set
+    assert "belongs_to_set" not in _leftover_names(person)
+    assert _edges_by_field(person)["belongs_to_set"].target is node_set
 
 
-def test_metadata_is_in_none_of_the_three():
+def test_metadata_is_on_neither_list():
     person = Owner(name="Alice")
-    properties, excluded, declared = person.graph_fields()
-    assert "metadata" not in properties
-    assert "metadata" not in excluded
-    assert all(name != "metadata" for name, _ in declared)
+    assert "metadata" not in _leftover_names(person)
+    assert all(name != "metadata" for name, _ in person.get_edges_from_fields())
 
 
 def test_transparent_target_stays_raw():
     alice = Person(name="Alice")
     group = Group(members=[alice])
     holder = Owner(name="Dept", groups=[group])
-    edge = _declared_by_name(holder.graph_fields()[2])["groups"]
+    edge = _edges_by_field(holder)["groups"]
     assert edge.target is group
 
 
-def test_model_with_no_relationships():
+def test_model_with_no_edges():
     plain = Plain(name="x")
-    _properties, excluded, declared = plain.graph_fields()
-    assert excluded == set()
-    assert declared == []
+    assert plain.get_edges_from_fields() == []
+    assert "name" in _leftover_names(plain)
 
 
 def test_tuple_target_argument_wins():
     car = Car(name="Beetle")
     other = Car(name="Golf")
     person = Owner(name="Alice", mixed=(Edge(target=car), other))
-    edge = _declared_by_name(person.graph_fields()[2])["mixed"]
+    edge = _edges_by_field(person)["mixed"]
     assert edge.target is other
 
 

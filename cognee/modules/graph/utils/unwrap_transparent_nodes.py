@@ -91,12 +91,11 @@ def unwrap_transparent(
         return []
     _active = (_active or frozenset()) | {id(data_point)}
 
-    properties, _excluded, declared = data_point.graph_fields()
-    for field_name, value in properties.items():
+    for field_name, value in data_point.get_fields_without_edges():
         _warn_dropped_field(data_point, field_name, value)
 
     resolved: List[DataPoint] = []
-    for field_name, edge in declared:
+    for field_name, edge in data_point.get_edges_from_fields():
         if field_name == "belongs_to_set":
             continue
         if edge.source is not data_point:
