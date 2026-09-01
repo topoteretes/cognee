@@ -1,0 +1,143 @@
+"""serve() must fail loudly at connect time instead of lying.
+
+Covers the two failure modes: nothing to connect with (no url, no env
+config, no usable saved credentials, no device client ID), and a reachable
+instance that rejects the API key — which previously printed "Connected"
+and failed on the first operation."""
+
+import json
+
+import pytest
+
+from cognee.api.v1.serve import credentials as creds_mod
+from cognee.api.v1.serve.cloud_client import CloudClient
+from cognee.api.v1.serve.serve import serve
+from cognee.exceptions import CogneeConfigurationError
+
+
+@pytest.fixture(autouse=True)
+def no_serve_env(monkeypatch):
+    for var in ("COGNEE_AUTH0_DEVICE_CLIENT_ID", "COGNEE_SERVICE_URL", "COGNEE_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_serve_no_config_fails_with_guidance(monkeypatch, tmp_path):
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", tmp_path / "cloud_credentials.json")
+
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve()
+
+    message = exc_info.value.message
+    assert "COGNEE_SERVICE_URL" in message
+    assert "COGNEE_AUTH0_DEVICE_CLIENT_ID" in message
+    assert "cognee.serve(url=" in message
+
+
+@pytest.mark.asyncio
+async def test_serve_stale_credentials_fail_with_guidance(monkeypatch, tmp_path):
+    creds_file = tmp_path / "cloud_credentials.json"
+    creds_file.write_text(
+        json.dumps(
+            {
+                "access_token": "stale",
+                "service_url": "http://stale.invalid",
+                "api_key": "dead-key",
+                "email": "user@example.com",
+                "expires_at": 1.0,
+            }
+        )
+    )
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+
+    async def failing_health_check(self):
+        return False
+
+    monkeypatch.setattr(CloudClient, "_health_check", failing_health_check)
+
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve()
+
+    message = exc_info.value.message
+    assert "user@example.com" in message
+    assert "http://stale.invalid" in message
+    assert "COGNEE_SERVICE_URL" in message
+
+
+def _patch_probes(monkeypatch, health: bool, auth_status):
+    async def health_check(self):
+        return health
+
+    async def auth_check(self):
+        return auth_status
+
+    monkeypatch.setattr(CloudClient, "_health_check", health_check)
+    monkeypatch.setattr(CloudClient, "_auth_check", auth_check)
+
+
+@pytest.mark.asyncio
+async def test_serve_direct_rejected_key_fails_and_saves_nothing(monkeypatch, tmp_path):
+    creds_file = tmp_path / "cloud_credentials.json"
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+    _patch_probes(monkeypatch, health=True, auth_status=401)
+
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve(url="http://some-instance:8000", api_key="bad-key")
+
+    assert "API key was rejected" in exc_info.value.message
+    # A rejected connect must not poison the credentials cache.
+    assert not creds_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_serve_direct_missing_key_explains_how_to_get_one(monkeypatch, tmp_path):
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", tmp_path / "cloud_credentials.json")
+    _patch_probes(monkeypatch, health=True, auth_status=401)
+
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve(url="http://some-instance:8000")
+
+    message = exc_info.value.message
+    assert "requires authentication" in message
+    assert "POST /api/v1/auth/api-keys" in message
+
+
+@pytest.mark.asyncio
+async def test_serve_direct_accepted_key_connects_and_saves(monkeypatch, tmp_path):
+    import cognee
+
+    creds_file = tmp_path / "cloud_credentials.json"
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+    _patch_probes(monkeypatch, health=True, auth_status=200)
+
+    client = await serve(url="http://some-instance:8000", api_key="good-key")
+    try:
+        assert client.service_url == "http://some-instance:8000"
+        assert creds_file.exists()
+    finally:
+        await cognee.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_serve_cached_cloud_creds_with_rejected_key_fall_through(monkeypatch, tmp_path):
+    """A reachable instance whose saved key no longer works must not 'connect';
+    without a device client ID it lands in the stale-credentials guidance."""
+    creds_file = tmp_path / "cloud_credentials.json"
+    creds_file.write_text(
+        json.dumps(
+            {
+                "access_token": "stale",
+                "service_url": "http://alive-but-rejects.invalid",
+                "api_key": "revoked-key",
+                "email": "user@example.com",
+                "expires_at": 1.0,
+            }
+        )
+    )
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+    _patch_probes(monkeypatch, health=True, auth_status=401)
+
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve()
+
+    assert "user@example.com" in exc_info.value.message
