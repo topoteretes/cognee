@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 from typing import Any
 
 from pydantic import BaseModel
@@ -21,16 +22,29 @@ def _note_extraction_config(system_prompt: str) -> None:
     or the global config outside a stage — resolved exactly as ``LLMGateway`` resolves
     it. The import is lazy so ``import cognee`` never loads the capture package, and
     the fingerprint (a sha256 over the rendered prompt) is only computed while capture
-    is active; ``note()`` itself is a no-op without a run scope.
+    is active - and once per distinct prompt, not once per chunk; ``note()`` itself is
+    a no-op without a run scope.
     """
     from cognee.modules.observability import capture as eval_capture
 
     if not eval_capture.is_active():
         return
     eval_capture.note("extraction.model", get_llm_context_config().llm_model)
-    eval_capture.note(
-        "extraction.prompt_fingerprint", eval_capture.prompt_fingerprint(system_prompt)
-    )
+    eval_capture.note("extraction.prompt_fingerprint", _prompt_fingerprint(system_prompt))
+
+
+@lru_cache(maxsize=8)
+def _prompt_fingerprint(system_prompt: str) -> str:
+    """Fingerprint of one rendered extraction prompt, memoized per distinct prompt text.
+
+    ``extract_content_graph`` runs once per chunk and every chunk of a batch renders
+    the same prompt, so the sha256 is paid once per prompt rather than once per chunk
+    (the economy ``summarize_text`` applies to its prompt). Only reached while capture
+    is active; a ``custom_prompt`` gets its own entry.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    return eval_capture.prompt_fingerprint(system_prompt)
 
 
 async def extract_content_graph(

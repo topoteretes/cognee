@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
 
 from cognee.modules.observability import OtelStatusCode as StatusCode
 
@@ -169,7 +169,12 @@ def _emit_retrieval_candidates(
         default_penalty = (
             6.5 if triplet_distance_penalty is None else float(triplet_distance_penalty)
         )
-        per_query = [(0, results)] if query_list_length is None else list(enumerate(results))
+        # Single mode carries one flat edge list; batch mode one list per query.
+        per_query: list[tuple[int, Sequence[Edge]]] = (
+            [(0, cast(List[Edge], results))]
+            if query_list_length is None
+            else list(enumerate(cast(List[List[Edge]], results)))
+        )
         for query_index, top_edges in per_query:
             eval_capture.emit(
                 eval_capture.KIND_RETRIEVAL_CANDIDATES,
@@ -480,7 +485,11 @@ async def brute_force_triplet_search(
         if capture_active:
             # The bounding settings of this search, mirrored from the span into
             # the run manifest so an offline eval can tie a candidate pool to the
-            # knobs that produced it. No-ops outside a run scope.
+            # knobs that produced it. No-ops outside a run scope. Last-wins: a
+            # retriever that runs several searches inside one operation scope
+            # (context extension, decomposition, node_name-seeded lookups) leaves
+            # the final call's knobs on the manifest, while every search still
+            # emits its own retrieval.candidates event.
             eval_capture.note("retrieval.top_k", top_k)
             eval_capture.note("retrieval.wide_search_top_k", wide_search_top_k)
             eval_capture.note("retrieval.neighborhood_seed_top_k", neighborhood_seed_top_k)

@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from instructor.core import InstructorRetryException
 from pydantic import BaseModel
@@ -29,10 +30,12 @@ def get_mock_summarized_code() -> SummarizedCode:
 
 async def extract_summary_with_provenance(
     content: str, response_model: type[BaseModel]
-) -> tuple[BaseModel, str, str]:
+) -> tuple[Any, str, str]:
     """``extract_summary`` plus what eval capture records about the call (SDK-529).
 
-    Returns ``(llm_output, prompt_text, model_name)``. The prompt text is the
+    Returns ``(llm_output, prompt_text, model_name)``. ``llm_output`` is an instance
+    of ``response_model`` (typed ``Any``: callers read model-specific fields such as
+    ``.summary`` off it). The prompt text is the
     system prompt that was sent — already read for the call, so returning it
     costs nothing extra — and the model name is the model id the active LLM
     context config routes the call to (inside ``pipeline_stage("summarization")``

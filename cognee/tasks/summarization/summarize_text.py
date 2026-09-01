@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type
+from typing import Optional, Type
 from uuid import uuid5
 from pydantic import BaseModel
 
@@ -82,7 +82,10 @@ async def summarize_text(
     summaries: list[TextSummary] = []
 
     for chunk, (llm_output, prompt_text, model_name) in zip(data_chunks, results):
-        provenance: dict[str, str] = {}
+        # Provenance stays None unless capture is active.
+        model: Optional[str] = None
+        prompt_fingerprint: Optional[str] = None
+        source_text_hash: Optional[str] = None
         if active:
             # The sanctioned snapshot cost: sha256 of the chunk text (and of each
             # distinct prompt) — only while capturing.
@@ -90,11 +93,8 @@ async def summarize_text(
             if prompt_fingerprint is None:
                 prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
                 prompt_fingerprints[prompt_text] = prompt_fingerprint
-            provenance = {
-                "model": model_name,
-                "prompt_fingerprint": prompt_fingerprint,
-                "source_text_hash": eval_capture.prompt_fingerprint(chunk.text),
-            }
+            model = model_name
+            source_text_hash = eval_capture.prompt_fingerprint(chunk.text)
 
         summary = TextSummary(
             id=uuid5(chunk.id, "TextSummary"),
@@ -103,7 +103,9 @@ async def summarize_text(
             belongs_to_set=chunk.belongs_to_set,
             text=llm_output.summary,
             importance_weight=chunk.importance_weight,
-            **provenance,
+            model=model,
+            prompt_fingerprint=prompt_fingerprint,
+            source_text_hash=source_text_hash,
         )
         summaries.append(summary)
 
