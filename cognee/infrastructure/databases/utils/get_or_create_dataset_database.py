@@ -41,14 +41,18 @@ async def _get_graph_db_info(dataset_id: UUID, user: User) -> dict:
 
 async def _existing_dataset_database(
     dataset_id: UUID,
-    user: User,
 ) -> Optional[DatasetDatabase]:
     """
-    Check if a DatasetDatabase row already exists for the given owner + dataset.
+    Check if a DatasetDatabase row already exists for the given dataset.
     Return None if it doesn't exist, return the row if it does.
+
+    dataset_id is the table's primary key — one row per dataset, shared by the
+    owner and every ACL-granted user — so the lookup must not filter by owner:
+    for a non-owner caller that turns a hit into a miss and the fall-through
+    INSERT crashes on the primary key (#4829).
+
     Args:
         dataset_id:
-        user:
 
     Returns:
         DatasetDatabase or None
@@ -56,10 +60,7 @@ async def _existing_dataset_database(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
-        stmt = select(DatasetDatabase).where(
-            DatasetDatabase.owner_id == user.id,
-            DatasetDatabase.dataset_id == dataset_id,
-        )
+        stmt = select(DatasetDatabase).where(DatasetDatabase.dataset_id == dataset_id)
         existing: DatasetDatabase = await session.scalar(stmt)
         return existing
 
@@ -79,7 +80,10 @@ async def get_or_create_dataset_database(
     Parameters
     ----------
     user : User
-        Principal that owns this dataset.
+        Principal that owns this dataset. An existing row is returned regardless
+        of who calls (the row is keyed by dataset alone), but when the row does
+        not exist yet this user is recorded as its owner — so creation must
+        happen as the owner, never as an ACL-granted caller.
     dataset : Union[str, UUID]
         Dataset being linked.
     """
@@ -99,7 +103,7 @@ async def get_or_create_dataset_database(
         dataset = await create_authorized_dataset(dataset, user)
 
     # If dataset database already exists return it
-    existing_dataset_database = await _existing_dataset_database(dataset_id, user)
+    existing_dataset_database = await _existing_dataset_database(dataset_id)
     if existing_dataset_database:
         return existing_dataset_database
 
