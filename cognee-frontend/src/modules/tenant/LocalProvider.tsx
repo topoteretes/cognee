@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { Tenant } from "./types";
 import { TenantContext, localInstance } from "./TenantContext";
 import { tokens } from "@/ui/theme/tokens";
-import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
+
+const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
 
 export function LocalProvider({ children }: { children: React.ReactNode }) {
-  const localApiUrl = getLocalApiUrl();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,13 +84,10 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       podUnreachable: false,
       error,
       statusMessage: null,
-      availableTenants: [],
       switchTenant: () => {},
       planType: null,
       hasAccess: true,
       requestCreateWorkspace: () => {},
-      // Single-user local mode: the only user is always the owner.
-      isOwner: true,
       nameModalOpen: false,
       releaseLoader: () => {},
     }}>
