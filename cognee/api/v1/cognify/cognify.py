@@ -47,8 +47,6 @@ from cognee.modules.observability import (
     MEMORY_SYSTEM,
     MEMORY_OPERATION,
     record_operation_duration,
-    increment_graph_edges,
-    increment_graph_nodes,
 )
 
 

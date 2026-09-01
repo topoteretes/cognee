@@ -1,5 +1,6 @@
 import asyncio
-from typing import TYPE_CHECKING, Dict, List, Optional
+from collections import Counter
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
@@ -23,6 +24,12 @@ from cognee.modules.graph.utils import (
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
+from cognee.modules.observability import (
+    MEMORY_OPERATION,
+    MEMORY_SYSTEM,
+    increment_graph_edges,
+    increment_graph_nodes,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
@@ -33,6 +40,11 @@ if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext
 
 logger = get_logger("add_data_points")
+
+# Past this many nodes the storage.delta capture event carries the node count
+# and type histogram only, not the id list, so one bulk write cannot produce an
+# unbounded event.
+_STORAGE_DELTA_MAX_NODE_IDS = 500
 
 
 @task_summary("Stored {n} data point(s)")
@@ -100,6 +112,10 @@ async def add_data_points(
         if isinstance(custom_edges, list) and custom_edges
         else None
     )
+    # Counted before the writes: ``edges`` absorbs ``custom_edges`` further down
+    # (for the hybrid attach pass and triplet embedding).
+    edge_count = len(edges)
+    custom_edge_count = len(custom_edges) if custom_edges else 0
 
     if graph_only:
         from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
@@ -257,7 +273,72 @@ async def add_data_points(
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
+    _record_storage_delta(nodes, edge_count, custom_edge_count, pipeline_run_id)
+
     return data_points
+
+
+def _record_storage_delta(
+    nodes: List[DataPoint],
+    edge_count: int,
+    custom_edge_count: int,
+    pipeline_run_id: Any,
+) -> None:
+    """Report what this call wrote: OTel counters always, eval capture when active.
+
+    ``add_data_points`` is the one choke point every graph write goes through
+    (cognify, memify, the code-graph route, every backend path above), so the
+    per-run node/edge delta is taken here once rather than in each caller. The
+    OTel counters are ``_NullInstrument`` no-ops without a meter provider. The
+    capture branch is a structural no-op when capture is off: one global read,
+    then return — no id list, no type histogram, no event.
+    """
+    node_count = len(nodes)
+    total_edges = edge_count + custom_edge_count
+    attributes = {MEMORY_SYSTEM: "cognee", MEMORY_OPERATION: "process"}
+    increment_graph_nodes(node_count, attributes)
+    increment_graph_edges(total_edges, attributes)
+
+    # Lazy on purpose: ``import cognee`` must not load the capture package.
+    from cognee.modules.observability import capture as eval_capture
+
+    if not eval_capture.is_active():
+        return
+
+    eval_capture.bump("storage.nodes_written", node_count)
+    eval_capture.bump("storage.edges_written", total_edges)
+    eval_capture.emit(
+        eval_capture.KIND_STORAGE_DELTA,
+        _storage_delta_payload(nodes, edge_count, custom_edge_count, pipeline_run_id),
+        payload_kind="json",
+        stage="add_data_points",
+    )
+
+
+def _storage_delta_payload(
+    nodes: List[DataPoint],
+    edge_count: int,
+    custom_edge_count: int,
+    pipeline_run_id: Any,
+) -> Dict[str, Any]:
+    """Ids, types and counts only — never the DataPoint instances.
+
+    The event is serialized later by the capture flusher, so this plain dict is
+    what gets buffered; a DataPoint would drag its whole subgraph along
+    (``DocumentChunk.contains`` recurses). Above ``_STORAGE_DELTA_MAX_NODE_IDS``
+    the id list is replaced by ``None``; the count and histogram stay.
+    """
+    node_count = len(nodes)
+    return {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "custom_edge_count": custom_edge_count,
+        "node_types": dict(Counter(node.type for node in nodes)),
+        "node_ids": (
+            [str(node.id) for node in nodes] if node_count <= _STORAGE_DELTA_MAX_NODE_IDS else None
+        ),
+        "pipeline_run_id": str(pipeline_run_id) if pipeline_run_id else None,
+    }
 
 
 def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
