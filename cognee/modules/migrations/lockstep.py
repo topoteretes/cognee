@@ -4,9 +4,13 @@ The fresh-database bootstrap builds the schema with ``create_all()`` from
 ``Base.metadata`` and then STAMPS Alembic head — asserting, without checking,
 that the models and the migration chain describe the same schema. This module
 makes that assertion checkable in CI: build a frozen, certified snapshot of the
-model schema as a real database, stamp it at the snapshot's revision, replay
-only the migrations added since, and compare the result against the current
-models in both directions.
+model schema as a real database and replay the chain over it — the ENTIRE
+chain from its initial revision (the whole-history probe), and, separately,
+only the migrations added since the freeze from a stamp at the frozen revision
+(the fast post-freeze probe) — then compare each result against the current
+models in both directions. The seed is always the FROZEN state, never live
+``Base.metadata``: a live-model seed already contains any model change whose
+migration is missing, hiding exactly the divergence being checked.
 
 It lives in the runtime package (not under ``tests/``) so downstream
 deployments that vendor their own Alembic chain — e.g. cognee cloud, whose
@@ -222,14 +226,7 @@ async def replay_from_baseline(
 
     try:
         async with adapter.engine.begin() as connection:
-
-            def _create(sync_connection):
-                metadata = sa.MetaData()
-                for name, columns in baseline["tables"].items():
-                    sa.Table(name, metadata, *(sa.Column(col, sa.Text()) for col in columns))
-                metadata.create_all(sync_connection)
-
-            await connection.run_sync(_create)
+            await _seed_baseline_tables(connection, baseline["tables"])
             await connection.execute(
                 sa.text(
                     "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL, "
@@ -248,26 +245,31 @@ async def replay_from_baseline(
 
 
 async def replay_entire_chain(
+    baseline: dict,
     database_url: str,
     script_location: str | None = None,
     ignored_tables: Iterable[str] = IGNORED_TABLES,
 ) -> dict[str, list[str]]:
-    """Run ``alembic upgrade head`` on an EMPTY database — the entire chain
-    from its initial revision — and reflect the resulting tables and columns.
+    """Replay the ENTIRE chain — ``alembic upgrade head`` from the initial
+    revision, no stamp — over a database seeded from the frozen baseline, and
+    reflect the resulting tables and columns.
 
-    Possible only because the initial migration creates the base schema
-    (guarded ``create_all``): the chain is a self-sufficient creation history.
-    Every revision above the base is inspector-guarded, so each either does
-    its genuine first run or no-ops (audited file by file; the replay runs
-    clean end to end).
+    The chain is a delta log: the base tables never came from migrations, so a
+    truly empty database gives the guarded revisions nothing to attach to. The
+    frozen snapshot supplies that base — deliberately the FROZEN state, never
+    live ``Base.metadata``: a live-model seed is a moving target that already
+    contains any model change whose migration is missing, which would blind
+    this probe to half of what it exists to catch. No migration file is
+    touched to make this possible.
 
-    This is the whole-history lockstep probe: it catches a chain that adds
-    anything the models do not declare, wherever in history the divergence
-    lives — including a downstream deployment whose vendored chain is paired
-    with an older pinned package (the mis-stamp incident pairing). The
-    reverse direction (a model change with no migration) is invisible here,
-    because the base is built from the models themselves — that direction
-    belongs to the frozen-baseline test.
+    Every revision is inspector-guarded (audited file by file), so each one
+    either no-ops against a frozen object that already exists or does its
+    genuine first run — which is exactly how anything the chain provides that
+    the models do not declare (wherever in history it was introduced,
+    including a downstream chain paired with an older pinned package — the
+    mis-stamp incident pairing) materializes and shows up as extra. The
+    reverse direction, a post-freeze model change with no migration, shows up
+    as missing.
     """
     from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
         SQLAlchemyAdapter,
@@ -275,10 +277,26 @@ async def replay_entire_chain(
 
     adapter = SQLAlchemyAdapter(database_url)
     try:
+        async with adapter.engine.begin() as connection:
+            await _seed_baseline_tables(connection, baseline["tables"])
         await _upgrade_head_pinned_to(adapter, script_location)
         return await _reflect_names(adapter, set(ignored_tables))
     finally:
         await adapter.engine.dispose()
+
+
+async def _seed_baseline_tables(connection, baseline_tables: dict[str, list[str]]) -> None:
+    """Materialize the frozen snapshot as real tables. Column types are
+    generic (the comparison is by NAME); what matters is that replayed
+    migrations meet exactly the frozen era's objects, nothing newer."""
+
+    def _create(sync_connection):
+        metadata = sa.MetaData()
+        for name, columns in baseline_tables.items():
+            sa.Table(name, metadata, *(sa.Column(col, sa.Text()) for col in columns))
+        metadata.create_all(sync_connection)
+
+    await connection.run_sync(_create)
 
 
 async def _upgrade_head_pinned_to(adapter, script_location: str | None) -> None:
