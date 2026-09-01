@@ -223,6 +223,13 @@ async def add(
                 transformed[item] = {}
         preferred_loaders = transformed
 
+    # Fail loudly on inconsistent LLM/embedding provider config before any DB
+    # or ingestion work — otherwise the mismatch surfaces minutes later as an
+    # opaque auth error mid-cognify. Cheap (no network), once per process.
+    from cognee.modules.preflight import validate_provider_config
+
+    validate_provider_config()
+
     await setup()
 
     # The pipeline-run log writers INSERT the operation-record columns

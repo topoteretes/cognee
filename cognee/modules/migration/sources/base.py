@@ -11,11 +11,26 @@ encapsulated in the source object.
 """
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Optional
+from pathlib import Path
+from typing import AsyncIterator, Optional, Union
 
 from cognee.modules.migration.cogx import COGXRecord
 
 IMPORT_MODES = ("re-derive", "preserve", "hybrid")
+
+
+def read_export_file(path: Union[str, Path]) -> str:
+    """Read an export file through the local-path allowlist.
+
+    Export paths can arrive from outside the SDK (CLI arguments, callers
+    forwarding request data), so they take the same containment check as
+    ingestion's local-file reads: symlink-safe resolution against
+    ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` (default: cwd, tmp, and cognee's own
+    storage roots) instead of dereferencing an arbitrary path.
+    """
+    from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+    return resolve_local_path(path, must_exist=True).read_text(encoding="utf-8")
 
 
 class MemorySource(ABC):
