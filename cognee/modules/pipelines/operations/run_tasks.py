@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import nullcontext
 
 from typing import Any, Awaitable, Callable, List, Optional, Union
 from uuid import UUID
@@ -88,7 +89,19 @@ async def run_tasks(
     # parent_run_scope makes nested runs (a pipeline started by one of our
     # tasks, or a recorded operation called mid-pipeline) parent to THIS run,
     # mirroring how their tokens chain into run_usage.
-    with operation_usage_scope() as run_usage, parent_run_scope(pipeline_run_id):
+    # Eval capture (SDK-529): lazy import keeps ``import cognee`` free of the
+    # capture package. Pipeline scopes are always sampled.
+    from cognee.modules.observability import capture as eval_capture
+
+    with (
+        operation_usage_scope() as run_usage,
+        parent_run_scope(pipeline_run_id),
+        (
+            eval_capture.run_scope(pipeline_run_id, dataset.id, kind="pipeline")
+            if eval_capture.is_active()
+            else nullcontext()
+        ),
+    ):
         async with set_database_global_context_variables(
             dataset.id,
             dataset.owner_id,
@@ -268,6 +281,11 @@ async def run_tasks(
                     tokens_out=run_usage.tokens_out,
                 )
 
+                # A pipeline run is seconds-to-minutes and LLM-bound, so one sink
+                # write is noise here; drain() swallows its own exceptions.
+                if eval_capture.is_active():
+                    await eval_capture.drain()
+
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
                     dataset_id=dataset.id,
@@ -311,6 +329,9 @@ async def run_tasks(
                     tokens_in=run_usage.tokens_in,
                     tokens_out=run_usage.tokens_out,
                 )
+
+                if eval_capture.is_active():
+                    await eval_capture.drain()
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,
