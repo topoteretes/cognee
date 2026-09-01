@@ -1,5 +1,7 @@
 """Eval capture end to end (SDK-529): ONE cognify-shaped pipeline run through the
-real runner, followed by ONE recorded search, observed through a FakeCaptureSink.
+real runner, followed by ONE recorded search, observed through a FakeCaptureSink —
+and once more with capture switched on through the environment, so the real
+``StorageSink`` persists the same run in its documented on-disk layout.
 
 What is real: ``run_tasks`` (via ``runner_plumbing``), the per-item task resolver
 notes from ``cognify``, ``classify_documents``, ``extract_chunks_from_documents`` with
@@ -15,8 +17,10 @@ lookup, operation-row writer), and the retrieval vector engine / memory fragment
 the same fakes the per-stage unit tests use.
 """
 
+import gzip
 import importlib
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
@@ -527,3 +531,116 @@ async def test_the_same_run_with_capture_off_is_a_structural_no_op(
         (node.model, node.prompt_fingerprint, node.source_text_hash) == (None, None, None)
         for node in summaries
     )
+
+
+def _read_capture_dir(root):
+    """Every record persisted under ``root`` by the StorageSink, keyed by relative path."""
+    persisted = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            path = os.path.join(dirpath, filename)
+            relative = os.path.relpath(path, root)
+            if filename == "manifest.json":
+                with open(path, encoding="utf-8") as handle:
+                    persisted[relative] = [json.load(handle)]
+            elif filename.endswith(".jsonl.gz"):
+                with gzip.open(path, "rt", encoding="utf-8") as handle:
+                    persisted[relative] = [json.loads(line) for line in handle if line.strip()]
+            else:
+                raise AssertionError(f"unexpected file in the capture directory: {relative}")
+    return persisted
+
+
+@pytest.mark.asyncio
+async def test_env_enabled_capture_persists_the_run_through_the_storage_sink(
+    monkeypatch, tmp_path, pipeline_fakes
+):
+    """Capture switched on the way a deployment does it — ``COGNEE_CAPTURE_ENABLED`` and
+    ``COGNEE_CAPTURE_DIR`` in the environment, no sink registered by hand — so the first
+    ``is_active()`` auto-registers the real ``StorageSink`` over the local file storage,
+    and one pipeline run plus one search land on disk in the documented layout::
+
+        {dataset}/{run}/manifest.json
+        {dataset}/{run}/{kind}/batch-*.jsonl.gz
+    """
+    capture_root = tmp_path / "capture"
+    monkeypatch.setenv("COGNEE_CAPTURE_ENABLED", "true")
+    monkeypatch.setenv("COGNEE_CAPTURE_DIR", str(capture_root))
+    fakes = pipeline_fakes
+    user = SimpleNamespace(id=uuid4(), tenant_id=None, email="probe@example.test")
+
+    async with record_operation_module.record_operation("remember") as remember_context:
+        remember_context.set_dataset(fakes.dataset.id)
+        events = await _run_pipeline(tmp_path, fakes, user)
+    assert type(events[-1]).__name__ == "PipelineRunCompleted", events[-1]
+    pipeline_run_id = str(events[0].pipeline_run_id)
+
+    search_context, search_results = await _run_search(fakes.dataset.id)
+    assert len(search_results) == 1
+
+    assert isinstance(capture.hook._sink, capture.StorageSink), "env did not register the sink"
+    await capture.drain()
+    assert not capture.hook._buffer
+
+    persisted = _read_capture_dir(capture_root)
+    dataset = str(fakes.dataset.id)
+    remember_run = str(remember_context.operation_id)
+    search_run = str(search_context.operation_id)
+
+    # Layout: three runs under the one dataset, nothing under nodataset/ or norun/.
+    assert {path.split(os.sep)[0] for path in persisted} == {dataset}
+    assert {path.split(os.sep)[1] for path in persisted} == {
+        remember_run,
+        pipeline_run_id,
+        search_run,
+    }
+
+    def kinds_under(run_id):
+        kinds = set()
+        for path in persisted:
+            parts = path.split(os.sep)
+            if parts[1] != run_id:
+                continue
+            kinds.add("manifest.json" if parts[2] == "manifest.json" else parts[2])
+        return kinds
+
+    assert kinds_under(remember_run) == {"manifest.json"}
+    assert kinds_under(pipeline_run_id) == {
+        "manifest.json",
+        KIND_EXTRACTION_CHUNK_GRAPH,
+        KIND_EXTRACTION_DROPPED_DUPLICATES,
+        KIND_EXTRACTION_FUZZY_MATCH,
+        KIND_SUMMARY_GENERATED,
+        KIND_STORAGE_DELTA,
+    }
+    assert kinds_under(search_run) == {"manifest.json", KIND_RETRIEVAL_CANDIDATES}
+
+    # Every persisted record carries the full envelope and points at its own run.
+    records = [record for group in persisted.values() for record in group]
+    for record in records:
+        assert set(record) == {"kind", "run_id", "dataset_id", "stage", "ts", "payload"}
+        assert record["dataset_id"] == dataset
+        _assert_flat(record["payload"])
+
+    pipeline_manifest = persisted[os.path.join(dataset, pipeline_run_id, "manifest.json")][0]
+    assert pipeline_manifest["kind"] == KIND_RUN_MANIFEST
+    manifest = pipeline_manifest["payload"]
+    assert manifest["parent_run_id"] == remember_run
+    assert manifest["chunking.chunker"] == "TextChunker"
+    assert manifest["extraction.model"] and manifest["extraction.prompt_fingerprint"]
+    assert manifest["summarization.model"] and manifest["summarization.prompt_fingerprint"]
+    assert manifest["ontology.mode"] == "annotate"
+    assert manifest["counters"]["storage.nodes_written"] > 0
+    assert manifest["dropped_events"] == 0
+
+    chunk_graph_records = [
+        record for record in records if record["kind"] == KIND_EXTRACTION_CHUNK_GRAPH
+    ]
+    assert len(chunk_graph_records) >= 2
+    assert {record["run_id"] for record in chunk_graph_records} == {pipeline_run_id}
+    [candidates] = [record for record in records if record["kind"] == KIND_RETRIEVAL_CANDIDATES]
+    assert candidates["run_id"] == search_run
+    assert candidates["payload"]["cut_size"] == 1
+    search_manifest = persisted[os.path.join(dataset, search_run, "manifest.json")][0]
+    assert search_manifest["payload"]["operation"] == "search"
+    assert search_manifest["payload"]["outcome"] == "succeeded"
