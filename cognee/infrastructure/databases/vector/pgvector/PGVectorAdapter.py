@@ -527,7 +527,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             ).all()
             for row in rows:
                 payload = dict(row.payload or {})
-                payload.update(payload_updates[str(row.id)])
+                updates = payload_updates[str(row.id)]
+                # Caller contract: the fields already exist in the payload. The
+                # JSON column would accept anything, so an unknown field would
+                # drift the schema silently — refuse it instead.
+                unknown_fields = set(updates) - set(payload)
+                if unknown_fields:
+                    raise ValueError(
+                        f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
+                        f"payload of {collection_name!r} row {row.id}"
+                    )
+                payload.update(updates)
                 await session.execute(
                     PGVectorDataPoint.update()
                     .where(PGVectorDataPoint.c.id == row.id)

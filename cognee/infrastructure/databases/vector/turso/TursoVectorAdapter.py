@@ -283,6 +283,14 @@ class TursoVectorAdapter(VectorDBInterface):
             if not rows:
                 continue
             payload = json.loads(rows[0][0]) if rows[0][0] else {}
+            # Caller contract: the fields already exist in the payload (see
+            # PGVectorAdapter.update_payload).
+            unknown_fields = set(fields) - set(payload)
+            if unknown_fields:
+                raise ValueError(
+                    f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
+                    f"payload of {collection_name!r} row {data_point_id}"
+                )
             payload.update(fields)
             await self._execute(
                 f'UPDATE "{collection_name}" SET payload = ? WHERE id = ?',

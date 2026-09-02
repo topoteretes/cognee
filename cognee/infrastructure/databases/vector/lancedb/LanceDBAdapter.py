@@ -1140,6 +1140,21 @@ class LanceDBAdapter(VectorDBInterface):
             where_clause = f"id IN ({id_list})"
 
         async with self.VECTOR_DB_LOCK:
+            schema = await collection.schema()
+            # The caller contract: every updated field already exists in the
+            # payload struct. pyarrow silently DROPS unknown struct keys when
+            # building against a schema, so an unknown field would be a silent
+            # no-op rather than an update — refuse it instead.
+            payload_type = schema.field("payload").type
+            known_fields = {payload_type.field(i).name for i in range(payload_type.num_fields)}
+            unknown_fields = {
+                field for fields in payload_updates.values() for field in fields
+            } - known_fields
+            if unknown_fields:
+                raise ValueError(
+                    f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
+                    f"payload schema of collection {collection_name!r}"
+                )
             rows = await collection.query().where(where_clause).to_list()
             if not rows:
                 return
@@ -1153,7 +1168,7 @@ class LanceDBAdapter(VectorDBInterface):
             # vector column.
             import pyarrow
 
-            arrow_records = pyarrow.Table.from_pylist(records, schema=await collection.schema())
+            arrow_records = pyarrow.Table.from_pylist(records, schema=schema)
             await collection.merge_insert("id").when_matched_update_all().execute(arrow_records)
 
     # Ids per `IN (...)` delete predicate. Each `collection.delete` is a

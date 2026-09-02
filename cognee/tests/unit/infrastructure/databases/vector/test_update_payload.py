@@ -77,6 +77,14 @@ async def _exercise_update_payload(engine, embedder: Optional[CountingMockEmbedd
     if embedder is not None:
         assert embedder.calls == calls_before, "payload update must not embed anything"
 
+    # Caller contract: fields must already exist in the payload schema. An
+    # unknown field is refused rather than dropped (LanceDB) or drifted into
+    # the JSON payload (PGVector, Turso).
+    with pytest.raises(ValueError, match="not_a_payload_field"):
+        await engine.update_payload(collection, {str(points[0].id): {"not_a_payload_field": 1}})
+    rows = await engine.retrieve(collection, [str(points[0].id)])
+    assert rows[0].payload["chunk_index"] == 41, "a refused update must change nothing"
+
     # Vector integrity: similarity search still finds the rows.
     found = await engine.search(collection, query_text="first chunk text", limit=2)
     assert len(found) >= 1
