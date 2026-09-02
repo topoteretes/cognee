@@ -3,14 +3,19 @@
 This file is the **allowlist**, not a suggestion. `tools/check_docstring_pilot_path.py`
 parses the table below and rejects any `path` that is not in it, so
 `.github/workflows/docstring_pilot.yml` cannot be pointed at a file the pilot did not
-choose. The skill (`SKILL.md`) reads the same table. Adding a row is a human decision
-made in a reviewed PR — the automation never extends this list.
+choose. The `docstring-author` skill beside it reads the same table, so the allowlist and
+the author's instructions cannot drift apart. Adding a row is a human decision made in a
+reviewed PR — the automation never extends this list.
+
+It lives under `docstring-author` rather than somewhere neutral because the author is the
+only agent that reads it: the reasons below say what each file was picked to demonstrate,
+which is the expected answer, so `docstring-critic` is deliberately kept away from them.
 
 Selection principle: files a developer or a coding agent is likely to open while
 *evaluating or integrating* cognee — package entrypoints, public SDK functions, core
 abstractions, extension points, and the enum whose members users pass as arguments.
-Five files have weak or missing docstrings and test whether the skill can add real
-context; five are already well documented and test whether it has the restraint to
+Five files have weak or missing docstrings and test whether the author can add real
+context; five are already well documented and test whether the critic has the restraint to
 leave them alone.
 
 Docstring counts below were measured on `dev` at `66cf082` and will drift as the
