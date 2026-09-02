@@ -7,7 +7,10 @@ from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.graph.cognee_graph.CogneeGraph import (
+    DEFAULT_TRIPLET_DISTANCE_PENALTY,
+    CogneeGraph,
+)
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.observability import (
@@ -25,11 +28,6 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
 
 logger = get_logger(level=ERROR)
-
-# Distance assigned to a graph element the vector search did not score, and the
-# default for every ``triplet_distance_penalty`` parameter. Shared so the
-# retrievers and the capture payload cannot drift apart.
-DEFAULT_TRIPLET_DISTANCE_PENALTY = 6.5
 
 # Eval capture (SDK-529): cap on the candidate pool carried by one
 # ``retrieval.candidates`` event. Batch mode searches every collection with no
