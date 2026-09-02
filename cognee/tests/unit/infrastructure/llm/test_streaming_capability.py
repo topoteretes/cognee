@@ -14,9 +14,15 @@ from unittest.mock import patch
 import pytest
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.azure_openai.adapter import AzureOpenAIAdapter
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import GeminiAdapter
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling.adapter import MCPSamplingAdapter
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.azure_openai.adapter import (
+    AzureOpenAIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
+    GeminiAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mcp_sampling.adapter import (
+    MCPSamplingAdapter,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.bedrock.adapter import (
     BedrockAdapter,
 )

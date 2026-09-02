@@ -352,9 +352,7 @@ def test_a_failure_after_output_arrives_as_a_single_error_event(client, monkeypa
     assert kinds[-1] == "error"
 
 
-def test_a_failure_after_output_still_reports_the_status_it_would_have_had(
-    client, monkeypatch
-):
+def test_a_failure_after_output_still_reports_the_status_it_would_have_had(client, monkeypatch):
     """Credit exhaustion is the failure this most needs to survive the transport.
 
     The 200 is already committed by the time the answer call runs, so a client

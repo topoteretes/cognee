@@ -210,7 +210,10 @@ async def test_include_usage_survives_caller_supplied_stream_options():
     with (
         _flag(True),
         _active(sink),
-        patch(f"{STREAM_MODULE}.litellm.acompletion", new=_streaming_completion([_chunk("hi")], seen=seen)),
+        patch(
+            f"{STREAM_MODULE}.litellm.acompletion",
+            new=_streaming_completion([_chunk("hi")], seen=seen),
+        ),
     ):
         await _stream(sink, [_chunk("hi")], stream_options={"other_key": "value"})
 
