@@ -278,7 +278,7 @@ async def test_three_edges_between_the_same_pair_survive():
 
 
 @pytest.mark.asyncio
-async def test_enumerated_out_of_literal_raises_at_edge_construction():
+async def test_enumerated_out_of_literal_raises():
     with pytest.raises(ValidationError):
         await content_graph_to_data_point(
             Dump(

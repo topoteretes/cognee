@@ -10,7 +10,6 @@ from cognee.shared.graph_model_utils import (
     from_identity_fields,
     graph_model_to_graph_schema,
     graph_schema_to_graph_model,
-    relationship_type_annotation,
 )
 from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
@@ -375,9 +374,8 @@ def test_fixed_edge_row_has_source_and_target_only():
     assert row["properties"]["source"]["type"] == "string"
     assert row["properties"]["target"]["type"] == "string"
     assert "relationship_type" not in row["properties"]
-    source, target, naming = edge_field_types(PeopleGraph)["friends_with"]
+    source, target, _ = edge_field_types(PeopleGraph)["friends_with"]
     assert source is Person and target is Person
-    assert relationship_type_annotation(naming) is None
 
 
 def test_enumerated_edge_row_has_required_enum():

@@ -105,7 +105,7 @@ def _edge_type_args(inner: type[Edge]) -> tuple[type[DataPoint], type[DataPoint]
 def edge_field_types(
     model: type[BaseModel],
 ) -> dict[str, tuple[type[DataPoint], type[DataPoint], Any]]:
-    """Map each list[Edge[...]] field to its generic args (source, target, naming)."""
+    """Map each list[Edge[...]] field to (source type, target type, third Edge generic)."""
     fields: dict[str, tuple[type[DataPoint], type[DataPoint], Any]] = {}
     for name, field_info in model.model_fields.items():
         inner = _list_edge_inner(field_info.annotation)
@@ -115,26 +115,13 @@ def edge_field_types(
     return fields
 
 
-def relationship_type_annotation(naming: Any) -> Any | None:
-    """Row-field annotation for relationship_type, or None in the fixed (field-name) mode."""
-    if naming is str:
-        return str
-    if get_origin(naming) is Literal:
-        return naming
-    return None
-
-
 def _row_class_name(field_name: str) -> str:
     return "".join(part.title() for part in field_name.split("_")) + "Edge"
 
 
 @lru_cache(maxsize=128)
-def _edge_row_model_for(
-    field_name: str,
-    source_type: type[DataPoint],
-    target_type: type[DataPoint],
-    rel_annotation: Any,
-) -> type[BaseModel]:
+def _edge_row_model_for(field_name: str, edge_types: tuple) -> type[BaseModel]:
+    source_type, target_type, relationship_generic = edge_types
     source_id = _single_identity_field(source_type, field_name)
     target_id = _single_identity_field(target_type, field_name)
     fields: dict[str, Any] = {
@@ -147,23 +134,27 @@ def _edge_row_model_for(
             Field(description=f"The {target_id} of a {target_type.__name__} already in the graph"),
         ),
     }
-    if rel_annotation is not None:
-        fields["relationship_type"] = (rel_annotation, ...)
+    if relationship_generic is str or get_origin(relationship_generic) is Literal:
+        fields["relationship_type"] = (relationship_generic, ...)
     return create_model(_row_class_name(field_name), **fields)
 
 
-def _llm_edge_field(field_name: str, field_info: Any, default_value: Any) -> tuple | None:
-    inner = _list_edge_inner(field_info.annotation)
-    if inner is None:
+def _edge_field_spec(
+    model: type[BaseModel], field_name: str
+) -> tuple[type[DataPoint], type[DataPoint], type[BaseModel]]:
+    edge_types = edge_field_types(model)[field_name]
+    source_type, target_type, _ = edge_types
+    return source_type, target_type, _edge_row_model_for(field_name, edge_types)
+
+
+def _llm_edge_field(
+    model_type: type[BaseModel], field_name: str, field_info: Any, default_value: Any
+) -> tuple | None:
+    if _list_edge_inner(field_info.annotation) is None:
         return None
-    source_type, target_type, naming = _edge_type_args(inner)
-    _check_single_identity_field(source_type, field_name)
-    _check_single_identity_field(target_type, field_name)
-    rel_annotation = relationship_type_annotation(naming)
-    row_model = _edge_row_model_for(field_name, source_type, target_type, rel_annotation)
-    list_annotation = types.GenericAlias(list, (row_model,))
+    *_, row_model = _edge_field_spec(model_type, field_name)
     return (
-        list_annotation,
+        types.GenericAlias(list, (row_model,)),
         default_value if default_value is not PydanticUndefined else PydanticUndefined,
     )
 
@@ -250,29 +241,30 @@ def _lookup_endpoint(index: dict, endpoint_type: type[DataPoint], identity_value
     return index.get((endpoint_type, endpoint_type.id_for(identity_value)))
 
 
-def _parametrized_edge(
-    source_type: type[DataPoint],
-    target_type: type[DataPoint],
-    rel_annotation: Any,
-) -> Any:
-    naming = rel_annotation if rel_annotation is not None else (str | None)
-    return Edge.__class_getitem__(cast("tuple[type[Any], ...]", (source_type, target_type, naming)))
-
-
-def _build_resolved_edge(
+def _resolve_edge_row(
     row: dict,
-    source_node: DataPoint,
-    target_node: DataPoint,
+    row_model: type[BaseModel],
+    index: dict,
     source_type: type[DataPoint],
     target_type: type[DataPoint],
-    rel_annotation: Any,
     field_name: str,
-) -> Edge:
-    name = row.get("relationship_type")
-    if rel_annotation is str:
-        name = generate_edge_name(name if isinstance(name, str) else "")
-    return _parametrized_edge(source_type, target_type, rel_annotation)(
-        source=source_node, target=target_node, relationship_type=name
+) -> Edge | None:
+    validated = row_model.model_validate(row).model_dump()
+    source_node = _lookup_endpoint(index, source_type, validated["source"])
+    target_node = _lookup_endpoint(index, target_type, validated["target"])
+    if source_node is None or target_node is None:
+        logger.warning("Skipping unresolved edge on %s: %s", field_name, row)
+        return None
+    name = validated.get("relationship_type")
+    rel_field = row_model.model_fields.get("relationship_type")
+    if not isinstance(name, str):
+        name = None
+    elif rel_field is not None and rel_field.annotation is str:
+        name = generate_edge_name(name)
+    return Edge(
+        source=source_node,
+        target=target_node,
+        relationship_type=name,
     ).normalize(source_node, field_name, target=target_node)
 
 
@@ -281,26 +273,12 @@ async def _attach_edge_rows(root: DataPoint, rows: dict) -> None:
     index = {(type(node), node.id): node for node in stored}
     for (path, field_name), row_dicts in rows.items():
         owner = _instance_at(root, path)
-        source_type, target_type, naming = edge_field_types(type(owner))[field_name]
-        rel_annotation = relationship_type_annotation(naming)
+        source_type, target_type, row_model = _edge_field_spec(type(owner), field_name)
         built = []
         for row in row_dicts:
-            source_node = _lookup_endpoint(index, source_type, row["source"])
-            target_node = _lookup_endpoint(index, target_type, row["target"])
-            if source_node is None or target_node is None:
-                logger.warning("Skipping unresolved edge on %s: %s", field_name, row)
-                continue
-            built.append(
-                _build_resolved_edge(
-                    row,
-                    source_node,
-                    target_node,
-                    source_type,
-                    target_type,
-                    rel_annotation,
-                    field_name,
-                )
-            )
+            edge = _resolve_edge_row(row, row_model, index, source_type, target_type, field_name)
+            if edge is not None:
+                built.append(edge)
         setattr(owner, field_name, built)
 
 
@@ -407,7 +385,7 @@ def datapoint_model_to_basemodel(
                     field_default,
                 )
                 continue
-            edge_field = _llm_edge_field(field_name, field_info, default_value)
+            edge_field = _llm_edge_field(model_type, field_name, field_info, default_value)
             if edge_field is not None:
                 converted_fields[field_name] = edge_field
                 continue
