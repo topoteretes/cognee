@@ -111,6 +111,41 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
+    async def delete_by_source_refs(self, source_ref_keys) -> "SourceRefRemovalResult":
+        """Remove MANY source refs in one planner pass (chunk-level updates).
+
+        Reads the dataset-independent ref maps once through the per-ref finders
+        and hands the planner every retired key together, so an artifact owned
+        by several retired chunks is detached or deleted in a single decision
+        and the post-delete cleanup (orphaned EdgeTypes, NodeSet tags) runs
+        once per call instead of once per chunk.
+        """
+        if not self.supports_graph_provenance_delete():
+            raise UnsupportedProvenanceCapability()
+        graph = self.graph
+        vector = self.vector
+
+        keys = list(dict.fromkeys(source_ref_keys))
+        refs_by_node: dict = {}
+        refs_by_edge: dict = {}
+        for key in keys:
+            for node_id in await graph.find_nodes_by_source_ref(key):
+                refs_by_node.setdefault(node_id, []).append(key)
+            for edge in await graph.find_edges_by_source_ref(key):
+                refs_by_edge.setdefault(edge, []).append(key)
+
+        node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
+        edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
+
+        return await execute_source_ref_removal(
+            graph,
+            vector,
+            node_data=node_data,
+            edge_data=edge_data,
+            refs_by_node=refs_by_node,
+            refs_by_edge=refs_by_edge,
+        )
+
     async def delete_by_document(self, dataset_id: str, data_id: str) -> "SourceRefRemovalResult":
         """Remove EVERY ref a document owns — v1 doc-scope AND v2 chunk-scope.
 
