@@ -272,6 +272,9 @@ async def update(
         graph_model=graph_model,
         custom_prompt=custom_prompt,
         chunk_size=fallback_chunk_size,
+        # update() returns the run info for the caller to inspect — an errored
+        # run is a valid return value here, not an exception.
+        raise_on_error=False,
     )
 
     return cognify_run

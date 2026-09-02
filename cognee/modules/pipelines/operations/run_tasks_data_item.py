@@ -254,13 +254,22 @@ async def run_tasks_data_item_incremental(
         logger.error(
             f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
         )
+        from cognee.modules.operations import scrub_error_message
+
         yield {
             "run_info": PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
                 payload=repr(error),
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
+                error_class=type(error).__name__,
+                error_message=scrub_error_message(error),
             ),
+            # In-memory handle to the root cause, so run_tasks can record and
+            # surface WHAT failed even on the non-raising path — otherwise the
+            # run ends as a generic "Pipeline run failed. Data item could not
+            # be processed." with a NULL error column.
+            "error": error,
             "data_id": data_id,
         }
 
