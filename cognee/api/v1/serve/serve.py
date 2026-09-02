@@ -274,7 +274,8 @@ async def _serve_cloud(
     # Step 5: Get or create API key
     api_key = await get_or_create_api_key(mgmt_url, access_token)
 
-    # Step 6: Save credentials
+    # Step 6: Build credentials — saved in Step 7 only after the tenant
+    # instance accepts the key (validate-then-save, matching the direct flow)
     creds = CloudCredentials(
         access_token=access_token,
         refresh_token=token.refresh_token,
@@ -286,8 +287,6 @@ async def _serve_cloud(
         tenant_name=tenant.name,
         email=email or "",
     )
-    save_credentials(creds)
-
     # Step 7: Connect
     client = CloudClient(service_url, api_key)
 
@@ -304,18 +303,22 @@ async def _serve_cloud(
     auth_status = await client._auth_check()
     if auth_status in (401, 403):
         from cognee.exceptions import CogneeConfigurationError
-        from cognee.api.v1.serve.credentials import get_credentials_path
 
         await client.close()
         raise CogneeConfigurationError(
             message=(
                 f"Authenticated with Cognee Cloud, but the tenant instance at {service_url} "
                 "rejected the provisioned API key. This is a provisioning problem, not a "
-                "problem with your login. Please try again; if it persists, delete "
-                f"{get_credentials_path()} and reconnect, or contact support."
+                "problem with your login — nothing was saved. Please try again; if it "
+                "persists, contact support."
             ),
             name="ServeAuthenticationError",
         )
+
+    # Rejections above discard the fresh Auth0 login (refresh token included),
+    # so a retry repeats the browser flow — the cost of never caching a key
+    # the tenant rejected.
+    save_credentials(creds)
 
     set_remote_client(client)
     print(f"  Connected to Cognee Cloud at {service_url}")

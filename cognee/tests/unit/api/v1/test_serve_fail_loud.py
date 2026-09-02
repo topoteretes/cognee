@@ -119,6 +119,42 @@ async def test_serve_direct_accepted_key_connects_and_saves(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_serve_cloud_rejected_provisioned_key_saves_nothing(monkeypatch, tmp_path):
+    """The cloud flow must validate the provisioned key before persisting
+    credentials — a tenant rejection may not poison the cache (same
+    validate-then-save order as the direct flow)."""
+    from cognee.api.v1.serve import device_auth, management_api
+
+    creds_file = tmp_path / "cloud_credentials.json"
+    monkeypatch.setattr(creds_mod, "_CREDENTIALS_FILE", creds_file)
+    monkeypatch.setenv("COGNEE_AUTH0_DEVICE_CLIENT_ID", "test-client-id")
+
+    async def fake_login(**kwargs):
+        return device_auth.TokenResponse(access_token="at", refresh_token="rt")
+
+    async def fake_tenant(mgmt_url, token):
+        return management_api.Tenant(id="t1", name="tenant-1")
+
+    async def fake_service_url(mgmt_url, token):
+        return "http://tenant-instance.invalid"
+
+    async def fake_api_key(mgmt_url, token):
+        return "provisioned-but-rejected"
+
+    monkeypatch.setattr(device_auth, "device_code_login", fake_login)
+    monkeypatch.setattr(management_api, "get_current_tenant", fake_tenant)
+    monkeypatch.setattr(management_api, "get_service_url", fake_service_url)
+    monkeypatch.setattr(management_api, "get_or_create_api_key", fake_api_key)
+    _patch_probes(monkeypatch, health=True, auth_status=401)
+
+    with pytest.raises(CogneeConfigurationError) as exc_info:
+        await serve()
+
+    assert "rejected the provisioned API key" in exc_info.value.message
+    assert not creds_file.exists()
+
+
+@pytest.mark.asyncio
 async def test_serve_cached_cloud_creds_with_rejected_key_fall_through(monkeypatch, tmp_path):
     """A reachable instance whose saved key no longer works must not 'connect';
     without a device client ID it lands in the stale-credentials guidance."""
