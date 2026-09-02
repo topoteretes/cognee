@@ -1,7 +1,7 @@
 name: automation | Docstring Pilot
 
 # Runs the evidence-led docstring skill on one of the ten files selected in
-# .claude/skills/docstring-pilot/pilot_files.md and opens a draft PR against dev
+# .claude/skills/docstring-author/pilot_files.md and opens a draft PR against dev
 # for review (RES-28).
 #
 # This is a proof of concept, and the shape is the thing being tested: docstrings
@@ -10,15 +10,13 @@ name: automation | Docstring Pilot
 # The question it answers is whether that produces docstring diffs a maintainer
 # would merge — not whether docstrings can be generated at scale.
 #
-# One skill, invoked twice (see its "How this skill runs" section). SKILL.md
-# holds the rules both passes share; each pass's checklist is a sibling file, and
-# each invocation is pointed at SKILL.md plus its own:
+# Two skills, one invocation each:
 #
-#   Pass 1 (author)  SKILL.md + author.md. Reads the target and its surrounding
-#                    code, writes docstrings, writes no ledger.
-#   Pass 2 (critic)  SKILL.md + critic.md, in fresh context with the author's diff
-#                    as a patch. Re-locates the evidence for every favorable claim,
-#                    cuts what it cannot support, and writes the ledger.
+#   Pass 1  .claude/skills/docstring-author  reads the target and its surrounding
+#           code, writes docstrings, writes no ledger.
+#   Pass 2  .claude/skills/docstring-critic  runs in fresh context with the
+#           author's diff as a patch, re-locates the evidence for every favorable
+#           claim, cuts what it cannot support, and writes the ledger.
 #
 # The passes were one agent run until it became clear that self-critique is the
 # design's weakest joint: an author asked to critique itself remembers which
@@ -28,12 +26,18 @@ name: automation | Docstring Pilot
 # may cut a true claim whose evidence it failed to find — which the ledger's
 # "Reviewer should check" section keeps visible.
 #
-# The checklists are separate files rather than two sections of one, so the critic
-# never reads the author's marching orders. Knowing them invites grading "did the
-# author follow instructions?" instead of "is this claim true?". The shared rules
-# stay in a single file for the usual reason: two copies of "what counts as
-# evidence" would drift, and the critic would start rejecting claims on a standard
-# the author was never held to. See the RES-28 discussion.
+# They are separate skills rather than two sections of one, so the critic never
+# reads the author's marching orders: knowing them invites grading "did the author
+# follow instructions?" instead of "is this claim true?". pilot_files.md is
+# withheld from the critic for the same reason, and lives under docstring-author
+# because the author is its only reader.
+#
+# The cost of two skills is that the shared rules — scope, docstrings-only, what
+# counts as evidence — exist in two copies, and if they drift the critic starts
+# rejecting claims on a standard the author was never held to. The "shared rules
+# are identical" step below makes that a failed run rather than a silent bug: the
+# block is delimited by shared-rules:start/end markers in both files and compared
+# byte for byte. See the RES-28 discussion.
 #
 # Deliberately manual. There is no cron, no push trigger, and no pull_request
 # trigger: the pilot is ten files, so there is nothing for a schedule to watch,
@@ -107,10 +111,9 @@ jobs:
         run: |
           missing=""
           for path in \
-            automation-src/.claude/skills/docstring-pilot/SKILL.md \
-            automation-src/.claude/skills/docstring-pilot/author.md \
-            automation-src/.claude/skills/docstring-pilot/critic.md \
-            automation-src/.claude/skills/docstring-pilot/pilot_files.md \
+            automation-src/.claude/skills/docstring-author/SKILL.md \
+            automation-src/.claude/skills/docstring-author/pilot_files.md \
+            automation-src/.claude/skills/docstring-critic/SKILL.md \
             automation-src/tools/check_docstring_pilot_path.py \
             automation-src/tools/check_docstring_pilot_diff.py; do
             [ -f "${path}" ] || missing="${missing} ${path#automation-src/}"
@@ -121,6 +124,47 @@ jobs:
             exit 1
           fi
 
+      # Two skills means two copies of the shared rules. Drift between them is the
+      # one real cost of splitting: the critic would start rejecting claims on a
+      # standard the author was never held to, and nothing about the output would
+      # look wrong. Cheaper to fail here than to debug it from a ledger later.
+      - name: Check the shared rules are identical in both skills
+        run: |
+          extract() {
+            sed -n '/<!-- shared-rules:start -->/,/<!-- shared-rules:end -->/p' "$1"
+          }
+          SKILLS=automation-src/.claude/skills
+          # Into RUNNER_TEMP, not the workspace: the diff guard rejects untracked
+          # non-markdown files, and these are scratch, not something an agent wrote.
+          author_shared="${RUNNER_TEMP}/author_shared.txt"
+          critic_shared="${RUNNER_TEMP}/critic_shared.txt"
+          shared_rules_diff="${RUNNER_TEMP}/shared_rules.diff"
+          extract "${SKILLS}/docstring-author/SKILL.md" > "${author_shared}"
+          extract "${SKILLS}/docstring-critic/SKILL.md" > "${critic_shared}"
+
+          if [ ! -s "${author_shared}" ] || [ ! -s "${critic_shared}" ]; then
+            echo "::error::A skill is missing its shared-rules:start/end markers."
+            exit 1
+          fi
+
+          if ! diff -u "${author_shared}" "${critic_shared}" > "${shared_rules_diff}"; then
+            echo "::error::The shared rules have drifted between the two skills."
+            {
+              echo "### Docstring pilot — shared rules have drifted"
+              echo
+              echo "\`docstring-author\` and \`docstring-critic\` carry copies of the same"
+              echo "shared-rules block, and they no longer match. Reconcile them before"
+              echo "running: a critic held to a different standard than the author will"
+              echo "reject sound claims for reasons nobody can see in the output."
+              echo
+              echo '```diff'
+              cat "${shared_rules_diff}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Shared rules match ($(wc -l < "${author_shared}") lines)."
+
       # A rejected path must produce zero pull requests, and the reason has to be
       # readable in the run summary — a bad `path` is a human typo, not a bug.
       - name: Check the path is one of the ten selected files
@@ -128,7 +172,7 @@ jobs:
         run: |
           python3 automation-src/tools/check_docstring_pilot_path.py \
             --path "${TARGET_PATH}" \
-            --allowlist automation-src/.claude/skills/docstring-pilot/pilot_files.md \
+            --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
             --repo-root .
         env:
           TARGET_PATH: ${{ inputs.path }}
@@ -156,13 +200,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            Read these two files and follow them, shared rules first:
+            Read and follow your skill:
 
-            - `automation-src/.claude/skills/docstring-pilot/SKILL.md` (shared rules)
-            - `automation-src/.claude/skills/docstring-pilot/author.md` (your checklist)
-
-            Also read the selection table the skill points at
-            (`automation-src/.claude/skills/docstring-pilot/pilot_files.md`).
+            - `automation-src/.claude/skills/docstring-author/SKILL.md` (your skill)
+            - `automation-src/.claude/skills/docstring-author/pilot_files.md` (why your
+              target was selected)
 
             - You are **pass 1, the author**.
             - Target file: `${{ steps.target.outputs.target }}`
@@ -189,16 +231,16 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            Read these two files and follow them, shared rules first:
+            Read and follow your skill:
 
-            - `automation-src/.claude/skills/docstring-pilot/SKILL.md` (shared rules)
-            - `automation-src/.claude/skills/docstring-pilot/critic.md` (your checklist
-              and the claim ledger format)
+            - `automation-src/.claude/skills/docstring-critic/SKILL.md` (your skill)
 
-            Do **not** read `author.md` or `pilot_files.md`. What the author was told to
-            do is not evidence for whether its claims are true, and the selection notes
-            say what each file was picked to demonstrate — which is the expected answer.
-            Reading either tilts you toward grading to the test instead of the evidence.
+            Do **not** read anything under
+            `automation-src/.claude/skills/docstring-author/`. What the author was told
+            to do is not evidence for whether its claims are true, and its
+            `pilot_files.md` says what each file was picked to demonstrate — which is
+            the expected answer. Reading either tilts you toward grading to the test
+            instead of the evidence.
 
             - You are **pass 2, the critic**. You did not write these docstrings and have
               no stake in them.
