@@ -303,20 +303,23 @@ async def run_benchmark(
     # One timing per benchmarked search type. `only_context=True` keeps every
     # number a measure of retrieval rather than answer generation, so the types
     # stay comparable to each other and to the previous single-search metric.
-    print("\nPhase 3: Running search queries...")
-    for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
-        t_q_start = time.time()
-        try:
-            await cognee.search(
-                query_text=SEARCH_QUERY,
-                query_type=cognee.SearchType[search_type],
-                only_context=True,
-            )
-            t_search[metric_key] = time.time() - t_q_start
-        except Exception as e:
-            t_search[metric_key] = time.time() - t_q_start
-            status[f"search_{metric_key}"] = f"failed: {_err(e)}"
-            print(f"  Search {search_type} FAILED: {_err(e)}")
+    if not _ingest_succeeded(status):
+        _skip_search_phase(status, t_search)
+    else:
+        print("\nPhase 3: Running search queries...")
+        for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+            t_q_start = time.time()
+            try:
+                await cognee.search(
+                    query_text=SEARCH_QUERY,
+                    query_type=cognee.SearchType[search_type],
+                    only_context=True,
+                )
+                t_search[metric_key] = time.time() - t_q_start
+            except Exception as e:
+                t_search[metric_key] = time.time() - t_q_start
+                status[f"search_{metric_key}"] = f"failed: {_err(e)}"
+                print(f"  Search {search_type} FAILED: {_err(e)}")
 
     # ── Phase 4: dataset delete (populated) ──────────────────────────────
     # Deleting the dataset AFTER the graph is built measures the meaningful
@@ -340,7 +343,10 @@ async def run_benchmark(
         status["dataset_delete"] = f"failed: {e}"
         print(f"  Dataset delete FAILED: {e}")
 
-    all_ok = all(v == "success" for v in status.values())
+    # "skipped" only ever appears when add/cognify already carries "failed:",
+    # so this changes no pass/fail outcome -- it only stops a skipped search
+    # from being counted as a second failure.
+    all_ok = all(v in ("success", "skipped") for v in status.values())
 
     # ── Report ───────────────────────────────────────────────────────────
     results = {
@@ -350,7 +356,14 @@ async def run_benchmark(
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": round(t_db_setup, 3),
-        **{f"search_time_{key}": t_search[key] for key, _ in BENCHMARKED_SEARCH_TYPES},
+        # A skipped search has no timing. Omit it rather than write 0.0 --
+        # the file's own rule is elapsed-until-failure, never a fabricated
+        # zero, and the report tolerates a missing metric.
+        **{
+            f"search_time_{key}": t_search[key]
+            for key, _ in BENCHMARKED_SEARCH_TYPES
+            if t_search.get(key) is not None
+        },
         "dataset_delete_time_s": round(t_dataset_delete, 3),
         "status": status,
         "success": all_ok,
@@ -374,10 +387,9 @@ async def run_benchmark(
     print(f"  cognify() time    : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
     for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
-        print(
-            f"  Search {search_type:<18}: {t_search[metric_key]:.2f}s  "
-            f"[{status[f'search_{metric_key}']}]"
-        )
+        timing = t_search.get(metric_key)
+        shown = f"{timing:.2f}s" if timing is not None else "n/a  "
+        print(f"  Search {search_type:<18}: {shown}  [{status[f'search_{metric_key}']}]")
     print(f"  DB setup time     : {t_db_setup:.2f}s  [{status['db_setup']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  Dataset delete    : {t_dataset_delete:.2f}s  [{status['dataset_delete']}]")
@@ -402,8 +414,64 @@ def _err(e: Exception) -> str:
     return str(e) or repr(e)
 
 
+def _ingest_succeeded(status: dict) -> bool:
+    """Phase 3 only means something on a graph that was actually built."""
+    return status.get("add") == "success" and status.get("cognify") == "success"
+
+
+def _skip_search_phase(status: dict, t_search: dict) -> None:
+    """Record every benchmarked search as skipped, with no timing.
+
+    A search against a graph that never got built returns fast without
+    raising, so without this the phase reports SUCCESS and a real-looking
+    float for work it did not do -- and those floats became the p50/p90/p99
+    uploaded to S3 and posted to Slack (job 100109026857: three 402s on
+    cognify, each followed by 'Search GRAPH_COMPLETION : 2.30s [success]').
+    """
+    print("\nPhase 3: SKIPPED (ingest did not succeed)")
+    for metric_key, _ in BENCHMARKED_SEARCH_TYPES:
+        status[f"search_{metric_key}"] = "skipped"
+        t_search[metric_key] = None
+
+
 # Transient-reset retries for tenant creation (see _create_cloud_tenant).
 _TENANT_CREATE_ATTEMPTS = 3
+
+# The POST can die with its tenant already committed server-side (the row and
+# its UserTenant membership are committed BEFORE provisioning starts), so a
+# retry re-POSTs a name that now exists and gets a 503. This timeout does NOT
+# fix that -- it only shortens the wasted wait, because half the observed deaths
+# are an intermediary reset at ~272s, below aiohttp's 300s default.
+_TENANT_POST_TIMEOUT_S = 120.0
+
+
+class TenantCreateFailed(RuntimeError):
+    """Tenant creation failed. Carries the id of anything that exists so the
+    caller's teardown can still reach it."""
+
+    def __init__(self, message: str, tenant_id: str | None = None):
+        super().__init__(message)
+        self.tenant_id = tenant_id
+
+
+async def _find_tenant_by_name(session, management_url: str, name: str) -> str | None:
+    """Resolve a tenant id by name.
+
+    GET /api/v1/tenants/me/with-status issues the byte-identical query to the
+    duplicate check that produces the 503, so whenever that 503 fires this
+    lookup must find the tenant.
+    """
+    async with session.get(f"{management_url}/api/v1/tenants/me/with-status") as resp:
+        if resp.status >= 400:
+            return None
+        matches = [t["id"] for t in (await resp.json()) if t.get("name") == name]
+    if len(matches) > 1:
+        print(
+            f"  WARNING: {len(matches)} tenants named '{name}' -- the controller's "
+            f"check-then-act is not atomic; taking {matches[0]}",
+            flush=True,
+        )
+    return matches[0] if matches else None
 
 
 async def _create_cloud_tenant(
@@ -420,28 +488,49 @@ async def _create_cloud_tenant(
 
     t0 = time.time()
     async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
-        # The controller drops the connection under load: a bare POST failed the
-        # whole nightly cloud arm on 3 of the last 4 runs with
-        # "[Errno 104] Connection reset by peer", 266s in. A reset is not a
-        # rejection -- nothing was created -- so retry it. An HTTP >=400 IS a
-        # real rejection and still fails immediately, so a genuinely broken
-        # controller is not retried into a slow green.
+        # The POST commits the tenant row BEFORE provisioning starts, so a lost
+        # response leaves a real tenant behind. Both failure shapes therefore
+        # resolve by name and adopt rather than re-POSTing:
+        #   * transport death (reset at ~272-294s, or aiohttp's 300s timeout)
+        #   * HTTP 503 "already exists" from our own previous attempt
+        # A genuine rejection (400 bad name, 401/403) still fails immediately.
         last_exc = None
         tenant_id = None
         for attempt in range(_TENANT_CREATE_ATTEMPTS):
             try:
                 async with session.post(
-                    f"{management_url}/api/v1/tenants", params={"tenant_name": tenant_name}
+                    f"{management_url}/api/v1/tenants",
+                    params={"tenant_name": tenant_name},
+                    timeout=aiohttp.ClientTimeout(total=_TENANT_POST_TIMEOUT_S),
                 ) as resp:
                     if resp.status >= 400:
                         body = await resp.text()
-                        raise RuntimeError(f"Tenant creation failed ({resp.status}): {body}")
+                        if resp.status == 409 or "already exists" in body:
+                            existing = await _find_tenant_by_name(
+                                session, management_url, tenant_name
+                            )
+                            if existing is not None:
+                                print(
+                                    f"  Tenant '{tenant_name}' already exists -- adopting {existing}",
+                                    flush=True,
+                                )
+                                tenant_id = existing
+                                break
+                        raise TenantCreateFailed(f"Tenant creation failed ({resp.status}): {body}")
                     tenant_id = (await resp.json())["tenant_id"]
                 break
             except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
                 last_exc = exc
+                existing = await _find_tenant_by_name(session, management_url, tenant_name)
+                if existing is not None:
+                    print(
+                        f"  Tenant create lost its response ({_err(exc)}); adopting {existing}",
+                        flush=True,
+                    )
+                    tenant_id = existing
+                    break
                 if attempt == _TENANT_CREATE_ATTEMPTS - 1:
-                    raise
+                    raise TenantCreateFailed(f"Tenant creation failed: {_err(exc)}") from exc
                 backoff = 2**attempt
                 print(
                     f"  Tenant creation attempt {attempt + 1}/{_TENANT_CREATE_ATTEMPTS} failed "
@@ -450,7 +539,7 @@ async def _create_cloud_tenant(
                 )
                 await asyncio.sleep(backoff)
         if tenant_id is None:  # pragma: no cover - defensive
-            raise RuntimeError(f"Tenant creation failed: {_err(last_exc)}")
+            raise TenantCreateFailed(f"Tenant creation failed: {_err(last_exc)}")
 
         deadline = time.time() + ready_timeout_s
         while True:
@@ -460,16 +549,50 @@ async def _create_cloud_tenant(
                 async with session.get(
                     f"{management_url}/api/v1/tenants/{tenant_id}/status"
                 ) as resp:
-                    if resp.status < 400 and (await resp.json()).get("status") == "healthy":
-                        break
+                    if resp.status in (403, 404):
+                        # The id we hold is gone. That does NOT mean nothing
+                        # exists: the controller's rollback deletes the row and
+                        # its own @retry then re-creates the SAME NAME under a
+                        # NEW id, which may go healthy. Re-resolve before giving
+                        # up, or we abandon a live, billed tenant.
+                        replacement = await _find_tenant_by_name(
+                            session, management_url, tenant_name
+                        )
+                        if replacement is not None and replacement != tenant_id:
+                            print(
+                                f"  Tenant {tenant_id} was rolled back; controller re-created "
+                                f"'{tenant_name}' as {replacement} -- following it",
+                                flush=True,
+                            )
+                            tenant_id = replacement
+                        elif replacement is None and time.time() > deadline:
+                            raise TenantCreateFailed(
+                                f"Tenant {tenant_id} disappeared while waiting "
+                                f"(status {resp.status})",
+                                tenant_id=None,
+                            )
+                    elif resp.status < 400:
+                        reported = (await resp.json()).get("status")
+                        if reported == "healthy":
+                            break
+                        if reported == "failed":
+                            raise TenantCreateFailed(
+                                f"Tenant {tenant_id} provisioning failed", tenant_id=tenant_id
+                            )
             except (aiohttp.ClientError, OSError, asyncio.TimeoutError) as exc:
                 if time.time() > deadline:
-                    raise TimeoutError(
+                    raise TenantCreateFailed(
                         f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s "
-                        f"(last error: {_err(exc)})"
+                        f"(last error: {_err(exc)})",
+                        tenant_id=await _find_tenant_by_name(session, management_url, tenant_name),
                     ) from exc
             if time.time() > deadline:
-                raise TimeoutError(f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s")
+                # A fresh by-name lookup rather than the possibly-stale local
+                # id, so teardown deletes whatever actually exists.
+                raise TenantCreateFailed(
+                    f"Tenant {tenant_id} not healthy after {ready_timeout_s:.0f}s",
+                    tenant_id=await _find_tenant_by_name(session, management_url, tenant_name),
+                )
             await asyncio.sleep(2)
 
     # Service URL convention: api.<domain> hosts the controller and
@@ -611,6 +734,10 @@ async def run_benchmark_cloud(
             # Record elapsed-until-failure like every other phase (0.0 would
             # skew failed-run percentiles low).
             t_tenant_create = time.time() - t_tenant_create_start
+            # TenantCreateFailed carries the id of whatever exists; without
+            # this, teardown (gated on tenant_id) was unreachable on exactly
+            # the branch that leaks a real, billed tenant.
+            tenant_id = getattr(e, "tenant_id", None)
             status["tenant_create"] = f"failed: {_err(e)}"
             skipped_phases = ("prune", "add", "cognify") + tuple(
                 f"search_{key}" for key, _ in BENCHMARKED_SEARCH_TYPES
@@ -674,21 +801,24 @@ async def run_benchmark_cloud(
         # One timing per benchmarked search type, matching the local mode.
         # Scoped to this suite's dataset so a concurrently-running suite on
         # the same tenant cannot contaminate the search timing or results.
-        print("\nPhase 3: Running remote search queries...")
-        for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
-            t_q_start = time.time()
-            try:
-                await client.search(
-                    SEARCH_QUERY,
-                    search_type=search_type,
-                    datasets=[dataset_name],
-                    only_context=True,
-                )
-                t_search[metric_key] = time.time() - t_q_start
-            except Exception as e:
-                t_search[metric_key] = time.time() - t_q_start
-                status[f"search_{metric_key}"] = f"failed: {_err(e)}"
-                print(f"  Search {search_type} FAILED: {_err(e)}")
+        if not _ingest_succeeded(status):
+            _skip_search_phase(status, t_search)
+        else:
+            print("\nPhase 3: Running remote search queries...")
+            for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
+                t_q_start = time.time()
+                try:
+                    await client.search(
+                        SEARCH_QUERY,
+                        search_type=search_type,
+                        datasets=[dataset_name],
+                        only_context=True,
+                    )
+                    t_search[metric_key] = time.time() - t_q_start
+                except Exception as e:
+                    t_search[metric_key] = time.time() - t_q_start
+                    status[f"search_{metric_key}"] = f"failed: {_err(e)}"
+                    print(f"  Search {search_type} FAILED: {_err(e)}")
 
         # ── Phase 4 (cloud-only metric): delete the POPULATED dataset ────
         # Only meaningful with a graph in it, hence after cognify/search and
@@ -734,7 +864,14 @@ async def run_benchmark_cloud(
         "total_ingest_time_s": round(t_total, 3),
         "prune_time_s": round(t_prune, 3),
         "db_setup_time_s": 0.0,
-        **{f"search_time_{key}": t_search[key] for key, _ in BENCHMARKED_SEARCH_TYPES},
+        # A skipped search has no timing. Omit it rather than write 0.0 --
+        # the file's own rule is elapsed-until-failure, never a fabricated
+        # zero, and the report tolerates a missing metric.
+        **{
+            f"search_time_{key}": t_search[key]
+            for key, _ in BENCHMARKED_SEARCH_TYPES
+            if t_search.get(key) is not None
+        },
         "status": status,
         "success": all_ok,
         "config": {
@@ -771,10 +908,9 @@ async def run_benchmark_cloud(
     print(f"  cognify time      : {t_cognify:.2f}s  [{status['cognify']}]")
     print(f"  Total ingest time : {t_total:.2f}s  ({t_total / n:.2f}s per memory)")
     for metric_key, search_type in BENCHMARKED_SEARCH_TYPES:
-        print(
-            f"  Search {search_type:<18}: {t_search[metric_key]:.2f}s  "
-            f"[{status[f'search_{metric_key}']}]"
-        )
+        timing = t_search.get(metric_key)
+        shown = f"{timing:.2f}s" if timing is not None else "n/a  "
+        print(f"  Search {search_type:<18}: {shown}  [{status[f'search_{metric_key}']}]")
     print(f"  Prune time        : {t_prune:.2f}s  [{status['prune']}]")
     print(f"  Overall           : {'ALL OK' if all_ok else 'SOME FAILURES'}")
     print("=" * 60)
