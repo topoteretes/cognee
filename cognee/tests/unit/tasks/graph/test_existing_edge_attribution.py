@@ -14,6 +14,7 @@ the seam in isolation.
 """
 
 import asyncio
+import sys
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -23,6 +24,11 @@ from cognee.modules.data.processing.document_types import TextDocument
 from cognee.shared.data_models import Edge, KnowledgeGraph, Node
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 from cognee.tasks.storage.chunk_ownership import collect_chunk_ownership
+
+# The package re-exports ``extract_graph_from_data`` (the function) under the
+# same name as its submodule, so a dotted patch target can resolve to the
+# function instead of the module. Take the module object from sys.modules.
+extract_module = sys.modules["cognee.tasks.graph.extract_graph_from_data"]
 
 
 def _chunk(document, text: str) -> DocumentChunk:
@@ -60,9 +66,8 @@ async def _integrate(edge_already_stored: bool):
     async def existing(edge_identities):
         return set(edge_identities) if edge_already_stored else set()
 
-    with patch(
-        "cognee.tasks.graph.extract_graph_from_data.find_existing_edge_identities",
-        AsyncMock(side_effect=existing),
+    with patch.object(
+        extract_module, "find_existing_edge_identities", AsyncMock(side_effect=existing)
     ):
         (chunk,) = await integrate_chunk_graphs([chunk], [_extracted_fact()], KnowledgeGraph, None)
 
