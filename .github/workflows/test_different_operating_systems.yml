@@ -46,13 +46,19 @@ env:
 
 jobs:
   run-unit-tests:
-    name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }}
+    name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }} (${{ matrix.shard }}/3)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
         os: ${{ fromJSON(inputs.os) }}
+        # pytest-split across three jobs, not xdist within one: the shards are
+        # separate processes, so the ~50 unit files that mutate process-global
+        # config (env, lru_cache'd settings) cannot interfere, and it is the
+        # tool the integration suite already shards with. Balanced by
+        # .test_durations, so each shard is ~1/3 of the suite by time.
+        shard: [1, 2, 3]
       fail-fast: false
     steps:
       - name: Check out
@@ -149,8 +155,9 @@ jobs:
           # step removes one layer from the suspect window; it is a hypothesis
           # test, not a known fix, and the snapshot above names the survivor.
           uv run --no-sync python -m pytest cognee/tests/unit/ \
+            --splits 3 --group "${{ matrix.shard }}" \
             --timeout=300 --timeout-method=thread \
-            -p no:cacheprovider --junitxml=junit-unit.xml
+            -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
           rc=$?
           # A Windows unit job has reported SUCCESS in 14 seconds having run
           # nothing at all (job 97050693924: zero bytes of output, exit 0).
@@ -159,13 +166,14 @@ jobs:
           # failure is a real failure and is never retried. `python -c` on
           # purpose: the PATH guard above drops Git-for-Windows' usr\bin, which
           # is where coreutils live.
-          # 4000 is a floor against 5066 collected on 2026-09-02; raise it when
-          # the suite grows materially.
+          # 1200 is a floor against ~1690 per shard (5066 collected on
+          # 2026-09-02, split three ways by duration); raise it when the suite
+          # grows materially. A shard that ran far fewer than that did not run.
           if python -c "import sys,xml.etree.ElementTree as E; \
             r=E.parse('junit-unit.xml').getroot(); \
             n=int(r.get('tests') or (r[0].get('tests') if len(r) else 0)); \
             print('junit tests:', n); \
-            sys.exit(0 if n >= 4000 else 1)"; then
+            sys.exit(0 if n >= 1200 else 1)"; then
             echo "ran=true" >> "$GITHUB_OUTPUT"
             exit $rc
           fi
@@ -247,8 +255,9 @@ jobs:
           # step removes one layer from the suspect window; it is a hypothesis
           # test, not a known fix, and the snapshot above names the survivor.
           uv run --no-sync python -m pytest cognee/tests/unit/ \
+            --splits 3 --group "${{ matrix.shard }}" \
             --timeout=300 --timeout-method=thread \
-            -p no:cacheprovider --junitxml=junit-unit.xml
+            -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
           rc=$?
           # A Windows unit job has reported SUCCESS in 14 seconds having run
           # nothing at all (job 97050693924: zero bytes of output, exit 0).
@@ -257,13 +266,14 @@ jobs:
           # failure is a real failure and is never retried. `python -c` on
           # purpose: the PATH guard above drops Git-for-Windows' usr\bin, which
           # is where coreutils live.
-          # 4000 is a floor against 5066 collected on 2026-09-02; raise it when
-          # the suite grows materially.
+          # 1200 is a floor against ~1690 per shard (5066 collected on
+          # 2026-09-02, split three ways by duration); raise it when the suite
+          # grows materially. A shard that ran far fewer than that did not run.
           if python -c "import sys,xml.etree.ElementTree as E; \
             r=E.parse('junit-unit.xml').getroot(); \
             n=int(r.get('tests') or (r[0].get('tests') if len(r) else 0)); \
             print('junit tests:', n); \
-            sys.exit(0 if n >= 4000 else 1)"; then
+            sys.exit(0 if n >= 1200 else 1)"; then
             echo "ran=true" >> "$GITHUB_OUTPUT"
             exit $rc
           fi
