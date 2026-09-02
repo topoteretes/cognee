@@ -318,6 +318,19 @@ jobs:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
+          # The Windows wedge, finally observed (run 33643256650, job
+          # 100291412286, first run with the in-step watchdog): the script
+          # stops at the auth-posture import line, and every 5-minute process
+          # snapshot for 35 minutes shows the same picture -- the main
+          # python.exe idle at ~15 MB, and a child python.exe frozen at 3.8 MB
+          # that never grows. That is a multiprocessing spawn worker deadlocked
+          # at startup, with the parent blocked on its ready signal. The
+          # Kuzu/LanceDB subprocess workers default on and this test does a
+          # real add/cognify, so it spawns them; the unit job does not, and
+          # does not wedge. Run this job in-process. The worker hang itself is
+          # a real bug on Windows and is tracked separately with this evidence.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -385,6 +398,19 @@ jobs:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
+          # The Windows wedge, finally observed (run 33643256650, job
+          # 100291412286, first run with the in-step watchdog): the script
+          # stops at the auth-posture import line, and every 5-minute process
+          # snapshot for 35 minutes shows the same picture -- the main
+          # python.exe idle at ~15 MB, and a child python.exe frozen at 3.8 MB
+          # that never grows. That is a multiprocessing spawn worker deadlocked
+          # at startup, with the parent blocked on its ready signal. The
+          # Kuzu/LanceDB subprocess workers default on and this test does a
+          # real add/cognify, so it spawns them; the unit job does not, and
+          # does not wedge. Run this job in-process. The worker hang itself is
+          # a real bug on Windows and is tracked separately with this evidence.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
