@@ -492,4 +492,3 @@ async def test_a_failure_without_a_status_still_reports_the_error():
 
     errors = [e for e in await _drain(sink) if e.type == "error"]
     assert len(errors) == 1 and errors[0].status is None
-
