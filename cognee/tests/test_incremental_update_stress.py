@@ -49,7 +49,7 @@ import os
 import re
 from collections import Counter
 from pathlib import Path
-from cognee.tests.integration.api.update.graph_backend_env import (
+from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
 )
@@ -102,7 +102,6 @@ def _setup_environment() -> None:
 
     os.environ.update(
         **incremental_test_backend_env(),
-        VECTOR_DB_PROVIDER="lancedb",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
         TRIPLET_EMBEDDING="true",

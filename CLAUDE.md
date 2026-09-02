@@ -651,6 +651,7 @@ this rule applies only to internal PRs.
 Tests are organized in `cognee/tests/`:
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
+- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 

@@ -1,13 +1,13 @@
 """Environment overrides that point the incremental-update suites at a backend.
 
 The suites default to the local stack (kuzu + lancedb + sqlite). Set
-``INCR_TEST_GRAPH_PROVIDER`` to run the same tests against another graph
-backend:
+``INCR_TEST_GRAPH_PROVIDER`` and/or ``INCR_TEST_VECTOR_PROVIDER`` (``pgvector``)
+to run the same tests against other backends:
 
     INCR_TEST_GRAPH_PROVIDER=postgres \\
     INCR_TEST_DB_HOST=localhost INCR_TEST_DB_PORT=5432 \\
     INCR_TEST_DB_USERNAME=cognee INCR_TEST_DB_PASSWORD=cognee \\
-    INCR_TEST_DB_NAME=cognee_db pytest cognee/tests/integration/api/update/
+    INCR_TEST_DB_NAME=cognee_db pytest cognee/tests/e2e/incremental_update/
 
     INCR_TEST_GRAPH_PROVIDER=neo4j INCR_TEST_GRAPH_URL=bolt://... \\
     INCR_TEST_GRAPH_USER=... INCR_TEST_GRAPH_PASSWORD=... pytest ...
@@ -20,9 +20,14 @@ import os
 
 
 def incremental_test_backend_env() -> dict:
-    """Env overrides for the graph (and, for Postgres, relational) backend."""
+    """Env overrides for the graph, vector and (for Postgres) relational backends."""
     provider = os.environ.get("INCR_TEST_GRAPH_PROVIDER", "kuzu")
-    env = {"GRAPH_DATABASE_PROVIDER": provider, "DB_PROVIDER": "sqlite"}
+    vector_provider = os.environ.get("INCR_TEST_VECTOR_PROVIDER", "lancedb")
+    env = {
+        "GRAPH_DATABASE_PROVIDER": provider,
+        "VECTOR_DB_PROVIDER": vector_provider,
+        "DB_PROVIDER": "sqlite",
+    }
     for source_key, target_key in [
         ("INCR_TEST_GRAPH_URL", "GRAPH_DATABASE_URL"),
         ("INCR_TEST_GRAPH_USER", "GRAPH_DATABASE_USERNAME"),
@@ -54,6 +59,14 @@ def incremental_test_backend_env() -> dict:
             GRAPH_DATABASE_USERNAME=username,
             GRAPH_DATABASE_PASSWORD=password,
             GRAPH_DATABASE_NAME=name,
+        )
+    if vector_provider == "pgvector":
+        env.update(
+            VECTOR_DB_HOST=os.environ.get("INCR_TEST_DB_HOST", "localhost"),
+            VECTOR_DB_PORT=os.environ.get("INCR_TEST_DB_PORT", "5432"),
+            VECTOR_DB_USERNAME=os.environ.get("INCR_TEST_DB_USERNAME", "cognee"),
+            VECTOR_DB_PASSWORD=os.environ.get("INCR_TEST_DB_PASSWORD", "cognee"),
+            VECTOR_DB_NAME=os.environ.get("INCR_TEST_DB_NAME", "cognee_db"),
         )
     return env
 

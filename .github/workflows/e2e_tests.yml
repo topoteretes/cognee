@@ -123,10 +123,78 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_library.py
 
-  run-incremental-update-stress-test:
-    name: Incremental Update Stress Test
+  run-incremental-update-matrix:
+    name: Incremental update e2e — ${{ matrix.name }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each leg runs the chunk-level update suite and the stress e2e
+          # against a full stack: graph + vector + (for Postgres) relational.
+          # Neo4j Community has no per-dataset databases, so its leg runs
+          # single-user; the others run with access control on where the
+          # suite asks for it.
+          - name: LadybugDB + LanceDB
+            graph: kuzu
+            vector: lancedb
+            acl: 'true'
+            extras: ''
+          - name: Postgres graph + PGVector
+            graph: postgres
+            vector: pgvector
+            acl: 'true'
+            extras: postgres
+          - name: Neo4j + LanceDB
+            graph: neo4j
+            vector: lancedb
+            acl: 'false'
+            extras: neo4j
+    services:
+      neo4j:
+        image: neo4j:5.21
+        env:
+          NEO4J_AUTH: neo4j/cognee_test_password
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_dbms_security_procedures_unrestricted: apoc.*
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    env:
+      ENV: 'dev'
+      INCR_TEST_GRAPH_PROVIDER: ${{ matrix.graph }}
+      INCR_TEST_VECTOR_PROVIDER: ${{ matrix.vector }}
+      INCR_TEST_ACL: ${{ matrix.acl }}
+      INCR_TEST_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+      INCR_TEST_DB_PORT: 5432
+      INCR_TEST_DB_USERNAME: cognee
+      INCR_TEST_DB_PASSWORD: cognee
+      INCR_TEST_DB_NAME: cognee_db
+      INCR_TEST_GRAPH_URL: bolt://${{ inputs.ci-image != '' && 'neo4j' || '127.0.0.1' }}:7687
+      INCR_TEST_GRAPH_USER: neo4j
+      INCR_TEST_GRAPH_PASSWORD: cognee_test_password
+      INCR_TEST_GRAPH_NAME: neo4j
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -135,10 +203,15 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          extra-dependencies: ${{ matrix.extras }}
+
+      # Mocked LLM and embeddings: no secrets. The suite covers the incremental
+      # update flow end to end and the chunk-ownership deletion semantics; the
+      # stress run mutates a book through every edit shape and audits ownership.
+      - name: Run incremental update suite
+        run: uv run pytest cognee/tests/e2e/incremental_update/
 
       - name: Run incremental update stress test
-        env:
-          ENV: 'dev'
         run: uv run python ./cognee/tests/test_incremental_update_stress.py
 
   run-pipeline-error-propagation-test:

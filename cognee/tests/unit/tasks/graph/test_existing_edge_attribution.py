@@ -9,7 +9,7 @@ With chunk-scoped deletion that is a data-loss path: when the first producer's
 chunk is deleted (an incremental edit, or ``delete_data`` on the first document)
 the edge has no owner left and is hard-deleted, although a live chunk still
 states the fact. Reproduced end to end in
-``tests/integration/api/update/test_chunk_ownership_semantics.py``; this pins
+``tests/e2e/incremental_update/test_chunk_ownership_semantics.py``; this pins
 the seam in isolation.
 """
 
