@@ -7,7 +7,7 @@ from textwrap import dedent
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.infrastructure.engine import DataPoint
@@ -431,7 +431,13 @@ class Neo4jAdapter(GraphDBInterface):
                     "properties": props,
                 }
 
-        results = await self.query(query, {"nodes": list(deduped.values()), **provenance_params})
+        # A folded provenance write is a read-modify-write against the same
+        # source_ref_keys that attach/remove rewrite under the lock; without the
+        # lock a fold landing between their read and write is lost.
+        async with self._source_ref_change_lock if source_ref_key is not None else nullcontext():
+            results = await self.query(
+                query, {"nodes": list(deduped.values()), **provenance_params}
+            )
         return results
 
     async def remove_belongs_to_set_tags(
@@ -1260,7 +1266,11 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
         try:
-            results = await self.query(query, {"edges": edges, **provenance_params})
+            # Same serialization as add_nodes: folded refs vs attach/remove.
+            async with (
+                self._source_ref_change_lock if source_ref_key is not None else nullcontext()
+            ):
+                results = await self.query(query, {"edges": edges, **provenance_params})
             return results
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info=True)

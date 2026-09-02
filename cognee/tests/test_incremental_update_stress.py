@@ -635,8 +635,10 @@ async def _verify(
 
 
 async def main():
-    await reset_backend_state()
     _setup_environment()
+    # After the env is pointed at the backend under test: a server-backed
+    # graph is shared across runs, so start from nothing.
+    await reset_backend_state()
 
     import cognee
     from cognee.api.v1.datasets import datasets as datasets_api

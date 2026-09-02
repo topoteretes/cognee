@@ -73,7 +73,9 @@ def ownership_env():
         TELEMETRY_DISABLED="1",
         DATA_ROOT_DIRECTORY=str(root / "data"),
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="true",
+        # Isolated per-dataset DBs need a backend that supports them; Neo4j
+        # Community cannot CREATE DATABASE, so its run sets INCR_TEST_ACL=false.
+        ENABLE_BACKEND_ACCESS_CONTROL=os.environ.get("INCR_TEST_ACL", "true"),
     )
     os.environ.setdefault("LLM_API_KEY", "mock-key")
 
