@@ -154,7 +154,9 @@ async def update(
         data.label is not None or data.external_metadata is not None
     )
     if chunk_level_diff and (node_set or data_item_changes_metadata):
-        logger.info(
+        # Warning, not info: the response carries no hint that the slower,
+        # costlier full rebuild ran instead of the chunk-level update.
+        logger.warning(
             "Chunk-level incremental update does not reconcile document metadata or "
             "node_set; running full update"
         )
@@ -164,7 +166,7 @@ async def update(
         # The baseline does not persist the model/prompt that produced its
         # graph. Applying a new configuration only to fresh chunks would mix
         # extraction schemas or rules inside one document.
-        logger.info(
+        logger.warning(
             "Chunk-level incremental update supports only the default graph model and prompt; "
             "running full update"
         )
