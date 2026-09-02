@@ -10,7 +10,11 @@ from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
-from cognee.api.v1.update.incremental import IncrementalUpdateNotPossible, incremental_update
+from cognee.api.v1.update.incremental import (
+    IncrementalUpdateNotPossible,
+    incremental_update,
+    recorded_chunk_budget,
+)
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.shared.logging_utils import get_logger
@@ -180,6 +184,12 @@ async def update(
         )
         chunk_level_diff = False
 
+    # The fallback re-cognifies the whole document. It keeps the chunk budget
+    # the stored chunks record so the document's granularity survives the
+    # rebuild; None (no baseline, or a recorded budget the current provider
+    # cannot take) means the current default.
+    fallback_chunk_size = None
+
     if chunk_level_diff:
         # Chunk-level incremental path: diff the new text against the stored
         # processed text, replace only the affected chunks — the Data row is
@@ -213,6 +223,7 @@ async def update(
                 refusal,
                 extra={"refusal_reason": refusal.reason.value},
             )
+            fallback_chunk_size = await recorded_chunk_budget(pinned_id, dataset_id, user)
 
     await datasets.delete_data(
         dataset_id=dataset_id,
@@ -260,6 +271,7 @@ async def update(
         data_cache=data_cache,
         graph_model=graph_model,
         custom_prompt=custom_prompt,
+        chunk_size=fallback_chunk_size,
     )
 
     return cognify_run

@@ -103,6 +103,7 @@ from cognee.modules.graph.methods.delete_chunks_incremental import (
 from cognee.modules.ingestion import classify, save_data_to_file
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
 from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
 from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
@@ -220,6 +221,31 @@ async def _require_chunk_scoped_ownership(
                 f"stored chunk {chunk_id} has no chunk-scoped ownership baseline",
                 RefusalReason.NO_BASELINE,
             )
+
+
+async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> Optional[int]:
+    """The token budget the document's stored chunks were cut against, if usable.
+
+    The full-flow fallback re-cognifies the document; without this it would
+    cut at the current default, and a document cognified at a custom
+    ``chunk_size`` would come back at a different granularity — and, where the
+    default exceeds the incremental path's limit, be refused by the budget
+    guard on every later update. Returns None when the graph holds no usable
+    baseline or the recorded budget is larger than the current provider limit
+    (then the default is the only safe cut).
+    """
+    try:
+        async with set_database_global_context_variables(dataset_id, user.id):
+            stored_chunks = await _get_stored_chunks(data_id)
+    except IncrementalUpdateNotPossible:
+        return None
+    recorded = next(
+        (int(node["max_chunk_tokens"]) for node in stored_chunks if node.get("max_chunk_tokens")),
+        None,
+    )
+    if recorded is None or recorded > await get_max_chunk_tokens():
+        return None
+    return recorded
 
 
 def _require_stored_chunks_tile(stored_chunks: List[dict], old_text: str) -> None:
@@ -378,6 +404,11 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
         raise IncrementalUpdateNotPossible(
             "no loader accepted the new content", RefusalReason.UNREADABLE_TEXT
         )
+    if isinstance(storage_file_path, LoaderResult):
+        # A loader may hand back a LoaderResult (its own identity and route
+        # stamp, as dlt does) instead of a plain path; only the stored text's
+        # path matters here — ingest_data unwraps it the same way.
+        storage_file_path = storage_file_path.file_path
 
     async with open_data_file(original_file_path) as file:
         original_metadata = classify(file).get_metadata()
