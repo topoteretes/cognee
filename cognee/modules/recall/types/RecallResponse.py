@@ -65,6 +65,11 @@ class ResponseMarkerEntry(BaseModel):
     text: str
     datapoint_count: int
     threshold: int
+    # Populated when status == "build_failed": the root cause of the last
+    # errored build, so clients can show WHY memory has no answers instead
+    # of an unexplained empty result.
+    error_class: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 RecallResponse = Annotated[
