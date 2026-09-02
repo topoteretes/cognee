@@ -4,11 +4,26 @@ name: automation | Docstring Pilot
 # .claude/skills/docstring-pilot/pilot_files.md and opens a draft PR against dev
 # for review (RES-28).
 #
-# This is a proof of concept, and the shape is the thing being tested: one skill
-# that authors docstrings and then critiques its own wording, plus a claim ledger
-# in the PR body pairing every favorable claim with evidence a reviewer can open.
+# This is a proof of concept, and the shape is the thing being tested: docstrings
+# written against the code, then independently verified, with a claim ledger in
+# the PR body pairing every favorable claim with evidence a reviewer can open.
 # The question it answers is whether that produces docstring diffs a maintainer
 # would merge — not whether docstrings can be generated at scale.
+#
+# One skill file, invoked twice (see its "How this skill runs" section):
+#
+#   Pass 1 (author)  reads the target and its surrounding code, writes docstrings.
+#   Pass 2 (critic)  runs in fresh context with the author's diff as a patch,
+#                    re-locates the evidence for every favorable claim, cuts what
+#                    it cannot support, and writes the ledger.
+#
+# The passes were one agent run until it became clear that self-critique is the
+# design's weakest joint: an author asked to critique itself remembers which
+# claims it grounded in code and which it inferred while reading, and that memory
+# is exactly what can be confabulated, so it accepts its own unsupported wording.
+# A separate critic has nothing to protect. The cost is the opposite error — it
+# may cut a true claim whose evidence it failed to find — which the ledger's
+# "Reviewer should check" section keeps visible. See the RES-28 discussion.
 #
 # Deliberately manual. There is no cron, no push trigger, and no pull_request
 # trigger: the pilot is ten files, so there is nothing for a schedule to watch,
@@ -19,11 +34,12 @@ name: automation | Docstring Pilot
 # Two guards make the draft PR cheap to review:
 #
 #   1. tools/check_docstring_pilot_path.py rejects any `path` outside the ten
-#      selected files, before Claude is called, and writes the reason into the
-#      run summary. The automation may not pick new files.
+#      selected files, before either pass is called, and writes the reason into
+#      the run summary. The automation may not pick new files.
 #   2. tools/check_docstring_pilot_diff.py compares the file's AST before and
 #      after with docstrings stripped, so a code edit smuggled into a
-#      "docstring" run fails the run instead of reaching the PR.
+#      "docstring" run fails the run instead of reaching the PR. It runs after
+#      the critic, so it covers both passes.
 #
 # The tree being edited is always dev; the machinery (skill, allowlist, guards)
 # comes from the triggering ref. That split is what lets this be dispatched from
@@ -118,24 +134,60 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      # Bash is not in the allowed tools: the workflow owns git, and the guards
-      # run as steps rather than as something the agent could satisfy itself.
-      - name: Improve docstrings with Claude
+      # Bash is not in the allowed tools for either pass: the workflow owns git,
+      # and the guards run as steps rather than as something an agent could
+      # satisfy itself. The author also has no Write — it produces docstrings,
+      # not the ledger, so there is nothing for it to write outside the target.
+      - name: Pass 1 — author docstrings with Claude
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
-            Read and follow `automation-src/.claude/skills/docstring-pilot/SKILL.md`,
-            including the selection table it points at
-            (`automation-src/.claude/skills/docstring-pilot/pilot_files.md`).
+            Read `automation-src/.claude/skills/docstring-pilot/SKILL.md` and follow its
+            shared rules and its **Pass 1 — author checklist**. Ignore the Pass 2
+            section; a separate invocation handles it. Also read the selection table the
+            skill points at (`automation-src/.claude/skills/docstring-pilot/pilot_files.md`).
 
+            - You are **pass 1, the author**.
             - Target file: `${{ steps.target.outputs.target }}`
+
+            The target has already been checked against the ten selected files, so work
+            on it. Edit only that file and only inside docstrings. Do not write a claim
+            ledger — pass 2 writes it from your diff. Do not create commits or branches.
+          claude_args: "--allowed-tools Read,Edit,Glob,Grep --max-turns 40"
+
+      # The critic has no Bash, so it cannot run git diff for itself. Handing it
+      # the patch is what lets it see exactly what the author changed without
+      # seeing why. An empty patch is fine and meaningful: it means the author
+      # proposed nothing, and the critic still writes a ledger saying so.
+      - name: Capture the author's diff for the critic
+        run: |
+          git diff "${{ steps.base.outputs.sha }}" -- "${{ steps.target.outputs.target }}" \
+            > docstring_pilot_diff.patch
+          echo "Author diff: $(wc -l < docstring_pilot_diff.patch) lines."
+          cat docstring_pilot_diff.patch
+
+      - name: Pass 2 — verify claims and write the ledger with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read `automation-src/.claude/skills/docstring-pilot/SKILL.md` and follow its
+            shared rules, its **Pass 2 — critic checklist**, and its **claim ledger**
+            section. Ignore the Pass 1 section; a separate invocation already ran it.
+
+            - You are **pass 2, the critic**. You did not write these docstrings and have
+              no stake in them.
+            - Target file: `${{ steps.target.outputs.target }}`
+            - The author's diff: `./docstring_pilot_diff.patch` (may be empty)
             - Claim ledger output: `./docstring_pilot_ledger.md`
 
-            The target has already been checked against the ten selected files, so
-            work on it. Edit only that file, only inside docstrings, and write the
-            ledger to the path above. Do not create commits or branches.
+            Assess every favorable claim in the patch by locating its evidence in this
+            repository yourself. Cut or rewrite what you cannot support, edit only the
+            target file and only inside docstrings, and write the ledger to the path
+            above. Do not create commits or branches.
           claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 40"
 
       - name: Check the ledger was written
@@ -145,8 +197,8 @@ jobs:
             {
               echo "### Docstring pilot — no ledger"
               echo
-              echo "The run produced no claim ledger, so its docstring changes cannot be"
-              echo "reviewed against evidence. Nothing was pushed."
+              echo "The critic pass produced no claim ledger, so the run's docstring"
+              echo "changes cannot be reviewed against evidence. Nothing was pushed."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -156,16 +208,21 @@ jobs:
       - name: Format the edited file
         run: uvx ruff@0.15.11 format "${{ steps.target.outputs.target }}"
 
+      # After both passes, so it covers the critic's edits as well as the
+      # author's. `changed` is false when the critic reverted the author
+      # entirely, which is a legitimate no-change-needed outcome.
       - name: Check the diff is docstrings only
         id: diff
         run: |
-          # automation-src is a second checkout inside this tree, so it is
-          # untracked here and has to be excluded from the stray-file check.
+          # automation-src is a second checkout inside this tree, and the patch
+          # is a workflow artifact — both are untracked here and neither is
+          # something an agent wrote, so both are excluded from the stray check.
           python3 automation-src/tools/check_docstring_pilot_diff.py \
             --path "${{ steps.target.outputs.target }}" \
             --base "${{ steps.base.outputs.sha }}" \
             --repo-root . \
-            --ignore automation-src/
+            --ignore automation-src/ \
+            --ignore docstring_pilot_diff.patch
 
       - name: Publish the ledger to the run summary
         run: |
@@ -189,7 +246,8 @@ jobs:
             echo "### No change needed"
             echo
             echo "The run left \`${{ steps.target.outputs.target }}\` unchanged, so no pull"
-            echo "request was created. See the critic pass above for what was considered."
+            echo "request was created. Either the author proposed nothing or the critic"
+            echo "reverted all of it; the ledger above says which, and why."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show the diff without pushing
@@ -252,14 +310,21 @@ jobs:
         run: |
           PR_TITLE="docs: Strengthen docstrings in ${TARGET} (RES-28)"
           {
-            echo "Docstring-only changes to \`${TARGET}\`, written by the"
+            echo "Docstring-only changes to \`${TARGET}\`, produced by the"
             echo "\`docstring-pilot\` skill and left as a draft for review (RES-28)."
+            echo
+            echo "Two passes: an author wrote the docstrings, then a **separate critic"
+            echo "invocation** re-located the evidence for every favorable claim in the"
+            echo "author's diff and cut what it could not support. The ledger below is"
+            echo "the critic's account, not the author's own — so a claim that survived"
+            echo "it was checked by something with no stake in it."
             echo
             echo "The diff is enforced to be docstrings in this one file:"
             echo "\`tools/check_docstring_pilot_diff.py\` compares the syntax tree before"
             echo "and after with all docstrings removed, and fails the run on any other"
-            echo "change. **Review the claims, not the mechanics** — the ledger below is"
-            echo "the skill's own account of what it asserted and what its critic pass cut."
+            echo "change. **Review the claims, not the mechanics.** If the ledger has a"
+            echo "*Reviewer should check* section, those are claims the critic cut but"
+            echo "suspected were true — where your judgement is worth most."
             echo
             echo "- Target: \`${TARGET}\`"
             echo "- Base: \`${BASE_SHA}\` on \`dev\`"
