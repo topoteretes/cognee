@@ -112,7 +112,7 @@ Let’s try Cognee in just a few lines of code.
 
 ### Step 1: Install Cognee
 
-You can install Cognee with **pip**, **poetry**, **uv**, or your preferred Python package manager.
+You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
 ```bash
 uv pip install cognee
@@ -219,14 +219,20 @@ cp .env.template .env   # then edit .env and set LLM_API_KEY
 docker compose up
 
 # Optional profiles (combine as needed):
-docker compose --profile ui up        # + frontend on http://localhost:3000
+docker compose --profile ui up        # + UI on http://localhost:3000
 docker compose --profile mcp up       # + MCP server on http://localhost:8001
 docker compose --profile postgres up  # + Postgres/PGVector
 docker compose --profile neo4j up     # + Neo4j
+
+# Backend, MCP server and UI together
+docker compose --profile mcp --profile ui up
 ```
 
 > The `cognee` and `cognee-mcp` services publish different host ports (`8000` vs `8001`),
 > so you can run both at once.
+
+> The `ui` profile runs the published `cognee/cognee-ui` image. To build the UI from
+> your working tree instead, with hot reload, use `--profile ui-dev`.
 
 ### Option B — Pull the prebuilt image (no clone required)
 
@@ -240,7 +246,28 @@ docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee:main
 # MCP server (HTTP transport)
 docker pull cognee/cognee-mcp:main
 docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+
+# UI (http://localhost:3000)
+docker pull cognee/cognee-ui:main
+docker run -p 3000:3000 --rm -it cognee/cognee-ui:main
 ```
+
+The UI needs no configuration when the backend is reachable at port 8000 on the same
+host you browse to: it derives the backend address from the page URL. Point it
+somewhere else with `COGNEE_BACKEND_URL`, which is read when the container starts, so
+one image works against any backend:
+
+```bash
+docker run -p 3000:3000 -e COGNEE_BACKEND_URL=https://cognee.example.com \
+  --rm -it cognee/cognee-ui:main
+
+# What backend did this container resolve?
+curl http://localhost:3000/api/runtime-config
+```
+
+The browser talks to the backend directly, so `COGNEE_BACKEND_URL` must be the address
+as seen from the browser, and the backend must allow the UI's origin through
+`CORS_ALLOWED_ORIGINS`.
 
 See the [MCP server README](cognee-mcp/README.md) for SSE/stdio transports, optional
 extras, and MCP client configuration.
@@ -372,7 +399,7 @@ pip install "cognee[postgres]"
 ```bash
 DB_PROVIDER=postgres
 VECTOR_DB_PROVIDER=pgvector
-GRAPH_DATABASE_PROVIDER=postgres
+GRAPH_DATABASE_PROVIDER=postgres_demo
 CACHE_BACKEND=postgres
 
 DB_HOST=localhost

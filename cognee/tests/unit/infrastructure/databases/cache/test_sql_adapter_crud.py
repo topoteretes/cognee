@@ -957,3 +957,23 @@ async def test_uuid_ids_across_trace_context_and_usage(adapter):
 
     assert await adapter.delete_session(user_uuid, session_uuid) is True
     assert await adapter.get_all_qa_entries(str(user_uuid), str(session_uuid)) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_removes_only_target(adapter):
+    """delete_session_context_entry removes one entry; others and other sessions survive."""
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c2"))
+    await adapter.create_session_context_entry("u1", "s2", _ctx("c1"))
+
+    assert await adapter.delete_session_context_entry("u1", "s1", "c1") is True
+
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["c2"]
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s2")] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_missing_returns_false(adapter):
+    await adapter.create_session_context_entry("u1", "s1", _ctx("c1"))
+    assert await adapter.delete_session_context_entry("u1", "s1", "missing") is False
+    assert len(await adapter.get_session_context_entries("u1", "s1")) == 1

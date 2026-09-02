@@ -477,3 +477,112 @@ async def test_cancellation_is_not_retried():
             )
 
     assert mock_acompletion.call_count == 1
+
+
+# ── provider-qualified model names (CLO-594) ─────────────────────────────────
+# cognee stores provider and model separately; litellm routes on a qualified
+# model name. The instructor path dispatched per provider, so LLM_PROVIDER=ollama
+# with LLM_MODEL=phi4 worked there and 400s on litellm_native with
+# "LLM Provider NOT provided". This broke the Ollama nightly the first time it
+# ran on dev after litellm_native became the default framework.
+
+
+class TestQualifyModel:
+    """_qualify_model must rescue unroutable names and touch nothing else."""
+
+    @staticmethod
+    def _qualify(model, provider):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+            _qualify_model,
+        )
+
+        return _qualify_model(model, provider)
+
+    def test_bare_ollama_model_gets_prefixed(self):
+        """The exact CI failure: LLM_PROVIDER=ollama, LLM_MODEL=phi4."""
+        assert self._qualify("phi4", "ollama") == "ollama/phi4"
+
+    def test_tagged_ollama_model_gets_prefixed(self):
+        assert self._qualify("qwen3:latest", "ollama") == "ollama/qwen3:latest"
+
+    def test_already_qualified_is_untouched(self):
+        assert self._qualify("ollama/phi4", "ollama") == "ollama/phi4"
+        assert self._qualify("openai/gpt-5-mini", "openai") == "openai/gpt-5-mini"
+
+    def test_name_litellm_already_resolves_is_untouched(self):
+        """Must not re-route a configuration that works today."""
+        assert self._qualify("gpt-4o", "openai") == "gpt-4o"
+
+    def test_unknown_provider_is_untouched(self):
+        """generic/llama_cpp have no unambiguous litellm prefix — leave them be."""
+        assert self._qualify("some-custom-model", "generic") == "some-custom-model"
+
+    def test_empty_model_is_untouched(self):
+        assert self._qualify("", "ollama") == ""
+
+    def test_qualified_name_is_routable_by_litellm(self):
+        """End of the chain: the rescued name must actually resolve."""
+        import litellm
+
+        qualified = self._qualify("phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
+    def test_namespaced_ollama_model_gets_prefixed(self):
+        """A slash is not a provider: Ollama accepts namespaced names."""
+        assert self._qualify("library/phi4", "ollama") == "ollama/library/phi4"
+
+    def test_hugging_face_gguf_path_gets_prefixed(self):
+        """The documented way to run a GGUF under Ollama keeps its full path."""
+        model = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
+        assert self._qualify(model, "ollama") == f"ollama/{model}"
+
+    def test_namespaced_name_is_routable_by_litellm(self):
+        """Same end of the chain, for a name that contains a slash."""
+        import litellm
+
+        qualified = self._qualify("library/phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
+
+# ── markdown-fenced JSON on the fallback path (CLO-596) ──────────────────────
+# The prompted-JSON path hands the model's reply straight to
+# model_validate_json. Models on that path routinely wrap the answer in a
+# ```json fence: the JSON inside is valid, but pydantic sees a backtick at
+# column 1 and rejects it, and the self-correction retry cannot help because a
+# model that fences once fences again. Hit while capturing the Henkel cassette.
+
+
+class TestStripJsonFence:
+    @staticmethod
+    def _strip(text):
+        from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+            _strip_json_fence,
+        )
+
+        return _strip_json_fence(text)
+
+    def test_fenced_with_language_tag(self):
+        """The exact shape that broke the Henkel capture."""
+        assert self._strip('```json\n{"summary": "s"}\n```') == '{"summary": "s"}'
+
+    def test_fenced_without_language_tag(self):
+        assert self._strip('```\n{"summary": "s"}\n```') == '{"summary": "s"}'
+
+    def test_surrounding_whitespace(self):
+        assert self._strip('  ```json\n{"summary": "s"}\n```  \n') == '{"summary": "s"}'
+
+    def test_plain_json_untouched(self):
+        payload = '{"summary": "s"}'
+        assert self._strip(payload) == payload
+
+    def test_backticks_inside_a_value_untouched(self):
+        """Anchored to the whole payload, so a value containing ``` survives."""
+        payload = '{"summary": "use ```json to fence"}'
+        assert self._strip(payload) == payload
+
+    def test_fenced_payload_parses_after_stripping(self):
+        """End of the chain: the rescued payload must validate."""
+        from cognee.shared.data_models import SummarizedContent
+
+        raw = '```json\n{"summary": "a summary", "description": ""}\n```'
+        assert SummarizedContent.model_validate_json(self._strip(raw)).summary == "a summary"

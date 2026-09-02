@@ -9,9 +9,14 @@ class OntologyConfig(TypedDict, total=False):
 
     Attributes:
         ontology_resolver: The ontology resolver instance to use
+        ontology_mode: How strictly to apply the ontology for this call —
+            "annotate" (enrich only, the default) or "strict" (drop extracted
+            entities with no ontology grounding). Falls back to the
+            ONTOLOGY_MODE environment value when omitted.
     """
 
     ontology_resolver: Optional[BaseOntologyResolver]
+    ontology_mode: Optional[str]
 
 
 class Config(TypedDict, total=False):

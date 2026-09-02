@@ -456,6 +456,7 @@ async def _read_memory_graph_provenance(
         stores_provenance_in_graph,
     )
     from cognee.infrastructure.databases.unified import get_unified_engine
+    from cognee.infrastructure.engine import is_internal_node
 
     unified = await get_unified_engine()
     graph = unified.graph
@@ -472,9 +473,14 @@ async def _read_memory_graph_provenance(
 
     graph_nodes, graph_edges = await graph.get_graph_data()
 
+    # Internal nodes (``is_internal`` marker, e.g. per-user preference state)
+    # must never be surfaced; drop them plus every edge and link touching them.
+    internal_ids = {str(node_id) for node_id, props in graph_nodes if is_internal_node(props)}
+
     node_ids = set(refs_by_node)
     node_ids.update(edge.source_id for edge in refs_by_edge)
     node_ids.update(edge.target_id for edge in refs_by_edge)
+    node_ids -= internal_ids
     nodes_by_id = {str(node_id): props for node_id, props in graph_nodes}
 
     nodes: List[Tuple[str, Dict[str, Any]]] = []
@@ -497,6 +503,8 @@ async def _read_memory_graph_provenance(
 
     links: List[Dict[str, Any]] = []
     for node_id, refs in refs_by_node.items():
+        if node_id in internal_ids:
+            continue
         for source_ref_key in refs:
             # v1 refs are document-scoped; v2 refs additionally name the
             # producing chunk. Foreign formats are skipped, never crash the

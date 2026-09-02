@@ -1,10 +1,11 @@
 from collections.abc import Coroutine
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import raise_if_quota_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
@@ -21,6 +22,31 @@ def _inject_agent_memory(text_input: str) -> str:
         return text_input
 
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
+
+
+def _exact_usage_from_result(result: Any) -> tuple[Optional[int], Optional[int]]:
+    """Real prompt/completion token counts from the raw provider response —
+    (None, None) otherwise, so the caller falls back to its char-based
+    estimate.
+
+    The structured-output adapters attach the raw litellm response to the
+    parsed model as ``_raw_response``: litellm_native (the default) does it
+    explicitly (``_attach_raw_response``), and instructor does it internally
+    (``instructor.processing.response.process_response``). That raw response
+    carries ``.usage`` with the provider-billed counts, including hidden
+    reasoning tokens no text estimate can see.
+
+    Returns (None, None) for the plain-string path (returns a bare ``str``,
+    nothing to attach to) and for BAML, which doesn't go through litellm.
+    """
+    usage = getattr(getattr(result, "_raw_response", None), "usage", None)
+    if usage is None:
+        return None, None
+    tokens_in = getattr(usage, "prompt_tokens", None)
+    tokens_out = getattr(usage, "completion_tokens", None)
+    if tokens_in is None or tokens_out is None:
+        return None, None
+    return int(tokens_in), int(tokens_out)
 
 
 async def _record_session_usage_after(
@@ -41,10 +67,13 @@ async def _record_session_usage_after(
         else:
             output_repr = str(result)
         model = get_llm_context_config().llm_model
+        tokens_in, tokens_out = _exact_usage_from_result(result)
         await record_llm_call(
             input_text=text_input,
             output_text=output_repr,
             model=model,
+            tokens_in_override=tokens_in,
+            tokens_out_override=tokens_out,
         )
     except Exception:
         pass
@@ -52,14 +81,21 @@ async def _record_session_usage_after(
 
 
 async def _fail_fast_on_quota(coro: Coroutine) -> T:
-    """Convert provider quota/billing exhaustion into ``LLMQuotaExceededError``.
+    """Convert provider quota/billing exhaustion into an actionable error.
 
     Runs at the single choke point every structured-output call flows through,
     so it is provider- and framework-agnostic.
+
+    Budget exhaustion is checked first, and here rather than only in the
+    adapters: each instructor adapter catches ``InstructorRetryException`` in a
+    clause that precedes its own budget handler, and the plain-text path
+    (``response_model is str``) bypasses those handlers altogether. Classifying
+    at this choke point gives every adapter and both paths the same 402.
     """
     try:
         return await coro
     except Exception as error:
+        raise_if_budget_exhausted(error)
         raise_if_quota_error(error)
         raise
 

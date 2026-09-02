@@ -15,7 +15,7 @@ Cognee is an open-source AI memory platform that transforms raw data into persis
 # Create virtual environment (recommended: uv)
 uv venv && source .venv/bin/activate
 
-# Install with pip, poetry, or uv
+# Install with pip or uv
 uv pip install -e .
 
 # Install with dev dependencies
@@ -124,7 +124,7 @@ cognee-cli -ui
 As of cognee 1.x the memory API is the primary surface. All functions are async.
 
 1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
-2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `GRAPH_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
+2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `HYBRID_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
 3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
@@ -250,7 +250,8 @@ Key files:
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
 
 Available search types (from `cognee/modules/search/types/SearchType.py`), passed as `query_type` to `recall()` or `search()`:
-- **GRAPH_COMPLETION** (default) - Graph traversal + LLM completion
+- **HYBRID_COMPLETION** (default) - Document passages plus entity neighbourhoods, then LLM completion
+- **GRAPH_COMPLETION** - Graph traversal + LLM completion
 - **GRAPH_SUMMARY_COMPLETION** - Uses pre-computed summaries with graph context
 - **GRAPH_COMPLETION_COT** - Chain-of-thought reasoning over graph
 - **GRAPH_COMPLETION_CONTEXT_EXTENSION** - Extended context graph retrieval
@@ -265,7 +266,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 
-`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the 7 choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `GRAPH_COMPLETION`; the rest are SDK-only.
+`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
 
 Key files:
 - `cognee/api/v1/search/search.py`
@@ -341,7 +342,7 @@ VECTOR_DB_URL=postgresql://cognee:cognee@localhost:5432/cognee_db
 ```
 
 #### Graph Databases
-Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres (demo)
+Supported: ladybug (default), neo4j, neptune, ladybug-remote, postgres_demo (demo; `postgres` is an accepted alias)
 ```bash
 # Neo4j (requires neo4j extra: pip install cognee[neo4j])
 GRAPH_DATABASE_PROVIDER=neo4j
@@ -359,7 +360,8 @@ GRAPH_DATABASE_PASSWORD=your_password
 # Postgres (requires postgres extra: pip install cognee[postgres])
 # DEMO, not production-ready — see the warning below.
 # Does not support raw Cypher queries, natural language search, or Graphiti.
-GRAPH_DATABASE_PROVIDER=postgres
+# The legacy value `postgres` still resolves to this same adapter.
+GRAPH_DATABASE_PROVIDER=postgres_demo
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```
 
@@ -408,12 +410,57 @@ Concurrent mode applies only to `GraphCompletionRetriever`,
 automatically. With `AUTO_FEEDBACK=false`
 neither mode analyzes the turn.
 
+#### only_context and `context_format`
+
+`only_context=True` returns the retrieval context instead of an LLM completion. By
+default that is the bare context string and nothing else — no session guidance, no
+conversation history, no rendered prompt — which is less than a real completion
+receives. Pass `context_format="prompt"` to get the full envelope instead:
+
+```python
+result = await cognee.recall(
+    "why did the migration stall?",
+    query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
+    session_id="s1",                         # session_id a session hit would
+    only_context=True,                       # short-circuit it (see recall vs search)
+    context_format="prompt",                 # default: "context"
+)
+```
+
+The `"prompt"` shape returns `question`, `context`, `session_context` (the guidance
+block plus conversation history), `user_prompt`, and `system_prompt` — the exact
+strings `generate_completion` would have sent, built by the same code
+(`build_session_prompt` in read-only mode plus `build_completion_prompts`). It makes no
+LLM completion or turn-analysis call, writes nothing to the session, and records no QA
+turn. It does make **one embedding call** — the conversation-history vector recall —
+once per search, shared across the dataset fan-out. With `CACHING=false` the
+`system_prompt` still carries the durable preference block, exactly as the real
+sessionless completion does.
+
+Search types that never send a single prompt from their template pair report the
+session layer and leave `user_prompt`/`system_prompt` empty: the non-generative types
+(`CHUNKS`, `SUMMARIES`, `CODE`, …) have no template, and `CYPHER` and
+`AGENTIC_COMPLETION` opt out via `supports_prompt_preview = False` (Cypher never
+prompts; the agentic loop answers through other templates). For `recall()`, an empty
+retrieval yields zero items in either format, so the `on_empty` tools fallback still
+fires.
+
+Caveats. `context_format` only affects `only_context` calls. `POST /api/v1/search`
+accepts `session_id`; without one the session layer is the default session's. And the
+preview is knowingly unfaithful in one place: a real sequential turn first rewrites the
+question (`effective_query`), and that rewrite fills `{{ question }}`, drives history
+selection, and ranks the guidance block — concurrent mode also merges a second
+retrieval lane. Producing the rewrite is an LLM call, so the preview uses the raw query
+for all of them: it reports the prompt for the context actually retrieved, not a
+replay of a full turn.
+
 ### Memory & Performance Tuning Flags
 
-Three flags trade memory features for speed. Know what each turns off before flipping it:
+Four flags trade memory features for speed. Know what each turns off before flipping it:
 
 | Flag (default) | Turns off when disabled | Cost of disabling |
 |---|---|---|
+| `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, the per-turn 1-5 rating question, and the `improve()` stage that folds ratings into weights | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
 | `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
 | `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
 | `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
@@ -469,10 +516,14 @@ HUGGINGFACE_TOKENIZER="nomic-ai/nomic-embed-text-v1.5"
 #### Custom / OpenRouter / vLLM
 ```bash
 LLM_PROVIDER="custom"
-LLM_MODEL="openrouter/google/gemini-2.0-flash-lite-preview-02-05:free"
+LLM_MODEL="openrouter/deepseek/deepseek-r1"
 LLM_ENDPOINT="https://openrouter.ai/api/v1"
 LLM_API_KEY="your_api_key"
 ```
+OpenRouter model ids change over time (the `:free` tier especially) — check
+`https://openrouter.ai/api/v1/models` for a current slug. Embeddings are a
+separate catalogue at `https://openrouter.ai/api/v1/embeddings/models` and
+must be configured separately; see the OpenRouter block in `.env.template`.
 
 #### AWS Bedrock (requires aws extra)
 ```bash
@@ -502,7 +553,11 @@ LLM_INSTRUCTOR_MODE="json_schema_mode"  # or "tool_call", "md_json", etc.
 
 ### Structured Output Framework
 ```bash
-# Use Instructor (default, via litellm)
+# litellm_native (default): plain litellm, schema-native response_format
+# with prompted-JSON fallback — no instructor in the call path
+STRUCTURED_OUTPUT_FRAMEWORK="litellm_native"
+
+# Or use Instructor (legacy, via litellm)
 STRUCTURED_OUTPUT_FRAMEWORK="instructor"
 
 # Or use BAML (requires baml extra: pip install cognee[baml])
@@ -546,7 +601,10 @@ Configuration:
 ONTOLOGY_RESOLVER=rdflib  # Default: uses rdflib and OWL files
 MATCHING_STRATEGY=fuzzy   # Default: fuzzy matching with 80% similarity
 ONTOLOGY_FILE_PATH=/path/to/your/ontology.owl  # Full path to ontology file
+ONTOLOGY_MODE=annotate    # Default: enrich only. strict drops entities with no ontology grounding
 ```
+
+`ONTOLOGY_MODE=strict` keeps an entity when either its type matches an ontology class or its name matches an individual, and drops the rest (plus their edges). It prunes only the graph — chunk text stays stored/embedded, so CHUNKS/RAG_COMPLETION can still surface dropped entities. It expects an ontology covering the corpus's vocabulary (a small ontology drops most entities; an aggregate dropped/retained count is logged), and an empty/missing ontology file with strict on is a hard error. The mode can also be set per call via `config={"ontology_config": {"ontology_mode": "strict", ...}}`.
 
 Implementation: `cognee/modules/ontology/`
 
@@ -634,7 +692,7 @@ Supporting:
 - `datasets()` - Dataset operations
 - `serve(url)` / `disconnect()` - Point the SDK at a running instance
 
-All functions are async - use `await` or `asyncio.run()`. See `examples/demos/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
+All functions are async - use `await` or `asyncio.run()`. See `examples/advanced_guides/remember_recall_improve_example.py` for permanent memory, session memory, and the sync between them.
 
 ## Security Considerations
 

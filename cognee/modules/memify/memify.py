@@ -103,6 +103,13 @@ async def memify(
 
     await setup()
 
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset, user)
+
     user, authorized_dataset_list = await resolve_authorized_user_datasets(dataset, user)
     authorized_dataset = authorized_dataset_list[0]
 

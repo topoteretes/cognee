@@ -304,9 +304,9 @@ def test_ladybug_declares_the_capability():
 
 def test_postgres_does_not_declare_the_capability_without_narrow_moves():
     pytest.importorskip("asyncpg")
-    from cognee.infrastructure.databases.graph.postgres.adapter import PostgresAdapter
+    from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 
-    assert PostgresAdapter.supports_incremental_chunk_updates is False
+    assert PostgresDemoAdapter.supports_incremental_chunk_updates is False
 
 
 def test_neo4j_declares_the_capability():

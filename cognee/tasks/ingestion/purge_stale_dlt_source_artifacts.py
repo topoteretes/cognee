@@ -50,7 +50,23 @@ async def purge_stale_dlt_source_artifacts(
         # propagates loudly — silently skipping would present stale rows as
         # fresh, which is worse than a failed run. Reprocessing a changed DLT
         # source therefore requires delete permission on the dataset.
-        await delete_data_nodes_and_edges(ctx.dataset.id, doc.id, ctx.user.id)
+        deleted_elements = await delete_data_nodes_and_edges(ctx.dataset.id, doc.id, ctx.user.id)
+        # Session answers that used the purged elements would replay the stale
+        # content after the re-emission (the "revise" contamination of COG-5835);
+        # invalidate them best-effort.
+        try:
+            from cognee.modules.session_lifecycle.invalidate_sessions import (
+                invalidate_sessions_for_deleted_data,
+            )
+
+            await invalidate_sessions_for_deleted_data(
+                ctx.dataset.id,
+                deleted_elements.node_ids,
+                deleted_elements.edge_ids,
+                user_id=ctx.user.id,
+            )
+        except Exception as error:
+            logger.warning("Session invalidation after DLT purge failed (non-fatal): %s", error)
         logger.info(
             "Purged prior derived artifacts of DLT source data item %s before re-emission.",
             doc.id,

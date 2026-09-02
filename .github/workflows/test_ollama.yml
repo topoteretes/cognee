@@ -98,7 +98,7 @@ jobs:
           PYTHONFAULTHANDLER: 1
           LLM_PROVIDER: "ollama"
           LLM_API_KEY: "ollama"
-          LLM_ENDPOINT: "http://localhost:11434/v1/"
+          LLM_ENDPOINT: "http://localhost:11434"
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "qwen3-embedding:latest"

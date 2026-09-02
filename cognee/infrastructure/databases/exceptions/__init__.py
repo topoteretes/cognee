@@ -11,6 +11,7 @@ from .exceptions import (
     UnsupportedProvenanceCapability,
     DatabaseNotCreatedError,
     EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
     EmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,
@@ -18,4 +19,5 @@ from .exceptions import (
     SessionQAEntryValidationError,
     SessionParameterValidationError,
     DatabaseCredentialsError,
+    Neo4jMultiDatabaseSupportError,
 )

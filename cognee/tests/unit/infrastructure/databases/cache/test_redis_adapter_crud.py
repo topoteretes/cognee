@@ -628,3 +628,23 @@ async def test_empty_session_returns_empty_list_for_all_last_n(adapter):
     assert await adapter.get_latest_qa_entries("u1", "missing", last_n=1) == []
     assert await adapter.get_latest_qa_entries("u1", "missing", last_n=5) == []
     assert await adapter.get_all_qa_entries("u1", "missing") == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_removes_only_target(adapter):
+    """delete_session_context_entry removes one entry; others and other sessions survive."""
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c2", "kind": "context"})
+    await adapter.create_session_context_entry("u1", "s2", {"id": "c1", "kind": "context"})
+
+    assert await adapter.delete_session_context_entry("u1", "s1", "c1") is True
+
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["c2"]
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s2")] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_missing_returns_false(adapter):
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
+    assert await adapter.delete_session_context_entry("u1", "s1", "missing") is False
+    assert len(await adapter.get_session_context_entries("u1", "s1")) == 1

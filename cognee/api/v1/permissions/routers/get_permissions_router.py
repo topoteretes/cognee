@@ -78,7 +78,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"POST /v1/permissions/datasets/{str(principal_id)}",
                 "dataset_ids": str(dataset_ids),
@@ -119,7 +119,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/permissions/datasets/{str(principal_id)}",
                 "dataset_ids": str(dataset_ids),
@@ -223,7 +223,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/permissions/roles",
                 "role_name": role_name,
@@ -259,7 +259,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/permissions/roles/{str(role_id)}",
                 "role_id": str(role_id),
@@ -310,7 +310,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"POST /v1/permissions/users/{str(user_id)}/roles",
                 "user_id": str(user_id),
@@ -342,7 +342,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/permissions/users/{str(user_id)}/roles",
                 "user_id": str(user_id),
@@ -387,7 +387,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"POST /v1/permissions/users/{str(user_id)}/tenants",
                 "user_id": str(user_id),
@@ -432,7 +432,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"DELETE /v1/permissions/tenants/{str(tenant_id)}/users/{str(user_id)}",
                 "tenant_id": str(tenant_id),
@@ -468,7 +468,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/permissions/tenants",
                 "tenant_name": tenant_name,
@@ -503,7 +503,7 @@ def get_permissions_router() -> APIRouter:
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": f"POST /v1/permissions/tenants/{str(payload.tenant_id)}",
                 "tenant_id": str(payload.tenant_id),

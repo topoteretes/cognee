@@ -1,6 +1,5 @@
 import handleServerErrors from "@/utils/handleServerErrors";
-
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 let apiKey: string | null = process.env.NEXT_PUBLIC_COGWIT_API_KEY || null;
 
@@ -17,6 +16,7 @@ export default async function localFetch(url: URL | RequestInfo, options: Reques
   if (!urlStr.startsWith("/")) {
     urlStr = `/${urlStr}`;
   }
+  const localApiUrl = getLocalApiUrl();
   const fullUrl = urlStr === "/health" || urlStr.startsWith("/health?")
     ? localApiUrl + urlStr
     : localApiUrl + "/api" + (/^\/v\d+(\/|\?|$)/.test(urlStr) ? urlStr : "/v1" + urlStr);

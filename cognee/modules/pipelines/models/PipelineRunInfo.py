@@ -44,3 +44,12 @@ class PipelineRunAlreadyCompleted(PipelineRunInfo):
 class PipelineRunErrored(PipelineRunInfo):
     status: str = "PipelineRunErrored"
     pass
+
+
+class PipelineRunProgress(PipelineRunInfo):
+    status: str = "PipelineRunProgress"
+    completed_items: Optional[int] = None
+    total_items: Optional[int] = None
+    current_stage: Optional[str] = None
+    stage_index: Optional[int] = None
+    stage_total: Optional[int] = None

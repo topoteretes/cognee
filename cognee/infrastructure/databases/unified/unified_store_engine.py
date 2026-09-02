@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBI
 
 from .capabilities import EngineCapability
 from .graph_vector_store_interface import GraphVectorStoreInterface
-from .provenance_delete_planner import execute_source_ref_removal
+from .provenance_delete_planner import SourceRefRemovalResult, execute_source_ref_removal
 
 
 class UnifiedStoreEngine(GraphVectorStoreInterface):
@@ -82,8 +82,12 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             and self._vector is not None
         )
 
-    async def delete_by_source_ref(self, source_ref_key: str) -> None:
-        """Delete artifacts owned only by the given source ref; detach the rest."""
+    async def delete_by_source_ref(self, source_ref_key: str) -> "SourceRefRemovalResult":
+        """Delete artifacts owned only by the given source ref; detach the rest.
+
+        Returns the hard-deleted node/edge identities so callers can invalidate
+        derived caches (e.g. session entries that used the deleted elements).
+        """
         if not self.supports_graph_provenance_delete():
             raise UnsupportedProvenanceCapability()
         graph = self.graph
@@ -98,7 +102,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
         refs_by_node = {node_id: [source_ref_key] for node_id in node_data}
         refs_by_edge = {edge: [source_ref_key] for edge in edge_data}
 
-        await execute_source_ref_removal(
+        return await execute_source_ref_removal(
             graph,
             vector,
             node_data=node_data,
@@ -107,7 +111,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
-    async def delete_by_document(self, dataset_id: str, data_id: str) -> None:
+    async def delete_by_document(self, dataset_id: str, data_id: str) -> "SourceRefRemovalResult":
         """Remove EVERY ref a document owns — v1 doc-scope AND v2 chunk-scope.
 
         Chunk-scoped ownership (source_ref:v2) means a document's artifacts
@@ -148,7 +152,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
         node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
         edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
 
-        await execute_source_ref_removal(
+        return await execute_source_ref_removal(
             graph,
             vector,
             node_data=node_data,

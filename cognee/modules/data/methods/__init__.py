@@ -34,6 +34,7 @@ from .load_or_create_datasets import load_or_create_datasets
 from .create_authorized_dataset import create_authorized_dataset
 
 # Check
+from .get_datasets_graph_counts import DatasetGraphCounts, get_datasets_graph_counts
 from .check_dataset_name import check_dataset_name
 
 # Boolean check
