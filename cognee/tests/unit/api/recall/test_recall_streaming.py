@@ -11,6 +11,7 @@ rather than a 200 carrying an opaque error.
 import asyncio
 import importlib
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
@@ -19,6 +20,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
+
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 from cognee.api.sse import wants_event_stream
 from cognee.api.v1.recall import recall_stream
@@ -50,11 +53,27 @@ PAYLOAD = [
 ENCODED = jsonable_encoder(PAYLOAD)
 
 
-def _flag(enabled: bool = True):
-    return patch(
-        "cognee.infrastructure.llm.config.get_llm_context_config",
-        return_value=SimpleNamespace(llm_answer_streaming=enabled),
-    )
+@contextmanager
+def _flag(enabled: bool = True, adapter_streams: bool = True):
+    """Set both preconditions for promotion — the flag and the adapter
+    capability — so whether a request streams is decided by the test, not by
+    whatever LLM provider the host environment happens to configure. Unpinned,
+    a host where the capability probe resolves False turns every streamed
+    request here into the zero-delta path and the delta/reset/answer_done
+    assertions fail. patch.object because the LLMGateway class shadows its
+    module and string targets land on the class under Python 3.10's mock."""
+    with (
+        patch(
+            "cognee.infrastructure.llm.config.get_llm_context_config",
+            return_value=SimpleNamespace(llm_answer_streaming=enabled),
+        ),
+        patch.object(
+            LLMGateway,
+            "supports_answer_streaming",
+            return_value=adapter_streams,
+        ),
+    ):
+        yield
 
 
 async def _recall_that_streams(**_kwargs):

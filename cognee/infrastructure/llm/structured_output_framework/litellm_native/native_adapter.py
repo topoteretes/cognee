@@ -139,6 +139,10 @@ class NativeLiteLLMAdapter:
           fallback_model, fallback_api_key, fallback_endpoint, llm_args, name
     """
 
+    # The default framework's answer path, so this is the one that decides
+    # whether an out-of-the-box install can stream at all.
+    supports_answer_streaming = True
+
     def __init__(
         self,
         api_key: str,
