@@ -163,6 +163,7 @@ def _assemble_final_chunks(
                         cut_type=region_chunk.cut_type,
                         is_part_of=document,
                         contains=[],
+                        importance_weight=region_chunk.importance_weight,
                         document_id=str(document.id),
                         document_name=document.name,
                     )
