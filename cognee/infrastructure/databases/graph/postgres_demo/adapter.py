@@ -174,6 +174,11 @@ class PostgresDemoAdapter(GraphDBInterface):
 
     supports_cypher_queries = False
 
+    # Chunk-level incremental updates: get_connections yields the true edge
+    # endpoints, provenance lives in-graph, and update_chunk_index below is the
+    # narrow single-property move the incremental path requires.
+    supports_incremental_chunk_updates = True
+
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
     def __init__(self, connection_string: str, schema: str = "") -> None:
@@ -285,6 +290,35 @@ class PostgresDemoAdapter(GraphDBInterface):
                         keys, run_refs, [source_ref_key], pipeline_run_id
                     ),
                 )
+            await session.commit()
+
+    async def update_chunk_index(self, chunk_indexes: dict) -> None:
+        """Set ONLY ``chunk_index`` on the given chunk nodes.
+
+        Node properties live in one JSONB column, so the move is a ``jsonb_set``
+        of that single key; name, type, every other property and the provenance
+        columns are untouched. Missing ids are skipped, like ``get_nodes``.
+        """
+        if not chunk_indexes:
+            return
+        rows = [
+            {"id": str(node_id), "chunk_index": int(chunk_index)}
+            for node_id, chunk_index in chunk_indexes.items()
+        ]
+        statement = text("""
+            UPDATE graph_node
+            SET properties = jsonb_set(
+                    COALESCE(properties, '{}'::jsonb),
+                    '{chunk_index}',
+                    to_jsonb(CAST(:chunk_index AS integer)),
+                    true
+                ),
+                updated_at = now()
+            WHERE id = :id
+        """)
+        async with self.sessionmaker() as session:
+            await _lock_graph_writes(session)
+            await session.execute(statement, rows)
             await session.commit()
 
     async def delete_node(self, node_id: str) -> None:

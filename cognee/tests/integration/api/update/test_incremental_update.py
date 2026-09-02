@@ -17,6 +17,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from cognee.tests.integration.api.update.graph_backend_env import (
+    incremental_test_backend_env,
+    reset_backend_state,
+)
 
 CHUNK_TOKENS = 60
 MARKER = re.compile(r"ENT[A-Z0-9]+")
@@ -31,25 +35,10 @@ def incremental_env():
 
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
-    # Parametrized via env so the same suite verifies other graph adapters:
-    #   INCR_TEST_GRAPH_PROVIDER=neo4j INCR_TEST_GRAPH_URL=bolt://... \
-    #   INCR_TEST_GRAPH_USER=... INCR_TEST_GRAPH_PASSWORD=... pytest ...
-    graph_provider = os.environ.get("INCR_TEST_GRAPH_PROVIDER", "kuzu")
-    graph_env = {"GRAPH_DATABASE_PROVIDER": graph_provider}
-    for source_key, target_key in [
-        ("INCR_TEST_GRAPH_URL", "GRAPH_DATABASE_URL"),
-        ("INCR_TEST_GRAPH_USER", "GRAPH_DATABASE_USERNAME"),
-        ("INCR_TEST_GRAPH_PASSWORD", "GRAPH_DATABASE_PASSWORD"),
-        ("INCR_TEST_GRAPH_NAME", "GRAPH_DATABASE_NAME"),
-    ]:
-        if os.environ.get(source_key):
-            graph_env[target_key] = os.environ[source_key]
-
     os.environ.update(
-        DB_PROVIDER="sqlite",
+        **incremental_test_backend_env(),
         VECTOR_DB_PROVIDER="lancedb",
         CACHE_BACKEND="sqlite",
-        **graph_env,
         MOCK_EMBEDDING="true",
         TRIPLET_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
@@ -164,6 +153,7 @@ async def _stored_text(user, data_id) -> str:
 
 @pytest.mark.asyncio
 async def test_incremental_update_full_flow(incremental_env):
+    await reset_backend_state()
     import cognee
     from cognee.modules.data.methods import get_datasets
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data

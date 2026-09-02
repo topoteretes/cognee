@@ -302,11 +302,15 @@ def test_ladybug_declares_the_capability():
     assert LadybugAdapter.supports_incremental_chunk_updates is True
 
 
-def test_postgres_does_not_declare_the_capability_without_narrow_moves():
+def test_postgres_demo_declares_the_capability_with_its_narrow_move():
+    """The demo adapter takes the incremental path: it stores provenance in-graph,
+    its connections carry true endpoints, and it overrides update_chunk_index."""
     pytest.importorskip("asyncpg")
+    from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
     from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 
-    assert PostgresDemoAdapter.supports_incremental_chunk_updates is False
+    assert PostgresDemoAdapter.supports_incremental_chunk_updates is True
+    assert PostgresDemoAdapter.update_chunk_index is not GraphDBInterface.update_chunk_index
 
 
 def test_neo4j_declares_the_capability():

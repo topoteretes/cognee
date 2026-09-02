@@ -26,6 +26,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from cognee.tests.integration.api.update.graph_backend_env import (
+    incremental_test_backend_env,
+    reset_backend_state,
+)
 
 MARKER = re.compile(r"ENT[A-Z0-9]+")
 
@@ -37,9 +41,8 @@ def staged_env():
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
-        DB_PROVIDER="sqlite",
+        **incremental_test_backend_env(),
         VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
@@ -145,6 +148,7 @@ def test_staged_publish_and_run_records(staged_env):
 
 
 async def _scenario():
+    await reset_backend_state()
     import cognee
     from cognee.modules.data.methods import get_data, get_datasets
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data

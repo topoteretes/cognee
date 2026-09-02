@@ -49,6 +49,10 @@ import os
 import re
 from collections import Counter
 from pathlib import Path
+from cognee.tests.integration.api.update.graph_backend_env import (
+    incremental_test_backend_env,
+    reset_backend_state,
+)
 
 FIXTURE = Path(__file__).parent / "test_data" / "alice_in_wonderland.txt"
 PARAGRAPHS_USED = 120
@@ -97,9 +101,8 @@ def _setup_environment() -> None:
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
-        DB_PROVIDER="sqlite",
+        **incremental_test_backend_env(),
         VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
         TRIPLET_EMBEDDING="true",
@@ -632,6 +635,7 @@ async def _verify(
 
 
 async def main():
+    await reset_backend_state()
     _setup_environment()
 
     import cognee

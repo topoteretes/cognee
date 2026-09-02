@@ -27,6 +27,10 @@ from pathlib import Path
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 import pytest
+from cognee.tests.integration.api.update.graph_backend_env import (
+    incremental_test_backend_env,
+    reset_backend_state,
+)
 
 CHUNK_TOKENS = 60
 MARKER = re.compile(r"ENT[A-Z0-9]+")
@@ -42,9 +46,8 @@ def legacy_env():
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
-        DB_PROVIDER="sqlite",
+        **incremental_test_backend_env(),
         VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
@@ -141,6 +144,7 @@ def test_legacy_chunk_ids_survive_update_and_delete(legacy_env):
 
 
 async def _scenario():
+    await reset_backend_state()
     import cognee
     import cognee.modules.chunking.TextChunker as chunker_module
     from cognee.api.v1.update.incremental import _read_processed_text

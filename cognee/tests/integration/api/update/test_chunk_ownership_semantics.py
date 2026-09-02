@@ -18,6 +18,7 @@ ENABLE_BACKEND_ACCESS_CONTROL=true — each dataset gets its own graph, so the
 scenarios are independent — with mocked LLM and embeddings.
 """
 
+import asyncio
 import hashlib
 import re
 import shutil
@@ -25,6 +26,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from cognee.tests.integration.api.update.graph_backend_env import (
+    incremental_test_backend_env,
+    reset_backend_state,
+)
 
 CHUNK_TOKENS = 8
 NOUN = re.compile(r"\b[A-Z][a-z]{3,}\b")
@@ -40,6 +45,17 @@ def _pairs(text: str) -> set:
 
 
 @pytest.fixture(scope="module")
+def event_loop():
+    """One event loop for the module: cognee's cached engines (asyncpg on the
+    Postgres backend) bind to the loop that created them."""
+    loop = asyncio.new_event_loop()
+    try:
+        yield loop
+    finally:
+        loop.close()
+
+
+@pytest.fixture(scope="module")
 def ownership_env():
     """Scratch roots, env overrides, config-cache resets, and the extraction mock."""
     import os
@@ -49,9 +65,8 @@ def ownership_env():
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
-        DB_PROVIDER="sqlite",
+        **incremental_test_backend_env(),
         VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
         TRIPLET_EMBEDDING="true",
@@ -238,6 +253,7 @@ CHAIN = "Hole met Rabbit.\n\nRabbit met Alice.\n\nAlice met Queen."
 async def test_chunk_owns_exactly_what_it_contains(ownership_env):
     """At cognify time, every entity's owners are the chunks that contain it and every
     relationship's owners are the chunks that state it — the invariant deletion relies on."""
+    await reset_backend_state()
     user, dataset, _ = await _ingest("ownership_exact", CHAIN)
     view = await _view(user, dataset)
     assert len(view.chunks) == 3, "each paragraph must be its own chunk for this scenario"
@@ -263,6 +279,7 @@ async def test_chunk_owns_exactly_what_it_contains(ownership_env):
 async def test_entity_orphaned_by_update_is_deleted(ownership_env):
     """Replace the only paragraph that mentions Queen: the entity, its relationship and its
     vector row must be gone, because no live chunk contains it any more."""
+    await reset_backend_state()
     import cognee
 
     user, dataset, (data_id,) = await _ingest("ownership_ghost", CHAIN)
@@ -295,6 +312,7 @@ async def test_entity_orphaned_by_update_is_deleted(ownership_env):
 async def test_fact_survives_loss_of_its_first_producer(ownership_env):
     """Two paragraphs state the same fact; delete the one that produced it first. The fact
     is still stated by a live chunk, so it must survive."""
+    await reset_backend_state()
     import cognee
 
     user, dataset, (data_id,) = await _ingest(
@@ -330,6 +348,7 @@ async def test_fact_survives_deleting_one_of_two_documents(ownership_env):
     """Two documents, ingested at different times, state the same fact; delete the first.
     The other still states it, so the edge must survive — this is the ``delete_data``
     path, not the incremental one, and it exists on ``dev`` independently of updates."""
+    await reset_backend_state()
     import cognee
     from cognee.api.v1.datasets import datasets as datasets_api
     from cognee.modules.data.methods.get_dataset_data import get_dataset_data

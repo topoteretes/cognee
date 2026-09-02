@@ -192,11 +192,40 @@ jobs:
         run: uv run pytest cognee/tests/integration/test_delete_edge_cases.py cognee/tests/integration/shared/
 
   integration-api-update:
-    name: Integration - Update API (chunk-level updates, ownership)
+    name: Integration - Update API on ${{ matrix.graph }} (chunk-level updates, ownership)
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # kuzu is the default stack; postgres runs the same suite against the
+        # Postgres demo graph adapter (its tables live in the relational DB).
+        graph: [kuzu, postgres]
+    services:
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
+      INCR_TEST_GRAPH_PROVIDER: ${{ matrix.graph }}
+      INCR_TEST_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+      INCR_TEST_DB_PORT: 5432
+      INCR_TEST_DB_USERNAME: cognee
+      INCR_TEST_DB_PASSWORD: cognee
+      INCR_TEST_DB_NAME: cognee_db
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -207,8 +236,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          extra-dependencies: "postgres"
 
       # Mocked LLM and embeddings: no secrets. Covers the incremental update
-      # flow end to end and the chunk-ownership deletion semantics.
+      # flow end to end and the chunk-ownership deletion semantics, on the
+      # default embedded graph and on the Postgres demo graph adapter.
       - name: Run Update API Tests
         run: uv run pytest cognee/tests/integration/api/

@@ -16,6 +16,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from cognee.tests.integration.api.update.graph_backend_env import (
+    incremental_test_backend_env,
+    reset_backend_state,
+)
 
 INGEST_BUDGET = 60
 CHANGED_GLOBAL_BUDGET = 400
@@ -31,9 +35,8 @@ def budget_env():
     import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
-        DB_PROVIDER="sqlite",
+        **incremental_test_backend_env(),
         VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
         CACHE_BACKEND="sqlite",
         MOCK_EMBEDDING="true",
         TELEMETRY_DISABLED="1",
@@ -121,6 +124,7 @@ def test_update_respects_recorded_chunk_budget(budget_env):
 
 
 async def _scenario():
+    await reset_backend_state()
     import cognee
     import cognee.api.v1.update.incremental as incremental_module
     from cognee.modules.data.methods import get_datasets
