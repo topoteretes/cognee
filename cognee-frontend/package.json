@@ -6,6 +6,7 @@
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
+    "test": "jest",
     "lint": "eslint .",
     "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
