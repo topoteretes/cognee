@@ -90,8 +90,9 @@ jobs:
   # the 50-doc set is short synthetic ones. This is many medium-sized real-world
   # documents, which is the shape most user datasets actually have.
   #
-  # No Rust arms yet: those read fixtures from topoteretes/cognee-rs
-  # (scripts/perf/fixtures/<label>/), so they land with that repo's PR.
+  # The Rust arms for this corpus live further down with the other Rust ones;
+  # they read their fixtures from topoteretes/cognee-rs
+  # (scripts/perf/fixtures/henkel/), not from S3.
   perf-henkel-llm:
     name: Performance — Henkel (real LLM)
     uses: ./.github/workflows/performance_report.yml
@@ -204,6 +205,32 @@ jobs:
       memories: scripts/perf/fixtures/war_and_peace/memories.json
       cassette: scripts/perf/fixtures/war_and_peace/cassette.json
     secrets: inherit
+  # Henkel through the Rust SDK. The corpus is the same 164 datasheets the
+  # Python/cloud Henkel arms run, but the Rust arms read a committed copy from
+  # cognee-rs rather than S3 (scripts/perf/fixtures/henkel/), and the mock arm
+  # needs a *Rust* cassette: replay is content-addressed by sha256(prompt +
+  # schema), so the Python mock_henkel.json cannot serve it. Both fixtures land
+  # in cognee-rs — record the cassette there with record-perf-cassette.yml so
+  # record and replay share the runner platform.
+  perf-rust-henkel-llm:
+    name: Performance — Rust SDK — Henkel (real LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: llm
+      label: henkel
+      memories: scripts/perf/fixtures/henkel/memories.json
+    secrets: inherit
+  perf-rust-henkel:
+    name: Performance — Rust SDK — Henkel (mock LLM)
+    uses: ./.github/workflows/performance_report_rust.yml
+    with:
+      runs: '3'
+      mode: mock_llm
+      label: henkel
+      memories: scripts/perf/fixtures/henkel/memories.json
+      cassette: scripts/perf/fixtures/henkel/cassette.json
+    secrets: inherit
 
   notify:
     name: Test Completion Status
@@ -224,6 +251,8 @@ jobs:
       perf-rust-wap,
       perf-rust-llm,
       perf-rust-wap-llm,
+      perf-rust-henkel,
+      perf-rust-henkel-llm,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
@@ -251,7 +280,9 @@ jobs:
                 "${{ needs.perf-rust.result }}" == "success" &&
                 "${{ needs.perf-rust-wap.result }}" == "success" &&
                 "${{ needs.perf-rust-llm.result }}" == "success" &&
-                "${{ needs.perf-rust-wap-llm.result }}" == "success" ]]; then
+                "${{ needs.perf-rust-wap-llm.result }}" == "success" &&
+                "${{ needs.perf-rust-henkel.result }}" == "success" &&
+                "${{ needs.perf-rust-henkel-llm.result }}" == "success" ]]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
             echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
@@ -292,6 +323,8 @@ jobs:
             url_rust_wap ${{ needs.perf-rust-wap.outputs.html_key }}
             url_rust_llm ${{ needs.perf-rust-llm.outputs.html_key }}
             url_rust_wap_llm ${{ needs.perf-rust-wap-llm.outputs.html_key }}
+            url_rust_henkel ${{ needs.perf-rust-henkel.outputs.html_key }}
+            url_rust_henkel_llm ${{ needs.perf-rust-henkel-llm.outputs.html_key }}
         run: |
           set -euo pipefail
           # 7 days = 604800s is the maximum lifetime for an IAM-user presigned URL.
@@ -333,6 +366,8 @@ jobs:
             📊|Rust SDK (file_based) — 50 Small Documents — Mock LLM|${{ needs.perf-rust.result }}|${{ needs.perf-rust.outputs.metrics }}|${{ steps.presign.outputs.url_rust }}
             📚|Rust SDK (file_based) — War and Peace — Real LLM|${{ needs.perf-rust-wap-llm.result }}|${{ needs.perf-rust-wap-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_wap_llm }}
             📚|Rust SDK (file_based) — War and Peace — Mock LLM|${{ needs.perf-rust-wap.result }}|${{ needs.perf-rust-wap.outputs.metrics }}|${{ steps.presign.outputs.url_rust_wap }}
+            🧪|Rust SDK (file_based) — Henkel — Real LLM|${{ needs.perf-rust-henkel-llm.result }}|${{ needs.perf-rust-henkel-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_henkel_llm }}
+            🧪|Rust SDK (file_based) — Henkel — Mock LLM|${{ needs.perf-rust-henkel.result }}|${{ needs.perf-rust-henkel.outputs.metrics }}|${{ steps.presign.outputs.url_rust_henkel }}
         run: python .github/scripts/build_nightly_slack_blocks.py
 
       - name: Post status to Slack
