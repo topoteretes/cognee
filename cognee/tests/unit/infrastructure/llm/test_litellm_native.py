@@ -533,7 +533,7 @@ class TestQualifyModel:
 # model_validate_json. Models on that path routinely wrap the answer in a
 # ```json fence: the JSON inside is valid, but pydantic sees a backtick at
 # column 1 and rejects it, and the self-correction retry cannot help because a
-# model that fences once fences again. Hit while capturing the Henkel cassette.
+# model that fences once fences again. Hit while capturing the datasheets cassette.
 
 
 class TestStripJsonFence:
@@ -546,7 +546,7 @@ class TestStripJsonFence:
         return _strip_json_fence(text)
 
     def test_fenced_with_language_tag(self):
-        """The exact shape that broke the Henkel capture."""
+        """The exact shape that broke the datasheets capture."""
         assert self._strip('```json\n{"summary": "s"}\n```') == '{"summary": "s"}'
 
     def test_fenced_without_language_tag(self):
