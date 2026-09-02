@@ -49,6 +49,19 @@ jobs:
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
+  # The PR gate runs the unit suite on the interpreter edges (3.10, 3.14) and
+  # on windows/macos 3.13 -- the four environments with version- or OS-specific
+  # fixes in the history. The three middle Linux versions run here instead.
+  # Same reusable workflow, same extras as the PR gate's ubuntu legs.
+  unit-matrix-mid:
+    name: Unit Tests (3.11-3.13 ubuntu)
+    uses: ./.github/workflows/test_different_operating_systems.yml
+    with:
+      python-versions: '["3.11.x", "3.12.x", "3.13.x"]'
+      os: '["ubuntu-22.04"]'
+      extra-dependencies: 'postgres aws neptune langchain dlt'
+    secrets: inherit
+
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -218,6 +231,7 @@ jobs:
     name: Test Completion Status
     needs: [
       ollama-tests,
+      unit-matrix-mid,
       llamacpp-tests,
       perf-small-llm,
       perf-small-mock,
@@ -251,6 +265,7 @@ jobs:
         run: |
           if [[ "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.llamacpp-tests.result }}" == "success" &&
+                "${{ needs.unit-matrix-mid.result }}" == "success" &&
                 "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
@@ -328,6 +343,7 @@ jobs:
           STATUS_SHA: ${{ github.sha }}
           STATUS_OLLAMA: ${{ needs.ollama-tests.result }}
           STATUS_LLAMACPP: ${{ needs.llamacpp-tests.result }}
+          STATUS_UNIT_MID: ${{ needs.unit-matrix-mid.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.

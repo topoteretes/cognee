@@ -8,12 +8,18 @@ on:
     branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
-    types: [opened, synchronize, reopened, labeled]
+    # No `labeled`: label-core-team.yml labels every core-team PR on open, and
+    # a `labeled` trigger queued a second run that cancelled the first (both
+    # runs on the same sha, seconds apart, on every PR).
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but never a push-to-dev run: consecutive merges
+  # were cancelling each other's full run (15 of the last 40 push runs), so
+  # dev's real state was unknown most of the time.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -167,11 +173,20 @@ jobs:
     name: OS and Python Tests Ubuntu
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
-      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x", "3.14.x"]'
+      # The interpreter edges only. Every version-specific fix on dev since
+      # 2025-06 was 3.10 (5) or 3.14 (1); none was 3.11/3.12/3.13-only. Those
+      # three run nightly instead. The unit suite is byte-identical across the
+      # legs, so this cuts three of eight copies with no change in what a
+      # passing run proves.
+      python-versions: '["3.10.x", "3.14.x"]'
       os: '["ubuntu-22.04"]'
       # postgres so the SQL cache adapter tests run instead of skipping; omitted
       # on macos/windows (extended) where psycopg2 has no prebuilt wheels.
-      extra-dependencies: 'postgres'
+      # aws/neptune/langchain/dlt: the CI-image copy of the unit suite (deleted
+      # -- it was the slowest of eight identical copies, behind a 3-minute image
+      # pull) was the only leg with these, and four test files importorskip on
+      # them. Resolved from the existing lock on 3.10.
+      extra-dependencies: 'postgres aws neptune langchain dlt'
     secrets: inherit
 
   different-os-tests-extended:
