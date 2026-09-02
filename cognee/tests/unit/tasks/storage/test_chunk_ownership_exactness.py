@@ -171,3 +171,79 @@ def test_chunk_owns_itself_and_its_structural_edges():
             assert owners_of(ownership.edge_owners.get(contains_edge)) == {label}, (
                 f"{label} -[contains]-> {entity.name} is produced by {label} alone"
             )
+
+
+def test_custom_graph_model_chunks_are_walked_as_they_are():
+    """A custom graph model stores its whole extracted model in ``contains``
+    (a pydantic object, not a list of entities); the scoped walk must leave it
+    alone rather than iterate it as fields."""
+    from typing import List
+
+    from cognee.infrastructure.engine import DataPoint
+
+    class Fact(DataPoint):
+        subject: str
+        claim: str
+
+    class CustomGraph(DataPoint):
+        facts: List[Fact]
+
+    document = TextDocument(
+        id=uuid4(),
+        name="custom",
+        raw_data_location="custom.txt",
+        mime_type="text/plain",
+        external_metadata="{}",
+    )
+    chunk = DocumentChunk(
+        id=uuid4(),
+        text="Custom model text.",
+        chunk_size=3,
+        chunk_index=0,
+        cut_type="paragraph_end",
+        is_part_of=document,
+        contains=[],
+    )
+    # integrate_chunk_graphs assigns the model after construction (no validation).
+    fact = Fact(subject="alice", claim="met the queen")
+    chunk.contains = CustomGraph(facts=[fact])
+    dataset_id, data_id = uuid4(), uuid4()
+
+    ownership = asyncio.run(collect_chunk_ownership([chunk], dataset_id, data_id))
+
+    key = make_chunk_source_ref_key(dataset_id, data_id, chunk.id)
+    assert ownership.node_owners.get(str(chunk.id)) == [key]
+    assert ownership.node_owners.get(str(fact.id)) == [key], (
+        "the custom model's nodes are produced by this chunk and stay chunk-owned"
+    )
+
+
+def test_chunk_copies_without_contains_are_walked_as_they_are():
+    """Chunks rebuilt from an export are simple pydantic copies that may carry
+    no ``contains`` attribute at all (COGX import); ownership must not require it."""
+    from cognee.modules.storage.utils import copy_model
+
+    document = TextDocument(
+        id=uuid4(),
+        name="imported",
+        raw_data_location="imported.txt",
+        mime_type="text/plain",
+        external_metadata="{}",
+    )
+    SimpleChunk = copy_model(DocumentChunk, exclude_fields=["contains"])
+    chunk = SimpleChunk(
+        id=uuid4(),
+        text="Imported text.",
+        chunk_size=2,
+        chunk_index=0,
+        cut_type="paragraph_end",
+        is_part_of=document,
+    )
+    assert not hasattr(chunk, "contains")
+    dataset_id, data_id = uuid4(), uuid4()
+
+    ownership = asyncio.run(collect_chunk_ownership([chunk], dataset_id, data_id))
+
+    assert ownership.node_owners.get(str(chunk.id)) == [
+        make_chunk_source_ref_key(dataset_id, data_id, chunk.id)
+    ]

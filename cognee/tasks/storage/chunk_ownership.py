@@ -101,8 +101,17 @@ def _without_relations(item):
 
 
 def _scoped_chunk(chunk):
-    contained = [_without_relations(item) for item in (chunk.contains or [])]
-    return chunk.model_copy(update={"contains": contained})
+    """The chunk with its contained entities' relations detached.
+
+    Only a real ``contains`` list is scoped. A custom graph model stores its
+    whole extracted model there (a pydantic object, not a list) and a chunk
+    rebuilt from an export (COGX import) may carry no ``contains`` at all —
+    both are walked exactly as they are.
+    """
+    contained = getattr(chunk, "contains", None)
+    if not isinstance(contained, list) or not contained:
+        return chunk
+    return chunk.model_copy(update={"contains": [_without_relations(item) for item in contained]})
 
 
 def _scoped_root(root):
