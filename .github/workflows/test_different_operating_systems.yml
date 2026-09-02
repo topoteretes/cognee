@@ -94,6 +94,13 @@ jobs:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
+          # Same wedge as the library job, same picture (run 33648260941: a
+          # child python.exe frozen at 3.8 MB for 25 minutes on both attempts,
+          # parent idle at 15 MB). The unit suite spawns the Kuzu/LanceDB
+          # subprocess workers too; it just does not hit the deadlock every
+          # time. Run in-process. The worker bug is SDK-540.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -185,6 +192,13 @@ jobs:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
           PYTHONUTF8: 1
+          # Same wedge as the library job, same picture (run 33648260941: a
+          # child python.exe frozen at 3.8 MB for 25 minutes on both attempts,
+          # parent idle at 15 MB). The unit suite spawns the Kuzu/LanceDB
+          # subprocess workers too; it just does not hit the deadlock every
+          # time. Run in-process. The worker bug is SDK-540.
+          GRAPH_DATABASE_SUBPROCESS_ENABLED: "false"
+          VECTOR_DB_SUBPROCESS_ENABLED: "false"
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
