@@ -199,6 +199,13 @@ async def _serve_cloud(
                 if token.refresh_token:
                     creds.refresh_token = token.refresh_token
                 creds.expires_at = time.time() + token.expires_in
+                # Deliberately saved BEFORE the connect checks below — unlike
+                # the validate-then-save order used for new API keys. This
+                # persists issuer-validated token material only (the API key
+                # beside it is already on disk either way), and with rotating
+                # refresh tokens the old token was consumed by this refresh:
+                # deferring the save would strand a dead refresh token in the
+                # file whenever the connect check fails, breaking recovery.
                 save_credentials(creds)
 
                 client = CloudClient(creds.service_url, creds.api_key)
