@@ -1,0 +1,315 @@
+name: automation | Docstring Pilot
+
+# Runs the evidence-led docstring skill on one of the ten files selected in
+# .claude/skills/docstring-pilot/pilot_files.md and opens a draft PR against dev
+# for review (RES-28).
+#
+# This is a proof of concept, and the shape is the thing being tested: one skill
+# that authors docstrings and then critiques its own wording, plus a claim ledger
+# in the PR body pairing every favorable claim with evidence a reviewer can open.
+# The question it answers is whether that produces docstring diffs a maintainer
+# would merge — not whether docstrings can be generated at scale.
+#
+# Deliberately manual. There is no cron, no push trigger, and no pull_request
+# trigger: the pilot is ten files, so there is nothing for a schedule to watch,
+# and a docstring is not drift that appears on its own. It is also deliberately
+# never auto-merged — an unsupported claim in a docstring is exactly the failure
+# this workflow exists to detect, and only a human review detects it.
+#
+# Two guards make the draft PR cheap to review:
+#
+#   1. tools/check_docstring_pilot_path.py rejects any `path` outside the ten
+#      selected files, before Claude is called, and writes the reason into the
+#      run summary. The automation may not pick new files.
+#   2. tools/check_docstring_pilot_diff.py compares the file's AST before and
+#      after with docstrings stripped, so a code edit smuggled into a
+#      "docstring" run fails the run instead of reaching the PR.
+#
+# The tree being edited is always dev; the machinery (skill, allowlist, guards)
+# comes from the triggering ref. That split is what lets this be dispatched from
+# its own feature branch before merging — the docstrings are still dev's, so the
+# PR can never carry a stale rewrite, which is the failure RES-14 hit twice.
+
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: "Pilot file to work on, e.g. cognee/api/v1/search/search.py"
+        required: true
+      dry_run:
+        description: "Show the diff and ledger in the run summary instead of opening a PR."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Queue rather than cancel: a run cancelled between the push and the PR update
+# would leave the draft PR half-refreshed. Keyed on the target file so two
+# dispatches on different pilot files do not block each other.
+concurrency:
+  group: docstring-pilot-${{ inputs.path }}
+  cancel-in-progress: false
+
+jobs:
+  docstring-pilot:
+    name: Draft docstring improvements for one pilot file
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      # Credentials are never persisted into either checkout: an agent with Edit
+      # access runs against this workspace, and nothing there should be able to
+      # read a token off disk. The push and PR steps receive the PAT explicitly.
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Check out pilot machinery from the triggering ref
+        uses: actions/checkout@v6
+        with:
+          path: automation-src
+          persist-credentials: false
+
+      # Before Claude is called, so a dispatch from a ref that predates the
+      # pilot fails in seconds with the cause named.
+      - name: Check the pilot machinery is present on this ref
+        run: |
+          missing=""
+          for path in \
+            automation-src/.claude/skills/docstring-pilot/SKILL.md \
+            automation-src/.claude/skills/docstring-pilot/pilot_files.md \
+            automation-src/tools/check_docstring_pilot_path.py \
+            automation-src/tools/check_docstring_pilot_diff.py; do
+            [ -f "${path}" ] || missing="${missing} ${path#automation-src/}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::Missing on ${GITHUB_REF_NAME}:${missing}"
+            echo "Dispatch this workflow from a ref that carries the docstring pilot skill."
+            exit 1
+          fi
+
+      # A rejected path must produce zero pull requests, and the reason has to be
+      # readable in the run summary — a bad `path` is a human typo, not a bug.
+      - name: Check the path is one of the ten selected files
+        id: target
+        run: |
+          python3 automation-src/tools/check_docstring_pilot_path.py \
+            --path "${TARGET_PATH}" \
+            --allowlist automation-src/.claude/skills/docstring-pilot/pilot_files.md \
+            --repo-root .
+        env:
+          TARGET_PATH: ${{ inputs.path }}
+
+      - name: Record the tree being edited
+        id: base
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          slug="$(echo "${{ steps.target.outputs.target }}" | sed 's#\.py$##; s#[/_]#-#g')"
+          echo "branch=automation/docstring-pilot/${slug}" >> "$GITHUB_OUTPUT"
+
+      # No cognee environment is needed: the guards are stdlib-only and the agent
+      # reads source rather than running it. uv is here for ruff alone.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # Bash is not in the allowed tools: the workflow owns git, and the guards
+      # run as steps rather than as something the agent could satisfy itself.
+      - name: Improve docstrings with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read and follow `automation-src/.claude/skills/docstring-pilot/SKILL.md`,
+            including the selection table it points at
+            (`automation-src/.claude/skills/docstring-pilot/pilot_files.md`).
+
+            - Target file: `${{ steps.target.outputs.target }}`
+            - Claim ledger output: `./docstring_pilot_ledger.md`
+
+            The target has already been checked against the ten selected files, so
+            work on it. Edit only that file, only inside docstrings, and write the
+            ledger to the path above. Do not create commits or branches.
+          claude_args: "--allowed-tools Read,Edit,Write,Glob,Grep --max-turns 40"
+
+      - name: Check the ledger was written
+        run: |
+          if [ ! -s docstring_pilot_ledger.md ]; then
+            echo "::error::No claim ledger at docstring_pilot_ledger.md."
+            {
+              echo "### Docstring pilot — no ledger"
+              echo
+              echo "The run produced no claim ledger, so its docstring changes cannot be"
+              echo "reviewed against evidence. Nothing was pushed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # Docstring reflow only — the file is already ruff-clean on dev, so any
+      # non-docstring change ruff makes here is caught by the guard below.
+      - name: Format the edited file
+        run: uvx ruff@0.15.11 format "${{ steps.target.outputs.target }}"
+
+      - name: Check the diff is docstrings only
+        id: diff
+        run: |
+          # automation-src is a second checkout inside this tree, so it is
+          # untracked here and has to be excluded from the stray-file check.
+          python3 automation-src/tools/check_docstring_pilot_diff.py \
+            --path "${{ steps.target.outputs.target }}" \
+            --base "${{ steps.base.outputs.sha }}" \
+            --repo-root . \
+            --ignore automation-src/
+
+      - name: Publish the ledger to the run summary
+        run: |
+          {
+            echo "## Docstring pilot — \`${{ steps.target.outputs.target }}\`"
+            echo
+            echo "- Base: \`${{ steps.base.outputs.short_sha }}\` on dev"
+            echo "- Docstrings changed: \`${{ steps.diff.outputs.changed }}\`"
+            echo
+            cat docstring_pilot_ledger.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A pilot file whose docstrings were already good is expected to land here.
+      # The ledger above carries the critic pass's reasoning, which is the actual
+      # result of such a run.
+      - name: Record that no change was needed
+        if: ${{ steps.diff.outputs.changed == 'false' }}
+        run: |
+          {
+            echo
+            echo "### No change needed"
+            echo
+            echo "The run left \`${{ steps.target.outputs.target }}\` unchanged, so no pull"
+            echo "request was created. See the critic pass above for what was considered."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show the diff without pushing
+        if: ${{ steps.diff.outputs.changed == 'true' && inputs.dry_run }}
+        run: |
+          {
+            echo
+            echo "### Dry run — nothing pushed"
+            echo
+            echo '```diff'
+            git --no-pager diff -- "${{ steps.target.outputs.target }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push the docstring branch
+        id: commit
+        if: ${{ steps.diff.outputs.changed == 'true' && !inputs.dry_run }}
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          BRANCH_NAME: ${{ steps.base.outputs.branch }}
+          TARGET: ${{ steps.target.outputs.target }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Recreated from the dev we checked out, every run — no long-lived
+          # branch accumulating merges, so the branch is never behind dev.
+          git checkout -B "${BRANCH_NAME}"
+          git add "${TARGET}"
+
+          # Skip the push, and the PR update, when the branch already carries
+          # exactly this content. Hashing the one file the run may touch means an
+          # unrelated commit to dev cannot invalidate it, so a rerun that reaches
+          # the same wording costs nothing instead of force-pushing over a review
+          # in progress.
+          CONTENT_HASH="$(git rev-parse ":${TARGET}")"
+          PREVIOUS_HASH=""
+          if git fetch origin "${BRANCH_NAME}" 2>/dev/null; then
+            PREVIOUS_HASH="$(git rev-parse "FETCH_HEAD:${TARGET}" 2>/dev/null || true)"
+          fi
+          if [ -n "${PREVIOUS_HASH}" ] && [ "${CONTENT_HASH}" = "${PREVIOUS_HASH}" ]; then
+            echo "Branch already carries this content (${CONTENT_HASH}) — skipping push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "docs: Strengthen docstrings in ${TARGET} (RES-28)"
+          git push --force \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "${BRANCH_NAME}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the draft PR
+        if: ${{ steps.commit.outputs.pushed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          HEAD_BRANCH: ${{ steps.base.outputs.branch }}
+          TARGET: ${{ steps.target.outputs.target }}
+          BASE_SHA: ${{ steps.base.outputs.short_sha }}
+        run: |
+          PR_TITLE="docs: Strengthen docstrings in ${TARGET} (RES-28)"
+          {
+            echo "Docstring-only changes to \`${TARGET}\`, written by the"
+            echo "\`docstring-pilot\` skill and left as a draft for review (RES-28)."
+            echo
+            echo "The diff is enforced to be docstrings in this one file:"
+            echo "\`tools/check_docstring_pilot_diff.py\` compares the syntax tree before"
+            echo "and after with all docstrings removed, and fails the run on any other"
+            echo "change. **Review the claims, not the mechanics** — the ledger below is"
+            echo "the skill's own account of what it asserted and what its critic pass cut."
+            echo
+            echo "- Target: \`${TARGET}\`"
+            echo "- Base: \`${BASE_SHA}\` on \`dev\`"
+            echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "---"
+            echo
+            cat docstring_pilot_ledger.md
+          } > pr_body.md
+
+          # --state all, not --state open: closing the bot's PR without deleting
+          # its branch would otherwise make the next run open a duplicate. A
+          # closed-but-unmerged PR is reopened and updated instead.
+          EXISTING="$(gh pr list \
+            --head "${HEAD_BRANCH}" \
+            --base dev \
+            --state all \
+            --json number,state \
+            --jq 'map(select(.state != "MERGED")) | .[0] | "\(.number) \(.state)"' \
+            2>/dev/null || true)"
+          PR_NUMBER="${EXISTING%% *}"
+          PR_STATE="${EXISTING##* }"
+
+          if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
+            if [ "${PR_STATE}" = "CLOSED" ]; then
+              echo "Reopening #${PR_NUMBER} rather than opening a duplicate."
+              gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+                --method PATCH --field state=open
+            fi
+            # REST instead of 'gh pr edit': the edit command needs read:org for
+            # its GraphQL query, which this repo-scoped PAT does not have. This
+            # never undrafts the PR — marking it ready is a human decision.
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --method PATCH \
+              --field title="${PR_TITLE}" \
+              --field body="$(cat pr_body.md)"
+            echo "Updated draft #${PR_NUMBER}."
+            PR_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+          else
+            PR_URL="$(gh pr create \
+              --draft \
+              --base dev \
+              --head "${HEAD_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body-file pr_body.md)"
+          fi
+
+          {
+            echo
+            echo "### Draft pull request"
+            echo
+            echo "${PR_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
