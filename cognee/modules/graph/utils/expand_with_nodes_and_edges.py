@@ -163,7 +163,9 @@ def _add_extracted_edges(
     extracted_graph: KnowledgeGraph,
     entities_by_extracted_node_id: dict[str, Entity],
     edges_by_identity: dict[EdgeIdentity, Edge],
+    data_chunk: DocumentChunk,
 ) -> None:
+    produced = data_chunk._produced_edge_identities
     for extracted_edge in extracted_graph.edges:
         source_entity = entities_by_extracted_node_id.get(extracted_edge.source_node_id)
         target_entity = entities_by_extracted_node_id.get(extracted_edge.target_node_id)
@@ -176,6 +178,12 @@ def _add_extracted_edges(
             target_id=str(target_entity.id),
             relationship_name=relationship_name,
         )
+        # The chunk owns every relationship its extraction yielded, including
+        # ones the graph already holds (those are not attached below and so
+        # never appear in the chunk's model — ownership must not depend on it).
+        produced_key = (edge_identity.source_id, edge_identity.target_id, relationship_name)
+        if produced_key not in produced:
+            produced.append(produced_key)
         edges_by_identity.setdefault(
             edge_identity,
             Edge(
@@ -206,6 +214,7 @@ def construct_data_points_and_edges(
             extracted_graph,
             entities_by_extracted_node_id,
             edges_by_identity,
+            data_chunk,
         )
 
     return data_points_by_id, edges_by_identity

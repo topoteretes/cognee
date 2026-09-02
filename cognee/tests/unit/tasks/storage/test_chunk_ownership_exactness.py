@@ -57,8 +57,9 @@ def _build_chain():
     """The reproduction graph: three chunks, four entities, three relations.
 
     Entities are SHARED objects across chunks, exactly as
-    ``construct_data_points_and_edges`` dedupes them within a batch, and each
-    relation is attached to its source entity as ``(Edge, target)``.
+    ``construct_data_points_and_edges`` dedupes them within a batch; each
+    relation is attached to its source entity as ``(Edge, target)`` AND
+    recorded on the chunk that yielded it, as construction does.
     """
     document = TextDocument(
         id=uuid4(),
@@ -77,6 +78,10 @@ def _build_chain():
         _chunk(document, 1, "Rabbit met Alice.", [rabbit, alice]),
         _chunk(document, 2, "Alice met Queen.", [alice, queen]),
     ]
+    # What ``construct_data_points_and_edges`` records: each chunk's OWN
+    # extracted relationships, independent of the shared entities' relations.
+    for chunk, (source, target) in zip(chunks, [(hole, rabbit), (rabbit, alice), (alice, queen)]):
+        chunk._produced_edge_identities.append((str(source.id), str(target.id), "precedes"))
     return chunks, {"hole": hole, "rabbit": rabbit, "alice": alice, "queen": queen}
 
 

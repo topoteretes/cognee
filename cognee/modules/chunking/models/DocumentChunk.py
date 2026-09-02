@@ -1,5 +1,7 @@
 from typing import List, Union, Optional
 
+from pydantic import PrivateAttr
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.data.processing.document_types import Document
@@ -56,3 +58,10 @@ class DocumentChunk(DataPoint):
     truth_alignment: Optional[list[float]] = None
     truth_epoch: Optional[int] = None
     metadata: dict = {"index_fields": ["text"]}
+    # Relationship edges this chunk's OWN extraction yielded, as
+    # (source_id, target_id, relationship_name) — recorded by
+    # ``construct_data_points_and_edges`` whether or not the graph already held
+    # the edge. Chunk ownership is derived from this record, not from the
+    # entities' ``relations`` lists (which accumulate edges from every chunk in
+    # a batch). Private: never persisted as a node property.
+    _produced_edge_identities: list = PrivateAttr(default_factory=list)

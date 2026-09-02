@@ -36,6 +36,19 @@ if TYPE_CHECKING:
 logger = get_logger("add_data_points")
 
 
+def _group_by_all_keys(owner_map: dict) -> dict:
+    """Artifacts that need the same FULL ref key set, grouped into one call.
+
+    For artifacts this batch does not write (relationship edges the graph
+    already held), nothing folds: every owner must be attached.
+    """
+    groups: dict = {}
+    for artifact, owners in owner_map.items():
+        if owners:
+            groups.setdefault(tuple(owners), []).append(artifact)
+    return groups
+
+
 def _group_by_extra_keys(owner_map: dict) -> dict:
     """Artifacts that need the same extra ref keys, grouped into one call.
 
@@ -285,6 +298,19 @@ async def add_data_points(
             for keys, edge_keys in _group_by_extra_keys(in_batch).items():
                 identities = [EdgeIdentity(key[0], key[1], key[2]) for key in edge_keys]
                 await graph_engine.attach_edge_source_refs(identities, list(keys), fold_run_arg)
+            # Relationship edges this batch's chunks produced but did not write
+            # because the graph already held them. They gain their new owners
+            # by ref attach alone — no rewrite, so stored edge properties
+            # (weights, feedback) stay untouched — otherwise the edge would be
+            # deleted with its FIRST producer while these chunks still state it.
+            existing = {
+                edge_key: owners
+                for edge_key, owners in ownership.edge_owners.items()
+                if edge_key not in batch_keys
+            }
+            for keys, edge_keys in _group_by_all_keys(existing).items():
+                identities = [EdgeIdentity(key[0], key[1], key[2]) for key in edge_keys]
+                await graph_engine.attach_edge_source_refs(identities, list(keys), fold_run_arg)
 
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
@@ -350,13 +376,24 @@ async def add_data_points(
             await graph_engine.attach_node_source_refs(node_ids, [ref_key], run_arg)
 
         attach_edges: dict = {}
+        written_edge_keys = set()
         for edge in edges:
             edge_key = (str(edge[0]), str(edge[1]), str(edge[2]))
+            written_edge_keys.add(edge_key)
             owners = ownership.edge_owners.get(edge_key) if ownership else None
             for key in owners or [fold_source_ref_key]:
                 attach_edges.setdefault(key, []).append(
                     EdgeIdentity(edge_key[0], edge_key[1], edge_key[2])
                 )
+        # Produced-but-existing relationship edges (see the non-hybrid path).
+        if ownership:
+            for edge_key, owners in ownership.edge_owners.items():
+                if edge_key in written_edge_keys:
+                    continue
+                for key in owners:
+                    attach_edges.setdefault(key, []).append(
+                        EdgeIdentity(edge_key[0], edge_key[1], edge_key[2])
+                    )
         for ref_key, identities in attach_edges.items():
             await graph_engine.attach_edge_source_refs(identities, [ref_key], run_arg)
 

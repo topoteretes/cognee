@@ -1,11 +1,25 @@
 """Chunk-scoped ownership of graph output (SDK-6 proposal, Phase 2).
 
 Graph merging stores equal output once; ownership records every chunk that
-produced it. Each DocumentChunk's model subtree is re-expanded in isolation
-(the same traversal ``add_data_points`` uses for the combined forest), giving
-the exact node ids and edge identities that chunk owns. Output reachable from
-several chunks gets several owners; output reachable from none — the document
-node itself, NodeSet tags — stays document-scoped.
+produced it. A chunk owns EXACTLY what its own extraction produced: itself,
+the summary made from it, the entities (or events) it ``contains`` and their
+types, the structural edges among those (``is_part_of``, ``contains``,
+``is_a``, ``made_from``, ``belongs_to_set``), and the relationship edges its
+extraction yielded — whether or not the graph already held them. Output
+reachable from several chunks gets several owners; output no chunk produced —
+the document node, NodeSet tags, ontology enrichment — stays document-scoped.
+
+Exactness is what chunk-scoped deletion relies on: an artifact is hard-deleted
+when its last owner dies and kept while any owner lives. Relationship edges
+hang off their SOURCE entity (``Entity.relations``), so a walk that followed
+them would hand a chunk everything downstream of any entity it mentions — a
+chunk containing only ``hole`` owned the whole ``hole -> rabbit -> alice ->
+queen`` chain, and deleting the chunk that contained ``queen`` left it alive as
+a ghost. The walk therefore stops at entity boundaries, and relationship edges
+are attributed from the chunk's own record (``_produced_edge_identities``),
+which also covers edges the graph already held and that were never attached
+to the model (the loss case: a fact deleted with its first producer while a
+later chunk still stated it).
 
 The grouping contract for writes: every node/edge is written in the batch of
 its FIRST owner (so its provenance stamp folds into the same atomic
@@ -41,6 +55,10 @@ def _edge_key(edge) -> EdgeKey:
     return (str(edge[0]), str(edge[1]), str(edge[2]))
 
 
+def _is_chunk(data_point) -> bool:
+    return type(data_point).__name__ == "DocumentChunk"
+
+
 def _document_scoped_type_names() -> set:
     """Names of node types that stay document-scoped even when a chunk's
     expansion reaches them: the document IS the document (v1 ref), and NodeSet
@@ -67,6 +85,52 @@ def _document_scoped_type_names() -> set:
     return names
 
 
+def _without_relations(item):
+    """A contained data point with its extracted relationships detached.
+
+    ``Entity.relations`` accumulates the edges of EVERY chunk in a batch, so
+    walking it would attribute other chunks' facts to this one. The chunk's
+    own relationships come from its produced-edge record instead.
+    """
+    if isinstance(item, tuple) and len(item) == 2:
+        edge, target = item
+        return (edge, _without_relations(target))
+    if isinstance(item, DataPoint) and hasattr(item, "relations"):
+        return item.model_copy(update={"relations": []})
+    return item
+
+
+def _scoped_chunk(chunk):
+    contained = [_without_relations(item) for item in (chunk.contains or [])]
+    return chunk.model_copy(update={"contains": contained})
+
+
+def _scoped_root(root):
+    """The root with the ownership walk cut at entity boundaries.
+
+    A chunk root, or a summary root pointing at its chunk via ``made_from``,
+    is walked through a copy whose contained entities carry no relations.
+    Any other root is walked as-is (it reaches no chunk, so it attributes
+    nothing to chunk scope).
+    """
+    if _is_chunk(root):
+        return _scoped_chunk(root)
+    made_from = getattr(root, "made_from", None)
+    if made_from is not None and _is_chunk(made_from):
+        return root.model_copy(update={"made_from": _scoped_chunk(made_from)})
+    return root
+
+
+def _chunks_of(root) -> List[DataPoint]:
+    """The ORIGINAL chunk objects a root is built from (they carry the record)."""
+    if _is_chunk(root):
+        return [root]
+    made_from = getattr(root, "made_from", None)
+    if made_from is not None and _is_chunk(made_from):
+        return [made_from]
+    return []
+
+
 async def collect_chunk_ownership(
     data_points: List[DataPoint],
     dataset_id: UUID,
@@ -75,29 +139,29 @@ async def collect_chunk_ownership(
     """Map every node/edge in the batch to the chunks that produced it.
 
     Attribution is ROOT-wise: each input data point (a summary, a chunk, …)
-    is expanded in isolation with fresh tracking dicts, and every chunk found
-    inside that expansion owns everything the expansion produced. This
-    captures both directions of the model: a chunk's own subtree (entities it
-    contains) AND its parents (the summary pointing at it via ``made_from``)
-    land in the same expansion. Documents and NodeSet tags are excluded —
-    they stay document-scoped regardless of which chunk's expansion reached
-    them.
+    is walked in isolation with fresh tracking dicts — through a copy that
+    stops at entity boundaries — and the chunk found inside that walk owns
+    everything the walk produced: the chunk itself, its summary and the
+    ``made_from`` edge, the entities it contains with their types and tags,
+    and the structural edges among them. The chunk's extracted relationships
+    are added from its own record. Documents and NodeSet tags are excluded —
+    they stay document-scoped regardless of which chunk's walk reached them.
     """
     ownership = ChunkOwnership()
     seen_chunk_keys: dict = {}
     document_scoped_names = _document_scoped_type_names()
     # Ids of every document-scoped node seen so far, accumulated across roots so
     # an edge can be classified even when its endpoints surfaced in different
-    # expansions. Node types do not change between roots.
+    # walks. Node types do not change between roots.
     document_scoped_ids: set = set()
 
     for root in data_points:
         sub_nodes, sub_edges = await get_graph_from_model(
-            root, added_nodes={}, added_edges={}, visited_properties={}
+            _scoped_root(root), added_nodes={}, added_edges={}, visited_properties={}
         )
         owner_keys = []
         for sub_node in sub_nodes:
-            if type(sub_node).__name__ == "DocumentChunk":
+            if _is_chunk(sub_node):
                 key = make_chunk_source_ref_key(dataset_id, data_id, sub_node.id)
                 owner_keys.append(key)
                 if key not in seen_chunk_keys:
@@ -128,6 +192,14 @@ async def collect_chunk_ownership(
                 continue
             owners = ownership.edge_owners.setdefault(_edge_key(sub_edge), [])
             for key in owner_keys:
+                if key not in owners:
+                    owners.append(key)
+        # The relationships this chunk's extraction yielded — including ones
+        # the graph already held, which never enter the model at all.
+        for chunk in _chunks_of(root):
+            key = make_chunk_source_ref_key(dataset_id, data_id, chunk.id)
+            for identity in getattr(chunk, "_produced_edge_identities", []):
+                owners = ownership.edge_owners.setdefault(tuple(identity), [])
                 if key not in owners:
                     owners.append(key)
 
