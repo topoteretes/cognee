@@ -71,6 +71,17 @@ on:
         required: false
         type: boolean
         default: false
+  # TEMPORARY (RES-28 testing) — REMOVE BEFORE MERGE.
+  # Lets the pilot be exercised from PR #4878 itself, without waiting for the
+  # default-branch registration that workflow_dispatch needs. A pull_request
+  # event carries no inputs, so the "Resolve run mode" step below pins the
+  # target to the weak-file candidate and FORCES a dry run — a PR-triggered
+  # run can never push a branch or open a PR. That hard gate is the lesson of
+  # #4668, where exactly this trigger, added for exactly this reason, pushed a
+  # bot PR against dev from unmerged code.
+  pull_request:
+    paths:
+      - ".github/workflows/docstring_pilot.yml"
 
 permissions:
   contents: write
@@ -80,12 +91,15 @@ permissions:
 # would leave the draft PR half-refreshed. Keyed on the target file so two
 # dispatches on different pilot files do not block each other.
 concurrency:
-  group: docstring-pilot-${{ inputs.path }}
+  group: docstring-pilot-${{ github.event_name }}-${{ inputs.path || github.ref }}
   cancel-in-progress: false
 
 jobs:
   docstring-pilot:
     name: Draft docstring improvements for one pilot file
+    # Fork PRs never run this: they have no secrets, and an agent workflow
+    # driven by untrusted YAML is not a check we owe forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-22.04
     timeout-minutes: 25
 
@@ -165,6 +179,22 @@ jobs:
           fi
           echo "Shared rules match ($(wc -l < "${author_shared}") lines)."
 
+      # inputs.* is empty on pull_request events, and `!inputs.dry_run` would
+      # evaluate TRUE there — every downstream step therefore reads the mode
+      # from this step, never from inputs directly. PR events are pinned to
+      # the weak-file candidate and always dry.
+      - name: Resolve run mode and target
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+            echo "path=cognee/api/v1/search/search.py" >> "$GITHUB_OUTPUT"
+            echo "Pull request event — forced dry run on cognee/api/v1/search/search.py."
+          else
+            echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+            echo "path=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
+          fi
+
       # A rejected path must produce zero pull requests, and the reason has to be
       # readable in the run summary — a bad `path` is a human typo, not a bug.
       - name: Check the path is one of the ten selected files
@@ -175,7 +205,7 @@ jobs:
             --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
             --repo-root .
         env:
-          TARGET_PATH: ${{ inputs.path }}
+          TARGET_PATH: ${{ steps.mode.outputs.path }}
 
       - name: Record the tree being edited
         id: base
@@ -315,7 +345,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show the diff without pushing
-        if: ${{ steps.diff.outputs.changed == 'true' && inputs.dry_run }}
+        if: ${{ steps.diff.outputs.changed == 'true' && steps.mode.outputs.dry_run == 'true' }}
         run: |
           {
             echo
@@ -328,7 +358,7 @@ jobs:
 
       - name: Commit and push the docstring branch
         id: commit
-        if: ${{ steps.diff.outputs.changed == 'true' && !inputs.dry_run }}
+        if: ${{ steps.diff.outputs.changed == 'true' && steps.mode.outputs.dry_run == 'false' }}
         env:
           PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           BRANCH_NAME: ${{ steps.base.outputs.branch }}
