@@ -1,8 +1,6 @@
 """Add composite index on pipeline_runs for the /status latest-run lookup
 
-Revision ID: ae2b0f7722e3 (re-keyed from d1e2f3a4b5c6 on 2026-09-01: that id was
-already taken by an unrelated migration in the cognee cloud chain, which made the
-cloud's mirror check believe this one was mirrored)
+Revision ID: d1e2f3a4b5c6
 Revises: b3d5f7a9c1e2
 Create Date: 2026-08-17
 
@@ -20,7 +18,7 @@ from typing import Sequence, Union
 from alembic import op
 from sqlalchemy.engine.reflection import Inspector
 
-revision: str = "ae2b0f7722e3"
+revision: str = "d1e2f3a4b5c6"
 down_revision: Union[str, None] = "b3d5f7a9c1e2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
