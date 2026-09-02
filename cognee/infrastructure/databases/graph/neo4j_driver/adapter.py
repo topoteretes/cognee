@@ -2298,18 +2298,28 @@ class Neo4jAdapter(GraphDBInterface):
         num_edges = edge_count[0]["count"] if edge_count else 0
 
         graph_name = "myGraph"
-        await self.drop_graph(graph_name)
-        await self.project_entire_graph(graph_name)
+        # The GDS projection is needed only by the connected-component and optional
+        # metrics. Projecting an LLM-extracted graph can fail outright — thousands
+        # of distinct relationship types, some with non-identifier characters,
+        # break the interpolated projection query — so the count-only path must
+        # not pay for (or fail on) it (#4832); component fields are None there.
+        if include_optional:
+            await self.drop_graph(graph_name)
+            await self.project_entire_graph(graph_name)
 
         mandatory_metrics = {
             "num_nodes": num_nodes,
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
             "edge_density": await get_edge_density(self),
-            "num_connected_components": await get_num_connected_components(self, graph_name),
+            "num_connected_components": await get_num_connected_components(self, graph_name)
+            if include_optional
+            else None,
             "sizes_of_connected_components": await get_size_of_connected_components(
                 self, graph_name
-            ),
+            )
+            if include_optional
+            else None,
         }
 
         if include_optional:
