@@ -44,6 +44,8 @@ async def extract_summary_with_provenance(
     single-value contract for every other caller.
     """
     system_prompt = read_query_prompt(SUMMARY_PROMPT_FILE) or ""
+    # One ContextVar read (falling back to the lru_cached global config), so
+    # every extract_summary caller can pay it, capture on or off.
     model_name = get_llm_context_config().llm_model
 
     llm_output = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)

@@ -94,7 +94,7 @@ def _remove_duplicate_extracted_nodes_by_id(
             eval_capture.bump("extraction.dropped_duplicate_nodes", len(dropped_node_ids))
 
 
-def _capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -> None:
+def capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -> None:
     """Snapshot every raw per-chunk graph for eval capture (SDK-529).
 
     Runs right after extraction and BEFORE ``_remove_duplicate_extracted_nodes_by_id``
@@ -335,7 +335,7 @@ async def extract_graph_from_data(
                 ]
             )
     # Eval capture (SDK-529): snapshot the raw graphs before anything mutates them.
-    _capture_chunk_graphs(data_chunks, chunk_graphs)
+    capture_chunk_graphs(data_chunks, chunk_graphs)
 
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
     if callable(cache_entity_embeddings):

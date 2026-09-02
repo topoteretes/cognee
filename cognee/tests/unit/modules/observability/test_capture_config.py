@@ -52,6 +52,7 @@ def test_defaults_and_derived_dir(clean_capture_env, monkeypatch, tmp_path):
     assert config.cognee_capture_flush_interval_s == 2.0
     assert config.cognee_capture_sample_rate == 1.0
     assert config.cognee_capture_sink_timeout_s == 30.0
+    assert config.cognee_capture_drain_timeout_s == 5.0
     assert config.cognee_capture_dir == os.path.join(str(tmp_path), "capture")
     assert config.to_dict() == {
         "cognee_capture_enabled": False,
@@ -61,6 +62,7 @@ def test_defaults_and_derived_dir(clean_capture_env, monkeypatch, tmp_path):
         "cognee_capture_flush_interval_s": 2.0,
         "cognee_capture_sample_rate": 1.0,
         "cognee_capture_sink_timeout_s": 30.0,
+        "cognee_capture_drain_timeout_s": 5.0,
     }
 
 
@@ -72,6 +74,7 @@ def test_env_vars_populate_fields(clean_capture_env, monkeypatch):
     monkeypatch.setenv("COGNEE_CAPTURE_FLUSH_INTERVAL_S", "0.5")
     monkeypatch.setenv("COGNEE_CAPTURE_SAMPLE_RATE", "0.25")
     monkeypatch.setenv("COGNEE_CAPTURE_SINK_TIMEOUT_S", "7.5")
+    monkeypatch.setenv("COGNEE_CAPTURE_DRAIN_TIMEOUT_S", "1.5")
     get_capture_config.cache_clear()
 
     config = get_capture_config()
@@ -83,6 +86,7 @@ def test_env_vars_populate_fields(clean_capture_env, monkeypatch):
     assert config.cognee_capture_flush_interval_s == 0.5
     assert config.cognee_capture_sample_rate == 0.25
     assert config.cognee_capture_sink_timeout_s == 7.5
+    assert config.cognee_capture_drain_timeout_s == 1.5
     assert get_capture_config() is config  # cached
 
 
@@ -99,6 +103,11 @@ def test_sample_rate_out_of_range_raises(clean_capture_env, monkeypatch):
 def test_sink_timeout_must_be_positive(clean_capture_env):
     with pytest.raises(ValueError, match=r"SINK_TIMEOUT_S must be positive, got 0\.0"):
         CaptureConfig(cognee_capture_sink_timeout_s=0.0)
+
+
+def test_drain_timeout_must_be_positive(clean_capture_env):
+    with pytest.raises(ValueError, match=r"DRAIN_TIMEOUT_S must be positive, got 0\.0"):
+        CaptureConfig(cognee_capture_drain_timeout_s=0.0)
 
 
 @pytest.mark.parametrize(

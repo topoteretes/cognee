@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(level=ERROR)
 
+# Distance assigned to a graph element the vector search did not score, and the
+# default for every ``triplet_distance_penalty`` parameter. Shared so the
+# retrievers and the capture payload cannot drift apart.
+DEFAULT_TRIPLET_DISTANCE_PENALTY = 6.5
+
 # Eval capture (SDK-529): cap on the candidate pool carried by one
 # ``retrieval.candidates`` event. Batch mode searches every collection with no
 # limit, so without a cap a single event could carry thousands of entries.
@@ -167,7 +172,9 @@ def _emit_retrieval_candidates(
 
     try:
         default_penalty = (
-            6.5 if triplet_distance_penalty is None else float(triplet_distance_penalty)
+            DEFAULT_TRIPLET_DISTANCE_PENALTY
+            if triplet_distance_penalty is None
+            else float(triplet_distance_penalty)
         )
         # Single mode carries one flat edge list; batch mode one list per query.
         per_query: list[tuple[int, Sequence[Edge]]] = (
@@ -216,7 +223,7 @@ async def get_memory_fragment(
     node_name_filter_operator: str = "OR",
     relevant_ids_to_filter: Optional[List[str]] = None,
     memory_fragment_filter: Optional[List[dict]] = None,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
     feedback_influence: float = get_base_config().default_feedback_influence,
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
@@ -395,7 +402,7 @@ async def brute_force_triplet_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
     feedback_influence: float = get_base_config().default_feedback_influence,
     unified_engine: Optional[UnifiedStoreEngine] = None,
     neighborhood_depth: Optional[int] = None,

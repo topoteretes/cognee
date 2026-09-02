@@ -34,6 +34,11 @@ class CaptureConfig(BaseSettings):
     # Upper bound on one sink write; a wedged sink (S3 under partition) must not
     # pin the flusher and every later drain().
     cognee_capture_sink_timeout_s: float = 30.0
+    # Default budget for drain() when the caller passes no timeout — the wait the
+    # pipeline wiring adds at every run completion while capture is on. Lower it
+    # when that tail latency matters more than losing a slow sink's last batch
+    # to the atexit hook.
+    cognee_capture_drain_timeout_s: float = 5.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -48,6 +53,11 @@ class CaptureConfig(BaseSettings):
             raise ValueError(
                 "COGNEE_CAPTURE_SINK_TIMEOUT_S must be positive, "
                 f"got {self.cognee_capture_sink_timeout_s}"
+            )
+        if self.cognee_capture_drain_timeout_s <= 0:
+            raise ValueError(
+                "COGNEE_CAPTURE_DRAIN_TIMEOUT_S must be positive, "
+                f"got {self.cognee_capture_drain_timeout_s}"
             )
         # A batch size of 0 would make every flush pop nothing — and a flusher
         # that pops nothing without suspending monopolises its event loop.
@@ -84,6 +94,7 @@ class CaptureConfig(BaseSettings):
             "cognee_capture_flush_interval_s": self.cognee_capture_flush_interval_s,
             "cognee_capture_sample_rate": self.cognee_capture_sample_rate,
             "cognee_capture_sink_timeout_s": self.cognee_capture_sink_timeout_s,
+            "cognee_capture_drain_timeout_s": self.cognee_capture_drain_timeout_s,
         }
 
 

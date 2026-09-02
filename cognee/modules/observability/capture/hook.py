@@ -119,6 +119,7 @@ BATCH_SIZE: int = _FIELDS["cognee_capture_batch_size"].default
 FLUSH_INTERVAL_S: float = _FIELDS["cognee_capture_flush_interval_s"].default
 SAMPLE_RATE: float = _FIELDS["cognee_capture_sample_rate"].default
 SINK_TIMEOUT_S: float = _FIELDS["cognee_capture_sink_timeout_s"].default
+DRAIN_TIMEOUT_S: float = _FIELDS["cognee_capture_drain_timeout_s"].default
 # Floor for the interval tick: a non-positive interval would spin the flusher.
 _MIN_FLUSH_INTERVAL_S: float = 0.01
 # How long shutdown() / _reset_for_tests() wait for a cancelled flusher to
@@ -194,6 +195,7 @@ def _configure(
     flush_interval_s: float | None = None,
     sample_rate: float | None = None,
     sink_timeout_s: float | None = None,
+    drain_timeout_s: float | None = None,
 ) -> None:
     """Set the cached knobs (from the config once per process, or from tests).
 
@@ -202,7 +204,7 @@ def _configure(
     nothing without ever suspending would monopolise its event loop; a
     non-positive interval would spin the flusher.
     """
-    global QUEUE_SIZE, BATCH_SIZE, FLUSH_INTERVAL_S, SAMPLE_RATE, SINK_TIMEOUT_S
+    global QUEUE_SIZE, BATCH_SIZE, FLUSH_INTERVAL_S, SAMPLE_RATE, SINK_TIMEOUT_S, DRAIN_TIMEOUT_S
     if queue_size is not None:
         QUEUE_SIZE = max(1, queue_size)
     if batch_size is not None:
@@ -213,6 +215,8 @@ def _configure(
         SAMPLE_RATE = sample_rate
     if sink_timeout_s is not None:
         SINK_TIMEOUT_S = sink_timeout_s
+    if drain_timeout_s is not None:
+        DRAIN_TIMEOUT_S = drain_timeout_s
 
 
 def _load_knobs(config: CaptureConfig) -> None:
@@ -222,6 +226,7 @@ def _load_knobs(config: CaptureConfig) -> None:
         flush_interval_s=config.cognee_capture_flush_interval_s,
         sample_rate=config.cognee_capture_sample_rate,
         sink_timeout_s=config.cognee_capture_sink_timeout_s,
+        drain_timeout_s=config.cognee_capture_drain_timeout_s,
     )
 
 
@@ -321,15 +326,22 @@ def register_capture_sink(sink: CaptureSink | None) -> None:
     tuning knobs (``COGNEE_CAPTURE_QUEUE_SIZE`` etc.) still come from the
     environment.
     Registering a sink re-arms flushing on loops ``shutdown()`` stopped.
+
+    Runs under ``_init_lock``: a registration racing ``_ensure_initialized()``
+    (a startup thread calling ``is_active()`` while another registers) must not
+    interleave with the env auto-registration, or the explicit sink could be
+    overwritten by the ``StorageSink`` — last-wins only holds when the two
+    writers are serialized.
     """
     global _sink, _initialized
-    if not _initialized:
-        _initialized = True
-        try:
-            _load_knobs(get_capture_config())
-        except Exception as exc:
-            logger.debug("capture config unavailable, keeping default knobs (%s)", exc)
-    _sink = sink
+    with _init_lock:
+        if not _initialized:
+            _initialized = True
+            try:
+                _load_knobs(get_capture_config())
+            except Exception as exc:
+                logger.debug("capture config unavailable, keeping default knobs (%s)", exc)
+        _sink = sink
     if sink is not None:
         _forget_stopped_flushers()
         _register_atexit()
@@ -863,8 +875,12 @@ async def _drain_until(deadline: float) -> None:
         await asyncio.sleep(0.01)
 
 
-async def drain(timeout: float = 5.0) -> None:
+async def drain(timeout: float | None = None) -> None:
     """Flush the events buffered so far, then wait for in-flight batches.
+
+    ``timeout=None`` (the default) means the configured budget:
+    ``COGNEE_CAPTURE_DRAIN_TIMEOUT_S``, 5 s unless overridden — this is the
+    wait the pipeline wiring adds at every run completion while capture is on.
 
     Never requires a flusher to exist, never raises (a cancellation of the
     caller propagates, as it must), and returns within about ``timeout`` — the
@@ -875,6 +891,8 @@ async def drain(timeout: float = 5.0) -> None:
     that does not let that cancel land is abandoned after the grace rather than
     waited on forever.
     """
+    if timeout is None:
+        timeout = DRAIN_TIMEOUT_S
     try:
         await _drain_until(time.monotonic() + timeout)
     except Exception as exc:
@@ -980,5 +998,6 @@ def _reset_for_tests() -> None:
         flush_interval_s=_FIELDS["cognee_capture_flush_interval_s"].default,
         sample_rate=_FIELDS["cognee_capture_sample_rate"].default,
         sink_timeout_s=_FIELDS["cognee_capture_sink_timeout_s"].default,
+        drain_timeout_s=_FIELDS["cognee_capture_drain_timeout_s"].default,
     )
     get_capture_config.cache_clear()
