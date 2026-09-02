@@ -3,6 +3,7 @@
 import os
 import json
 import asyncio
+from contextlib import nullcontext
 import threading
 import tempfile
 from uuid import UUID, uuid5, NAMESPACE_OID
@@ -1226,12 +1227,21 @@ class LadybugAdapter(GraphDBInterface):
                     extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
                 total = len(node_params)
-                for start in range(0, total, _WRITE_CHUNK_SIZE):
-                    chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
-                    await self.query(merge_query, {"nodes": chunk, **extra_params})
-                    if total > _WRITE_CHUNK_SIZE:
-                        logger.info("Merged nodes %d/%d", start + len(chunk), total)
-                await self.checkpoint()
+                # A folded write appends the row's owner key in one statement,
+                # but attach/remove are a read-then-write pair under
+                # _source_ref_change_lock. A fold landing between that read
+                # and write is overwritten (lost update) — seen when two
+                # documents of one cognify run wrote a shared entity
+                # concurrently. Folds take the same lock; query() takes the
+                # engine lock inside it, the same order attach/remove use.
+                folds_provenance = per_row_refs or source_ref_key is not None
+                async with self._source_ref_change_lock if folds_provenance else nullcontext():
+                    for start in range(0, total, _WRITE_CHUNK_SIZE):
+                        chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                        await self.query(merge_query, {"nodes": chunk, **extra_params})
+                        if total > _WRITE_CHUNK_SIZE:
+                            logger.info("Merged nodes %d/%d", start + len(chunk), total)
+                    await self.checkpoint()
                 logger.debug(f"Processed {total} nodes in batch")
 
         except Exception as e:
@@ -1391,7 +1401,9 @@ class LadybugAdapter(GraphDBInterface):
 
         The lock serializes this two-query sequence within one adapter instance
         so concurrent explicit attach/remove calls do not overwrite each other's
-        provenance updates.
+        provenance updates. Folded writes (``add_nodes``/``add_edges`` with a
+        source ref) take the same lock: a fold landing between this read and
+        write would otherwise be lost.
         """
         if not artifacts:
             return
@@ -2094,12 +2106,16 @@ class LadybugAdapter(GraphDBInterface):
                 extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
             total = len(edge_params)
-            for start in range(0, total, _WRITE_CHUNK_SIZE):
-                chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
-                await self.query(query, {"edges": chunk, **extra_params})
-                if total > _WRITE_CHUNK_SIZE:
-                    logger.info("Merged edges %d/%d", start + len(chunk), total)
-            await self.checkpoint()
+            # Same lost-update guard as add_nodes: folded edge writes and the
+            # attach/remove read-then-write pair share one lock.
+            folds_provenance = per_row_refs or source_ref_key is not None
+            async with self._source_ref_change_lock if folds_provenance else nullcontext():
+                for start in range(0, total, _WRITE_CHUNK_SIZE):
+                    chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
+                    await self.query(query, {"edges": chunk, **extra_params})
+                    if total > _WRITE_CHUNK_SIZE:
+                        logger.info("Merged edges %d/%d", start + len(chunk), total)
+                await self.checkpoint()
 
         except Exception as e:
             logger.error(f"Failed to add edges in batch: {e}")
