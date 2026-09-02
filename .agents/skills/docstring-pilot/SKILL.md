@@ -56,11 +56,13 @@ Work through these in order.
 - [ ] Read enough surrounding code to establish system context: the callers (grep the
       symbol across `cognee/`), the interfaces or base classes involved, the concrete
       implementations of anything abstract, and the tests that exercise it.
-- [ ] Check the repo's own guidance for what this file is *for*: `CLAUDE.md`,
-      `AGENTS.md`, and `docs/` describe several of these files by name. Alignment with
-      that guidance is evidence; contradiction with it is a signal you have the purpose
-      wrong, not a licence to correct the guidance (editing `CLAUDE.md` or `AGENTS.md`
-      is out of scope for this pilot).
+- [ ] Check the repo's own guidance for what this file is *for*: `CLAUDE.md` and
+      `AGENTS.md` describe several of these files by name. Alignment with that guidance
+      is evidence; contradiction with it is a signal you have the purpose wrong, not a
+      licence to correct the guidance (editing `CLAUDE.md` or `AGENTS.md` is out of
+      scope for this pilot). Treat a guidance claim you cannot find in the code as
+      unverified — `CLAUDE.md` currently points at `docs/recall-vs-search.md`, which
+      does not exist.
 - [ ] Add or improve the **module** docstring when the file's role is not obvious from
       its path. Say what the module is responsible for and where it sits in the flow.
 - [ ] Add or improve **class** docstrings for public classes: what the type represents,
@@ -148,10 +150,16 @@ Rules for the ledger:
 
 - **Every favorable claim you introduced or strengthened gets a row.** Neutral factual
   description does not need one; "this is good in way X" always does.
-- **Evidence must be something a reviewer can open**: a symbol, file, or test in this
-  repo; a statement in `CLAUDE.md`, `AGENTS.md`, or `docs/`; or a documented product
-  behavior. "It is obvious from the design" is not evidence. Neither is another
-  docstring — docstrings are the thing under review.
+- **Evidence must be something a reviewer can open in this repository**: a symbol, a
+  file, a test, or a statement in `CLAUDE.md` or `AGENTS.md`. "It is obvious from the
+  design" is not evidence. Neither is another docstring — docstrings are the thing under
+  review.
+- **The published documentation is not available to you.** `docs/` in this repo covers
+  only Docker, Colima, Ollama, and Coolify setup; the product documentation lives in
+  `topoteretes/cognee-docs` and is published at docs.cognee.ai, neither of which this run
+  can read. So a claim whose only support is "the docs say so" cannot be verified here —
+  drop it rather than assert it, and if it matters, note it in the critic section as
+  something a reviewer should confirm against the docs.
 - **Weak evidence means rewrite or drop, not hedge.** If the only support is one code
   path that looks like it would generalize, state that code path instead of the
   generalization. Do not write "generally" or "typically" to make an unproven claim
