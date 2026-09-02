@@ -90,6 +90,14 @@ class GenericAPIAdapter(LLMInterface):
     Type[BaseModel]) -> BaseModel
     """
 
+    # True for this class and for OpenAIAdapter, which reach the shared
+    # streaming path through this class's acreate_str_output. NOT inherited in
+    # practice by Anthropic, Gemini, Mistral or managed-identity Azure: each
+    # overrides acreate_structured_output without a plain-text branch, so each
+    # declares False for itself. Adding streaming to one means routing its
+    # plain-text call through stream_text_completion and flipping its flag.
+    supports_answer_streaming = True
+
     MAX_RETRIES = 2
     default_instructor_mode = get_instructor_mode("generic")
 

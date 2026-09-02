@@ -301,9 +301,11 @@ async def answer_scope(
     """Mark this task as the one completion a listening client may watch.
 
     A scope, not a verb: entering it usually promotes nothing. It yields without
-    promoting when no sink was requested, when the feature switch is off, or when
-    an earlier lane already closed the sink — so the caller cannot tell from the
-    name whether tokens will flow, and must not care.
+    promoting when no sink was requested, when the feature switch is off, when the
+    configured adapter cannot stream at all, when the caller declares this call
+    cannot (a structured ``response_model``), or when an earlier lane already
+    closed the sink — so the caller cannot tell from the name whether tokens will
+    flow, and must not care.
 
     Do not call this directly from a request or session path. The one production
     caller is :func:`cognee.modules.retrieval.utils.completion.generate_answer`;
@@ -311,7 +313,7 @@ async def answer_scope(
     stream, and keeping the decision there is what stops unrelated layers from
     having to import this module.
 
-    This is also where the feature switch is read — in one place, so a request cannot promote a sink
+    Every precondition is checked here, in one place, so a request cannot promote a sink
     that the adapter below will then refuse to stream into.
 
     On the way out it ends the stream **when this lane actually streamed**:
@@ -321,9 +323,17 @@ async def answer_scope(
     module docstring).
     """
     from cognee.infrastructure.llm.config import get_llm_context_config
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
     sink = requested_token_sink.get()
     if sink is None or not get_llm_context_config().llm_answer_streaming:
+        yield
+        return
+    if not LLMGateway.supports_answer_streaming():
+        # Bedrock, Ollama, llama.cpp, MCP-sampling and the BAML framework answer
+        # without ever reaching the streaming path. Promoting for them announces
+        # a stream that produces no tokens — a `stage` event and then silence —
+        # so the request stays exactly as it is with the flag off.
         yield
         return
     if sink.is_closed:
