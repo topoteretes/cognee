@@ -57,6 +57,11 @@ def get_parsed_path(file_path: str) -> str:
         return os.path.normpath(file_path)
 
 
+# Bytes read from a source stream per write iteration — the peak RAM one
+# store adds, independent of file size.
+WRITE_CHUNK_SIZE = 4 * 1024 * 1024
+
+
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
@@ -120,18 +125,46 @@ class LocalFileStorage(Storage):
         await self.ensure_directory_exists(file_dir_path)
 
         if overwrite or not full_file_path.exists():
-            if isinstance(data, str):
-                with open(full_file_path, mode="w", encoding="utf-8", newline="\n") as file:
-                    file.write(data)
-            else:
-                with open(full_file_path, mode="wb") as file:
-                    if hasattr(data, "read"):
-                        data.seek(0)
-                        file.write(data.read())
-                    else:
+            # Write-then-rename: an ``overwrite=True`` write to a key another
+            # reader may hold open (content-addressed keys are shared by
+            # design) must never be observable half-written, which an in-place
+            # truncating open is. ``os.replace`` swaps atomically on the same
+            # filesystem.
+            temp_file_path = full_file_path.with_name(f".{full_file_path.name}.{os.getpid()}.tmp")
+            try:
+                if isinstance(data, str):
+                    with open(temp_file_path, mode="w", encoding="utf-8", newline="\n") as file:
                         file.write(data)
-
-                file.close()
+                else:
+                    with open(temp_file_path, mode="wb") as file:
+                        if hasattr(data, "read"):
+                            # Chunked copy — peak memory is one chunk, not the
+                            # file (parity with S3FileStorage.store).
+                            data.seek(0)
+                            while chunk := data.read(WRITE_CHUNK_SIZE):
+                                file.write(chunk)
+                        else:
+                            file.write(data)
+                try:
+                    os.replace(temp_file_path, full_file_path)
+                except PermissionError:
+                    # Windows: replacing a file another handle holds open needs
+                    # DELETE sharing on that handle, which ordinary open()s do
+                    # not grant. Fall back to the pre-atomic in-place write —
+                    # non-atomic for that reader, but a succeeding store beats
+                    # failing it (and matches the old behavior there). POSIX
+                    # never takes this path.
+                    with (
+                        open(temp_file_path, mode="rb") as written,
+                        open(full_file_path, mode="wb") as target,
+                    ):
+                        while chunk := written.read(WRITE_CHUNK_SIZE):
+                            target.write(chunk)
+            finally:
+                try:
+                    os.unlink(temp_file_path)
+                except OSError:
+                    pass
 
         return Path(full_file_path).as_uri()
 

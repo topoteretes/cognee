@@ -31,7 +31,12 @@ METRICS = [
     "add_time_s",
     "cognify_time_s",
     "total_ingest_time_s",
+    # Python + cloud runs time each search type separately; the Rust SDK bench
+    # still reports a single `search_time`. build_report keeps whichever the
+    # runs actually produced, so all three shapes report correctly.
     "search_time",
+    "search_time_graph_completion",
+    "search_time_hybrid_completion",
     "prune_time_s",
     "db_setup_time_s",
     # Local + cloud --create-tenant modes (populated-dataset deletion).
@@ -47,6 +52,8 @@ LABELS = {
     "cognify_time_s": "cognee.cognify()",
     "total_ingest_time_s": "Total ingest",
     "search_time": "Search",
+    "search_time_graph_completion": "Search GRAPH_COMPLETION",
+    "search_time_hybrid_completion": "Search HYBRID_COMPLETION",
     "prune_time_s": "Prune",
     "db_setup_time_s": "DB setup",
     "tenant_create_time_s": "Tenant create (cloud)",
@@ -135,13 +142,13 @@ def print_report(stats: dict, num_runs: int, config: dict, runs: list[dict]):
     print(f"  Success rate     : {succeeded}/{num_runs} ({failed} failed)")
     print()
 
-    header = f"  {'Metric':<22} {'min':>8} {'p50':>8} {'p75':>8} {'p90':>8} {'p95':>8} {'p99':>8} {'max':>8} {'mean':>8}"
+    header = f"  {'Metric':<26} {'min':>8} {'p50':>8} {'p75':>8} {'p90':>8} {'p95':>8} {'p99':>8} {'max':>8} {'mean':>8}"
     print(header)
     print("  " + "-" * (len(header) - 2))
 
     for metric, entry in stats.items():
         label = LABELS.get(metric, metric)
-        parts = [f"  {label:<22}"]
+        parts = [f"  {label:<26}"]
         for key in ["min", "p50", "p75", "p90", "p95", "p99", "max", "mean"]:
             parts.append(f"{entry[key]:>7.2f}s")
         print(" ".join(parts))
@@ -360,6 +367,12 @@ def main():
         "--mock-memories", type=Path, default=None, help="Forward to bench_cognee.py"
     )
     parser.add_argument(
+        "--mock-document-embeddings",
+        type=Path,
+        default=None,
+        help="Forward to bench_cognee.py: replay captured document embeddings",
+    )
+    parser.add_argument(
         "--tenant-url",
         default=None,
         help="Cognee Cloud tenant URL; benchmark runs remotely via cognee.serve()",
@@ -406,6 +419,8 @@ def main():
         extra_args += ["--mock-llm"]
     if args.mock_memories:
         extra_args += ["--mock-memories", str(args.mock_memories)]
+    if args.mock_document_embeddings:
+        extra_args += ["--mock-document-embeddings", str(args.mock_document_embeddings)]
     if args.tenant_url:
         extra_args += ["--tenant-url", args.tenant_url]
     if args.tenant_api_key:

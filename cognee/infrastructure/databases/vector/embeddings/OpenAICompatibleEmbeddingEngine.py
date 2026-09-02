@@ -20,11 +20,11 @@ from typing import List, Optional
 
 import httpx
 import numpy as np
+import openai
 from openai import AsyncOpenAI
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
 )
@@ -32,6 +32,10 @@ from tenacity import (
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
+from cognee.infrastructure.databases.vector.embeddings.retry_config import (
+    embedding_retry_condition,
+)
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
@@ -39,6 +43,7 @@ from cognee.infrastructure.databases.vector.embeddings.utils import (
 )
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
     EmbeddingException,
 )
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
@@ -84,6 +89,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         endpoint: Optional[str] = "http://localhost:8080",
         api_key: Optional[str] = "no-key-required",
         batch_size: int = 36,
+        input_type: Optional[str] = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -91,6 +97,11 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         self.endpoint = endpoint or "http://localhost:8080"
         self.api_key = api_key or "no-key-required"
         self.batch_size = batch_size
+        # Some OpenAI-compatible servers (e.g. self-hosted NVIDIA NIM
+        # containers) require an "input_type" field ("query" / "passage")
+        # that isn't part of the OpenAI embeddings spec. Sent via extra_body
+        # so it has no effect on servers that ignore unknown fields.
+        self.input_type = input_type
         self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
@@ -108,8 +119,14 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type(
-            (EmbeddingContextWindowTooSmallError, ValueError, asyncio.CancelledError)
+        # Budget exhaustion is terminal too: this engine talks to any
+        # OpenAI-compatible base URL, a LiteLLM proxy included. It is classified
+        # by predicate rather than by class -- see embeddings/retry_config.py.
+        retry=embedding_retry_condition(
+            EmbeddingContextWindowTooSmallError,
+            EmbeddingCredentialsError,
+            ValueError,
+            asyncio.CancelledError,
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
@@ -139,18 +156,27 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
             return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
         try:
+            create_kwargs = {
+                "model": self.model,
+                "input": sanitized_text,
+                "encoding_format": "float",
+            }
+            if self.input_type:
+                create_kwargs["extra_body"] = {"input_type": self.input_type}
+
             async with embedding_rate_limiter_context_manager():
                 response = await asyncio.wait_for(
-                    self._client.embeddings.create(
-                        model=self.model,
-                        input=sanitized_text,
-                        encoding_format="float",
-                    ),
+                    self._client.embeddings.create(**create_kwargs),
                     timeout=300.0,
                 )
             embeddings = [item.embedding for item in response.data]
 
         except Exception as error:
+            # A proxy spend cap is terminal, and none of the branches below can
+            # read it correctly: it is neither a context-window problem nor a
+            # connectivity one. Raise the same actionable 402 the LLM path does.
+            raise_if_budget_exhausted(error)
+
             error_str = str(error).lower()
 
             # Handle context window exceeded by splitting input
@@ -203,6 +229,31 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
                 raise EmbeddingException(
                     "Cannot connect to embedding endpoint. Check EMBEDDING_ENDPOINT."
                 ) from error
+
+            if isinstance(error, (openai.AuthenticationError, openai.PermissionDeniedError)):
+                # Terminal credential failures are re-raised as a cognee type,
+                # not as the openai class: the class is what the exclusion list
+                # cannot use (the generic wrap below would hide it from the
+                # predicate anyway), and staying inside CogneeApiError is what
+                # keeps the API's 422 instead of falling through a router's
+                # ``except Exception`` into a 500. Diverges from
+                # LiteLLMEmbeddingEngine, which re-raises litellm's class bare so
+                # the CLI's remediation can match its message; that message shape
+                # is litellm's, not this SDK's, so the rationale does not carry
+                # over. The provider's text is preserved in the message instead.
+                #
+                # NotFoundError is deliberately left retryable here, unlike in
+                # LiteLLMEmbeddingEngine: an ingress or reverse proxy in front of
+                # a self-hosted server can 404 transiently during a rolling
+                # deploy, which is realistic for exactly this engine. The cost is
+                # that a permanent 404 (a typo'd model name, a wrong base path)
+                # still burns the full ladder.
+                logger.error(
+                    "Embedding endpoint rejected the request: %s. EMBEDDING_ENDPOINT='%s'.",
+                    str(error),
+                    self.endpoint,
+                )
+                raise EmbeddingCredentialsError(str(error)) from error
 
             logger.error(
                 "Error embedding text: %s. EMBEDDING_ENDPOINT='%s'.",

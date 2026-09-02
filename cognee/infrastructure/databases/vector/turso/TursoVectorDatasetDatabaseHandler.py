@@ -3,7 +3,7 @@ from uuid import UUID
 from typing import Optional
 
 from cognee.infrastructure.databases.vector.create_vector_engine import (
-    aevict_vector_engines_for_database,
+    vector_engine_cache,
 )
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
@@ -56,11 +56,11 @@ class TursoVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         # cache a fresh engine whose connection then leaks, and DROP TABLE never
         # removes the file. Evict every cached engine for this database, wait
         # for their in-flight closes to finish (a close deferred behind an idle
-        # holder is not waited on; see aevict_vector_engines_for_database), then
+        # holder is not waited on; see vector_engine_cache.aevict_for_database), then
         # delete the on-disk libSQL file. Turso's embedded store is a single
         # file (unlike LanceDB's directory), so remove the file, not a tree.
         # Mirrors the LanceDB handler.
-        await aevict_vector_engines_for_database(dataset_database.vector_database_name)
+        await vector_engine_cache.aevict_for_database(dataset_database.vector_database_name)
 
         databases_directory_path = os.path.dirname(dataset_database.vector_database_url)
         await get_file_storage(databases_directory_path).remove(

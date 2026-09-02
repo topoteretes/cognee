@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional, Literal
+from typing import Dict, Optional, Literal
 import os
 
 
@@ -8,6 +8,15 @@ class TavilyConfig(BaseModel):
     extract_depth: Literal["basic", "advanced"] = "basic"
     proxies: Optional[Dict[str, str]] = None
     timeout: Optional[int] = Field(default=10, ge=1, le=60)
+
+
+class KeenableConfig(BaseModel):
+    api_key: Optional[str] = os.getenv("KEENABLE_API_KEY")
+    base_url: str = os.getenv("KEENABLE_BASE_URL", "https://api.keenable.ai")
+    live: bool = os.getenv("KEENABLE_LIVE_FETCH", "false").lower() in ("true", "1", "yes")
+    prompt: Optional[str] = Field(default=None, max_length=2000)
+    concurrency: int = Field(default=5, ge=1)
+    timeout: Optional[int] = Field(default=30, ge=1, le=120)
 
 
 class DefaultCrawlerConfig(BaseModel):

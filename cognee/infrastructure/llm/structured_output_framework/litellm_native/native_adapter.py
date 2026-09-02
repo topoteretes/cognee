@@ -21,10 +21,11 @@ to the configured fallback model. This file never imports ``instructor``.
 import asyncio
 import json
 import logging
+import re
 from typing import Any, cast
 
 import litellm
-from litellm.exceptions import ContentPolicyViolationError
+from litellm.exceptions import BadRequestError, ContentPolicyViolationError
 from pydantic import BaseModel, ValidationError
 from tenacity import (
     before_sleep_log,
@@ -41,14 +42,44 @@ from cognee.infrastructure.llm.exceptions import (
 from cognee.infrastructure.llm.retry_config import llm_retry_stop_condition
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.llm.streaming.stream_completion import stream_text_completion
+from cognee.infrastructure.llm.streaming.token_sink import get_active_token_sink
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger()
 observe = get_observe()
 
+# Models on the prompted-JSON path routinely wrap their answer in a markdown
+# fence (```json ... ```). That is not a malformed answer -- the JSON inside is
+# valid -- but model_validate_json() sees a backtick at column 1 and rejects it,
+# and the self-correction retry does not help because a model that fences once
+# fences again. Strip a fence that wraps the entire payload before parsing.
+# Deliberately anchored to the whole string: JSON that merely *contains*
+# backticks in a value is left alone.
+_JSON_FENCE_RE = re.compile(r"\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z", re.DOTALL)
+
+
+def _strip_json_fence(text: str) -> str:
+    """Return ``text`` with a wrapping markdown code fence removed, if present."""
+    match = _JSON_FENCE_RE.match(text)
+    return match.group(1) if match else text
+
+
 # Max self-correction attempts when a json-object provider returns JSON that
 # fails validation. Separate from the tenacity retry (transient HTTP errors).
 _MAX_VALIDATION_RETRIES: int = 3
+
+
+def _attach_raw_response(instance: BaseModel, response) -> BaseModel:
+    """Attach the raw litellm response as ``_raw_response``, like instructor does.
+
+    The LLMGateway usage recorder reads ``result._raw_response.usage`` for the
+    provider-billed token counts (which include hidden reasoning tokens no
+    text-based estimate can see). ``object.__setattr__`` bypasses pydantic's
+    field validation for the non-field attribute.
+    """
+    object.__setattr__(instance, "_raw_response", response)
+    return instance
 
 
 def _supports_native_schema(model_name: str) -> bool:
@@ -108,6 +139,10 @@ class NativeLiteLLMAdapter:
           fallback_model, fallback_api_key, fallback_endpoint, llm_args, name
     """
 
+    # The default framework's answer path, so this is the one that decides
+    # whether an out-of-the-box install can stream at all.
+    supports_answer_streaming = True
+
     def __init__(
         self,
         api_key: str,
@@ -143,7 +178,26 @@ class NativeLiteLLMAdapter:
         api_version: str | None,
         **merged_kwargs: Any,
     ) -> str:
-        """Plain-text completion without any schema (mirrors GenericAPIAdapter)."""
+        """Plain-text completion without any schema (mirrors GenericAPIAdapter).
+
+        This is the default framework's answer path, so it is the one that has to
+        stream for streaming to reach anybody: STRUCTURED_OUTPUT_FRAMEWORK
+        defaults to litellm_native, which routes here regardless of provider.
+        """
+        sink = get_active_token_sink()
+        if sink is not None:
+            return await stream_text_completion(
+                sink=sink,
+                model=model,
+                system_prompt=system_prompt,
+                text_input=text_input,
+                api_key=api_key,
+                endpoint=endpoint,
+                api_version=api_version,
+                adapter_name="litellm_native",
+                **merged_kwargs,
+            )
+
         async with llm_rate_limiter_context_manager():
             response = await litellm.acompletion(
                 model=model,
@@ -156,6 +210,8 @@ class NativeLiteLLMAdapter:
                 api_version=api_version,
                 **merged_kwargs,
             )
+        if not response.choices:
+            raise ValueError("litellm_native returned no choices for a plain-text completion")
         return response.choices[0].message.content or ""
 
     async def _acreate_schema_native(
@@ -185,7 +241,7 @@ class NativeLiteLLMAdapter:
                 **merged_kwargs,
             )
         raw_content = response.choices[0].message.content or "{}"
-        return response_model.model_validate_json(raw_content)
+        return _attach_raw_response(response_model.model_validate_json(raw_content), response)
 
     async def _acreate_json_fallback(
         self,
@@ -237,9 +293,11 @@ class NativeLiteLLMAdapter:
                     **merged_kwargs,
                 )
 
-            raw_content = response.choices[0].message.content or "{}"
+            raw_content = _strip_json_fence(response.choices[0].message.content or "{}")
             try:
-                return response_model.model_validate_json(raw_content)
+                return _attach_raw_response(
+                    response_model.model_validate_json(raw_content), response
+                )
             except (ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
                 logger.warning(
@@ -270,16 +328,32 @@ class NativeLiteLLMAdapter:
     ) -> BaseModel:
         """Route to the schema-native or json-object path based on the model."""
         if _supports_native_schema(model):
-            return await self._acreate_schema_native(
-                text_input,
-                system_prompt,
-                response_model,
-                model=model,
-                api_key=api_key,
-                endpoint=endpoint,
-                api_version=api_version,
-                **merged_kwargs,
-            )
+            try:
+                return await self._acreate_schema_native(
+                    text_input,
+                    system_prompt,
+                    response_model,
+                    model=model,
+                    api_key=api_key,
+                    endpoint=endpoint,
+                    api_version=api_version,
+                    **merged_kwargs,
+                )
+            except BadRequestError as error:
+                # Strict schema-native mode rejects Pydantic models whose JSON
+                # schema it cannot enforce — e.g. a free-form dict field, which
+                # OpenAI 400s with "'additionalProperties' is required to be
+                # supplied and to be false". Those models still work on the
+                # prompted-JSON path, so fall through instead of failing.
+                if "schema" not in str(error).lower():
+                    raise
+                logger.warning(
+                    "litellm_native: %s rejected the schema for %s; retrying via "
+                    "json fallback (%s)",
+                    model,
+                    response_model.__name__,
+                    error,
+                )
         return await self._acreate_json_fallback(
             text_input,
             system_prompt,

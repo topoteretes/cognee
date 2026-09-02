@@ -3,8 +3,16 @@ name: test | docker compose
 on:
   workflow_call:
 
+# Least-privilege token (OSSF Scorecard: Token-Permissions). This workflow only
+# checks out the repo and builds/runs images locally — no GITHUB_TOKEN writes.
+permissions:
+  contents: read
+
 env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
+  # Profiles exercised by the full-stack e2e: the default `cognee` service plus
+  # postgres (persistence) and the MCP server.
+  COMPOSE_PROFILES: 'postgres,mcp'
 
 jobs:
   docker-compose-test:
@@ -12,10 +20,15 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@master
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+      with:
+        enable-cache: true
 
     - name: Build Docker images
       env:
@@ -37,9 +50,41 @@ jobs:
         EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
       run: |
-        printenv | grep -E '^(LLM_|EMBEDDING_)' > .env
+        # Only variables that actually have a value: a bare `LLM_ARGS=` (empty
+        # secret) reaches LLMConfig.llm_args — a dict field — as "" and kills
+        # the container at import time.
+        printenv | grep -E '^(LLM_|EMBEDDING_)[A-Za-z0-9_]*=.+' > .env
         echo "EMBEDDING_DIMENSIONS=300" >> .env
         echo "COGNEE_SKIP_CONNECTION_TEST=true" >> .env
+        # Point the relational store at the postgres service so the e2e
+        # persistence test is genuinely Postgres-backed. docker compose reads
+        # the same .env for ${DB_*} interpolation in docker-compose.yml, which
+        # is how the cognee-mcp service picks up the same database.
+        cat >> .env <<'EOF'
+        DB_PROVIDER=postgres
+        DB_HOST=postgres
+        DB_PORT=5432
+        DB_NAME=cognee_db
+        DB_USERNAME=cognee
+        DB_PASSWORD=cognee
+        EOF
+
+    - name: Start Postgres and wait for it
+      # The app services have no depends_on for postgres, so bring the
+      # database up first to keep them from crash-looping on boot.
+      run: |
+        docker compose -f docker-compose.yml up -d postgres
+        echo "Waiting for postgres to become ready..."
+        for attempt in $(seq 1 30); do
+          if docker compose -f docker-compose.yml exec -T postgres pg_isready -U cognee -d cognee_db >/dev/null 2>&1; then
+            echo "postgres ready after ~$((attempt * 3))s"
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "postgres never became ready"
+        docker compose -f docker-compose.yml logs postgres | tail -60
+        exit 1
 
     - name: Run Docker Compose
       env:
@@ -64,6 +109,40 @@ jobs:
         echo "server did not become healthy in time"
         docker compose -f docker-compose.yml logs cognee | tail -60
         exit 1
+
+    - name: Wait for MCP server health
+      run: |
+        for attempt in $(seq 1 60); do
+          if curl -sf http://localhost:8001/health >/dev/null; then
+            echo "cognee-mcp healthy after ~$((attempt * 3))s"
+            exit 0
+          fi
+          sleep 3
+        done
+        echo "cognee-mcp did not become healthy in time"
+        docker compose -f docker-compose.yml logs cognee-mcp | tail -60
+        exit 1
+
+    - name: Run full-stack e2e suite
+      # Runs before the real-LLM round-trip below so the suite's traceback
+      # scan only covers deterministic, LLM-free paths (startup, ingestion,
+      # MCP, persistence) and cannot flake on model-provider noise.
+      env:
+        COGNEE_E2E_MANAGE_COMPOSE: '1'
+        COGNEE_E2E_COMPOSE_PROFILES: 'postgres,mcp'
+      run: |
+        # The suite is decoupled from the `cognee` package: --confcutdir keeps
+        # pytest from loading the heavy ancestor conftests, and --no-project
+        # keeps uv from syncing the whole project on the runner.
+        uv run --no-project \
+          --with pytest \
+          --with pytest-timeout \
+          --with requests \
+          --with mcp \
+          python -m pytest cognee/tests/e2e/docker_compose \
+            -p no:cacheprovider \
+            --confcutdir=cognee/tests/e2e/docker_compose \
+            -v --timeout=900
 
     - name: Verify remember and recall round-trip
       run: |
@@ -96,13 +175,13 @@ jobs:
         echo "recall (GRAPH_COMPLETION): $ANSWER"
         echo "$ANSWER" | grep -qi "Marsk" || { echo "graph completion did not mention the remembered entity"; exit 1; }
 
-    - name: Show server logs on failure
+    - name: Show service logs on failure
       if: failure()
       # Filter key-shaped lines: GitHub masks exact secret values, but partial
       # or transformed echoes (e.g. provider auth errors) would slip through.
-      run: docker compose -f docker-compose.yml logs cognee | grep -viE "api[-_]?key|authorization|bearer" | tail -100
+      run: docker compose -f docker-compose.yml logs --no-color | grep -viE "api[-_]?key|authorization|bearer" | tail -200
 
     - name: Shut down Docker Compose
       if: always()
       run: |
-        docker compose -f docker-compose.yml down
+        docker compose -f docker-compose.yml down -v

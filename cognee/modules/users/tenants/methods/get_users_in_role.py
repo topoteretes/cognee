@@ -37,11 +37,14 @@ async def get_users_in_role(tenant_id: UUID, role_id: UUID, user: User):
             )
         ).scalar_one_or_none() is not None
 
-        # Members may see who shares their own roles. Everyone else needs the
-        # tenant-wide user management permission, which raises when absent.
-        if not requester_is_member:
-            await has_user_management_permission(user.id, tenant_id)
+    # Members may see who shares their own roles. Everyone else needs the
+    # tenant-wide user management permission, which raises when absent.
+    # has_user_management_permission opens its own session(s); run it OUTSIDE the
+    # session above so we never hold two pooled connections at once (#4197 class).
+    if not requester_is_member:
+        await has_user_management_permission(user.id, tenant_id)
 
+    async with db_engine.get_async_session() as session:
         member_results = await session.execute(
             select(User)
             .join(UserRole, User.id == UserRole.user_id)

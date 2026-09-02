@@ -1,7 +1,7 @@
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis
 import redis.asyncio as aioredis
@@ -119,7 +119,7 @@ class RedisAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized Redis payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
@@ -638,6 +638,31 @@ class RedisAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
             error_msg = f"Unexpected error while updating session context in Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str
+    ) -> bool:
+        """Delete a single session-context entry by its "id" field."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            entries = await self._load_entries(context_key)
+            surviving = [entry for entry in entries if entry.get("id") != entry_id]
+            if len(surviving) == len(entries):
+                return False
+            await self._rewrite_entries(context_key, surviving)
+            if surviving:
+                await self._apply_session_ttl(context_key)
+            return True
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while deleting session context entry: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = (
+                f"Unexpected error while deleting session context entry from Redis: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

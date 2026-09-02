@@ -5,7 +5,12 @@ from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
+from cognee.cli.config import (
+    COMPLETION_SEARCH_TYPES,
+    DEFAULT_SEARCH_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
@@ -23,7 +28,11 @@ use cases - from simple fact retrieval to complex reasoning and code analysis.
 
 Search Types & Use Cases:
 
-**GRAPH_COMPLETION** (Default - Recommended):
+**HYBRID_COMPLETION** (Default - Recommended):
+    Passages plus entity neighbourhoods, then an LLM answer.
+    Best for: Ordinary questions over mixed document-and-graph memory.
+
+**GRAPH_COMPLETION**:
     Natural language Q&A using full graph context and LLM reasoning.
     Best for: Complex questions, analysis, summaries, insights.
 
@@ -50,8 +59,8 @@ Search Types & Use Cases:
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION for conversational AI responses)",
+            default=DEFAULT_SEARCH_TYPE,
+            help="Search mode (default: HYBRID_COMPLETION for conversational AI responses)",
         )
         parser.add_argument(
             "--datasets",
@@ -131,7 +140,7 @@ Search Types & Use Cases:
                 fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
                 fmt.echo("=" * 60)
 
-                if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                if args.query_type in COMPLETION_SEARCH_TYPES:
                     # These return conversational responses
                     for i, result in enumerate(results, 1):
                         fmt.echo(f"{fmt.bold('Response:')} {result}")

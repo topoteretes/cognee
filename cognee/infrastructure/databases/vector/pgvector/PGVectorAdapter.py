@@ -17,8 +17,6 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 
-from distributed.utils import override_distributed
-from distributed.tasks.queued_add_data_points import queued_add_data_points
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
@@ -75,11 +73,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         connection_string: str,
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
+        schema: str = "",
     ):
-        """Initialize the adapter and, when possible, reuse the relational engine."""
+        """Initialize the adapter and, when possible, reuse the relational engine.
+
+        When ``schema`` is set (shared-database isolation mode), this adapter is
+        pinned to a single Postgres schema via the connection ``search_path``:
+        every collection table is created and queried inside that schema, so
+        many datasets coexist in one database with no table-name collisions and
+        no per-dataset database. In that mode the adapter always owns a
+        dedicated engine (it must never mutate the search_path of the shared
+        relational engine, which has to stay on ``public``).
+        """
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
+        # Postgres schema this adapter is pinned to ("" = default/public search path).
+        # Read by schema-scoped overrides of get_table_names()/delete_database().
+        self.schema: str = schema or ""
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
@@ -119,7 +130,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Reuse engine and sessionmaker if the relational engine is provided and is the same database as the one configured for pgvector
         db_name1 = make_url(relational_db.db_uri).database
         db_name2 = make_url(self.db_uri).database
-        if backend_access_control_enabled() and (db_name1 != db_name2):
+        if self.schema:
+            # Shared-database schema-isolation mode. Always a dedicated engine
+            # whose connections are pinned to this dataset's schema via
+            # search_path; ``public`` is kept on the path so the pgvector
+            # extension's ``vector`` type and operators (installed in public)
+            # resolve. Our collection tables are always created in the dataset
+            # schema (first on the path), so reads never fall through to public.
+            connect_args = dict(effective_connect_args) if effective_connect_args else {}
+            server_settings = dict(connect_args.get("server_settings") or {})
+            server_settings["search_path"] = f"{self.schema}, public"
+            connect_args["server_settings"] = server_settings
+            super().__init__(
+                connection_string=self.db_uri,
+                connect_args=connect_args,
+                pool_args=effective_pool_args,
+            )
+            self._owns_engine = True
+        elif backend_access_control_enabled() and (db_name1 != db_name2):
             # If backend access control create new instances of engine and sessionmaker
             super().__init__(
                 connection_string=self.db_uri,
@@ -151,6 +179,44 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         Reset SQLAlchemy metadata reflection cache for this adapter instance.
         """
         self._metadata = MetaData()
+
+    async def get_table_names(self) -> List[str]:
+        """List collection tables, scoped to this adapter's schema when pinned.
+
+        In shared-database mode this adapter's engine is pinned to a single
+        Postgres schema (``self.schema``); reflecting every schema (the base
+        adapter's behavior) would leak other datasets' collections into
+        schema-wide operations such as ``remove_belongs_to_set_tags``. Falls
+        back to the base (all non-system schemas) when not schema-pinned.
+        """
+        if not self.schema:
+            return await super().get_table_names()
+
+        table_names: List[str] = []
+        async with self.engine.begin() as connection:
+            metadata = MetaData()
+            await connection.run_sync(metadata.reflect, schema=self.schema)
+            table_names.extend(metadata.tables.keys())
+        return table_names
+
+    async def delete_database(self):
+        """Drop this dataset's tables, scoped to its schema when pinned.
+
+        In shared-database mode ``prune`` must only drop the pinned dataset
+        schema's tables — never ``public`` (which holds cognee's shared
+        relational tables) or other datasets' schemas. Falls back to the base
+        public-schema behavior when not schema-pinned.
+        """
+        if not self.schema:
+            return await super().delete_database()
+
+        async with self.engine.begin() as connection:
+            metadata = MetaData()
+            await connection.run_sync(metadata.reflect, schema=self.schema)
+            for table in metadata.sorted_tables:
+                await connection.execute(
+                    text(f'DROP TABLE IF EXISTS "{self.schema}"."{table.name}" CASCADE')
+                )
 
     async def close(self) -> None:
         """
@@ -273,7 +339,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    @override_distributed(queued_add_data_points)
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
@@ -607,9 +672,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return None
 
         async with self._get_write_lock(collection_name):
+            # Resolve the table BEFORE opening the session. get_table() checks out
+            # its own connection; doing it inside the session would hold two pooled
+            # connections at once and deadlock the pool under concurrency (same
+            # class as #4197). Mirrors retrieve()/search().
+            PGVectorDataPoint = await self.get_table(collection_name)
             async with self.get_async_session() as session:
-                PGVectorDataPoint = await self.get_table(collection_name)
-
                 results = None
                 if not data_point_ids:
                     results = await session.execute(

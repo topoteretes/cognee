@@ -59,6 +59,8 @@ def get_improve_router() -> APIRouter:
         - **build_global_context_index** (Optional[bool]): Build the global context index after enrichment (default: False).
 
         Either dataset_name or dataset_id must be provided.
+        - **sessionIds** (Optional[List[str]]): Session identifiers whose cached memory
+          entries are used as input for enrichment.
 
         ## Error Codes
         - **400 Bad Request**: Neither dataset_id nor dataset_name provided
@@ -66,7 +68,7 @@ def get_improve_router() -> APIRouter:
         """
         send_telemetry(
             "Improve API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/improve",
                 "cognee_version": cognee_version,

@@ -34,6 +34,17 @@ from cognee.modules.integrations.slack.slack_settings import require
 # Distinct from PROVIDER ("slack") on purpose — see module docstring.
 MEMBER_LINK_PROVIDER = "slack_member"
 
+# Shown wherever resolve_owner_user_id comes back None. /cognee-ask,
+# /cognee-remember and the "Remember this" shortcut all reach that state, so
+# the wording lives here — with the command it names — instead of being
+# retyped per call site. It had already drifted that way: two copies told
+# people to run `/cognee-link <api_key>` and create a key first, neither of
+# which this command has ever taken or needed.
+NOT_LINKED_MESSAGE = (
+    "I don't know which Cognee account you are yet. "
+    "Run `/cognee-link` to connect yours, then try again."
+)
+
 # Long enough to open Slack, switch to the browser, and click Confirm;
 # short enough that a leaked link (pasted somewhere, sitting in a browser
 # history) is stale soon after.

@@ -8,6 +8,8 @@ from cognee.infrastructure.files.storage import get_file_storage, get_storage_co
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 logger = get_logger(__name__)
 
@@ -127,7 +129,7 @@ class DoclingLoader(LoaderInterface):
             return False
         return extension.lower().lstrip(".") in _get_docling_supported_extensions()
 
-    async def load(self, file_path: str, **kwargs: Any) -> str:
+    async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -156,4 +158,4 @@ class DoclingLoader(LoaderInterface):
             data_root_directory = storage_config["data_root_directory"]
             storage = get_file_storage(data_root_directory)
 
-            return await storage.store(storage_file_name, text)
+            return await store_derived_text(storage, storage_file_name, text)

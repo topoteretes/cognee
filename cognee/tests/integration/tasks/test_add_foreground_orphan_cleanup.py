@@ -79,17 +79,29 @@ def _dlt_source(rows):
 
 
 async def _dlt_page_ids(user):
+    """Primary keys of all live DLT rows in the dataset.
+
+    Relational sources are stored as one manifest Data record per source
+    (source == "dlt_source") whose JSON carries the rows; legacy per-row
+    records (source == "dlt") are read directly.
+    """
+    from cognee.tasks.ingestion.dlt_utils import load_dlt_manifest
+
     dataset = (
         await get_authorized_existing_datasets(
             user=user, permission_type="read", datasets=[DATASET]
         )
     )[0]
     rows = await get_dataset_data(dataset.id)
-    return sorted(
-        d.external_metadata.get("primary_key_value")
-        for d in rows
-        if isinstance(d.external_metadata, dict) and d.external_metadata.get("source") == "dlt"
-    )
+    pks = []
+    for d in rows:
+        ext = d.system_metadata if isinstance(d.system_metadata, dict) else {}
+        if ext.get("source") == "dlt_source":
+            manifest = await load_dlt_manifest(d.raw_data_location)
+            pks.extend(row["primary_key_value"] for row in manifest.get("rows", []))
+        elif ext.get("source") == "dlt":
+            pks.append(ext.get("primary_key_value"))
+    return sorted(pks)
 
 
 @pytest.mark.asyncio

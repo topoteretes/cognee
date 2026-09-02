@@ -26,7 +26,7 @@ async def run_tasks_with_telemetry(
         logger.info("Pipeline run started: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Started",
-            user.id,
+            user,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
@@ -41,7 +41,7 @@ async def run_tasks_with_telemetry(
         logger.info("Pipeline run completed: `%s`", pipeline_name)
         send_telemetry(
             "Pipeline Run Completed",
-            user.id,
+            user,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
@@ -58,7 +58,7 @@ async def run_tasks_with_telemetry(
         )
         send_telemetry(
             "Pipeline Run Errored",
-            user.id,
+            user,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,

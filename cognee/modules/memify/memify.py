@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Type, Any
+from typing import Union, Optional, List, Sequence, Type, Any
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -19,13 +19,14 @@ from cognee.memify_pipelines.memify_default_tasks import (
     get_default_memify_enrichment_tasks,
     get_default_memify_extraction_tasks,
 )
+from cognee.memify_pipelines.memify_task_registry import resolve_memify_tasks
 
 logger = get_logger("memify")
 
 
 async def memify(
-    extraction_tasks: Union[List[Task], List[str]] = None,
-    enrichment_tasks: Union[List[Task], List[str]] = None,
+    extraction_tasks: Optional[Sequence[Union[Task, str]]] = None,
+    enrichment_tasks: Optional[Sequence[Union[Task, str]]] = None,
     data: Optional[Any] = None,
     dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
     user: User = None,
@@ -47,7 +48,10 @@ async def memify(
 
     Args:
         extraction_tasks: List of Cognee Tasks to execute for graph/data extraction.
+                          Entries may be Task instances or names of built-in memify tasks
+                          (see cognee.memify_pipelines.memify_task_registry).
         enrichment_tasks: List of Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
+                          Entries may be Task instances or names of built-in memify tasks.
         data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
               If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
@@ -87,13 +91,24 @@ async def memify(
         ```
     """
 
+    # Resolve task names into Task instances (raises CogneeValidationError on unknown names)
+    resolved_extraction_tasks = resolve_memify_tasks(extraction_tasks)
+    resolved_enrichment_tasks = resolve_memify_tasks(enrichment_tasks)
+
     # Use default triplet embedding tasks if no tasks were provided
-    if not extraction_tasks:
-        extraction_tasks = get_default_memify_extraction_tasks()
-    if not enrichment_tasks:
-        enrichment_tasks = get_default_memify_enrichment_tasks()
+    if not resolved_extraction_tasks:
+        resolved_extraction_tasks = get_default_memify_extraction_tasks()
+    if not resolved_enrichment_tasks:
+        resolved_enrichment_tasks = get_default_memify_enrichment_tasks()
 
     await setup()
+
+    # The pipeline-run log writers INSERT the operation-record columns
+    # (user_id, outcome, tokens, ...), so an existing database must be at the
+    # current Alembic head before the first write — same gate as cognify().
+    from cognee.modules.migrations.startup import run_migrations_and_block
+
+    await run_migrations_and_block(dataset, user)
 
     user, authorized_dataset_list = await resolve_authorized_user_datasets(dataset, user)
     authorized_dataset = authorized_dataset_list[0]
@@ -107,8 +122,8 @@ async def memify(
             data = [memory_fragment]
 
     memify_tasks = [
-        *extraction_tasks,  # Unpack tasks provided to memify pipeline
-        *enrichment_tasks,
+        *resolved_extraction_tasks,  # Unpack tasks provided to memify pipeline
+        *resolved_enrichment_tasks,
     ]
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for

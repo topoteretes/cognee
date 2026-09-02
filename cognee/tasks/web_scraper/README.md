@@ -2,12 +2,13 @@
 
 ## Overview
 
-The `web_scraper` module provides tools for scraping web content and storing structured data in cognee's graph database. It supports two scraping backends:
+The `web_scraper` module provides tools for scraping web content and storing structured data in cognee's graph database. It supports three scraping backends:
 
 1. **Default Crawler** - Uses `httpx` for HTTP requests with optional Playwright for JavaScript rendering
 2. **Tavily API** - Uses Tavily for content extraction (requires `TAVILY_API_KEY` environment variable)
+3. **Keenable API** - Uses [Keenable](https://docs.keenable.ai) for clean markdown extraction (requires `KEENABLE_API_KEY` environment variable)
 
-The module automatically selects the backend: Tavily if `TAVILY_API_KEY` is set, otherwise the default crawler.
+The module automatically selects the backend: Tavily if `TAVILY_API_KEY` is set, otherwise Keenable if `KEENABLE_API_KEY` is set, otherwise the default crawler. Pass `preferred_tool` to `fetch_page_content` to select one explicitly.
 
 ## Components
 
@@ -26,6 +27,7 @@ The module automatically selects the backend: Tavily if `TAVILY_API_KEY` is set,
 | `DefaultUrlCrawler` | Async crawler with concurrency, rate limiting, robots.txt compliance, Playwright support |
 | `DefaultCrawlerConfig` | Configuration for default crawler (concurrency, timeouts, Playwright) |
 | `TavilyConfig` | Configuration for Tavily API (API key, extract depth, timeout) |
+| `KeenableConfig` | Configuration for Keenable API (API key, live fetch, extraction prompt, timeout) |
 
 ### Data Models (extend `DataPoint`)
 
@@ -120,6 +122,17 @@ await cognee.cognify()
 | `extract_depth` | `"basic"` | `"basic"` or `"advanced"` |
 | `proxies` | `None` | Proxy configuration dict |
 | `timeout` | `10` | Request timeout (1-60s) |
+
+### KeenableConfig
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `api_key` | `KEENABLE_API_KEY` env | Keenable API key (required) |
+| `base_url` | `KEENABLE_BASE_URL` env or `https://api.keenable.ai` | Keenable API base URL |
+| `live` | `KEENABLE_LIVE_FETCH` env or `False` | Fetch the live page instead of Keenable's indexed copy |
+| `prompt` | `None` | Optional LLM extraction instruction (max 2000 chars) |
+| `concurrency` | `5` | Max concurrent fetch requests |
+| `timeout` | `30` | Request timeout (1-120s) |
 
 ## Dependencies
 

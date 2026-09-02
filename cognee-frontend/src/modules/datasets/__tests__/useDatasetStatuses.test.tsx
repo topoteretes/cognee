@@ -42,6 +42,33 @@ describe("useDatasetStatuses", () => {
 
     renderHook(() => useDatasetStatuses(true), { wrapper: Wrapper });
 
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith("/v1/datasets/status"));
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith("/v1/datasets/status?include_error_detail=true"),
+    );
+  });
+
+  it("normalizes a bare-status response (pod predating CLO-306) into statusDetails with a null reason", async () => {
+    mockUseTenant.mockReturnValue({ tenant: { tenant_id: "t1" }, tenantReady: true });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ "ds-1": "DATASET_PROCESSING_ERRORED" }) });
+
+    const { result } = renderHook(() => useDatasetStatuses(true), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.statuses["ds-1"]).toBe("DATASET_PROCESSING_ERRORED"));
+    expect(result.current.statusDetails["ds-1"]).toEqual({ status: "DATASET_PROCESSING_ERRORED", reason: null });
+  });
+
+  it("surfaces the reason from a detailed response (pod with CLO-306) in statusDetails", async () => {
+    mockUseTenant.mockReturnValue({ tenant: { tenant_id: "t1" }, tenantReady: true });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        "ds-1": { status: "DATASET_PROCESSING_ERRORED", reason: "insufficient_credits", error: "Budget has been exceeded!" },
+      }),
+    });
+
+    const { result } = renderHook(() => useDatasetStatuses(true), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.statusDetails["ds-1"]?.reason).toBe("insufficient_credits"));
+    expect(result.current.statuses["ds-1"]).toBe("DATASET_PROCESSING_ERRORED");
   });
 });

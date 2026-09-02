@@ -144,7 +144,7 @@ async def add_skills(
         raise FileNotFoundError(f"Skill source not found: {source}")
 
     if not parsed:
-        logger.warning("No SKILL.md files discovered under %s", source)
+        logger.warning("No SKILL.md files discovered under the resolved skill source path.")
         return []
 
     dataset_id = dataset.id
@@ -163,5 +163,5 @@ async def add_skills(
         scoped.append(skill)
 
     await add_data_points(scoped, ctx=_make_storage_context(user, dataset, path))
-    logger.info("Ingested %d skill(s) from %s into dataset %s", len(scoped), source, dataset.name)
+    logger.info("Ingested %d skill(s) into dataset %s", len(scoped), dataset.name)
     return scoped

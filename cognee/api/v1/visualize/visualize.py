@@ -1,6 +1,11 @@
+import json
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional, Union
 from uuid import UUID
+
+from sqlalchemy import select
+
 from cognee.modules.users.models.User import User
 
 from cognee.modules.visualization.cognee_network_visualization import (
@@ -10,6 +15,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
     build_semantic_payload,
     build_brain_summary_payload,
 )
+from cognee.modules.visualization.preprocessor import build_node_set_colors
 from cognee.modules.visualization.session_events import collect_session_events
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_MAX_NODES,
@@ -18,7 +24,9 @@ from cognee.modules.visualization.subgraph_data import (
     fetch_visualization_graph_data,
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
+from cognee.modules.data.models import Data
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.users.methods import get_default_user
@@ -322,6 +330,137 @@ async def build_brains_payload(
     for dataset in datasets:
         graph_data = await fetch_dataset_graph_data(dataset, max_nodes=max_nodes)
         payload[str(dataset.id)] = build_brain_summary_payload(dataset.name, graph_data)
+
+    return payload
+
+
+def _parse_node_set(raw: Any) -> List[str]:
+    """The node set names on one ``Data`` row, defensively.
+
+    ``Data.node_set`` is written by ingestion as ``json.dumps(list)`` — a JSON
+    string inside a JSON column — so the value read back is normally a string
+    holding a list. A row written or migrated by anything else could hold the
+    list itself, a bare name, or something unusable; none of those may break an
+    overview of every dataset a user can read, so each degrades to what it can
+    contribute instead of raising.
+
+    Order is preserved: it is the order ``classify_documents`` joins the names
+    in to build the graph's ``source_node_set`` value, which is what the node
+    set color map is keyed by.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return [raw.strip()] if raw.strip() else []
+
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+
+    if not isinstance(raw, (list, tuple)):
+        return []
+
+    return [name.strip() for name in raw if isinstance(name, str) and name.strip()]
+
+
+async def _fetch_dataset_node_sets(dataset_ids: List[UUID]) -> Dict[UUID, List[List[str]]]:
+    """Every dataset's node sets, one entry per ingested document, in one query.
+
+    Reads the two columns it needs for every dataset at once — the point of the
+    summary endpoint is that describing N datasets costs one relational query,
+    not N of anything.
+
+    Each document's names stay their own list rather than being flattened per
+    dataset: a document carrying several node sets contributes the comma-joined
+    form as a single color key (that is what the graph stores in
+    ``source_node_set``) while contributing each name separately to
+    ``source_names``.
+    """
+    if not dataset_ids:
+        return {}
+
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(Data.dataset_id, Data.node_set).where(
+                    Data.dataset_id.in_(dataset_ids),
+                    Data.node_set.isnot(None),
+                )
+            )
+        ).all()
+
+    node_sets: Dict[UUID, List[List[str]]] = defaultdict(list)
+    for dataset_id, raw in rows:
+        names = _parse_node_set(raw)
+        if names:
+            node_sets[dataset_id].append(names)
+
+    return node_sets
+
+
+async def build_brains_summary_payload(user: Optional[User] = None) -> dict:
+    """Every dataset the caller may read, described from relational metadata.
+
+    ``{dataset_id: {"name", "source_names", "node_count", "node_set_colors"}}``
+    — the overview data ``build_brains_payload`` produces as a side effect of
+    fetching each dataset's graph, produced instead from relational metadata
+    plus the per-cognify-run count cache. That is the point: ``/brains`` costs
+    one bounded graph read per readable dataset on every call, which is what
+    makes it unfit for a switcher that only needs names, sources and a size.
+    This costs one count query per cognify run whose count is not cached yet
+    (see ``get_datasets_graph_counts``) — so a cold cache does open the graph
+    engine once per such dataset, and every call after that opens none.
+
+    Same authorization as ``build_brains_payload`` — the group-aware union in
+    ``get_all_user_permission_datasets`` — so both list the same datasets.
+
+    Returns:
+        dict: keyed by dataset id (as a string), each value holding
+
+        - ``name``: the dataset's name.
+        - ``source_names``: distinct node set names across the dataset's
+          ingested data, sorted; empty for data ingested without node sets.
+        - ``node_count``: nodes in the dataset's graph as of its latest cognify
+          run (see ``get_datasets_graph_counts``) — the whole graph, not only
+          entity nodes, and 0 for a dataset never cognified.
+        - ``node_set_colors``: node set colors from the same
+          ``build_node_set_colors`` rule ``/brains`` uses. Same rule and same
+          input node sets give the same colors, but the two endpoints do not
+          always have the same input: the rule assigns hues by position in the
+          sorted set of names, ``/brains`` takes that set from the nodes its
+          bounded graph fetch returned, and this takes it from every ``Data``
+          row of the dataset. Where those sets differ — notably a node set that
+          exists only in the graph, such as the memory sets ``improve()``
+          writes, which has no relational row here at all — the colors from the
+          divergence onward differ too.
+    """
+    if not user:
+        user = await get_default_user()
+
+    datasets = await get_all_user_permission_datasets(user, "read")
+    if not datasets:
+        return {}
+
+    # Independent reads against different stores; run them together so the
+    # payload costs the slower one rather than their sum.
+    node_sets, counts = await asyncio.gather(
+        _fetch_dataset_node_sets([dataset.id for dataset in datasets]),
+        get_datasets_graph_counts(datasets),
+    )
+
+    payload: dict = {}
+    for dataset in datasets:
+        dataset_node_sets = node_sets.get(dataset.id, [])
+        payload[str(dataset.id)] = {
+            "name": dataset.name,
+            "source_names": sorted({name for names in dataset_node_sets for name in names}),
+            "node_count": counts[dataset.id].num_nodes,
+            "node_set_colors": build_node_set_colors(
+                ", ".join(names) for names in dataset_node_sets
+            ),
+        }
 
     return payload
 

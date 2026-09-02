@@ -2,7 +2,7 @@
 
 `get_triplet_datapoints` walks every triplet with a `while True` loop that raises
 `offset` by the batch size and stops on the first empty batch. That is only correct
-if two calls with different offsets read from the same ordering. PostgresAdapter and
+if two calls with different offsets read from the same ordering. PostgresDemoAdapter and
 TursoVectorAdapter order explicitly (`ORDER BY e.source_id, e.target_id,
 e.relationship_name`) before applying `OFFSET`/`LIMIT`; the two Cypher adapters
 paginated an unordered match, where row order is not defined.

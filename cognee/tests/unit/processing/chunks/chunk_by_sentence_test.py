@@ -55,5 +55,16 @@ def test_paragraph_chunk_length(input_text, maximum_length):
     ),
 )
 def test_paragraph_chunk_long_input(input_text, maximum_length):
-    with pytest.raises(ValueError):
-        list(chunk_by_sentence(input_text, maximum_length))
+    """A run longer than the chunk size that reaches the end of the text is emitted, not raised on.
+
+    Before the fix this asserted ``ValueError``. A single such run made the whole document
+    unprocessable, and with no partial-commit mode that failed the entire pipeline run. The
+    chunker's existing contract is that an oversized run becomes one oversized chunk (see
+    ``test_oversized_paragraph_gets_emitted_as_a_single_chunk``); the trailing run now follows
+    the same rule, so no text is lost.
+    """
+    chunks = list(chunk_by_sentence(input_text, maximum_length))
+
+    assert chunks, "an oversized trailing run must still produce a chunk"
+    reconstructed_text = "".join(chunk[1] for chunk in chunks)
+    assert reconstructed_text == input_text, "no text may be lost"
