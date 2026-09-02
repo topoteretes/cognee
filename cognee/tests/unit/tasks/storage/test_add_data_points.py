@@ -1,3 +1,4 @@
+import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
@@ -9,6 +10,7 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
+from cognee.modules.observability import capture
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
     add_data_points,
@@ -895,3 +897,188 @@ async def test_add_data_points_relational_upserts_happen_before_graph_and_vector
     )
     assert call_order[:3] == ["upsert_nodes", "upsert_edges", "upsert_edges"]
     assert first_graph_index >= 3
+
+
+# ---------------------------------------------------------------------------
+# Eval capture (SDK-529): one storage.delta per call, OTel counters wired
+# ---------------------------------------------------------------------------
+
+
+def _storage_deltas(sink):
+    return [record for record in sink.records if record["kind"] == capture.KIND_STORAGE_DELTA]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hybrid", [False, True])
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_emits_one_storage_delta_per_call(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    hybrid,
+    fake_capture_sink,
+):
+    """Counts, a type histogram, string ids and the run id — the same event on
+    the default and the hybrid write path; the run-scope counters see the write."""
+    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
+
+    dp1 = SimplePoint(text="first")
+    dp2 = NamedPoint(name="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    custom_edges = [(str(dp2.id), str(dp1.id), "custom_edge", {})]
+
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, _graph_engine = _graph_provenance_unified(mock_get_unified)
+    if hybrid:
+        unified.has_capability = MagicMock(
+            side_effect=lambda cap: cap == EngineCapability.HYBRID_WRITE
+        )
+    ctx = _provenance_ctx()
+
+    with capture.run_scope(ctx.pipeline_run_id, ctx.dataset.id, kind="pipeline") as scope:
+        await add_data_points([dp1, dp2], custom_edges=custom_edges, ctx=ctx)
+
+    assert scope.counters["storage.nodes_written"] == 2
+    assert scope.counters["storage.edges_written"] == 2  # 1 datapoint edge + 1 custom edge
+
+    await capture.drain()
+
+    [delta] = _storage_deltas(fake_capture_sink)
+    assert delta["stage"] == "add_data_points"
+    assert delta["run_id"] == str(ctx.pipeline_run_id)
+    assert delta["dataset_id"] == str(ctx.dataset.id)
+
+    payload = delta["payload"]
+    assert payload["node_count"] == 2
+    assert payload["edge_count"] == 1
+    assert payload["custom_edge_count"] == 1
+    assert payload["node_types"] == {"SimplePoint": 1, "NamedPoint": 1}
+    assert sorted(payload["node_ids"]) == sorted([str(dp1.id), str(dp2.id)])
+    assert payload["pipeline_run_id"] == str(ctx.pipeline_run_id)
+    # Plain scalars only — no DataPoint slipped into the event.
+    json.dumps(payload)
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_storage_delta_drops_node_ids_past_the_cap(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    monkeypatch,
+    fake_capture_sink,
+):
+    monkeypatch.setattr(adp_module, "_STORAGE_DELTA_MAX_NODE_IDS", 1)
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    mock_get_graph.side_effect = [([dp1], []), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, _graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([dp1, dp2])  # no ctx: no pipeline run, no dataset
+    await capture.drain()
+
+    [delta] = _storage_deltas(fake_capture_sink)
+    assert delta["run_id"] is None
+    assert delta["dataset_id"] is None
+    payload = delta["payload"]
+    assert payload["node_ids"] is None
+    assert payload["node_count"] == 2
+    assert payload["node_types"] == {"SimplePoint": 2}
+    assert payload["edge_count"] == 0
+    assert payload["custom_edge_count"] == 0
+    assert payload["pipeline_run_id"] is None
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_is_a_capture_no_op_when_off(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    monkeypatch,
+    capture_reset,
+):
+    """Structural no-op: neither the payload (id list, histogram) nor an event
+    nor a counter bump is built when no sink is registered."""
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+    payload_spy = MagicMock(wraps=adp_module._storage_delta_payload)
+    monkeypatch.setattr(adp_module, "_storage_delta_payload", payload_spy)
+    emit_spy = MagicMock(wraps=capture.emit)
+    monkeypatch.setattr(capture, "emit", emit_spy)
+    bump_spy = MagicMock(wraps=capture.bump)
+    monkeypatch.setattr(capture, "bump", bump_spy)
+
+    dp = SimplePoint(text="only")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, _graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    result = await add_data_points([dp])
+
+    assert result == [dp]
+    assert capture.is_active() is False
+    payload_spy.assert_not_called()
+    emit_spy.assert_not_called()
+    bump_spy.assert_not_called()
+    assert not capture.hook._buffer
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_reports_graph_write_counters(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    monkeypatch,
+    capture_reset,
+):
+    """The OTel node/edge counters fire once per call, with the same attributes
+    cognify uses for its duration histogram — independent of eval capture."""
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+    nodes_counter = MagicMock()
+    edges_counter = MagicMock()
+    monkeypatch.setattr(adp_module, "increment_graph_nodes", nodes_counter)
+    monkeypatch.setattr(adp_module, "increment_graph_edges", edges_counter)
+
+    dp1 = SimplePoint(text="first")
+    dp2 = SimplePoint(text="second")
+    edge1 = (str(dp1.id), str(dp2.id), "related_to", {"edge_text": "connects"})
+    custom_edges = [(str(dp2.id), str(dp1.id), "custom_edge", {})]
+    mock_get_graph.side_effect = [([dp1], [edge1]), ([dp2], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, _graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+
+    await add_data_points([dp1, dp2], custom_edges=custom_edges)
+
+    attributes = {"memory.system": "cognee", "memory.operation": "process"}
+    nodes_counter.assert_called_once_with(2, attributes)
+    edges_counter.assert_called_once_with(2, attributes)  # 1 datapoint edge + 1 custom edge

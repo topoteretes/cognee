@@ -6,10 +6,35 @@ from pydantic import BaseModel
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm.config import (
     get_llm_config,
+    get_llm_context_config,
 )
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
+
+
+def _note_extraction_config(system_prompt: str) -> None:
+    """Record the effective extraction model and prompt fingerprint on the run manifest.
+
+    Eval capture (SDK-529). The model is the one every LLM call in this context is
+    routed to — the stage-merged config that ``pipeline_stage("extraction")`` bound,
+    or the global config outside a stage — resolved exactly as ``LLMGateway`` resolves
+    it. The import is lazy so ``import cognee`` never loads the capture package.
+
+    The fingerprint (a sha256 over the rendered prompt; ~2.5 us for the 2.4 KB default
+    prompt) is computed per call, and only while capture is active AND a run scope is
+    open — without a scope ``note()`` would discard it, so nothing is hashed. It is
+    deliberately not memoized: a process-wide cache outlives runs (and tests), so a
+    regressed ``is_active()`` guard would go unnoticed for any prompt seen before.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    if not eval_capture.is_active() or eval_capture.current_scope() is None:
+        return
+    eval_capture.note("extraction.model", get_llm_context_config().llm_model)
+    eval_capture.note(
+        "extraction.prompt_fingerprint", eval_capture.prompt_fingerprint(system_prompt)
+    )
 
 
 async def extract_content_graph(
@@ -31,6 +56,8 @@ async def extract_content_graph(
             base_directory = None
 
         system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+
+    _note_extraction_config(system_prompt)
 
     simplified_response_model = response_model
     if isinstance(response_model, type) and issubclass(response_model, DataPoint):

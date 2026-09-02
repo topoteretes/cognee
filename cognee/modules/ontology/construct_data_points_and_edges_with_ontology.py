@@ -90,17 +90,56 @@ def _find_ontology_match(
     )
 
 
+def _emit_fuzzy_matches(
+    chunk_index: int, data_chunk: DocumentChunk, resolutions: list[dict]
+) -> None:
+    """One ``extraction.fuzzy_match`` event for a chunk's ontology resolutions (SDK-529).
+
+    ``resolutions`` is a list of plain scalar dicts built by the caller only while
+    capture is active; the manifest counts every lookup and every hit.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    matched = sum(1 for resolution in resolutions if resolution["matched"])
+    eval_capture.emit(
+        eval_capture.KIND_EXTRACTION_FUZZY_MATCH,
+        {
+            "chunk_id": str(data_chunk.id),
+            "chunk_index": chunk_index,
+            "matches": resolutions,
+            "lookups": len(resolutions),
+            "count": matched,
+        },
+        payload_kind="json",
+        stage="extract_graph_from_data",
+    )
+    eval_capture.bump("extraction.fuzzy_lookups", len(resolutions))
+    eval_capture.bump("extraction.fuzzy_matches", matched)
+
+
 def _find_ontology_matches_for_extracted_graphs(
     data_chunks: list[DocumentChunk],
     extracted_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver,
 ) -> OntologyMatchLookup:
-    """Find one ontology match for each distinct extracted name and type."""
+    """Find one ontology match for each distinct extracted name and type.
+
+    Eval capture (SDK-529): the lookup is shared across the batch, so a name is resolved
+    by the first chunk that mentions it and skipped afterwards. While capture is active,
+    each chunk that triggered at least one resolution emits ONE ``extraction.fuzzy_match``
+    event listing those resolutions (matched or not) — never one event per node. Nothing
+    is collected when capture is off.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    active = eval_capture.is_active()
+
     ontology_match_lookup: OntologyMatchLookup = {}
-    for data_chunk, extracted_graph in zip(data_chunks, extracted_graphs):
+    for chunk_index, (data_chunk, extracted_graph) in enumerate(zip(data_chunks, extracted_graphs)):
         if not extracted_graph:
             continue
 
+        resolutions: Optional[list[dict]] = [] if active else None
         for node in extracted_graph.nodes:
             for node_category, extracted_name in (
                 (_ONTOLOGY_CLASS_CATEGORY, node.type),
@@ -111,12 +150,29 @@ def _find_ontology_matches_for_extracted_graphs(
                 if lookup_key in ontology_match_lookup:
                     continue
 
-                ontology_match_lookup[lookup_key] = _find_ontology_match(
+                ontology_match = _find_ontology_match(
                     ontology_resolver,
                     normalized_extracted_name,
                     node_category,
                     data_chunk,
                 )
+                ontology_match_lookup[lookup_key] = ontology_match
+                if resolutions is not None:
+                    resolutions.append(
+                        {
+                            "category": node_category,
+                            "extracted": extracted_name,
+                            "normalized": normalized_extracted_name,
+                            "canonical": (
+                                None if ontology_match is None else ontology_match.canonical_name
+                            ),
+                            "uri": None if ontology_match is None else ontology_match.canonical_uri,
+                            "matched": ontology_match is not None,
+                        }
+                    )
+
+        if resolutions:
+            _emit_fuzzy_matches(chunk_index, data_chunk, resolutions)
 
     return ontology_match_lookup
 

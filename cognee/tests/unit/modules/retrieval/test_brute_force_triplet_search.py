@@ -1,7 +1,11 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+from uuid import uuid4
 
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.observability import capture
+from cognee.modules.observability.capture import KIND_RETRIEVAL_CANDIDATES
+from cognee.modules.retrieval.utils import brute_force_triplet_search as bfts_module
 from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     brute_force_triplet_search,
     get_memory_fragment,
@@ -9,6 +13,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
 )
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
@@ -1262,3 +1267,336 @@ async def test_cognee_graph_mapping_batch_shapes():
     assert node1.attributes.get("vector_distance") == [0.95, 6.5]
     assert node2.attributes.get("vector_distance") == [6.5, 0.87]
     assert edge.attributes.get("vector_distance") == [0.92, 0.88]
+
+
+# ---------------------------------------------------------------------------
+# Eval capture (SDK-529): retrieval.candidates events and bounding-setting notes.
+# The vector engine and the memory fragment are faked exactly as above; the
+# fragment returns real CogneeGraph Edge objects so the flat payload is built
+# from the same attribute paths production uses. No LLM, no database.
+# ---------------------------------------------------------------------------
+
+
+def _capture_vector_engine(single=None, batch=None):
+    """A vector engine whose per-collection results are given as dicts."""
+    engine = AsyncMock()
+    engine.embedding_engine = AsyncMock()
+    engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    if single is not None:
+        engine.search = AsyncMock(side_effect=lambda **kw: single.get(kw["collection_name"], []))
+    if batch is not None:
+        engine.batch_search = AsyncMock(
+            side_effect=lambda **kw: batch.get(
+                kw["collection_name"], [[] for _ in kw["query_texts"]]
+            )
+        )
+    return engine
+
+
+def _capture_edge(source, target, rel, distances):
+    """A real Edge whose source, edge, and target carry per-query vector distances."""
+    node1 = Node(source, {"name": source})
+    node2 = Node(target, {"name": target})
+    edge = Edge(node1, node2, attributes={"relationship_type": rel})
+    for element, element_distances in zip((node1, edge, node2), distances):
+        element.attributes["vector_distance"] = list(element_distances)
+    return edge
+
+
+def _capture_fragment(results):
+    return AsyncMock(
+        map_vector_distances_to_graph_nodes=AsyncMock(),
+        map_vector_distances_to_graph_edges=AsyncMock(),
+        calculate_top_triplet_importances=AsyncMock(return_value=results),
+    )
+
+
+async def _capture_search(engine, fragment, **kwargs):
+    with (
+        patch(
+            "cognee.modules.retrieval.utils.node_edge_vector_search.get_vector_engine_async",
+            return_value=engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.utils.brute_force_triplet_search.get_memory_fragment",
+            return_value=fragment,
+        ),
+    ):
+        return await brute_force_triplet_search(**kwargs)
+
+
+def _candidate_events(sink):
+    return [record for record in sink.records if record["kind"] == KIND_RETRIEVAL_CANDIDATES]
+
+
+def _assert_flat(value):
+    """Every leaf is a JSON scalar: no ScoredResult, Node, Edge, or other object leaks."""
+    if isinstance(value, dict):
+        for item in value.values():
+            _assert_flat(item)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_flat(item)
+    else:
+        assert value is None or isinstance(value, (str, int, float, bool)), repr(value)
+
+
+@pytest.mark.asyncio
+async def test_capture_off_builds_no_retrieval_payload(monkeypatch, capture_reset):
+    """(a) With capture off the search never constructs a payload or buffers an event."""
+    monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
+    builder = MagicMock(side_effect=AssertionError("payload built while capture is off"))
+    monkeypatch.setattr(bfts_module, "_retrieval_candidates_payload", builder)
+
+    edge = _capture_edge("a", "b", "knows", ([0.1], [0.2], [0.3]))
+    engine = _capture_vector_engine(single={"Entity_name": [MockScoredResult("a", 0.1)]})
+
+    results = await _capture_search(engine, _capture_fragment([edge]), query="q", node_name=None)
+
+    assert results == [edge]
+    assert capture.is_active() is False
+    builder.assert_not_called()
+    assert not capture.hook._buffer
+
+
+@pytest.mark.asyncio
+async def test_sampled_out_search_records_notes_without_event(monkeypatch, fake_capture_sink):
+    """(b) A run sampled out still records the bounding settings; no event, no payload."""
+    capture.hook._configure(sample_rate=0.0)
+    builder = MagicMock(side_effect=AssertionError("payload built for a sampled-out run"))
+    monkeypatch.setattr(bfts_module, "_retrieval_candidates_payload", builder)
+
+    edge = _capture_edge("a", "b", "knows", ([0.1], [0.2], [0.3]))
+    engine = _capture_vector_engine(single={"Entity_name": [MockScoredResult("a", 0.1)]})
+
+    with capture.run_scope(uuid4(), kind="operation") as scope:
+        assert scope.sampled is False
+        results = await _capture_search(
+            engine,
+            _capture_fragment([edge]),
+            query="q",
+            node_name=None,
+            top_k=3,
+            wide_search_top_k=7,
+            neighborhood_seed_top_k=4,
+            feedback_influence=0.2,
+            collections=["Entity_name"],
+        )
+
+    assert results == [edge]
+    assert scope.fields == {
+        "retrieval.top_k": 3,
+        "retrieval.wide_search_top_k": 7,
+        "retrieval.neighborhood_seed_top_k": 4,
+        "retrieval.feedback_influence": 0.2,
+        "retrieval.mode": "single",
+        "retrieval.collections": ["Entity_name", "EdgeType_relationship_name"],
+    }
+    builder.assert_not_called()
+    await capture.drain()
+    assert _candidate_events(fake_capture_sink) == []
+
+
+@pytest.mark.asyncio
+async def test_sampled_in_search_emits_flat_capped_candidates(fake_capture_sink):
+    """(c) One flat event: scalar-only pool/top_k, pool capped at 500, cut_size == len(top_k)."""
+    entity_rows = [MockScoredResult(f"n{i}", i / 1000) for i in range(600)]
+    edge_rows = [MockScoredResult(f"e{i}", 0.5 + i / 100) for i in range(3)]
+    engine = _capture_vector_engine(
+        single={"Entity_name": entity_rows, "EdgeType_relationship_name": edge_rows}
+    )
+    edges = [
+        _capture_edge("a", "b", "knows", ([0.1], [0.2], [0.3])),
+        _capture_edge("b", "c", "likes", ([0.4], [0.5], [0.6])),
+    ]
+
+    results = await _capture_search(
+        engine, _capture_fragment(edges), query="q", node_name=None, top_k=2
+    )
+    assert results == edges
+
+    await capture.drain()
+    [event] = _candidate_events(fake_capture_sink)
+    assert event["stage"] == "brute_force_triplet_search"
+    payload = event["payload"]
+    assert set(payload) == {
+        "query_index",
+        "pool",
+        "top_k",
+        "pool_size",
+        "pool_truncated",
+        "cut_size",
+    }
+    _assert_flat(payload)
+    assert payload["query_index"] == 0
+
+    # Pool: 600 entity + 3 edge candidates seen, 500 kept.
+    assert payload["pool_size"] == 603
+    assert payload["pool_truncated"] is True
+    assert len(payload["pool"]) == 500
+    for entry in payload["pool"]:
+        assert set(entry) == {"id", "collection", "score"}
+        assert isinstance(entry["id"], str)
+        assert isinstance(entry["collection"], str)
+        assert isinstance(entry["score"], float)
+    assert payload["pool"][0] == {"id": "n0", "collection": "Entity_name", "score": 0.0}
+    # The cap keeps the head of every collection, not just the first 500 seen.
+    edge_ids = [e["id"] for e in payload["pool"] if e["collection"] == "EdgeType_relationship_name"]
+    assert edge_ids == ["e0", "e1", "e2"]
+
+    # Cut: plain ids and the summed raw vector distance for this query.
+    assert payload["cut_size"] == len(payload["top_k"]) == 2
+    for entry in payload["top_k"]:
+        assert set(entry) == {"source", "target", "rel", "score"}
+    assert payload["top_k"][0] == {
+        "source": "a",
+        "target": "b",
+        "rel": "knows",
+        "score": pytest.approx(0.6),
+    }
+    assert payload["top_k"][1] == {
+        "source": "b",
+        "target": "c",
+        "rel": "likes",
+        "score": pytest.approx(1.5),
+    }
+
+
+@pytest.mark.asyncio
+async def test_batch_search_emits_one_candidates_event_per_query(fake_capture_sink):
+    """(d) Batch mode: one event per query index, each with its own pool and cut."""
+    batch = {
+        "Entity_name": [
+            [MockScoredResult("n1", 0.1), MockScoredResult("n2", 0.2)],
+            [MockScoredResult("n3", 0.3)],
+        ],
+        "EdgeType_relationship_name": [[MockScoredResult("e1", 0.4)], []],
+    }
+    engine = _capture_vector_engine(batch=batch)
+    edge_a = _capture_edge("a", "b", "knows", ([0.1, 1.0], [0.2, 2.0], [0.3, 3.0]))
+    edge_b = _capture_edge("b", "c", "likes", ([0.4, 4.0], [0.5, 5.0], [0.6, 6.0]))
+    run_id = uuid4()
+
+    with capture.run_scope(run_id, kind="operation") as scope:
+        assert scope.sampled is True
+        results = await _capture_search(
+            engine,
+            _capture_fragment([[edge_a], [edge_a, edge_b]]),
+            query_batch=["q1", "q2"],
+            collections=["Entity_name"],
+        )
+
+    assert results == [[edge_a], [edge_a, edge_b]]
+    assert scope.fields["retrieval.mode"] == "batch"
+
+    await capture.drain()
+    events = _candidate_events(fake_capture_sink)
+    assert [event["run_id"] for event in events] == [str(run_id), str(run_id)]
+    first, second = (event["payload"] for event in events)
+    _assert_flat(first)
+    _assert_flat(second)
+
+    assert first["query_index"] == 0
+    assert first["pool"] == [
+        {"id": "n1", "collection": "Entity_name", "score": 0.1},
+        {"id": "n2", "collection": "Entity_name", "score": 0.2},
+        {"id": "e1", "collection": "EdgeType_relationship_name", "score": 0.4},
+    ]
+    assert first["pool_size"] == 3
+    assert first["pool_truncated"] is False
+    assert first["top_k"] == [
+        {"source": "a", "target": "b", "rel": "knows", "score": pytest.approx(0.6)}
+    ]
+    assert first["cut_size"] == 1
+
+    assert second["query_index"] == 1
+    assert second["pool"] == [{"id": "n3", "collection": "Entity_name", "score": 0.3}]
+    assert second["pool_size"] == 1
+    assert second["cut_size"] == 2
+    # Scores are taken at this query's index of each element's distance list.
+    assert second["top_k"][0]["score"] == pytest.approx(6.0)
+    assert second["top_k"][1] == {
+        "source": "b",
+        "target": "c",
+        "rel": "likes",
+        "score": pytest.approx(15.0),
+    }
+
+
+@pytest.mark.asyncio
+async def test_candidates_capture_failure_never_breaks_the_search(monkeypatch, fake_capture_sink):
+    """A failing payload build is swallowed: the search returns normally, no event."""
+    monkeypatch.setattr(
+        bfts_module, "_retrieval_candidates_payload", MagicMock(side_effect=RuntimeError("boom"))
+    )
+    edge = _capture_edge("a", "b", "knows", ([0.1], [0.2], [0.3]))
+    engine = _capture_vector_engine(single={"Entity_name": [MockScoredResult("a", 0.1)]})
+
+    results = await _capture_search(engine, _capture_fragment([edge]), query="q", node_name=None)
+
+    assert results == [edge]
+    await capture.drain()
+    assert _candidate_events(fake_capture_sink) == []
+
+
+@pytest.mark.asyncio
+async def test_missing_distances_fall_back_to_the_triplet_distance_penalty(fake_capture_sink):
+    """Every ``score`` fallback path, which the well-formed fixtures never exercise.
+
+    The penalty machinery exists because triplet endpoints frequently carry no
+    distance for a given query, so a regression that hardcoded the default or
+    returned 0.0 would silently corrupt the ranking-input score in every captured
+    record. Covered here: a missing ``vector_distance`` key, a list too short for
+    this query index, a non-numeric entry, and a pool row with no ``.score``.
+    """
+    edge = _capture_edge("a", "b", "knows", ([0.5], [1.5], [2.5]))
+    del edge.node2.attributes["vector_distance"]  # missing key -> penalty
+    edge.attributes["vector_distance"] = []  # too short for index 0 -> penalty
+
+    short = _capture_edge("c", "d", "likes", ([0.25], [0.25], [0.25]))
+    short.node1.attributes["vector_distance"] = ["not-a-number"]  # TypeError/ValueError -> penalty
+
+    class _NoScore:
+        id = "no-score"
+
+    engine = _capture_vector_engine(single={"Entity_name": [_NoScore()]})
+
+    results = await _capture_search(
+        engine,
+        _capture_fragment([edge, short]),
+        query="q",
+        node_name=None,
+        triplet_distance_penalty=9.0,
+    )
+    assert results == [edge, short]
+
+    await capture.drain()
+    [event] = _candidate_events(fake_capture_sink)
+    payload = event["payload"]
+
+    # node1 keeps its 0.5; edge and node2 both fall back to the explicit 9.0.
+    assert payload["top_k"][0]["score"] == pytest.approx(0.5 + 9.0 + 9.0)
+    # node1's entry is non-numeric -> penalty; the other two are real.
+    assert payload["top_k"][1]["score"] == pytest.approx(9.0 + 0.25 + 0.25)
+    # A pool row with no .score falls back to the same penalty.
+    assert payload["pool"] == [{"id": "no-score", "collection": "Entity_name", "score": 9.0}]
+
+
+@pytest.mark.asyncio
+async def test_the_default_penalty_is_used_when_none_is_passed(fake_capture_sink):
+    """``triplet_distance_penalty=None`` means the 6.5 retrieval default, not 0.0."""
+    edge = _capture_edge("a", "b", "knows", ([0.5], [1.5], [2.5]))
+    del edge.node2.attributes["vector_distance"]
+    engine = _capture_vector_engine(single={"Entity_name": [MockScoredResult("a", 0.1)]})
+
+    await _capture_search(
+        engine,
+        _capture_fragment([edge]),
+        query="q",
+        node_name=None,
+        triplet_distance_penalty=None,
+    )
+
+    await capture.drain()
+    [event] = _candidate_events(fake_capture_sink)
+    assert event["payload"]["top_k"][0]["score"] == pytest.approx(0.5 + 1.5 + 6.5)

@@ -104,6 +104,15 @@ async def lifespan(app: FastAPI):
 
     await recover_stale_cognify_runs_on_startup()
 
+    # Eval capture (SDK-529): resolve the capture config (and, when enabled, the
+    # storage sink) once here, so the first request of the process does not pay
+    # that one-time initialization on its awaited path. Lazy import: ``import
+    # cognee`` must not load the capture package. Never raises; a failed
+    # initialization just leaves capture disabled.
+    from cognee.modules.observability import capture as eval_capture
+
+    eval_capture.is_active()
+
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
@@ -127,6 +136,15 @@ async def lifespan(app: FastAPI):
     from cognee.shared.utils import close_telemetry_session
 
     await close_telemetry_session()
+
+    # Flush buffered eval-capture events (SDK-529) and stop the flusher on the
+    # loop that owns it, rather than leaving the last requests' records to the
+    # atexit hook. Lazy import: ``import cognee`` must not load the capture
+    # package; is_active() keeps this a no-op when capture is off.
+    from cognee.modules.observability import capture as eval_capture
+
+    if eval_capture.is_active():
+        await eval_capture.shutdown()
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)

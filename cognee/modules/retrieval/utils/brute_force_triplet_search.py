@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Type, Union, cast
 
 from cognee.modules.observability import OtelStatusCode as StatusCode
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.graph.cognee_graph.CogneeGraph import (
+    DEFAULT_TRIPLET_DISTANCE_PENALTY,
+    CogneeGraph,
+)
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.observability import (
@@ -25,6 +28,170 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
 
 logger = get_logger(level=ERROR)
+
+# Eval capture (SDK-529): cap on the candidate pool carried by one
+# ``retrieval.candidates`` event. Batch mode searches every collection with no
+# limit, so without a cap a single event could carry thousands of entries.
+_CAPTURE_POOL_CAP = 500
+_CAPTURE_STAGE = "brute_force_triplet_search"
+
+
+def _distance_at(attributes: Dict, query_index: int, default: float) -> float:
+    """The vector distance an element carries for one query; ``default`` when unset."""
+    distances = attributes.get("vector_distance")
+    if isinstance(distances, list) and query_index < len(distances):
+        try:
+            return float(distances[query_index])
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
+def _scored_for_query(
+    scored: Sequence, query_index: int, query_list_length: Optional[int]
+) -> Sequence:
+    """One query's slice of a ``NodeEdgeVectorSearch`` distance list.
+
+    Single-query mode stores flat lists; batch mode stores one list per query.
+    """
+    if query_list_length is None:
+        return scored or ()
+    if query_index < len(scored):
+        return scored[query_index] or ()
+    return ()
+
+
+def _retrieval_candidates_payload(
+    vector_search: NodeEdgeVectorSearch,
+    top_edges: Sequence[Edge],
+    query_index: int,
+    query_list_length: Optional[int],
+    default_penalty: float,
+) -> Dict:
+    """Flat ``retrieval.candidates`` payload for one query (SDK-529). Scalars only.
+
+    The pool is rebuilt from the ``id``/``score`` attributes of the vector-search
+    results and the cut from the ids and attributes of the returned edges — never
+    the ScoredResult / Node / Edge objects themselves (ScoredResult carries chunk
+    text, Node/Edge back-reference the whole projected fragment).
+
+    Pool: every scored candidate the distance-mapping step saw, as
+    ``(id, collection, score)``, capped at ``_CAPTURE_POOL_CAP``. When the cap
+    bites, each collection keeps the head of its (best-first) results up to an
+    equal quota and the remaining room is filled in collection order, so one large
+    collection cannot crowd the others out of the record.
+
+    Cut: the returned triplets, ``score`` being the summed raw vector distance of
+    source, edge, and target for this query — the un-weighted ranking input. The
+    exact ranking key (importance-weight, feedback, and personal blends) is a
+    closure inside ``CogneeGraph._calculate_query_top_triplet_importances`` and is
+    not stored on the edge; it is deliberately not duplicated here.
+    """
+    per_collection: List[Tuple[str, Sequence]] = [
+        (collection, _scored_for_query(scored, query_index, query_list_length))
+        for collection, scored in vector_search.node_distances.items()
+    ]
+    per_collection.append(
+        (
+            vector_search.edge_collection,
+            _scored_for_query(vector_search.edge_distances, query_index, query_list_length),
+        )
+    )
+
+    pool_size = sum(len(scored) for _, scored in per_collection)
+    if pool_size <= _CAPTURE_POOL_CAP:
+        taken = [(collection, result) for collection, scored in per_collection for result in scored]
+    else:
+        quota = max(1, _CAPTURE_POOL_CAP // len(per_collection))
+        taken = [
+            (collection, result)
+            for collection, scored in per_collection
+            for result in scored[:quota]
+        ]
+        room = _CAPTURE_POOL_CAP - len(taken)
+        for collection, scored in per_collection:
+            if room <= 0:
+                break
+            extra = scored[quota : quota + room]
+            taken.extend((collection, result) for result in extra)
+            room -= len(extra)
+
+    pool = [
+        {
+            "id": str(getattr(result, "id", "")),
+            "collection": collection,
+            "score": float(getattr(result, "score", default_penalty)),
+        }
+        for collection, result in taken
+    ]
+
+    cut = []
+    for edge in top_edges:
+        node1 = edge.node1
+        node2 = edge.node2
+        attributes = edge.attributes
+        rel = (
+            attributes.get("relationship_type")
+            or attributes.get("relationship_name")
+            or attributes.get("edge_text")
+            or ""
+        )
+        score = (
+            _distance_at(node1.attributes, query_index, default_penalty)
+            + _distance_at(attributes, query_index, default_penalty)
+            + _distance_at(node2.attributes, query_index, default_penalty)
+        )
+        cut.append(
+            {"source": str(node1.id), "target": str(node2.id), "rel": str(rel), "score": score}
+        )
+
+    return {
+        "query_index": query_index,
+        "pool": pool,
+        "top_k": cut,
+        "pool_size": pool_size,
+        "pool_truncated": pool_size > _CAPTURE_POOL_CAP,
+        "cut_size": len(cut),
+    }
+
+
+def _emit_retrieval_candidates(
+    vector_search: NodeEdgeVectorSearch,
+    results: Union[List[Edge], List[List[Edge]]],
+    query_list_length: Optional[int],
+    triplet_distance_penalty: Optional[float],
+) -> None:
+    """Emit one ``retrieval.candidates`` event per query (SDK-529). Sync; never raises.
+
+    Called only under ``is_active() and should_capture(...)`` — the OFF path never
+    reaches this function, so it builds nothing when capture is disabled.
+    """
+    from cognee.modules.observability import capture as eval_capture
+
+    try:
+        default_penalty = (
+            DEFAULT_TRIPLET_DISTANCE_PENALTY
+            if triplet_distance_penalty is None
+            else float(triplet_distance_penalty)
+        )
+        # Single mode carries one flat edge list; batch mode one list per query.
+        per_query: list[tuple[int, Sequence[Edge]]] = (
+            [(0, cast(List[Edge], results))]
+            if query_list_length is None
+            else list(enumerate(cast(List[List[Edge]], results)))
+        )
+        for query_index, top_edges in per_query:
+            eval_capture.emit(
+                eval_capture.KIND_RETRIEVAL_CANDIDATES,
+                _retrieval_candidates_payload(
+                    vector_search, top_edges, query_index, query_list_length, default_penalty
+                ),
+                payload_kind="json",
+                stage=_CAPTURE_STAGE,
+            )
+    except Exception as exc:
+        # Capture never breaks the retrieval it observes.
+        logger.debug("retrieval candidates capture skipped (%s)", exc)
 
 
 def format_triplets(edges):
@@ -54,7 +221,7 @@ async def get_memory_fragment(
     node_name_filter_operator: str = "OR",
     relevant_ids_to_filter: Optional[List[str]] = None,
     memory_fragment_filter: Optional[List[dict]] = None,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
     feedback_influence: float = get_base_config().default_feedback_influence,
     graph_engine=None,
     neighborhood_depth: Optional[int] = None,
@@ -233,7 +400,7 @@ async def brute_force_triplet_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    triplet_distance_penalty: Optional[float] = DEFAULT_TRIPLET_DISTANCE_PENALTY,
     feedback_influence: float = get_base_config().default_feedback_influence,
     unified_engine: Optional[UnifiedStoreEngine] = None,
     neighborhood_depth: Optional[int] = None,
@@ -313,6 +480,28 @@ async def brute_force_triplet_search(
         otel_span.set_attribute("cognee.retrieval.collection_count", len(collections))
         otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, ", ".join(collections))
 
+        # Eval capture (SDK-529). Imported lazily so ``import cognee`` never pays
+        # for the capture package; is_active() is one global read once
+        # initialized and is read once per search. The OFF path does nothing else:
+        # no notes, no payload, no sampling roll.
+        from cognee.modules.observability import capture as eval_capture
+
+        capture_active = eval_capture.is_active()
+        if capture_active:
+            # The bounding settings of this search, mirrored from the span into
+            # the run manifest so an offline eval can tie a candidate pool to the
+            # knobs that produced it. No-ops outside a run scope. Last-wins: a
+            # retriever that runs several searches inside one operation scope
+            # (context extension, decomposition, node_name-seeded lookups) leaves
+            # the final call's knobs on the manifest, while every search still
+            # emits its own retrieval.candidates event.
+            eval_capture.note("retrieval.top_k", top_k)
+            eval_capture.note("retrieval.wide_search_top_k", wide_search_top_k)
+            eval_capture.note("retrieval.neighborhood_seed_top_k", neighborhood_seed_top_k)
+            eval_capture.note("retrieval.feedback_influence", feedback_influence)
+            eval_capture.note("retrieval.mode", "batch" if query_batch is not None else "single")
+            eval_capture.note("retrieval.collections", list(collections))
+
         try:
             vector_engine = unified_engine.vector if unified_engine else None
             graph_engine = unified_engine.graph if unified_engine else None
@@ -360,6 +549,16 @@ async def brute_force_triplet_search(
                 COGNEE_RESULT_SUMMARY,
                 f"Found {result_count} triplet(s) from {len(collections)} collection(s)",
             )
+
+            # Candidate pool + final cut, after the result is computed and with no
+            # await: emit() only buffers. Sampled per run for retrieval kinds; the
+            # payload is built only when this search is sampled in.
+            if capture_active and eval_capture.should_capture(
+                eval_capture.KIND_RETRIEVAL_CANDIDATES
+            ):
+                _emit_retrieval_candidates(
+                    vector_search, results, query_list_length, triplet_distance_penalty
+                )
 
             return results
         except CollectionNotFoundError:
