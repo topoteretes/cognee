@@ -30,7 +30,6 @@ async def test_serve_no_config_fails_with_guidance(monkeypatch, tmp_path):
 
     message = exc_info.value.message
     assert "COGNEE_SERVICE_URL" in message
-    assert "COGNEE_AUTH0_DEVICE_CLIENT_ID" in message
     assert "cognee.serve(url=" in message
 
 

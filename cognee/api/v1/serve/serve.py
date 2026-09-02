@@ -59,14 +59,13 @@ async def serve(
 
     Raises:
         CogneeConfigurationError: When called with no ``url``, no usable saved
-            credentials, and no Auth0 device client ID configured — i.e. there
+            credentials, and no device-login client ID configured — i.e. there
             is nothing to connect with. The error explains the available
-            options (pass ``url``/``api_key``, set ``COGNEE_SERVICE_URL`` /
-            ``COGNEE_API_KEY``, or configure ``COGNEE_AUTH0_DEVICE_CLIENT_ID``
-            for browser-based cloud login). Also raised when the instance is
-            reachable but rejects the API key (401/403 on an authenticated
-            probe) — connecting would otherwise appear to succeed and fail on
-            the first operation.
+            options (pass ``url``/``api_key`` or set ``COGNEE_SERVICE_URL`` /
+            ``COGNEE_API_KEY``). Also raised when the instance is reachable
+            but rejects the API key (401/403 on an authenticated probe) —
+            connecting would otherwise appear to succeed and fail on the
+            first operation.
     """
     # Resolve URL from arg or env
     service_url = url or os.getenv("COGNEE_SERVICE_URL")
@@ -240,10 +239,7 @@ async def _serve_cloud(
                 "To connect to a Cognee instance, pass its URL and API key:\n"
                 '    await cognee.serve(url="http://localhost:8000")\n'
                 '    await cognee.serve(url="https://your-instance", api_key="...")\n'
-                "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables.\n\n"
-                "Browser-based Cognee Cloud login additionally requires the "
-                "COGNEE_AUTH0_DEVICE_CLIENT_ID environment variable (or the "
-                "auth0_client_id argument)."
+                "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables."
             ),
             name="ServeConfigurationError",
         )
