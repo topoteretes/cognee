@@ -57,7 +57,10 @@ jobs:
         # separate processes, so the ~50 unit files that mutate process-global
         # config (env, lru_cache'd settings) cannot interfere, and it is the
         # tool the integration suite already shards with. Balanced by
-        # .test_durations, so each shard is ~1/3 of the suite by time.
+        # .test_durations with least_duration (greedy bin-packing): the default
+        # duration_based_chunks cuts collection order at 1/3-time boundaries,
+        # and with the slow subprocess tests clustered that gave 1059/131/4207
+        # tests per shard. least_duration gives 1795/1801/1801 at equal time.
         shard: [1, 2, 3]
       fail-fast: false
     steps:
@@ -155,7 +158,7 @@ jobs:
           # step removes one layer from the suspect window; it is a hypothesis
           # test, not a known fix, and the snapshot above names the survivor.
           uv run --no-sync python -m pytest cognee/tests/unit/ \
-            --splits 3 --group "${{ matrix.shard }}" \
+            --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
             --timeout=300 --timeout-method=thread \
             -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
           rc=$?
@@ -166,14 +169,17 @@ jobs:
           # failure is a real failure and is never retried. `python -c` on
           # purpose: the PATH guard above drops Git-for-Windows' usr\bin, which
           # is where coreutils live.
-          # 1200 is a floor against ~1690 per shard (5066 collected on
-          # 2026-09-02, split three ways by duration); raise it when the suite
-          # grows materially. A shard that ran far fewer than that did not run.
+          # The floor only has to catch "did not run": the false pass this
+          # guards against reported zero tests. Shards are balanced by TIME
+          # (least_duration), so their test COUNTS legitimately differ, and a
+          # count-based floor near the average is wrong by construction --
+          # the first sharded run had shards of 862 / 105 / 4490 tests, all
+          # green, all failed by a 1200 floor. 50 is far below any real shard.
           if python -c "import sys,xml.etree.ElementTree as E; \
             r=E.parse('junit-unit.xml').getroot(); \
             n=int(r.get('tests') or (r[0].get('tests') if len(r) else 0)); \
             print('junit tests:', n); \
-            sys.exit(0 if n >= 1200 else 1)"; then
+            sys.exit(0 if n >= 50 else 1)"; then
             echo "ran=true" >> "$GITHUB_OUTPUT"
             exit $rc
           fi
@@ -255,7 +261,7 @@ jobs:
           # step removes one layer from the suspect window; it is a hypothesis
           # test, not a known fix, and the snapshot above names the survivor.
           uv run --no-sync python -m pytest cognee/tests/unit/ \
-            --splits 3 --group "${{ matrix.shard }}" \
+            --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
             --timeout=300 --timeout-method=thread \
             -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
           rc=$?
@@ -266,14 +272,17 @@ jobs:
           # failure is a real failure and is never retried. `python -c` on
           # purpose: the PATH guard above drops Git-for-Windows' usr\bin, which
           # is where coreutils live.
-          # 1200 is a floor against ~1690 per shard (5066 collected on
-          # 2026-09-02, split three ways by duration); raise it when the suite
-          # grows materially. A shard that ran far fewer than that did not run.
+          # The floor only has to catch "did not run": the false pass this
+          # guards against reported zero tests. Shards are balanced by TIME
+          # (least_duration), so their test COUNTS legitimately differ, and a
+          # count-based floor near the average is wrong by construction --
+          # the first sharded run had shards of 862 / 105 / 4490 tests, all
+          # green, all failed by a 1200 floor. 50 is far below any real shard.
           if python -c "import sys,xml.etree.ElementTree as E; \
             r=E.parse('junit-unit.xml').getroot(); \
             n=int(r.get('tests') or (r[0].get('tests') if len(r) else 0)); \
             print('junit tests:', n); \
-            sys.exit(0 if n >= 1200 else 1)"; then
+            sys.exit(0 if n >= 50 else 1)"; then
             echo "ran=true" >> "$GITHUB_OUTPUT"
             exit $rc
           fi
