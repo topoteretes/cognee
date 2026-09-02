@@ -8,8 +8,11 @@ permissions:
   packages: read
 
 on:
-  schedule:
-    - cron: '0 3 * * *'
+  # No `schedule:` here on purpose. A cron only ever fires against the default
+  # branch's copy of this file, which resolved all 16 reusable-workflow calls
+  # at main and so never tested dev. `.github/workflows/nightly_scheduler.yml`
+  # carries the cron on main and dispatches this workflow at the ref we want
+  # (dev daily, main weekly).
   # Deliberately NOT on pull_request. This workflow used to run on any PR that
   # touched the nightly/perf workflow files, to validate the edit before merge.
   # The cost of that was the whole nightly gating the PR: ~13 jobs including
@@ -19,6 +22,12 @@ on:
   # unrelated PR. Validate workflow edits with `workflow_dispatch` on the branch
   # instead (Actions -> Nightly Tests -> Run workflow -> pick the branch).
   workflow_dispatch:
+    inputs:
+      cadence:
+        description: 'Why this run happened: daily (dev), weekly (main), manual.'
+        required: false
+        default: manual
+        type: string
 
 
 concurrency:
@@ -235,6 +244,10 @@ jobs:
 
       - name: Determine status
         id: status
+        env:
+          # Via env, not inline ${{ }}: `cadence` is a free-text dispatch input
+          # and inline interpolation would splice it into this shell script.
+          CADENCE: ${{ inputs.cadence }}
         run: |
           if [[ "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.llamacpp-tests.result }}" == "success" &&
@@ -261,6 +274,9 @@ jobs:
             echo "summary=One or more nightly test suites failed." >> "$GITHUB_OUTPUT"
           fi
           echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+          # Two nightlies now exist (daily dev, weekly main). Everything below
+          # that reaches a human or the warehouse has to say which one this is.
+          echo "cadence=${CADENCE:-manual}" >> "$GITHUB_OUTPUT"
 
       - name: Presign performance report links
         id: presign
@@ -307,6 +323,9 @@ jobs:
           STATUS_EMOJI: ${{ steps.status.outputs.emoji }}
           STATUS_SUMMARY: ${{ steps.status.outputs.summary }}
           STATUS_RAN_AT: ${{ steps.status.outputs.ran_at }}
+          STATUS_BRANCH: ${{ github.ref_name }}
+          STATUS_CADENCE: ${{ steps.status.outputs.cadence }}
+          STATUS_SHA: ${{ github.sha }}
           STATUS_OLLAMA: ${{ needs.ollama-tests.result }}
           STATUS_LLAMACPP: ${{ needs.llamacpp-tests.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -345,7 +364,7 @@ jobs:
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
           payload: |
             channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
-            text: "${{ steps.status.outputs.emoji }} Nightly Tests (${{ steps.status.outputs.ran_at }}): ${{ steps.status.outputs.summary }}"
+            text: "${{ steps.status.outputs.emoji }} Nightly Tests [${{ github.ref_name }}] (${{ steps.status.outputs.ran_at }}): ${{ steps.status.outputs.summary }}"
             blocks: ${{ steps.blocks.outputs.blocks }}
 
       - name: Load performance reports into MotherDuck
@@ -365,6 +384,13 @@ jobs:
           DUCKDB_VERSION: '1.4.5'
           motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
           MD_TARGET: ci_analytics.nightly
+          # The ETL does CREATE OR REPLACE VIEW from the script on the ref that
+          # ran it. With two refs now running it, view definitions would be
+          # last-writer-wins ACROSS refs: every week where dev's ETL differs
+          # from main's (i.e. the release week of any ETL change, including this
+          # one), the Sunday main run would silently revert them for six days.
+          # Only the daily dev run defines views; the weekly main run loads rows.
+          PERF_REFRESH_VIEWS: ${{ steps.status.outputs.cadence == 'weekly' && 'false' || 'true' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
           AWS_DEFAULT_REGION: eu-west-1

@@ -1,6 +1,7 @@
 # Nightly performance corpora
 
-The nightly percentile benchmark (`.github/workflows/nightly_tests.yml`) runs each
+The nightly percentile benchmark (`.github/workflows/nightly_tests.yml`, dispatched by
+`.github/workflows/nightly_scheduler.yml` — dev daily, main weekly) runs each
 corpus through `statistics_percentile_report.py` on four backends. A corpus is two
 S3 objects under
 `s3://github-runner-cognee-tests/nightly_ci_artifacts/performance_test_artifacts/`:
