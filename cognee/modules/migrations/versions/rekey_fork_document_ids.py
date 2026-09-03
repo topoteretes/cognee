@@ -61,7 +61,9 @@ from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapa
 from cognee.infrastructure.databases.provenance import (
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
+    make_chunk_source_ref_key,
     make_source_ref_key,
+    parse_source_ref_key,
 )
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -267,6 +269,74 @@ async def _rekey_graph_provenance(graph_engine, fork_rows: list) -> None:
             old_key,
             new_key,
         )
+
+    await _rekey_chunk_scoped_provenance(graph_engine, fork_rows)
+
+
+async def _rekey_chunk_scoped_provenance(graph_engine, fork_rows: list) -> None:
+    """Move chunk-scoped (source_ref:v2) refs from pre-fork ids to canonical ids.
+
+    Artifacts produced by a chunk carry ``source_ref:v2:{dataset}:{data_id}:
+    {chunk_id}`` instead of the document-scoped v1 key, so the v1 sweep above
+    never finds them — a post-migration delete by the canonical id would
+    strand every chunk-owned node. The chunk ids are not derivable from the
+    fork rows, so the keys are discovered from the dataset's ref maps and each
+    one is re-issued under the canonical data id (same chunk id),
+    attach-then-remove like the v1 sweep so an interrupted run converges.
+    """
+    ids_by_dataset: dict = {}
+    for old_id, new_id, dataset_id in fork_rows:
+        ids_by_dataset.setdefault(dataset_id, {})[str(old_id)] = str(new_id)
+
+    for dataset_id, id_map in ids_by_dataset.items():
+        try:
+            refs_by_node = await graph_engine.find_node_source_refs_by_dataset(str(dataset_id))
+            refs_by_edge = await graph_engine.find_edge_source_refs_by_dataset(str(dataset_id))
+        except UnsupportedProvenanceCapability:
+            return
+
+        def _forked_v2_refs(ref_map: dict) -> dict:
+            """old v2 ref key -> (new v2 ref key, holder ids)."""
+            moves: dict = {}
+            for holder, refs in ref_map.items():
+                for ref in refs:
+                    try:
+                        parsed = parse_source_ref_key(ref)
+                    except ValueError:
+                        continue
+                    if parsed.version != 2 or str(parsed.data_id) not in id_map:
+                        continue
+                    new_key = make_chunk_source_ref_key(
+                        dataset_id, UUID(id_map[str(parsed.data_id)]), parsed.chunk_id
+                    )
+                    moves.setdefault(ref, (new_key, []))[1].append(holder)
+            return moves
+
+        node_moves = _forked_v2_refs(refs_by_node)
+        edge_moves = _forked_v2_refs(refs_by_edge)
+
+        for old_ref, (new_key, node_ids) in node_moves.items():
+            snapshots = await graph_engine.get_node_delete_data(node_ids)
+            for node_id in node_ids:
+                run_id = _run_id_for_key(snapshots.get(node_id), old_ref)
+                await graph_engine.attach_node_source_refs([node_id], [new_key], run_id)
+            await graph_engine.remove_node_source_refs(node_ids, [old_ref])
+
+        for old_ref, (new_key, edge_identities) in edge_moves.items():
+            edge_snapshots = await graph_engine.get_edge_delete_data(edge_identities)
+            for edge in edge_identities:
+                run_id = _run_id_for_key(edge_snapshots.get(edge), old_ref)
+                await graph_engine.attach_edge_source_refs([edge], [new_key], run_id)
+            await graph_engine.remove_edge_source_refs(edge_identities, [old_ref])
+
+        if node_moves or edge_moves:
+            logger.info(
+                "rekey_fork_document_ids: moved %d chunk-scoped node ref key(s), "
+                "%d edge ref key(s) in dataset %s",
+                len(node_moves),
+                len(edge_moves),
+                dataset_id,
+            )
 
 
 class ForkChunkIndexPoint(DataPoint):

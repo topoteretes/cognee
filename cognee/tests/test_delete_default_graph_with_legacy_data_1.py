@@ -15,6 +15,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
@@ -271,7 +272,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     johns_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(johns_data_id)}-0"),
+        id=content_chunk_id(str(johns_data_id), chunk_content_hash(johns_text), 0),
         text=johns_text,
         chunk_size=14,
         chunk_index=0,
@@ -287,7 +288,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     maries_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(maries_data_id)}-0"),
+        id=content_chunk_id(str(maries_data_id), chunk_content_hash(maries_text), 0),
         text=maries_text,
         chunk_size=14,
         chunk_index=0,

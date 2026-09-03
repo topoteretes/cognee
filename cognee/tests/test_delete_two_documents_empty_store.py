@@ -32,6 +32,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
@@ -235,7 +236,7 @@ async def main(mock_create_structured_output: AsyncMock):
         id=doc1_data_id, name="Doc1", raw_data_location="doc1_location", external_metadata=""
     )
     doc1_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(doc1_data_id)}-0"),
+        id=content_chunk_id(str(doc1_data_id), chunk_content_hash(doc1_text), 0),
         text=doc1_text,
         chunk_size=14,
         chunk_index=0,
@@ -248,7 +249,7 @@ async def main(mock_create_structured_output: AsyncMock):
         id=doc2_data_id, name="Doc2", raw_data_location="doc2_location", external_metadata=""
     )
     doc2_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(doc2_data_id)}-0"),
+        id=content_chunk_id(str(doc2_data_id), chunk_content_hash(doc2_text), 0),
         text=doc2_text,
         chunk_size=14,
         chunk_index=0,

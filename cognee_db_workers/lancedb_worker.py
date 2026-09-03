@@ -24,6 +24,7 @@ from .lancedb_protocol import (
     OP_TABLE_NAMES,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
+    OP_TABLE_SCHEMA,
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
@@ -145,6 +146,14 @@ async def _op_table_to_arrow(registry: HandleRegistry, req: Request):
     return sink.getvalue().to_pybytes()
 
 
+async def _op_table_schema(registry: HandleRegistry, req: Request):
+    table = registry.get(req.handle_id)
+    schema = await table.schema()
+    # Arrow IPC, matching OP_CREATE_TABLE's schema encoding — a typed format
+    # that rejects non-schema bytes, unlike pickle over an RPC boundary.
+    return schema.serialize().to_pybytes()
+
+
 async def _op_table_add(registry: HandleRegistry, req: Request):
     table = registry.get(req.handle_id)
     records = req.args[0]
@@ -230,6 +239,7 @@ DISPATCH = {
     OP_DROP_TABLE: _op_drop_table,
     OP_TABLE_RELEASE: _op_release_handle,
     OP_TABLE_COUNT_ROWS: _op_table_count_rows,
+    OP_TABLE_SCHEMA: _op_table_schema,
     OP_TABLE_TO_ARROW: _op_table_to_arrow,
     OP_TABLE_ADD: _op_table_add,
     OP_TABLE_DELETE: _op_table_delete,

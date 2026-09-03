@@ -165,6 +165,7 @@ def _add_extracted_edges(
     entities_by_extracted_node_id: dict[str, Entity],
     edges_by_identity: dict[EdgeIdentity, Edge],
 ) -> None:
+    produced = data_chunk._produced_edge_identities
     for extracted_edge in extracted_graph.edges:
         source_entity = entities_by_extracted_node_id.get(extracted_edge.source_node_id)
         target_entity = entities_by_extracted_node_id.get(extracted_edge.target_node_id)
@@ -178,12 +179,18 @@ def _add_extracted_edges(
             target_id=str(target_entity.id),
             relationship_name=relationship_name,
         )
-
-        # Capture after entity resolution but before deduplication and the
-        # existing-edge filter. Thus every chunk keeps its exact support link
-        # even when the graph assertion was written by an earlier source.
-        # PrivateAttr storage keeps this transient tuple out of graph/vector
-        # payloads.
+        # Both records are written HERE, before the deduplication below, so a
+        # relationship the graph already holds still counts for this chunk:
+        # such an edge is never attached to the chunk's model, so neither
+        # ownership nor evidence may depend on it being written.
+        #
+        # Ownership needs one entry per distinct relationship — it decides
+        # what survives when a chunk is deleted.
+        produced_key = (edge_identity.source_id, edge_identity.target_id, relationship_name)
+        if produced_key not in produced:
+            produced.append(produced_key)
+        # Evidence needs every occurrence with its supporting text, so this
+        # one is appended unconditionally.
         data_chunk._provenance_edges.append(
             (
                 edge_identity.source_id,
@@ -192,7 +199,6 @@ def _add_extracted_edges(
                 {"edge_text": edge_text},
             )
         )
-
         edges_by_identity.setdefault(
             edge_identity,
             Edge(
