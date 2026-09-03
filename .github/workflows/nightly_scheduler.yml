@@ -7,8 +7,13 @@ name: Nightly Scheduler
 #
 # This shim keeps the cron on main and hands the work to nightly_tests.yml at
 # the ref we actually want tested:
-#   * daily  03:00 UTC     -> dev   (the branch that must stay green)
-#   * weekly Sun 06:00 UTC -> main  (released code keeps its coverage)
+#   * daily  18:00 UTC     -> main  (released code, exercised during peak US
+#     hours: 18:00 UTC = 19:00 CET / 20:00 CEST, inside the 17:00-22:00 CET
+#     window either side of the DST switch, so the cloud perf arms measure
+#     the platform under real peak load)
+#   * weekly Sun 06:00 UTC -> dev   (in-development code keeps nightly-only
+#     coverage: the 3.11-3.13 unit matrix, the search-DB version sweep, and
+#     anything else that runs only here)
 #
 # It works because workflow_dispatch is one of only two events GITHUB_TOKEN may
 # raise that still creates a workflow run:
@@ -19,8 +24,8 @@ name: Nightly Scheduler
 
 on:
   schedule:
-    - cron: '0 3 * * *'    # daily  -> dev
-    - cron: '0 6 * * 0'    # Sunday -> main (the only free slot among the repo's crons)
+    - cron: '0 18 * * *'   # daily  -> main, peak US hours (see header)
+    - cron: '0 6 * * 0'    # Sunday -> dev (a free slot among the repo's crons)
   workflow_dispatch:
     inputs:
       target_ref:
@@ -60,8 +65,8 @@ jobs:
           # github.event.schedule is the literal cron string that fired, which
           # is how one workflow file serves two cadences.
           case "${SCHEDULE:-}" in
-            '0 3 * * *') ref=dev;                 cadence=daily  ;;
-            '0 6 * * 0') ref=main;                cadence=weekly ;;
+            '0 18 * * *') ref=main;               cadence=daily  ;;
+            '0 6 * * 0')  ref=dev;                cadence=weekly ;;
             '')          ref="${INPUT_REF:-dev}"; cadence=manual ;;
             *) echo "::error::unmapped cron '${SCHEDULE}' — add it to the case"; exit 1 ;;
           esac

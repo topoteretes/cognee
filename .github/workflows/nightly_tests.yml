@@ -9,10 +9,11 @@ permissions:
 
 on:
   # No `schedule:` here on purpose. A cron only ever fires against the default
-  # branch's copy of this file, which resolved all 16 reusable-workflow calls
-  # at main and so never tested dev. `.github/workflows/nightly_scheduler.yml`
-  # carries the cron on main and dispatches this workflow at the ref we want
-  # (dev daily, main weekly).
+  # branch's copy of this file, so a plain schedule could only ever test main's
+  # stale copy of the job graph. `.github/workflows/nightly_scheduler.yml`
+  # carries the cron on main and dispatches this workflow at the ref we want:
+  # main daily at 18:00 UTC (peak US hours, so the cloud perf arms measure the
+  # platform under real load), dev weekly on Sunday.
   # Deliberately NOT on pull_request. This workflow used to run on any PR that
   # touched the nightly/perf workflow files, to validate the edit before merge.
   # The cost of that was the whole nightly gating the PR: ~13 jobs including
@@ -452,11 +453,12 @@ jobs:
           motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
           MD_TARGET: ci_analytics.nightly
           # The ETL does CREATE OR REPLACE VIEW from the script on the ref that
-          # ran it. With two refs now running it, view definitions would be
-          # last-writer-wins ACROSS refs: every week where dev's ETL differs
-          # from main's (i.e. the release week of any ETL change, including this
-          # one), the Sunday main run would silently revert them for six days.
-          # Only the daily dev run defines views; the weekly main run loads rows.
+          # ran it. With two refs running it, view definitions would be
+          # last-writer-wins ACROSS refs, flip-flopping every week where the
+          # two ETLs differ. Only the DAILY run defines views (main, so the
+          # warehouse always reflects released ETL code -- a dev-side ETL
+          # change takes effect at the release merge); the weekly dev run
+          # loads rows only.
           PERF_REFRESH_VIEWS: ${{ steps.status.outputs.cadence == 'weekly' && 'false' || 'true' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
