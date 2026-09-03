@@ -46,7 +46,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -68,13 +68,33 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_cognee_server_start.py
 
+  run-migration-model-lockstep-guard:
+    name: Migration/Model Lockstep Guard
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Standalone lockstep guard: the Alembic chain and the ORM models must
+      # describe the same schema (see the test's docstring). Deliberately its
+      # own check so a break is visible by name, and deliberately secret-free:
+      # it replays migrations onto a local SQLite database only.
+      - name: Run Migration/Model Lockstep Guard
+        run: uv run pytest cognee/tests/e2e/migrations/test_migration_model_lockstep.py -v
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -93,10 +113,78 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_telemetry.py
 
-  run-telemetry-pipeline-test:
-    name: Run Telemetry Pipeline Test
+  run-incremental-update-matrix:
+    name: Incremental update e2e — ${{ matrix.name }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each leg runs the chunk-level update suite and the stress e2e
+          # against a full stack: graph + vector + (for Postgres) relational.
+          # Neo4j Community has no per-dataset databases, so its leg runs
+          # single-user; the others run with access control on where the
+          # suite asks for it.
+          - name: LadybugDB + LanceDB
+            graph: kuzu
+            vector: lancedb
+            acl: 'true'
+            extras: ''
+          - name: Postgres graph + PGVector
+            graph: postgres
+            vector: pgvector
+            acl: 'true'
+            extras: postgres
+          - name: Neo4j + LanceDB
+            graph: neo4j
+            vector: lancedb
+            acl: 'false'
+            extras: neo4j
+    services:
+      neo4j:
+        image: neo4j:5.21
+        env:
+          NEO4J_AUTH: neo4j/cognee_test_password
+          NEO4J_PLUGINS: '["apoc"]'
+          NEO4J_dbms_security_procedures_unrestricted: apoc.*
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+      postgres:
+        image: ghcr.io/topoteretes/pgvector:pg17
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    env:
+      ENV: 'dev'
+      INCR_TEST_GRAPH_PROVIDER: ${{ matrix.graph }}
+      INCR_TEST_VECTOR_PROVIDER: ${{ matrix.vector }}
+      INCR_TEST_ACL: ${{ matrix.acl }}
+      INCR_TEST_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
+      INCR_TEST_DB_PORT: 5432
+      INCR_TEST_DB_USERNAME: cognee
+      INCR_TEST_DB_PASSWORD: cognee
+      INCR_TEST_DB_NAME: cognee_db
+      INCR_TEST_GRAPH_URL: bolt://${{ inputs.ci-image != '' && 'neo4j' || '127.0.0.1' }}:7687
+      INCR_TEST_GRAPH_USER: neo4j
+      INCR_TEST_GRAPH_PASSWORD: cognee_test_password
+      INCR_TEST_GRAPH_NAME: neo4j
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -105,23 +193,16 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          extra-dependencies: ${{ matrix.extras }}
 
-      - name: Add telemetry identifier
-        run: |
-          echo "test-machine" > .anon_id
+      # Mocked LLM and embeddings: no secrets. The suite covers the incremental
+      # update flow end to end and the chunk-ownership deletion semantics; the
+      # stress run mutates a book through every edit shape and audits ownership.
+      - name: Run incremental update suite
+        run: uv run pytest cognee/tests/e2e/incremental_update/
 
-      - name: Run default basic pipeline with telemetry on
-        env:
-          ENV: 'local'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_library.py
+      - name: Run incremental update stress test
+        run: uv run python ./cognee/tests/test_incremental_update_stress.py
 
   run-pipeline-error-propagation-test:
     name: Pipeline Error Propagation Test
@@ -129,7 +210,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -155,7 +236,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -181,7 +262,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -227,7 +308,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -253,7 +334,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -274,13 +355,39 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_dlt_mixed_input_e2e.py
 
+  run-code-graph-e2e-test:
+    name: Code Graph E2E Test (enola ingest -> typed graph -> CODE search)
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Cache the pinned enola binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cognee/bin
+          key: enola-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('cognee/tasks/code_graph/install_enola.py') }}
+
+      # Deliberately NO LLM/embedding secrets: the enola code-graph route must
+      # ingest, store and answer SearchType.CODE queries without an API key.
+      - name: Run code graph e2e test
+        env:
+          ENV: 'dev'
+        run: uv run python ./cognee/tests/test_code_graph_e2e.py
+
   run-s3-bucket-test:
       name: S3 Bucket Test
       runs-on: ubuntu-22.04
       container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       steps:
         - name: Check out repository
-          uses: actions/checkout@v6
+          uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
         - name: Cognee Setup
           uses: ./.github/actions/cognee_setup
@@ -312,7 +419,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -341,7 +448,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -367,7 +474,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -393,7 +500,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -419,7 +526,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -448,7 +555,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -478,7 +585,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -504,7 +611,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -530,7 +637,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -549,40 +656,13 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_delete_permission.py
 
-  test-deletion-on-default-graph:
-    name: Delete default graph data test
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run deletion on default graph
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_default_graph.py
-
   test-deletion-on-default-graph-non-mocked:
     name: Delete default graph data test (non-mocked)
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
@@ -603,40 +683,13 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_delete_default_graph_non_mocked.py
 
-  test-deletion-on-custom-graph:
-    name: Delete custom graph data test
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run deletion on custom graph
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_delete_custom_graph.py
-
   test-delete-two-documents-empty-store:
     name: Delete two documents, verify incremental empty store (Ladybug/LanceDB)
     runs-on: ubuntu-22.04
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
@@ -684,7 +737,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -728,7 +781,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
@@ -768,7 +821,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -803,7 +856,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
@@ -831,7 +884,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -857,7 +910,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -882,7 +935,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -907,7 +960,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -940,7 +993,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1000,7 +1053,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1038,7 +1091,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1098,7 +1151,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1157,7 +1210,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1212,7 +1265,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1252,7 +1305,7 @@ jobs:
         shell: bash
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1302,7 +1355,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1338,7 +1391,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1405,7 +1458,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1452,7 +1505,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Check out
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1492,7 +1545,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1520,7 +1573,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1550,7 +1603,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1580,7 +1633,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1609,7 +1662,7 @@ jobs:
     container:  ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1653,7 +1706,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1701,7 +1754,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1733,7 +1786,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1764,7 +1817,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1787,7 +1840,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1810,7 +1863,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -1823,29 +1876,6 @@ jobs:
         env:
           ENV: 'dev'
         run: uv run pytest cognee/tests/api/test_agents_e2e.py -v
-
-  run_agent_registry_tests:
-    name: Agent Registry Tests
-    runs-on: ubuntu-latest
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Check out
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run Agent Registry Tests
-        env:
-          ENV: 'dev'
-        run: uv run pytest cognee/tests/unit/modules/agents/test_agent_registry.py -v
 
   backwards-compatibility-sqlite:
     name: Backwards compatibility — SQLite + LanceDB + Kuzu
@@ -1878,17 +1908,17 @@ jobs:
       EMBEDDING_DIMENSIONS: 300
     steps:
       - name: Check out current branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
         with:
           enable-cache: true
 
@@ -1983,17 +2013,17 @@ jobs:
 
     steps:
       - name: Check out current branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
         with:
           enable-cache: true
 
@@ -2042,7 +2072,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -2080,7 +2110,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -2116,7 +2146,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -2143,7 +2173,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

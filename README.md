@@ -112,7 +112,7 @@ Let’s try Cognee in just a few lines of code.
 
 ### Step 1: Install Cognee
 
-You can install Cognee with **pip**, **poetry**, **uv**, or your preferred Python package manager.
+You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
 ```bash
 uv pip install cognee
@@ -198,6 +198,31 @@ A third flag, `DATASET_QUEUE_ENABLED=false`, removes the per-process concurrency
 on datasets; it saves a little latency but risks file-lock leaks and resource
 exhaustion when multiple datasets run in parallel — leave it on for servers.
 
+### Procedural memory (skills)
+
+Beyond facts, cognee stores **skills** — dataset-scoped `SKILL.md` playbooks that
+agents can discover semantically, load on demand, execute, and improve from run
+history:
+
+```python
+# Ingest a folder of SKILL.md files into a dataset
+await cognee.remember("./skills", content_type="skills", dataset_name="ops")
+
+# Discover by meaning — returns name/description/metadata, never the full procedure
+results = await cognee.search("how do I deploy to staging",
+                              query_type=SearchType.SKILLS, datasets=["ops"])
+
+# recall() also runs a deterministic (no-LLM) skill gate: procedural questions
+# automatically get matching skills appended, tagged source="skills"
+results = await cognee.recall("how do I deploy to staging", datasets=["ops"])
+```
+
+Skills are authored as `SKILL.md` files (one directory per skill, frontmatter for
+description/tools/maintainer), scoped to exactly one dataset at ingest time, and
+executed through `SearchType.AGENTIC_COMPLETION`, where the agent loads full
+procedure bodies on demand via the `load_skill` tool. Disable the recall gate with
+`SKILL_GATE_ENABLED=false`.
+
 ## Run with Docker
 
 Prefer containers? Cognee publishes prebuilt images to Docker Hub on every push to `main`:
@@ -219,14 +244,20 @@ cp .env.template .env   # then edit .env and set LLM_API_KEY
 docker compose up
 
 # Optional profiles (combine as needed):
-docker compose --profile ui up        # + frontend on http://localhost:3000
+docker compose --profile ui up        # + UI on http://localhost:3000
 docker compose --profile mcp up       # + MCP server on http://localhost:8001
 docker compose --profile postgres up  # + Postgres/PGVector
 docker compose --profile neo4j up     # + Neo4j
+
+# Backend, MCP server and UI together
+docker compose --profile mcp --profile ui up
 ```
 
 > The `cognee` and `cognee-mcp` services publish different host ports (`8000` vs `8001`),
 > so you can run both at once.
+
+> The `ui` profile runs the published `cognee/cognee-ui` image. To build the UI from
+> your working tree instead, with hot reload, use `--profile ui-dev`.
 
 ### Option B — Pull the prebuilt image (no clone required)
 
@@ -240,7 +271,28 @@ docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee:main
 # MCP server (HTTP transport)
 docker pull cognee/cognee-mcp:main
 docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+
+# UI (http://localhost:3000)
+docker pull cognee/cognee-ui:main
+docker run -p 3000:3000 --rm -it cognee/cognee-ui:main
 ```
+
+The UI needs no configuration when the backend is reachable at port 8000 on the same
+host you browse to: it derives the backend address from the page URL. Point it
+somewhere else with `COGNEE_BACKEND_URL`, which is read when the container starts, so
+one image works against any backend:
+
+```bash
+docker run -p 3000:3000 -e COGNEE_BACKEND_URL=https://cognee.example.com \
+  --rm -it cognee/cognee-ui:main
+
+# What backend did this container resolve?
+curl http://localhost:3000/api/runtime-config
+```
+
+The browser talks to the backend directly, so `COGNEE_BACKEND_URL` must be the address
+as seen from the browser, and the backend must allow the UI's origin through
+`CORS_ALLOWED_ORIGINS`.
 
 See the [MCP server README](cognee-mcp/README.md) for SSE/stdio transports, optional
 extras, and MCP client configuration.
@@ -284,7 +336,7 @@ See the [plugin README](https://github.com/topoteretes/cognee-integrations/tree/
 
 ### Connect to Cognee Cloud
 
-Point any Python agent at a managed Cognee instance — all SDK calls route to the cloud:
+Point any Python agent at a managed Cognee instance — all SDK calls route to the cloud. Get your instance URL and API key from the [Cognee Cloud](https://www.cognee.ai) dashboard, or set the `COGNEE_SERVICE_URL` and `COGNEE_API_KEY` environment variables and call `serve()` with no arguments:
 
 ```python
 import cognee
@@ -388,7 +440,7 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 
 | Platform | Best For | Command |
 |----------|----------|---------|
-| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai) or `await cognee.serve()` |
+| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai), then `await cognee.serve(url=..., api_key=...)` |
 | **Modal** | Serverless, auto-scaling, GPU workloads | `bash distributed/deploy/modal-deploy.sh` |
 | **Railway** | Simplest PaaS, native Postgres | `railway init && railway up` |
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |

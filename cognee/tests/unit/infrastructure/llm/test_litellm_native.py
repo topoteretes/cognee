@@ -527,13 +527,29 @@ class TestQualifyModel:
         qualified = self._qualify("phi4", "ollama")
         assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
 
+    def test_namespaced_ollama_model_gets_prefixed(self):
+        """A slash is not a provider: Ollama accepts namespaced names."""
+        assert self._qualify("library/phi4", "ollama") == "ollama/library/phi4"
+
+    def test_hugging_face_gguf_path_gets_prefixed(self):
+        """The documented way to run a GGUF under Ollama keeps its full path."""
+        model = "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF"
+        assert self._qualify(model, "ollama") == f"ollama/{model}"
+
+    def test_namespaced_name_is_routable_by_litellm(self):
+        """Same end of the chain, for a name that contains a slash."""
+        import litellm
+
+        qualified = self._qualify("library/phi4", "ollama")
+        assert litellm.get_llm_provider(model=qualified)[1] == "ollama"
+
 
 # ── markdown-fenced JSON on the fallback path (CLO-596) ──────────────────────
 # The prompted-JSON path hands the model's reply straight to
 # model_validate_json. Models on that path routinely wrap the answer in a
 # ```json fence: the JSON inside is valid, but pydantic sees a backtick at
 # column 1 and rejects it, and the self-correction retry cannot help because a
-# model that fences once fences again. Hit while capturing the Henkel cassette.
+# model that fences once fences again. Hit while capturing the datasheets cassette.
 
 
 class TestStripJsonFence:
@@ -546,7 +562,7 @@ class TestStripJsonFence:
         return _strip_json_fence(text)
 
     def test_fenced_with_language_tag(self):
-        """The exact shape that broke the Henkel capture."""
+        """The exact shape that broke the datasheets capture."""
         assert self._strip('```json\n{"summary": "s"}\n```') == '{"summary": "s"}'
 
     def test_fenced_without_language_tag(self):

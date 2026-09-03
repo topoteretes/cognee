@@ -55,7 +55,10 @@ async def test_forget_routes_dataset_id_without_name_inference():
     ):
         await forget_module.forget(dataset_id=dataset_id, user=USER)
 
-    assert _CapturingContextManager.captured == [dataset_id]
+    # forget() must NOT enter the database context itself: the context (queue
+    # slot) is entered after the per-dataset lock, inside the helpers /
+    # datasets operations — canonical order (dataset lock -> queue slot), SDK-483.
+    assert _CapturingContextManager.captured == []
     forget_dataset.assert_awaited_once()
     assert forget_dataset.call_args.args[0] == dataset_id
 
@@ -78,8 +81,9 @@ async def test_forget_routes_dataset_as_name():
     ):
         await forget_module.forget(dataset="scientists", user=USER)
 
-    # The context is entered with the *authorized* dataset id, not the raw name.
-    assert _CapturingContextManager.captured == [resolved_id]
+    # forget() must NOT enter the database context itself (see the dataset_id
+    # variant above); authorization still resolved the name before dispatch.
+    assert _CapturingContextManager.captured == []
     forget_dataset.assert_awaited_once()
     assert forget_dataset.call_args.args[0] == "scientists"
 

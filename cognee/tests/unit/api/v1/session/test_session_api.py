@@ -411,12 +411,27 @@ class TestAddFeedback:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_session_manager_exception(self, session_user_ctx, sm):
+    async def test_session_manager_exception_propagates(self, session_user_ctx, sm):
+        """A failed write is an error, not a missing QA entry."""
         from cognee.api.v1.session.session import add_feedback
 
         sm.add_feedback.side_effect = RuntimeError("cache error")
-        result = await add_feedback(session_id="s1", qa_id="q1", feedback_text="ok")
-        assert result is False
+        with pytest.raises(RuntimeError, match="cache error"):
+            await add_feedback(session_id="s1", qa_id="q1", feedback_text="ok")
+
+    @pytest.mark.asyncio
+    async def test_session_manager_factory_exception_propagates(self, session_user_ctx):
+        """A misconfigured cache backend is an error, not a missing QA entry."""
+        from cognee.api.v1.session.session import add_feedback
+        from cognee.infrastructure.databases.exceptions import CacheConnectionError
+
+        with patch.object(
+            _session_module(),
+            "get_session_manager",
+            side_effect=CacheConnectionError("bad backend"),
+        ):
+            with pytest.raises(CacheConnectionError, match="bad backend"):
+                await add_feedback(session_id="s1", qa_id="q1", feedback_text="ok")
 
     @pytest.mark.asyncio
     async def test_passes_optional_feedback_params(self, session_user_ctx, sm):
@@ -492,12 +507,13 @@ class TestAddFrequencyWeights:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_session_manager_exception(self, session_user_ctx, sm):
+    async def test_session_manager_exception_propagates(self, session_user_ctx, sm):
+        """A failed write is an error, not a missing QA entry."""
         from cognee.api.v1.session.session import add_frequency_weights
 
         sm.update_qa.side_effect = RuntimeError("cache error")
-        result = await add_frequency_weights(session_id="s1", qa_id="q1", node_ids=["n1"])
-        assert result is False
+        with pytest.raises(RuntimeError, match="cache error"):
+            await add_frequency_weights(session_id="s1", qa_id="q1", node_ids=["n1"])
 
     @pytest.mark.asyncio
     async def test_uses_explicit_user(self, session_user_ctx, sm):
@@ -551,12 +567,13 @@ class TestDeleteFeedback:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_session_manager_exception(self, session_user_ctx, sm):
+    async def test_session_manager_exception_propagates(self, session_user_ctx, sm):
+        """A failed write is an error, not a missing QA entry."""
         from cognee.api.v1.session.session import delete_feedback
 
         sm.delete_feedback.side_effect = RuntimeError("cache error")
-        result = await delete_feedback(session_id="s1", qa_id="q1")
-        assert result is False
+        with pytest.raises(RuntimeError, match="cache error"):
+            await delete_feedback(session_id="s1", qa_id="q1")
 
     @pytest.mark.asyncio
     async def test_uses_explicit_user(self, session_user_none, sm):

@@ -15,6 +15,7 @@ from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.recall_command import RecallCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
+from cognee.cli.commands.forget_command import ForgetCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
@@ -616,6 +617,98 @@ class TestDeleteCommand:
             command.execute(args)
 
 
+class TestForgetCommand:
+    """Test the ForgetCommand class"""
+
+    def test_command_properties(self):
+        command = ForgetCommand()
+        assert command.command_string == "forget"
+        assert "Remove data" in command.help_string
+        assert command.docs_url is not None
+
+    def test_configure_parser(self):
+        command = ForgetCommand()
+        parser = argparse.ArgumentParser()
+
+        command.configure_parser(parser)
+
+        actions = {action.dest: action for action in parser._actions}
+        assert "dataset" in actions
+        assert "dataset_id" in actions
+        assert "data_id" in actions
+        assert "everything" in actions
+        assert "memory_only" in actions
+        assert actions["memory_only"].default is False
+
+    @patch("cognee.cli.commands.forget_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_threads_memory_only_flag(self, mock_asyncio_run):
+        """--memory-only must reach cognee.forget(memory_only=True)."""
+        mock_cognee = MagicMock()
+        mock_cognee.forget = AsyncMock(
+            return_value={"status": "success", "dataset_id": "ds", "data_records_reset": 0}
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = ForgetCommand()
+            args = argparse.Namespace(
+                dataset="my_dataset",
+                dataset_id=None,
+                data_id=None,
+                everything=False,
+                memory_only=True,
+            )
+            command.execute(args)
+
+        mock_cognee.forget.assert_awaited_once_with(
+            data_id=None,
+            dataset="my_dataset",
+            dataset_id=None,
+            everything=False,
+            memory_only=True,
+        )
+
+    def test_execute_everything_with_memory_only_errors(self):
+        """--memory-only has no effect with --everything (which deletes
+        outright) -- must error instead of silently doing a full wipe."""
+        mock_cognee = MagicMock()
+        mock_cognee.forget = AsyncMock()
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = ForgetCommand()
+            args = argparse.Namespace(
+                dataset=None, dataset_id=None, data_id=None, everything=True, memory_only=True
+            )
+            # Should not raise, just print an error and return without calling forget().
+            command.execute(args)
+
+        mock_cognee.forget.assert_not_awaited()
+
+    def test_execute_no_forget_target(self):
+        command = ForgetCommand()
+        args = argparse.Namespace(
+            dataset=None, dataset_id=None, data_id=None, everything=False, memory_only=False
+        )
+
+        # Should not raise, just print an error and return.
+        command.execute(args)
+
+    @patch("cognee.cli.commands.forget_command.asyncio.run")
+    def test_execute_with_exception(self, mock_asyncio_run):
+        mock_asyncio_run.side_effect = Exception("Forget error")
+
+        command = ForgetCommand()
+        args = argparse.Namespace(
+            dataset="my_dataset",
+            dataset_id=None,
+            data_id=None,
+            everything=False,
+            memory_only=False,
+        )
+
+        with pytest.raises(CliCommandException):
+            command.execute(args)
+
+
 class TestConfigCommand:
     """Test the ConfigCommand class"""
 
@@ -828,3 +921,138 @@ class TestConfigGetSetPersistence:
             os.chdir(original_cwd)
             get_chunk_config.cache_clear()
             get_chunk_config().chunk_size = original_chunk_size
+
+
+class TestFeedbackCommand:
+    """Tests for FeedbackCommand: a missing Q&A entry and a broken cache are
+    different failures, and both must exit non-zero."""
+
+    def _add_args(self, **overrides):
+        base = dict(feedback_action="add", session_id="s1", qa_id="q1", text="good", score=None)
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def _delete_args(self):
+        return argparse.Namespace(feedback_action="delete", session_id="s1", qa_id="q1")
+
+    def test_command_properties(self):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        command = FeedbackCommand()
+        assert command.command_string == "feedback"
+        assert "feedback" in command.help_string.lower()
+
+    def test_configure_parser(self):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        parser = argparse.ArgumentParser()
+        FeedbackCommand().configure_parser(parser)
+        add_args = parser.parse_args(["add", "s1", "q1", "--score", "5"])
+        assert add_args.feedback_action == "add"
+        assert add_args.score == 5
+        del_args = parser.parse_args(["delete", "s1", "q1"])
+        assert del_args.feedback_action == "delete"
+
+    def test_add_requires_text_or_score(self):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        with pytest.raises(CliCommandException) as exc_info:
+            FeedbackCommand().execute(self._add_args(text=None, score=None))
+        assert exc_info.value.error_code == 1
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.feedback_command.fmt.success")
+    @patch("cognee.cli.commands.feedback_command.asyncio.run", side_effect=_mock_run)
+    def test_add_success(self, _mock_asyncio_run, mock_success, _mock_resolve):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        with patch(
+            "cognee.api.v1.session.add_feedback", new_callable=lambda: AsyncMock(return_value=True)
+        ) as mock_add:
+            FeedbackCommand().execute(self._add_args(score=4))
+
+        mock_add.assert_awaited_once_with(
+            session_id="s1", qa_id="q1", feedback_text="good", feedback_score=4, user=ANY
+        )
+        mock_success.assert_called_once()
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.feedback_command.asyncio.run", side_effect=_mock_run)
+    def test_add_not_found_exits_non_zero(self, _mock_asyncio_run, _mock_resolve):
+        """False from the SDK means "no such entry" (or caching off), not a crash."""
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        with patch(
+            "cognee.api.v1.session.add_feedback", new_callable=lambda: AsyncMock(return_value=False)
+        ):
+            with pytest.raises(CliCommandException) as exc_info:
+                FeedbackCommand().execute(self._add_args())
+
+        assert exc_info.value.error_code == 1
+        assert "no Q&A entry q1 in session s1" in str(exc_info.value)
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.feedback_command.asyncio.run", side_effect=_mock_run)
+    def test_add_infrastructure_error_is_reported_as_error(self, _mock_asyncio_run, _mock_resolve):
+        """A cache failure surfaces with its own message, not as "check your IDs"."""
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+        from cognee.infrastructure.databases.exceptions import CacheConnectionError
+
+        with patch(
+            "cognee.api.v1.session.add_feedback",
+            new_callable=lambda: AsyncMock(side_effect=CacheConnectionError("redis down")),
+        ):
+            with pytest.raises(CliCommandException) as exc_info:
+                FeedbackCommand().execute(self._add_args())
+
+        assert exc_info.value.error_code == 1
+        assert "redis down" in str(exc_info.value)
+        assert "no Q&A entry" not in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, CacheConnectionError)
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.feedback_command.fmt.success")
+    @patch("cognee.cli.commands.feedback_command.asyncio.run", side_effect=_mock_run)
+    def test_delete_success(self, _mock_asyncio_run, mock_success, _mock_resolve):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        with patch(
+            "cognee.api.v1.session.delete_feedback",
+            new_callable=lambda: AsyncMock(return_value=True),
+        ) as mock_delete:
+            FeedbackCommand().execute(self._delete_args())
+
+        mock_delete.assert_awaited_once_with(session_id="s1", qa_id="q1", user=ANY)
+        mock_success.assert_called_once()
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.feedback_command.asyncio.run", side_effect=_mock_run)
+    def test_delete_not_found_exits_non_zero(self, _mock_asyncio_run, _mock_resolve):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        with patch(
+            "cognee.api.v1.session.delete_feedback",
+            new_callable=lambda: AsyncMock(return_value=False),
+        ):
+            with pytest.raises(CliCommandException) as exc_info:
+                FeedbackCommand().execute(self._delete_args())
+
+        assert exc_info.value.error_code == 1
+        assert "no Q&A entry q1 in session s1" in str(exc_info.value)
+
+    @patch(_RESOLVE_USER_PATCH, new_callable=lambda: AsyncMock(return_value=_mock_user()))
+    @patch("cognee.cli.commands.feedback_command.asyncio.run", side_effect=_mock_run)
+    def test_delete_infrastructure_error_is_reported_as_error(
+        self, _mock_asyncio_run, _mock_resolve
+    ):
+        from cognee.cli.commands.feedback_command import FeedbackCommand
+
+        with patch(
+            "cognee.api.v1.session.delete_feedback",
+            new_callable=lambda: AsyncMock(side_effect=RuntimeError("cache exploded")),
+        ):
+            with pytest.raises(CliCommandException) as exc_info:
+                FeedbackCommand().execute(self._delete_args())
+
+        assert exc_info.value.error_code == 1
+        assert "cache exploded" in str(exc_info.value)

@@ -588,3 +588,42 @@ async def test_concurrent_explicit_attach_keeps_all_keys(graph_provenance_adapte
     assert sorted(snap.source_run_refs) == sorted(
         [make_source_run_ref(UUID(run), key1), make_source_run_ref(UUID(run), key2)]
     )
+
+
+async def test_concurrent_folded_writes_and_attaches_keep_every_owner(graph_provenance_adapter):
+    """A folded write (owner key stamped inside the MERGE) landing between an
+    attach's read and write must not be lost.
+
+    This is what two documents of one cognify run do to an entity they share:
+    each document's batch folds its first owner into the node and attaches the
+    rest afterwards, concurrently. Seen on CI as one owner missing from
+    ``alice`` and ``rabbit`` at baseline while every other check passed.
+    """
+    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+
+    adapter = graph_provenance_adapter
+    shared = _Ent(id=uuid4(), name="Alice")
+    node_id = str(shared.id)
+    dataset_id = uuid4()
+    rounds = 6
+
+    def chunk_keys(document_id):
+        return [make_chunk_source_ref_key(dataset_id, document_id, uuid4()) for _ in range(rounds)]
+
+    doc_a, doc_b = uuid4(), uuid4()
+    folded_a, attached_a = chunk_keys(doc_a), chunk_keys(doc_a)
+    folded_b, attached_b = chunk_keys(doc_b), chunk_keys(doc_b)
+
+    async def writer(folded, attached):
+        for fold_key, attach_key in zip(folded, attached):
+            await adapter.add_nodes([shared], source_ref_key=fold_key)  # one-statement fold
+            await adapter.attach_node_source_refs([node_id], [attach_key])  # read-then-write
+
+    await asyncio.gather(writer(folded_a, attached_a), writer(folded_b, attached_b))
+
+    snapshot = (await adapter.get_node_delete_data([node_id]))[node_id]
+    expected = set(folded_a + attached_a + folded_b + attached_b)
+    missing = expected - set(snapshot.source_ref_keys)
+    assert not missing, (
+        f"{len(missing)} owner key(s) lost to a concurrent write: {sorted(missing)[:4]}"
+    )
