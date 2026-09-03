@@ -327,6 +327,12 @@ async def _forget_dataset_memory(dataset_ref: Union[str, UUID], user: Any) -> di
                 error,
             )
 
+        # 1c. The edges are gone, so the evidence rows describing them are stale;
+        # the next cognify recaptures them under its own run (non-fatal).
+        from cognee.modules.provenance.edge_evidence import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id)
+
         # 2. Reset pipeline_status on all data records in this dataset
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
@@ -426,6 +432,11 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: Union[str, UUID], user
                 dataset_id,
                 error,
             )
+
+        # 1c. Drop this item's edge evidence with its edges (non-fatal).
+        from cognee.modules.provenance.edge_evidence import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id, data_id)
 
         # 2. Reset pipeline_status for this data record
         db_engine = get_relational_engine()
