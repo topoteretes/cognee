@@ -37,37 +37,13 @@ env:
   COGNEE_SKIP_CONNECTION_TEST: 'true'
 
 jobs:
-  unit-tests:
-    name: Run Unit Tests
-    runs-on: ubuntu-22.04
-    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
-    env:
-      ENV: 'dev'
-      LLM_PROVIDER: openai
-      LLM_MODEL: ${{ secrets.LLM_MODEL }}
-      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-      LLM_ARGS: ${{ secrets.LLM_ARGS }}
-      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-      EMBEDDING_DIMENSIONS: 300
-      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Run Unit Tests
-        run: uv run pytest cognee/tests/unit/ --timeout=300 --timeout-method=thread
-
+  # No unit-test job here any more. This was the eighth identical copy of
+  # `pytest cognee/tests/unit/` per PR, and the slowest: it ran in the CI
+  # image, so it paid a ~3-minute image pull before the same 14 minutes of
+  # tests the seven bare OS-matrix legs ran in parallel. It was the critical
+  # path of the whole gate. The only thing it uniquely exercised was four
+  # test files that importorskip on aws/neptune/langchain/dlt; those extras
+  # now go to the ubuntu unit legs in test_suites.yml.
   simple-examples:
     name: Run Simple Examples
     runs-on: ubuntu-22.04

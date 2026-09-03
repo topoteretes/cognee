@@ -8,8 +8,8 @@ reproducible for document sets that arrive as files on disk.
 
 Usage:
 
-    # Henkel technical datasheets (164 PDFs) -> corpus
-    python build_corpus.py --from-dir ~/Downloads/Henkel --output henkel.json
+    # Technical datasheets (164 PDFs) -> corpus
+    python build_corpus.py --from-dir ~/Downloads/datasheets --output datasheets.json
 
     # Text/markdown corpora work the same way
     python build_corpus.py --from-dir ./notes --output notes.json
