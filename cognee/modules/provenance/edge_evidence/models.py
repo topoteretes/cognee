@@ -33,7 +33,11 @@ class ProvenanceEdgeEvidence(Base):
     destination_node_id = Column(UUID, nullable=False)
     relationship_name = Column(Text, nullable=False)
 
-    evidence_kind = Column(String(32), nullable=False, default="extracted")
+    # server_default too: migration f3a7b9c1d2e4 gives the column a database-side
+    # DEFAULT, and the model must describe the same table the chain builds.
+    evidence_kind = Column(
+        String(32), nullable=False, default="extracted", server_default="extracted"
+    )
     source_task = Column(String(255), nullable=True)
     confidence = Column(Float, nullable=True)
     created_at = Column(

@@ -9,9 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 
-from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
-from cognee.modules.pipelines.models.PipelineRun import PipelineRun, PipelineRunStatus
-
 
 # revision identifiers, used by Alembic.
 revision: str = "1d0bb7fede17"
@@ -21,9 +18,10 @@ depends_on: Union[str, Sequence[str], None] = "482cd6517ce4"
 
 
 def upgrade() -> None:
-    db_engine = get_relational_engine()
-
-    if db_engine.engine.dialect.name == "postgresql":
+    # The dialect of the database being migrated (op.get_bind()), never of the
+    # globally configured engine: an adapter's create_database() runs this chain
+    # on ITS database, which may not be the configured one.
+    if op.get_bind().dialect.name == "postgresql":
         op.execute(
             "ALTER TYPE pipelinerunstatus ADD VALUE IF NOT EXISTS 'DATASET_PROCESSING_INITIATED'"
         )
