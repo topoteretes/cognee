@@ -22,6 +22,7 @@ its contract:
 
 import asyncio
 import importlib
+import importlib.util
 import tempfile
 import uuid
 from pathlib import Path
@@ -31,7 +32,14 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
-PRE_RECONCILE_HEAD = "d1e2f3a4b5c6"
+# The revision just below the reconcile: stamping a damaged database here makes
+# an upgrade run ONLY the reconcile, isolating its behaviour.
+PRE_RECONCILE_HEAD = "f3a7b9c1d2e4"
+# The freeze point: the head at which the initial revision's frozen surface was
+# certified. A legacy database born by create_all under the old bootstrap holds
+# (a subset of) THAT surface and is stamped there or below; on upgrade it
+# replays everything above it — the post-freeze revisions and the reconcile.
+FREEZE_HEAD = "d1e2f3a4b5c6"
 # Registered only by the API routers, never by ``import cognee``: the tables a
 # pure-SDK process never created under the create_all bootstrap.
 ROUTER_ONLY_TABLES = {"integration_credentials", "sync_operations"}
@@ -44,6 +52,26 @@ def _register_all_models() -> None:
     for sub in sorted(path.name for path in root.iterdir() if path.is_dir()):
         if (root / sub / "models" / "__init__.py").exists():
             importlib.import_module(f"cognee.modules.{sub}.models")
+
+
+def _frozen_table_names() -> set[str]:
+    """The tables the initial revision's frozen surface carries, read from the
+    reconcile revision's own declaration (loaded by path; a migration module is
+    not importable by name). Needs an Alembic op context for its enum helper."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    from cognee.modules.migrations.lockstep import packaged_script_location
+
+    path = (
+        Path(packaged_script_location()) / "versions" / "1c22e6cb5aec_reconcile_to_frozen_schema.py"
+    )
+    spec = importlib.util.spec_from_file_location("reconcile_revision", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with sa.create_engine("sqlite://").connect() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            module._define_frozen_schema()
+    return set(module._FROZEN.tables)
 
 
 def _adapter():
@@ -165,19 +193,30 @@ def test_chain_born_database_passes_through_as_a_no_op_also_twice_in_one_process
 
 
 def test_partial_surface_legacy_database_converges_to_chain_born():
-    """The pure-SDK 1.5.x shape: create_all from the surface `import cognee`
-    registers (no router-only tables), stamped at the pre-reconcile head."""
+    """The pure-SDK 1.5.x shape: create_all of the frozen surface minus the
+    router-only tables (what `import cognee` registered when such databases
+    were born), stamped at the freeze point. The upgrade replays every
+    post-freeze revision and then the reconcile — the path a real legacy
+    database takes. Tables newer than the freeze must come from THEIR
+    revisions, not from create_all: a model and its migration can disagree on
+    what the name-level guard cannot see (a server default), and only the
+    chain's version is the one every database actually has."""
     _register_all_models()
     from cognee.infrastructure.databases.relational import Base
 
     _, born = _born()
     legacy = _adapter()
+    frozen = _frozen_table_names()
 
     async def build_legacy():
-        partial = [t for t in Base.metadata.sorted_tables if t.name not in ROUTER_ONLY_TABLES]
+        partial = [
+            t
+            for t in Base.metadata.sorted_tables
+            if t.name in frozen and t.name not in ROUTER_ONLY_TABLES
+        ]
         async with legacy.engine.begin() as connection:
             await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=partial))
-        await _stamp(legacy, PRE_RECONCILE_HEAD)
+        await _stamp(legacy, FREEZE_HEAD)
         before = await _snapshot(legacy)
         await _upgrade(legacy)
         return before, await _snapshot(legacy)

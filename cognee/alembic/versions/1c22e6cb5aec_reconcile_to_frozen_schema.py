@@ -1,7 +1,7 @@
 """Reconcile every database to the chain's frozen truth
 
 Revision ID: 1c22e6cb5aec
-Revises: d1e2f3a4b5c6
+Revises: f3a7b9c1d2e4
 Create Date: 2026-09-02 12:34:49.529355
 
 A database bootstrapped by the pre-chain-born code (``create_all`` + ``stamp
@@ -44,7 +44,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "1c22e6cb5aec"
-down_revision: Union[str, None] = "d1e2f3a4b5c6"
+down_revision: Union[str, None] = "f3a7b9c1d2e4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
