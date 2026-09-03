@@ -7,8 +7,10 @@ holding more than one target for such a relationship, keeps the most recent
 assertion and tags the older ones as superseded.
 
 Nothing is deleted: a superseded edge stays in the graph with its provenance,
-tagged (``superseded``, ``superseded_by``, ``supersession_reason``) so the
-current fact can be told apart from the history it replaced.
+tagged (``superseded``, ``superseded_by``, ``supersession_reason``) and closed
+(``valid_to`` = when the winning assertion was made, the same field
+``close_node`` stamps on nodes) so retrieval can tell the current fact from the
+history it replaced and rank it accordingly.
 
 Because it reads the stored neighbourhood rather than the batch in flight, a
 fact ingested today supersedes one ingested last month: entity node ids are

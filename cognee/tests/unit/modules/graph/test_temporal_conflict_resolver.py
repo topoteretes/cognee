@@ -131,3 +131,39 @@ def test_superseded_edges_keep_input_order():
     ]
     superseded = tag_superseded_edges(edges, {"ceo_of"})
     assert [e[1] for e in superseded] == ["alice", "carol"]
+
+
+# --------------------------------------------------------------------------- #
+# SDK-90: a superseded edge is also closed, the way close_node closes a node.
+# --------------------------------------------------------------------------- #
+
+
+def test_superseded_edge_is_closed_at_the_winning_assertion_time():
+    edges = [
+        _edge("c", "alice", "ceo_of", "2020-01-01 00:00:00", edge_object_id="old"),
+        _edge("c", "bob", "ceo_of", "2021-03-04 05:06:07", edge_object_id="new"),
+    ]
+
+    (superseded,) = tag_superseded_edges(edges, {"ceo_of"})
+
+    assert superseded[1] == "alice"
+    assert superseded[3]["superseded"] is True
+    assert superseded[3]["superseded_by"] == "new"
+    # 2021-03-04 05:06:07 UTC in ms epoch: the moment the new fact was asserted.
+    assert superseded[3]["valid_to"] == 1_614_834_367_000
+
+
+def test_superseded_edge_without_winner_timestamp_is_closed_now():
+    import time
+
+    edges = [
+        _edge("c", "alice", "ceo_of", ""),
+        _edge("c", "bob", "ceo_of", ""),  # later position wins the tie
+    ]
+    before = int(time.time() * 1000)
+
+    (superseded,) = tag_superseded_edges(edges, {"ceo_of"})
+
+    assert superseded[1] == "alice"
+    assert isinstance(superseded[3]["valid_to"], int)
+    assert superseded[3]["valid_to"] >= before

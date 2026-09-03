@@ -167,6 +167,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        as_of_ms: Optional[int] = None,
     ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Retrieves relevant graph triplets based on a query string.
@@ -175,6 +176,8 @@ class GraphCompletionRetriever(BaseRetriever):
         -----------
 
             - query (str): The query string used to search for relevant triplets in the graph.
+            - as_of_ms (Optional[int]): Reference time for fact validity; superseded or
+              closed facts rank below current ones as of that moment. None means now.
 
         Returns:
         --------
@@ -205,6 +208,7 @@ class GraphCompletionRetriever(BaseRetriever):
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
             personal_weights=personal_weights or None,
+            as_of_ms=as_of_ms,
         )
 
     async def get_triplets_batch(

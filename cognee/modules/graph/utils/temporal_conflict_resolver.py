@@ -20,6 +20,8 @@ stored graph.
 
 from typing import Any, Collection
 
+from cognee.modules.graph.utils.fact_validity import now_ms, to_epoch_ms
+
 # Graph edges flow through the pipeline as
 # (source_node_id, target_node_id, relationship_name, properties) tuples.
 Edge = tuple[Any, Any, str, dict]
@@ -51,10 +53,12 @@ def tag_superseded_edges(
     Returns:
         A tagged copy of every edge a more recent assertion supersedes, in the
         order the edges were given: ``superseded=True``, ``superseded_by`` (the
-        winning edge's ``edge_object_id``) and a human-readable
-        ``supersession_reason`` are added to its properties. Edges that are
-        still current are not returned, and neither the input list nor its
-        property dicts are mutated.
+        winning edge's ``edge_object_id``), a human-readable
+        ``supersession_reason`` and ``valid_to`` (ms epoch: the moment the
+        winning assertion was made, so the superseded edge and a node closed
+        via ``close_node`` describe staleness the same way) are added to its
+        properties. Edges that are still current are not returned, and neither
+        the input list nor its property dicts are mutated.
     """
     if not functional_relationships:
         return []
@@ -81,6 +85,13 @@ def tag_superseded_edges(
         if winner is None or target == edges[winner][1]:
             continue
 
+        winner_properties = edges[winner][3]
+        # The old fact stopped being current when the new one was asserted; fall
+        # back to "now" only when the winning edge carries no timestamp at all.
+        valid_to = to_epoch_ms(winner_properties.get("updated_at"))
+        if valid_to is None:
+            valid_to = now_ms()
+
         superseded_edges.append(
             (
                 source,
@@ -89,10 +100,11 @@ def tag_superseded_edges(
                 {
                     **properties,
                     "superseded": True,
-                    "superseded_by": edges[winner][3].get("edge_object_id"),
+                    "superseded_by": winner_properties.get("edge_object_id"),
                     "supersession_reason": (
                         f"superseded by a more recent '{relationship_name}' assertion"
                     ),
+                    "valid_to": valid_to,
                 },
             )
         )

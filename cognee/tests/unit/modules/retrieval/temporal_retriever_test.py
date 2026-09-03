@@ -304,7 +304,7 @@ async def test_get_context_no_events_found(mock_graph_engine):
         context = await retriever.get_context_from_objects("test query", objects)
 
     assert context == "triplet text"
-    mock_get_triplets.assert_awaited_once_with("test query")
+    mock_get_triplets.assert_awaited_once_with("test query", as_of_ms=None)
     mock_resolve.assert_awaited_once()
 
 
@@ -836,7 +836,7 @@ async def test_get_retrieved_objects_falls_back_when_backend_lacks_temporal_quer
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
 
     assert objects == {"triplets": ["triplet"]}
-    mock_get_triplets.assert_awaited_once_with("What happened in 2024?")
+    mock_get_triplets.assert_awaited_once_with("What happened in 2024?", as_of_ms=None)
 
 
 # ---------------------------------------------------------------------------
@@ -893,3 +893,48 @@ async def test_extract_time_from_query_expands_only_the_upper_bound():
 
     assert (time_from.year, time_from.month, time_from.day) == (1994, 1, 1)
     assert (time_to.year, time_to.month, time_to.day, time_to.second) == (1996, 12, 31, 59)
+
+
+# ---------------------------------------------------------------------------
+# SDK-90: the triplet fallback judges fact validity as of the window start.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_triplet_fallback_passes_window_start_as_validity_reference(mock_graph_engine):
+    retriever = TemporalRetriever()
+    mock_graph_engine.collect_time_ids.return_value = []
+    unified_mock = _make_unified_mock(mock_graph_engine)
+    window_start = Timestamp(year=2019)
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=(window_start, Timestamp(year=2019))
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
+        patch.object(retriever, "get_triplets", return_value=[]) as mock_get_triplets,
+    ):
+        await retriever.get_retrieved_objects("Who was CEO in 2019?")
+
+    mock_get_triplets.assert_awaited_once_with("Who was CEO in 2019?", as_of_ms=1_546_300_800_000)
+
+
+@pytest.mark.asyncio
+async def test_windowless_fallback_judges_validity_as_of_now(mock_graph_engine):
+    retriever = TemporalRetriever()
+    unified_mock = _make_unified_mock(mock_graph_engine)
+
+    with (
+        patch.object(retriever, "extract_time_from_query", return_value=(None, None)),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
+        patch.object(retriever, "get_triplets", return_value=[]) as mock_get_triplets,
+    ):
+        await retriever.get_retrieved_objects("Who is the CEO?")
+
+    mock_get_triplets.assert_awaited_once_with("Who is the CEO?")

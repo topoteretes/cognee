@@ -10,7 +10,8 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
 
-from cognee.tasks.temporal_graph.models import QueryInterval
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
 from cognee.tasks.temporal_graph.time_precision import expand_to_period_end
 
 logger = get_logger()
@@ -186,6 +187,11 @@ class TemporalRetriever(GraphCompletionRetriever):
         unified = await get_unified_engine()
         graph_engine = unified.graph
 
+        # When the triplet fallback runs for a question about a period, a fact
+        # closed *after* that period began was still true then: judge validity
+        # as of the window start, not as of now.
+        as_of_ms = date_to_int(time_from) if isinstance(time_from, Timestamp) else None
+
         try:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
             relevant_events = await graph_engine.collect_events(ids) if ids else []
@@ -193,13 +199,13 @@ class TemporalRetriever(GraphCompletionRetriever):
             logger.warning(
                 "%s. Falling back to triplet search for this TEMPORAL query.", str(error)
             )
-            return {"triplets": await self.get_triplets(query)}
+            return {"triplets": await self.get_triplets(query, as_of_ms=as_of_ms)}
 
         if not relevant_events:
             logger.info(
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
-            return {"triplets": await self.get_triplets(query)}
+            return {"triplets": await self.get_triplets(query, as_of_ms=as_of_ms)}
 
         vector_engine = unified.vector
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]

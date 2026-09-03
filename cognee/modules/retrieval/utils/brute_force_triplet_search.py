@@ -67,6 +67,16 @@ async def get_memory_fragment(
     node_properties_to_project = list(properties_to_project)
     edge_properties_to_project = ["relationship_name", "edge_text", "edge_object_id"]
 
+    # Fact validity (SDK-90): a node closed via close_node carries valid_to; an
+    # edge a newer assertion replaced carries superseded + valid_to. Both must be
+    # projected so ranking can demote them and rendering can flag them.
+    for validity_field in ("valid_to",):
+        if validity_field not in node_properties_to_project:
+            node_properties_to_project.append(validity_field)
+    for validity_field in ("superseded", "valid_to"):
+        if validity_field not in edge_properties_to_project:
+            edge_properties_to_project.append(validity_field)
+
     if feedback_influence > 0.0:
         if "feedback_weight" not in node_properties_to_project:
             node_properties_to_project.append("feedback_weight")
@@ -133,6 +143,7 @@ async def _get_top_triplet_importances(
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
     personal_weights: Optional[Dict[str, float]] = None,
+    as_of_ms: Optional[int] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
@@ -147,6 +158,8 @@ async def _get_top_triplet_importances(
             extraction. (default 10)
         personal_weights: Optional per-node ``prefers`` weights (node id -> weight in
             [0, 1]) applied to matching nodes so the triplet scorer can nudge ranking.
+        as_of_ms: Reference time (ms epoch) for fact validity; facts superseded or
+            closed at or before it rank below current ones. None means now.
 
     Returns:
         List[Edge]: For single-query mode (query_list_length is None).
@@ -215,6 +228,8 @@ async def _get_top_triplet_importances(
     if personal_weights:
         memory_fragment.apply_personal_weights(personal_weights)
 
+    memory_fragment.as_of_ms = as_of_ms
+
     return await memory_fragment.calculate_top_triplet_importances(
         k=top_k,
         query_list_length=query_list_length,
@@ -239,6 +254,7 @@ async def brute_force_triplet_search(
     neighborhood_depth: Optional[int] = None,
     neighborhood_seed_top_k: Optional[int] = 10,
     personal_weights: Optional[Dict[str, float]] = None,
+    as_of_ms: Optional[int] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -258,6 +274,8 @@ async def brute_force_triplet_search(
         feedback_influence (float): Weight of feedback influence in range [0, 1]
         personal_weights (Optional[Dict[str, float]]): Per-node prefers weights
             (node id -> weight in [0, 1]) that nudge triplet ranking for the active user.
+        as_of_ms (Optional[int]): Reference time (ms epoch) for fact validity. Facts
+            superseded or closed at or before it rank below current ones; None means now.
 
     Returns:
         List[Edge]: The top triplet results for single query mode (flat list).
@@ -352,6 +370,7 @@ async def brute_force_triplet_search(
                 neighborhood_depth=neighborhood_depth,
                 neighborhood_seed_top_k=neighborhood_seed_top_k,
                 personal_weights=personal_weights,
+                as_of_ms=as_of_ms,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)
