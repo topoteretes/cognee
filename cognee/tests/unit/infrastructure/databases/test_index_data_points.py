@@ -91,9 +91,11 @@ async def test_concurrency_floors_at_one_when_batch_size_exceeds_limit():
 
     assert peak == 1
 
+
 @pytest.mark.asyncio
 async def test_index_data_points_isolates_metadata_for_multiple_index_fields():
     """Each indexed copy retains only its own field without mutating the source."""
+
     class MultiFieldDataPoint(DataPoint):
         name: str
         description: str
@@ -115,6 +117,7 @@ async def test_index_data_points_isolates_metadata_for_multiple_index_fields():
         ("name", ["name"]),
         ("description", ["description"]),
     ]
+
 
 @pytest.mark.asyncio
 async def test_index_data_points_does_not_mutate_metadata():
