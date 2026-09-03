@@ -186,6 +186,13 @@ jobs:
           # No (or a short) junit report: the suite did not run, whatever the
           # exit status says. Fail regardless of rc, so a silent exit-0 is not
           # a pass and the retry gate below fires.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
           echo "::error::pytest exited $rc without a usable junit report"
           exit 1
 
@@ -260,7 +267,12 @@ jobs:
           # installed in all of them. Taking uv's implicit sync out of the
           # step removes one layer from the suspect window; it is a hypothesis
           # test, not a known fix, and the snapshot above names the survivor.
-          uv run --no-sync python -m pytest cognee/tests/unit/ \
+          # No --no-sync here, deliberately: this attempt only runs when the first
+          # produced nothing, and one observed shape of that is uv itself dying
+          # with 127 in seconds (run 33729891452, windows shard 3/3, both
+          # attempts). Letting the retry re-sync gives it a chance to repair a
+          # broken environment instead of replaying the same failure into it.
+          uv run python -m pytest cognee/tests/unit/ \
             --splits 3 --group "${{ matrix.shard }}" --splitting-algorithm least_duration \
             --timeout=300 --timeout-method=thread \
             -p no:cacheprovider --junitxml=junit-unit.xml --durations=15
@@ -289,6 +301,13 @@ jobs:
           # No (or a short) junit report: the suite did not run, whatever the
           # exit status says. Fail regardless of rc, so a silent exit-0 is not
           # a pass and the retry gate below fires.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
           echo "::error::pytest exited $rc without a usable junit report"
           exit 1
 
@@ -484,7 +503,12 @@ jobs:
           # emitted at import time by get_authenticated_user.py. Healthy runs
           # continue past it within seconds. The mechanism is not established;
           # the snapshot above is what establishes it on the next wedge.
-          uv run --no-sync python ./cognee/tests/test_library.py \
+          # No --no-sync here, deliberately: this attempt only runs when the first
+          # produced nothing, and one observed shape of that is uv itself dying
+          # with 127 in seconds (run 33729891452, windows shard 3/3, both
+          # attempts). Letting the retry re-sync gives it a chance to repair a
+          # broken environment instead of replaying the same failure into it.
+          uv run python ./cognee/tests/test_library.py \
             && echo "LIBRARY_TEST_DONE" > library-done.txt
           rc=$?
           # A completion sentinel plays the junit report's role: a run that
