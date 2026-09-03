@@ -26,6 +26,7 @@ from sqlalchemy import select
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
@@ -79,11 +80,7 @@ async def _setup(tmp_path):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await setup_cognee()
-    user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
-    return user
+    return await get_default_user()
 
 
 async def _ingest():
@@ -118,38 +115,47 @@ async def _graph_edge_ids_by_relationship():
 async def test_edge_evidence_follows_the_graph_through_its_lifecycle(mock_struct, tmp_path):
     mock_struct.side_effect = _mock_llm_output
     user = await _setup(tmp_path)
-    dataset_id, d1, d2 = await _ingest()
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
 
-    # 1. Capture: every row is scoped to the real dataset/data item/run.
-    rows = await _evidence_rows()
-    assert rows, "cognify must persist edge evidence on the default stack"
-    assert {row.dataset_id for row in rows} == {dataset_id}
-    assert {row.data_id for row in rows} <= {d1, d2}
-    assert all(row.pipeline_run_id is not None for row in rows)
-    extracted = {row.relationship_name for row in rows if row.evidence_kind == "extracted"}
-    assert {"knows", "lives_in", "from"} <= extracted
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock. The scope
+    # releases the lock at test end so later tests in this pytest process can
+    # operate on the same dataset id.
+    async with dataset_lock(authorized_dataset.id):
+        await set_database_global_context_variables(authorized_dataset.id, user.id)
+        dataset_id, d1, d2 = await _ingest()
 
-    # 2. Lookup: the graph's own edge ids resolve back to the source document.
-    edge_ids = await _graph_edge_ids_by_relationship()
-    records = await get_edge_evidence_records([edge_ids["knows"], edge_ids["from"]], dataset_id)
-    by_edge = {record.edge_id: record for record in records}
-    assert by_edge[edge_ids["knows"]].data_id == d1
-    assert by_edge[edge_ids["from"]].data_id == d2
-    assert all(record.document_name for record in records)
+        # 1. Capture: every row is scoped to the real dataset/data item/run.
+        rows = await _evidence_rows()
+        assert rows, "cognify must persist edge evidence on the default stack"
+        assert {row.dataset_id for row in rows} == {dataset_id}
+        assert {row.data_id for row in rows} <= {d1, d2}
+        assert all(row.pipeline_run_id is not None for row in rows)
+        extracted = {row.relationship_name for row in rows if row.evidence_kind == "extracted"}
+        assert {"knows", "lives_in", "from"} <= extracted
 
-    # 3. Deleting one document sweeps its rows only.
-    await datasets.delete_data(dataset_id, d2, user)
-    remaining = await _evidence_rows()
-    assert {row.data_id for row in remaining} == {d1}
-    assert await get_edge_evidence_records([edge_ids["from"]], dataset_id) == []
-    assert await get_edge_evidence_records([edge_ids["knows"]], dataset_id)
+        # 2. Lookup: the graph's own edge ids resolve back to the source document.
+        edge_ids = await _graph_edge_ids_by_relationship()
+        records = await get_edge_evidence_records([edge_ids["knows"], edge_ids["from"]], dataset_id)
+        by_edge = {record.edge_id: record for record in records}
+        assert by_edge[edge_ids["knows"]].data_id == d1
+        assert by_edge[edge_ids["from"]].data_id == d2
+        assert all(record.document_name for record in records)
 
-    # 4. Dropping memory sweeps the dataset; re-cognify recaptures under a new run.
-    await cognee.forget(dataset_id=dataset_id, memory_only=True)
-    assert await _evidence_rows() == []
+        # 3. Deleting one document sweeps its rows only.
+        await datasets.delete_data(dataset_id, d2, user)
+        remaining = await _evidence_rows()
+        assert {row.data_id for row in remaining} == {d1}
+        assert await get_edge_evidence_records([edge_ids["from"]], dataset_id) == []
+        assert await get_edge_evidence_records([edge_ids["knows"]], dataset_id)
 
-    await cognee.cognify()
-    recaptured = await _evidence_rows()
-    assert recaptured
-    assert {row.data_id for row in recaptured} == {d1}
-    assert "knows" in {row.relationship_name for row in recaptured}
+        # 4. Dropping memory sweeps the dataset; re-cognify recaptures under a new run.
+        await cognee.forget(dataset_id=dataset_id, memory_only=True)
+        assert await _evidence_rows() == []
+
+        await cognee.cognify()
+        recaptured = await _evidence_rows()
+        assert recaptured
+        assert {row.data_id for row in recaptured} == {d1}
+        assert "knows" in {row.relationship_name for row in recaptured}
