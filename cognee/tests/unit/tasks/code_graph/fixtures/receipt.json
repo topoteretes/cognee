@@ -1,8 +1,19 @@
 {
-  "enola_version": "0.3.1",
   "snapshot_id": "sha256:abc123def456",
+  "format_version": 1,
+  "enola_version": "0.4.12",
+  "extractor_version": "v259",
+  "generated_at": "2026-09-01T20:11:56Z",
+  "duration": "160ms",
+  "repo_path": "/tmp/shop",
+  "git": {"ref": "main", "commit": "17f4e44c2f425dc5427b7ab80f35aa6ef2a8e986", "dirty": false},
+  "extractors": ["go"],
+  "fact_count": 16,
+  "insight_count": 0,
   "quality": {
+    "files_seen": 42,
     "files_parsed": 42,
+    "parse_errors": 0,
     "coverage": 0.92
   }
 }

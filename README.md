@@ -336,7 +336,7 @@ See the [plugin README](https://github.com/topoteretes/cognee-integrations/tree/
 
 ### Connect to Cognee Cloud
 
-Point any Python agent at a managed Cognee instance — all SDK calls route to the cloud:
+Point any Python agent at a managed Cognee instance — all SDK calls route to the cloud. Get your instance URL and API key from the [Cognee Cloud](https://www.cognee.ai) dashboard, or set the `COGNEE_SERVICE_URL` and `COGNEE_API_KEY` environment variables and call `serve()` with no arguments:
 
 ```python
 import cognee
@@ -440,7 +440,7 @@ Use [Cognee Cloud](https://www.cognee.ai) for a fully managed experience, or sel
 
 | Platform | Best For | Command |
 |----------|----------|---------|
-| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai) or `await cognee.serve()` |
+| **Cognee Cloud** | Managed service, no infrastructure to maintain | [Sign up](https://www.cognee.ai), then `await cognee.serve(url=..., api_key=...)` |
 | **Modal** | Serverless, auto-scaling, GPU workloads | `bash distributed/deploy/modal-deploy.sh` |
 | **Railway** | Simplest PaaS, native Postgres | `railway init && railway up` |
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |

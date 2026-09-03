@@ -91,3 +91,47 @@ def test_config_falls_back_when_unresolvable(monkeypatch):
         embedding_dimensions=None,
     )
     assert cfg.embedding_dimensions == 3072
+
+
+# ---- EMBEDDING_API_BASE alias (SDK-539 / issue #4871) ----
+
+
+def _fresh_config(monkeypatch, **env):
+    """Build EmbeddingConfig from a controlled environment (no .env leakage
+    for the two endpoint vars)."""
+    from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+
+    for var in ("EMBEDDING_ENDPOINT", "EMBEDDING_API_BASE"):
+        monkeypatch.delenv(var, raising=False)
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+    return EmbeddingConfig(_env_file=None)
+
+
+def test_embedding_api_base_alone_populates_endpoint(monkeypatch):
+    """The exact repro from issue #4871: API_BASE set, ENDPOINT not."""
+    config = _fresh_config(monkeypatch, EMBEDDING_API_BASE="https://api.siliconflow.cn/v1")
+    assert config.embedding_endpoint == "https://api.siliconflow.cn/v1"
+
+
+def test_embedding_endpoint_wins_over_api_base(monkeypatch):
+    config = _fresh_config(
+        monkeypatch,
+        EMBEDDING_ENDPOINT="https://endpoint.example/v1",
+        EMBEDDING_API_BASE="https://api-base.example/v1",
+    )
+    assert config.embedding_endpoint == "https://endpoint.example/v1"
+
+
+def test_embedding_endpoint_env_still_works_alone(monkeypatch):
+    config = _fresh_config(monkeypatch, EMBEDDING_ENDPOINT="https://endpoint.example/v1")
+    assert config.embedding_endpoint == "https://endpoint.example/v1"
+
+
+def test_programmatic_field_name_construction_still_works(monkeypatch):
+    from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
+
+    for var in ("EMBEDDING_ENDPOINT", "EMBEDDING_API_BASE"):
+        monkeypatch.delenv(var, raising=False)
+    config = EmbeddingConfig(_env_file=None, embedding_endpoint="https://kwarg.example/v1")
+    assert config.embedding_endpoint == "https://kwarg.example/v1"
