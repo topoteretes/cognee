@@ -66,7 +66,10 @@ class ChunksRetriever(BaseRetriever):
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+            chunk_payloads = [
+                {**found_chunk.payload, "score": found_chunk.score}
+                for found_chunk in retrieved_objects
+            ]
             return chunk_payloads
         else:
             return []
