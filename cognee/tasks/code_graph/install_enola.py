@@ -31,19 +31,20 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("enola")
 
-ENOLA_PINNED_VERSION = "0.3.13"
+ENOLA_PINNED_VERSION = "0.4.12"
 
 _RELEASE_URL_TEMPLATE = "https://github.com/enola-labs/enola/releases/download/v{version}/{asset}"
 
 # SHA-256 of each release archive, pinned from the .sha256 files published
-# alongside the v0.3.13 release assets. Bumping ENOLA_PINNED_VERSION requires
-# re-pinning these.
+# alongside the v0.4.12 release assets (2026-09-01). Bumping
+# ENOLA_PINNED_VERSION requires re-pinning these; the e2e known answers in
+# tests/test_code_graph_e2e.py are pinned to the same version.
 ENOLA_RELEASE_CHECKSUMS = {
-    "darwin-arm64": "f395dfaa213a816539f4178d1519bd13117764eb9b0cd0029b3d319040c0aba7",
-    "darwin-amd64": "50292c297831a2e77fd6fb9617f307219141496fa4cea09dd64511e7919291dd",
-    "linux-amd64": "870cb18f589620171b195812aa44a9883b7234206fbab95d42dc20069942ed9e",
-    "linux-arm64": "bb86c297a3f6a0071a6a4b4c180e08bf836e42c4e98fab258d9d763ad626e2b0",
-    "windows-amd64": "8d4a0a03b1f17af7f5174722e542fa06da2b8101d4f6fd09537e6d176b774a17",
+    "darwin-arm64": "b6da39f34cb869368e98f33a2ddcf7caffa16269de1d31d57cfc08eee4b1fd6b",
+    "darwin-amd64": "db105ae8235b482c776a280bde54afe43f0ecad3c992316ea445a29ec0e0bd7e",
+    "linux-amd64": "108767f9053b7d01651eef819d08301ae3b4e4e5cd06bfc6c36dcce1648f8cbf",
+    "linux-arm64": "2f3e1cb8d172977da873c16b6fccca9baadb8fdd0211c801d1064c2802872a8f",
+    "windows-amd64": "5f9dfc5914dd0dec5452d272f0f1413dc33ba58b73519d3a6c8cfbd4d92f473a",
 }
 
 _FALSEY = {"false", "0", "no", "off"}
@@ -106,8 +107,8 @@ def _download(url: str, destination: Path) -> None:
 def _extract_single_binary(archive_path: Path, destination: Path) -> None:
     """Extract the archive's single enola binary member without trusting member paths.
 
-    Releases up to 0.1.x shipped the binary alone; 0.3.x adds LICENSE and
-    NOTICE next to it. Exactly one top-level `enola*` member must exist, and
+    Releases up to 0.1.x shipped the binary alone; 0.3.x and later add LICENSE
+    and NOTICE next to it. Exactly one top-level `enola*` member must exist, and
     no member name may contain a path separator or start with a dot.
     """
     with tarfile.open(archive_path, "r:gz") as archive:

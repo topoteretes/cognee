@@ -127,6 +127,13 @@ async def test_forget_dataset_memory_clears_graph_and_resets_pipeline(monkeypatc
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -196,6 +203,13 @@ async def test_forget_dataset_memory_skips_records_without_pipeline_status(monke
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
     mock_reset_status = AsyncMock()
 
     with (
@@ -245,6 +259,13 @@ async def test_forget_data_memory_clears_graph_and_resets_pipeline(monkeypatch):
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
     )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
+    )
 
     with (
         patch.object(
@@ -285,6 +306,13 @@ async def test_forget_data_memory_no_record_found(monkeypatch):
         forget_module,
         "_resolve_dataset_id",
         AsyncMock(return_value=DATASET_ID),
+    )
+    # The memory helpers enter the dataset database context inside the lock
+    # (canonical order, SDK-483); stub it out for these unit tests.
+    monkeypatch.setattr(
+        forget_module,
+        "set_database_global_context_variables",
+        lambda *args, **kwargs: _NoOpAsyncContext(),
     )
 
     with (
