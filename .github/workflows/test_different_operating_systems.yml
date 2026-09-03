@@ -436,6 +436,13 @@ jobs:
           # The sentinel is only written on a rc=0 finish, so reaching here
           # means the script did not finish or failed; either way rc is the
           # truth. Fail so the retry gate can evaluate it.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
           exit "${rc:-1}"
 
       - name: Run default basic pipeline (retry - first attempt did not finish)
@@ -521,6 +528,13 @@ jobs:
           # The sentinel is only written on a rc=0 finish, so reaching here
           # means the script did not finish or failed; either way rc is the
           # truth. Fail so the retry gate can evaluate it.
+          if [ "$rc" = "127" ]; then
+            # 127 = command not found. Say WHAT was missing; builtins and
+            # python only, since coreutils are off PATH here.
+            command -v uv || echo "uv: NOT ON PATH"
+            command -v python || echo "python: NOT ON PATH"
+            python -c "import os; p='.venv/Scripts' if os.name=='nt' else '.venv/bin'; print(p, os.listdir(p)[:12] if os.path.isdir(p) else 'MISSING')" || true
+          fi
           exit "${rc:-1}"
 
       - name: Assert the library test finished
