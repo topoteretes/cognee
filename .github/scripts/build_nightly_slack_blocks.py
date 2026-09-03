@@ -13,8 +13,8 @@ Input (env):
                `metrics` output; empty/unparseable is treated as `{}`, which is
                what a failed job produces. A `tenant_create` key adds the
                cloud-only tenant row.
-  STATUS_*     header fields (emoji, summary, ran_at, ollama, llamacpp,
-               branch, cadence, sha — the last three fall back if unset).
+  STATUS_*     header fields (emoji, summary, ran_at, branch, cadence,
+               sha — the last three fall back if unset).
   RUN_URL      link target for the footer.
 
 Output: `blocks=<compact JSON>` appended to $GITHUB_OUTPUT (stdout if unset).
@@ -98,8 +98,6 @@ def main():
         f"{env.get('STATUS_SUMMARY', '')}\n"
         f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`  •  "
         f"*Branch:* `{branch}` (`{cadence}`)  •  *Commit:* `{sha}`\n"
-        f"*Ollama:* `{env.get('STATUS_OLLAMA', '')}`  •  "
-        f"*Llama-cpp:* `{env.get('STATUS_LLAMACPP', '')}`\n"
     )
 
     blocks = [header]

@@ -78,8 +78,8 @@ jobs:
   # ══ Moved out of the PR gate and the nightly (SDK-533) ═══════════════════
   # These jobs used to run on every PR (e2e_tests.yml) or in nightly_tests.yml.
   # None of them earns a PR-gate slot, and the nightly report is for the
-  # Ollama/llama-cpp suites and the perf arms, so they run here: before a
-  # release, and on demand. They test the checked-out source -- cognee_setup
+  # perf arms, so they run here: before a release, and on demand. They
+  # test the checked-out source -- cognee_setup
   # installs from the local tree -- so the `cognee_version` input does not
   # apply to them.
 
@@ -106,6 +106,20 @@ jobs:
     uses: ./.github/workflows/search_db_tests.yml
     with:
       python-versions: '["3.10", "3.12", "3.13"]'
+    secrets: inherit
+
+  # Local-model suites: each pulls a model into a container on the runner,
+  # which is why neither has ever been on the PR gate.
+  ollama-tests:
+    name: Ollama Tests
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    uses: ./.github/workflows/test_ollama.yml
+    secrets: inherit
+
+  llamacpp-tests:
+    name: Llama-cpp Tests
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
   # The only job that runs the pipeline with telemetry ON; every other job in

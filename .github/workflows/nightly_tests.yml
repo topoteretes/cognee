@@ -40,16 +40,6 @@ env:
   ENV: 'dev'
 
 jobs:
-  ollama-tests:
-    name: Ollama Tests
-    uses: ./.github/workflows/test_ollama.yml
-    secrets: inherit
-
-  llamacpp-tests:
-    name: Llama-cpp Tests
-    uses: ./.github/workflows/test_llamacpp.yml
-    secrets: inherit
-
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -218,8 +208,6 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
-      ollama-tests,
-      llamacpp-tests,
       perf-small-llm,
       perf-small-mock,
       perf-wap-llm,
@@ -250,9 +238,7 @@ jobs:
           # and inline interpolation would splice it into this shell script.
           CADENCE: ${{ inputs.cadence }}
         run: |
-          if [[ "${{ needs.ollama-tests.result }}" == "success" &&
-                "${{ needs.llamacpp-tests.result }}" == "success" &&
-                "${{ needs.perf-small-llm.result }}" == "success" &&
+          if [[ "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
                 "${{ needs.perf-wap-mock.result }}" == "success" &&
@@ -327,8 +313,6 @@ jobs:
           STATUS_BRANCH: ${{ github.ref_name }}
           STATUS_CADENCE: ${{ steps.status.outputs.cadence }}
           STATUS_SHA: ${{ github.sha }}
-          STATUS_OLLAMA: ${{ needs.ollama-tests.result }}
-          STATUS_LLAMACPP: ${{ needs.llamacpp-tests.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.
