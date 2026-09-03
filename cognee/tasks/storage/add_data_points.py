@@ -27,6 +27,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.exceptions import (
     InvalidDataPointsInAddDataPointsError,
 )
+from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
 from ...modules.engine.utils import generate_node_id
 
 if TYPE_CHECKING:
@@ -132,11 +133,6 @@ async def add_data_points(
         # graph write below (atomic — no window where an artifact exists without
         # its provenance). Hybrid backends still attach in a second pass and keep
         # that window; if the attach raises, the run is marked failed.
-        #
-        # Under COGNEE_DISTRIBUTED the graph write is diverted to a queue; the
-        # provenance stamp (source_ref_key / pipeline_run_id) rides along in the
-        # queue payload and is folded per data item by the graph_saving_worker,
-        # so graph-native provenance works in distributed mode too.
         stores_provenance = await mark_graph_provenance_if_empty(graph_engine)
 
         if not stores_provenance:
@@ -261,6 +257,14 @@ async def add_data_points(
         if triplets:
             await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
+
+    # Capture only after graph/vector writes succeeded. This is memory-only for
+    # normal documents and is flushed once at data-item completion; very large
+    # documents use a bounded bulk flush configured by EDGE_EVIDENCE_FLUSH_THRESHOLD.
+    # The original ``data_points`` are passed, not the expanded ``nodes``: expansion
+    # rebuilds nodes as stripped copies, and the chunks a cognify batch carries are
+    # nested under its TextSummary objects — capture walks the object graph itself.
+    await capture_graph_provenance(data_points, edges, ctx)
 
     return data_points
 

@@ -41,12 +41,12 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types import (
     AudioDocument,
-    DltRowDocument,
     ImageDocument,
     PdfDocument,
     TextDocument,
     UnstructuredDocument,
 )
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.session_lifecycle.usage_tracking import estimate_cost_usd
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
@@ -54,6 +54,8 @@ from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
 from cognee.tasks.documents import classify_documents
 from cognee.tasks.documents.classify_documents import EXTENSION_TO_DOCUMENT_CLASS
 from cognee.tasks.ingestion.data_item import DataItem
+
+logger = get_logger("cognify.estimator")
 
 SUMMARY_OUTPUT_TOKENS_PER_CHUNK = 150
 GRAPH_OUTPUT_TOKEN_RATIO = 0.5
@@ -223,20 +225,21 @@ def estimate_chunks(
     graph_model: Type[BaseModel] = KnowledgeGraph,
     custom_prompt: Optional[str] = None,
     skipped_items: int = 0,
+    skipped_dlt_chunks: int = 0,
+    skipped_code_items: int = 0,
 ) -> DryRunEstimate:
-    """Estimate the per-chunk LLM stages of the default cognify pipeline."""
+    """Estimate the per-chunk LLM stages of the default cognify pipeline.
+
+    DLT and code items never reach this function's chunk list: the cognify
+    estimate routes them out (same policy as execution — cognify_route_for)
+    before any document is read, and reports them via ``skipped_dlt_chunks``
+    and ``skipped_code_items``.
+    """
     tokenizer = _llm_tokenizer()
     model = get_llm_config().llm_model
     summarization_model = get_cognify_config().summarization_model
 
-    # The real pipeline skips LLM extraction and summarization for DLT row
-    # chunks (see extract_graph_from_data / summarize_text).
-    llm_chunks = [
-        chunk
-        for chunk in chunks
-        if not isinstance(getattr(chunk, "is_part_of", None), DltRowDocument)
-    ]
-    skipped_dlt_chunks = len(chunks) - len(llm_chunks)
+    llm_chunks = chunks
 
     chunk_token_counts = [_count_tokens(chunk.text, tokenizer) for chunk in llm_chunks]
     chunk_tokens = sum(chunk_token_counts)
@@ -288,6 +291,11 @@ def estimate_chunks(
             f"Skipped {skipped_dlt_chunks} DLT row chunk(s) because they do not use "
             "LLM extraction or summarization."
         )
+    if skipped_code_items:
+        warnings.append(
+            f"Skipped {skipped_code_items} code file(s) because they run the "
+            "deterministic code graph pipeline — no LLM calls."
+        )
     if output_multiplier != 1:
         warnings.append(
             f"{model} is a reasoning model: output tokens and cost include a rough "
@@ -304,7 +312,7 @@ def estimate_chunks(
         chunks=len(llm_chunks),
         chunk_tokens=chunk_tokens,
         stages=stages,
-        skipped_items=skipped_items + skipped_dlt_chunks,
+        skipped_items=skipped_items + skipped_dlt_chunks + skipped_code_items,
         warnings=warnings,
     )
 
@@ -369,7 +377,13 @@ def _path_candidate(value: str) -> Optional[Path]:
             # Mirror the ACCEPT_LOCAL_FILE_PATH gate: an existing *absolute* file
             # path is rejected, while an existing *relative* path falls through to
             # raw text (save_data_item_to_storage has no reject branch for it).
-            if value.startswith("/"):
+            # Absolute-path detection matches save_data_item_to_storage exactly,
+            # including Windows drive-letter paths (C:\...), which "/"-prefix
+            # checking alone misses.
+            is_absolute_path = (
+                value.startswith("/") or (os.name == "nt" and len(value) > 1 and value[1] == ":")
+            ) and Path(os.path.normpath(value)).is_absolute()
+            if is_absolute_path:
                 raise ValueError(f"Local files are not accepted, got {value!r}.")
             return None
         return path
@@ -469,8 +483,41 @@ async def _chunks_from_data_items(
     *,
     chunker: Type[Any],
     chunk_size: int,
-) -> tuple[list[DocumentChunk], int]:
-    documents = await classify_documents(data_items)
+) -> tuple[list[DocumentChunk], int, int, int]:
+    """Chunk the LLM-bound items; DLT and code items are routed out BEFORE any read.
+
+    Uses the same routing policy as execution (cognify_route_for), so the
+    estimate cannot drift from what cognify actually runs. Manifest chunk
+    counts come from system_metadata["row_count"] — a dry run never opens
+    a (potentially multi-GB) manifest file. Code files run the deterministic
+    code graph pipeline (no LLM calls), so they are counted, not chunked.
+    """
+    from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
+
+    llm_items: list[Data] = []
+    skipped_dlt_chunks = 0
+    skipped_code_items = 0
+    for data_item in data_items:
+        route = cognify_route_for(data_item)
+        if route is CognifyRoute.DLT_SOURCE:
+            system_metadata = data_item.system_metadata
+            row_count = (
+                system_metadata.get("row_count") if isinstance(system_metadata, dict) else None
+            )
+            if row_count is None:
+                logger.warning(
+                    "DLT manifest %s has no row_count in system_metadata; "
+                    "counting 0 skipped chunks for it.",
+                    data_item.id,
+                )
+                row_count = 0
+            skipped_dlt_chunks += row_count
+        elif route in (CognifyRoute.CODE, CognifyRoute.CODE_REPO):
+            skipped_code_items += 1
+        else:
+            llm_items.append(data_item)
+
+    documents = await classify_documents(llm_items)
     chunks: list[DocumentChunk] = []
     skipped = 0
     for document in documents:
@@ -479,7 +526,7 @@ async def _chunks_from_data_items(
             continue
         async for chunk in document.read(chunker_cls=chunker, max_chunk_size=chunk_size):
             chunks.append(chunk)
-    return chunks, skipped
+    return chunks, skipped, skipped_dlt_chunks, skipped_code_items
 
 
 async def estimate_remember_dry_run(
@@ -524,12 +571,21 @@ async def estimate_cognify_dry_run(
 
     chunks: list[DocumentChunk] = []
     skipped = 0
+    skipped_dlt = 0
+    skipped_code = 0
     for dataset in authorized_datasets:
-        dataset_chunks, skipped_items = await _chunks_from_data_items(
+        (
+            dataset_chunks,
+            skipped_items,
+            skipped_dlt_chunks,
+            skipped_code_items,
+        ) = await _chunks_from_data_items(
             await get_dataset_data(dataset.id), chunker=chunker, chunk_size=chunk_size
         )
         chunks.extend(dataset_chunks)
         skipped += skipped_items
+        skipped_dlt += skipped_dlt_chunks
+        skipped_code += skipped_code_items
 
     return estimate_chunks(
         chunks,
@@ -537,4 +593,6 @@ async def estimate_cognify_dry_run(
         graph_model=graph_model,
         custom_prompt=custom_prompt,
         skipped_items=skipped,
+        skipped_dlt_chunks=skipped_dlt,
+        skipped_code_items=skipped_code,
     )

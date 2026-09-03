@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 import diskcache as dc
 from pydantic import ValidationError
@@ -66,7 +66,7 @@ class FSCacheAdapter(CacheDBInterface):
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
-            time=datetime.utcnow().isoformat(),
+            time=datetime.now(timezone.utc).isoformat(),
             question=question,
             context=context,
             answer=answer,
@@ -505,6 +505,26 @@ class FSCacheAdapter(CacheDBInterface):
                 return False
         except Exception as e:
             error_msg = f"Unexpected error while updating session context in diskcache: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def delete_session_context_entry(
+        self, user_id: str, session_id: str, entry_id: str
+    ) -> bool:
+        """Delete a single session-context entry by its "id" field."""
+        try:
+            context_key = self._session_context_key(user_id, session_id)
+            with self.cache.transact():
+                entries = self._load_entries(context_key)
+                surviving = [entry for entry in entries if entry.get("id") != entry_id]
+                if len(surviving) == len(entries):
+                    return False
+                self._save_entries(context_key, surviving)
+                return True
+        except Exception as e:
+            error_msg = (
+                f"Unexpected error while deleting session context entry from diskcache: {str(e)}"
+            )
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

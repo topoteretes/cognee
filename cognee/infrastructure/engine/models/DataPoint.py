@@ -21,6 +21,7 @@ class MetaData(TypedDict):
     type: NotRequired[str]
     index_fields: list[str]
     identity_fields: NotRequired[list[str]]
+    transparent: NotRequired[bool]
 
 
 # Updated DataPoint model with versioning and new fields
@@ -63,6 +64,9 @@ class DataPoint(BaseModel):
     ontology_uri: str | None = None
     version: int = 1  # Default version
     topological_rank: int | None = 0
+    # Bi-temporal validity: ms epoch when this fact was superseded (via close_node);
+    # None = still current. Not the same as Event/Interval time_to (when an event occurred).
+    valid_to: int | None = None
     metadata: MetaData = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
     belongs_to_set: "list[DataPoint] | list[str] | None" = None

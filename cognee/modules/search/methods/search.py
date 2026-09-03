@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import Any, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
@@ -24,9 +23,11 @@ from cognee.modules.observability import (
     new_span,
 )
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.retrieval.context_preview import SharedSessionHistory
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
-from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
+    ContextFormat,
     SearchResult,
     SearchType,
 )
@@ -35,6 +36,20 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
+
+
+def _single_dataset_id(dataset_ids: Union[list[UUID], UUID, None]) -> Optional[UUID]:
+    """Return the dataset a search is scoped to, when it is exactly one.
+
+    Searches fan out across every dataset they are given, and ``None`` means
+    "every dataset the user can read". Neither case has a single dataset to
+    attribute the logged query to, so both record ``None``.
+    """
+    if dataset_ids is None:
+        return None
+    if isinstance(dataset_ids, UUID):
+        return dataset_ids
+    return dataset_ids[0] if len(dataset_ids) == 1 else None
 
 
 async def search(
@@ -49,9 +64,10 @@ async def search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose=False,
     retriever_specific_config: Optional[dict] = None,
@@ -76,10 +92,9 @@ async def search(
     Notes:
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
-    query = await log_query(query_text, query_type.value, user.id)
     send_telemetry(
         "cognee.search EXECUTION STARTED",
-        user.id,
+        user,
         additional_properties={
             "cognee_version": cognee_version,
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
@@ -108,6 +123,7 @@ async def search(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -124,28 +140,18 @@ async def search(
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
-        user.id,
+        user,
         additional_properties={
             "cognee_version": cognee_version,
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
         },
     )
 
-    # Log only the completion text (what the user sees), not the full
-    # serialized graph payload. The raw result_objects can be 50-100 KB
-    # each and cause unbounded DB growth in long-running deployments.
-    completions = []
-    for item in search_results:
-        payload = item[0] if isinstance(item, tuple) else item
-        if hasattr(payload, "completion") and payload.completion:
-            completions.append(payload.completion)
-        elif hasattr(payload, "context") and payload.context:
-            completions.append(payload.context)
-    await log_result(
-        query.id,
-        json.dumps(completions) if completions else "[]",
-        user.id,
-    )
+    # Logged after the search because only the results say which datasets were
+    # actually searched — dataset_ids=None means "every dataset the user can
+    # read". Only the completion text is stored, never the raw result_objects,
+    # which run 50-100 KB each and would grow the DB without bound.
+    await log_search_history(query_text, query_type.value, user.id, search_results)
 
     return _backwards_compatible_search_results(search_results, verbose)
 
@@ -162,9 +168,10 @@ async def authorized_search(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -195,6 +202,7 @@ async def authorized_search(
         node_name=node_name,
         node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
+        context_format=context_format,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
@@ -222,9 +230,10 @@ async def search_in_datasets_context(
     node_name: Optional[List[str]] = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
+    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 6.5,
+    wide_search_top_k: Optional[int] = None,
+    triplet_distance_penalty: Optional[float] = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     retriever_specific_config: Optional[dict] = None,
     neighborhood_depth: Optional[int] = None,
@@ -249,9 +258,10 @@ async def search_in_datasets_context(
         node_name: Optional[List[str]] = None,
         node_name_filter_operator: str = "OR",
         only_context: bool = False,
+        context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
         session_id: Optional[str] = None,
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: Optional[int] = None,
+        triplet_distance_penalty: Optional[float] = None,
         feedback_influence: float = get_base_config().default_feedback_influence,
         retriever_specific_config: Optional[dict] = None,
         neighborhood_depth: Optional[int] = None,
@@ -302,6 +312,8 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
+                    shared_history=shared_history,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -334,6 +346,13 @@ async def search_in_datasets_context(
                 dataset_tenant_id=dataset.tenant_id,
             )
 
+    # One conversation-history read — the only billed step of the session layer (it
+    # embeds the query for vector recall) — for the whole fan-out. The guidance block
+    # still renders per dataset because preferences are dataset-scoped.
+    shared_history = None
+    if only_context and ContextFormat.parse(context_format) is ContextFormat.PROMPT:
+        shared_history = SharedSessionHistory(query=query_text, session_id=session_id)
+
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
     soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
@@ -351,6 +370,7 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -379,6 +399,8 @@ async def search_in_datasets_context(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
+            shared_history=shared_history,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -407,9 +429,30 @@ async def search_in_datasets_context(
     return await asyncio.gather(*tasks)
 
 
+def _prompt_preview_fields(search_result) -> dict:
+    """Prompt-preview keys for verbose output, present exactly when the prompt shape was asked for.
+
+    Gated on ``context_format``, not on whether the values happen to be set: a verbose
+    caller that requested the prompt always gets the three keys (possibly ``None``), and an
+    ordinary search never sees them — the key set depends on the request, not on session
+    state.
+    """
+    if search_result.context_format != ContextFormat.PROMPT:
+        return {}
+    return {
+        "session_context_result": search_result.session_context,
+        "user_prompt_result": search_result.user_prompt,
+        "system_prompt_result": search_result.system_prompt,
+    }
+
+
 def _backwards_compatible_search_results(search_results, verbose: bool):
     """
     Prepares search results in a format compatible with previous versions of the API.
+
+    Does not include SearchResultPayload.search_type. only_context / verbose
+    callers that parse retriever-specific shapes must pin query_type; hybrid
+    may have deferred to GRAPH_COMPLETION.
     """
     # This is for maintaining backwards compatibility
     if backend_access_control_enabled():
@@ -426,6 +469,10 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
+                search_result_dict.update(_prompt_preview_fields(search_result))
+                search_result_dict["evidence"] = [
+                    reference.model_dump(mode="json") for reference in search_result.evidence
+                ]
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -441,6 +488,10 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
+                    **_prompt_preview_fields(search_result),
+                    "evidence": [
+                        reference.model_dump(mode="json") for reference in search_result.evidence
+                    ],
                 }
                 return_value.append(search_result_dict)
             return return_value

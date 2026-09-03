@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # Minimal DataPoint replica (avoids the full cognee import chain)
 # ---------------------------------------------------------------------------
 
+
 class DataPoint(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -45,6 +46,7 @@ class ChildDP(DataPoint):
 # ---------------------------------------------------------------------------
 # Inline _stamp_provenance (mirrors run_tasks_base, avoids import chain)
 # ---------------------------------------------------------------------------
+
 
 def _stamp_provenance(
     data,
@@ -93,8 +95,14 @@ def _stamp_provenance(
     elif isinstance(data, (list, tuple)):
         for item in data:
             _stamp_provenance(
-                item, pipeline_name, task_name, visited,
-                node_set, user_label, content_hash, task_index,
+                item,
+                pipeline_name,
+                task_name,
+                visited,
+                node_set,
+                user_label,
+                content_hash,
+                task_index,
             )
 
 
@@ -127,6 +135,7 @@ def _make_config(mode: str) -> _ProvenanceConfig:
 # Helper: simulate what handle_task does for a single DataPoint result
 # ---------------------------------------------------------------------------
 
+
 def _simulate_pipeline_task(
     data_point: DataPoint,
     mode: str = "lightweight",
@@ -155,6 +164,7 @@ def _simulate_pipeline_task(
 # ===========================================================================
 # Tests — lightweight mode (default)
 # ===========================================================================
+
 
 class TestLightweightMode:
     def test_source_pipeline_stamped(self):
@@ -230,6 +240,7 @@ class TestLightweightMode:
 # Tests — deep mode
 # ===========================================================================
 
+
 class TestDeepMode:
     """Deep mode must behave identically to lightweight for stamp semantics.
 
@@ -257,6 +268,7 @@ class TestDeepMode:
 # ===========================================================================
 # Tests — disabled mode
 # ===========================================================================
+
 
 class TestDisabledMode:
     def test_nothing_stamped_when_disabled(self):
@@ -296,6 +308,7 @@ class TestDisabledMode:
 # Tests — ProvenanceConfig validation
 # ===========================================================================
 
+
 class TestProvenanceConfig:
     def test_default_is_lightweight(self):
         cfg = _ProvenanceConfig()
@@ -327,6 +340,7 @@ class TestProvenanceConfig:
 # ===========================================================================
 # Tests — shared fixture: ingest → recall → provenance present
 # ===========================================================================
+
 
 class TestSharedFixture:
     """Simulate a minimal ingestion fixture: provenance present after ingest,

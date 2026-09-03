@@ -79,6 +79,11 @@ class AgenticRetriever(GraphCompletionRetriever):
       used inside the loop (distinct from the parent's graph-completion prompts).
     """
 
+    # Answers through a multi-step loop on the agentic templates; the inherited
+    # (user_prompt_path, system_prompt_path) pair is only the budget-exhausted fallback,
+    # so a single rendered prompt would misrepresent what this retriever sends.
+    supports_prompt_preview = False
+
     def __init__(
         self,
         skills: Optional[Sequence[Union[str, Skill]]] = None,
@@ -418,7 +423,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             return await build_active_context_block(
                 session_manager=session_manager,
                 user_id=str(user_id),
-                session_id=session_manager._resolve_session_id(self.session_id),
+                session_id=session_manager.resolve_session_id(self.session_id),
                 query=query or "",
             )
         except Exception as exc:
@@ -447,7 +452,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             if not session_manager.is_available:
                 return
 
-            used_graph_element_ids = self._extract_context_object_ids(triplets)
+            used_graph_element_ids = self.extract_context_object_ids(triplets)
             served_ids = getattr(self, "_active_context_served_ids", None) or None
             await session_manager.add_qa(
                 user_id=str(user_id),

@@ -338,6 +338,45 @@ async def test_update_memify_metadata_merges_existing_keys(adapter):
 
 
 @pytest.mark.asyncio
+async def test_concurrent_update_qa_writers_both_keep_their_metadata_keys(adapter):
+    """Two concurrent update_qa calls, each passing only its own key, both land.
+
+    This is the two-improve()-stages scenario: the feedback-weights stage and
+    the preference stage each mark the same QA row with their own
+    memify_metadata key. Because each writer passes ONLY its own keys and the
+    adapter overlays them onto the stored dict, neither wipes the other.
+    """
+    import asyncio
+
+    from cognee.infrastructure.session.session_manager import SessionManager
+
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    manager = SessionManager(cache_engine=adapter)
+
+    results = await asyncio.gather(
+        manager.update_qa(
+            user_id="u1",
+            session_id="s1",
+            qa_id="id1",
+            memify_metadata={MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True},
+        ),
+        manager.update_qa(
+            user_id="u1",
+            session_id="s1",
+            qa_id="id1",
+            memify_metadata={"preference_turn_counted": False},
+        ),
+    )
+
+    assert results == [True, True]
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert entries[0].memify_metadata == {
+        MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY: True,
+        "preference_turn_counted": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_delete_entry(adapter):
     """Delete a single QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
@@ -414,3 +453,23 @@ async def test_get_qa_entries_by_ids_returns_matching_rows_in_chronological_orde
     entries = await adapter.get_qa_entries_by_ids("u1", "s1", ["id3", "missing", "id1"])
 
     assert [entry.qa_id for entry in entries] == ["id1", "id3"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_removes_only_target(adapter):
+    """delete_session_context_entry removes one entry; others and other sessions survive."""
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c2", "kind": "context"})
+    await adapter.create_session_context_entry("u1", "s2", {"id": "c1", "kind": "context"})
+
+    assert await adapter.delete_session_context_entry("u1", "s1", "c1") is True
+
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s1")] == ["c2"]
+    assert [e["id"] for e in await adapter.get_session_context_entries("u1", "s2")] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_session_context_entry_missing_returns_false(adapter):
+    await adapter.create_session_context_entry("u1", "s1", {"id": "c1", "kind": "context"})
+    assert await adapter.delete_session_context_entry("u1", "s1", "missing") is False
+    assert len(await adapter.get_session_context_entries("u1", "s1")) == 1

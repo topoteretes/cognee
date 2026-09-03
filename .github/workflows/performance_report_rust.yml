@@ -1,0 +1,311 @@
+name: performance report (rust)
+
+# Reusable workflow: runs the SAME percentile performance report as
+# performance_report.yml, but drives the Rust SDK (`cognee-rs`) instead of the
+# Python one. It checks out the latest cognee-rs, builds the `cognee-cli bench`
+# subcommand, and feeds it to the shared Python orchestrator
+# (cognee/tests/performance/statistics_percentile_report.py) via the BENCH_CMD
+# hook — so the identical percentile table + JSON + HTML report are produced and
+# uploaded to S3, and the headline metrics are exposed as outputs for the Slack
+# bot in nightly_tests.yml.
+#
+# Scope: file_based backend (SQLite + Ladybug + LanceDB), mock LLM only. The run
+# is fully offline — deterministic mock embeddings + a committed record/replay
+# cassette (cognee-rs scripts/perf/fixtures/) — so it needs no LLM API key. Real
+# LLM and the postgres backend are future extensions (the latter needs bench.rs
+# to honour DB_PROVIDER instead of hardcoding on-disk backends).
+
+on:
+  workflow_call:
+    inputs:
+      runs:
+        description: "Number of sequential benchmark runs."
+        required: false
+        type: string
+        default: '3'
+      mode:
+        description: "'mock_llm' (offline cassette) or 'llm' (real LLM + embeddings)."
+        required: false
+        type: string
+        default: 'mock_llm'
+      cognee_rs_ref:
+        description: "cognee-rs git ref to check out (blank = default branch)."
+        required: false
+        type: string
+        default: ''
+      label:
+        description: "Dataset label — display name + S3 output path segment."
+        required: false
+        type: string
+        default: '50_small_documents'
+      memories:
+        description: "Corpus path inside the cognee-rs checkout."
+        required: false
+        type: string
+        default: 'scripts/perf/fixtures/memories.json'
+      cassette:
+        description: "Replay cassette path inside the cognee-rs checkout."
+        required: false
+        type: string
+        default: 'scripts/perf/fixtures/cassette.json'
+    outputs:
+      metrics:
+        description: "success + add/cognify/search/total p50/p90/p99."
+        value: ${{ jobs.rust_file_based.outputs.metrics }}
+      html_key:
+        description: "S3 object key of the HTML report."
+        value: ${{ jobs.rust_file_based.outputs.html_key }}
+
+permissions:
+  contents: read
+
+env:
+  BUCKET: github-runner-cognee-tests
+  # ort-sys caches the ONNX Runtime static lib here (mirrors cognee-rs ci.yml).
+  ORT_CACHE_DIR: ${{ github.workspace }}/cognee-rs/target/ort-cache
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  rust_file_based:
+    name: rust file_based — ${{ inputs.label }} (${{ inputs.mode }})
+    # ubuntu-latest (not 22.04): lbug's bundled simsimd needs a C compiler with
+    # avx512fp16 / _Float16 support (GCC >= 12). This matches cognee-rs's own CI.
+    runs-on: ubuntu-latest
+    # The War-and-Peace real-LLM arm is the binding case and 90 was too tight:
+    # it was cancelled at the limit on two consecutive runs. Measured, with the
+    # cargo cache warm in every one (restore 1.5-2 min, build ~20 min):
+    #
+    #   03:31 UTC nightly   report 53.9 min   job 76 min   success
+    #   14:53 UTC run       report >67 min    job 90 min   CANCELLED
+    #   18:03 UTC run       report >67 min    job 90 min   CANCELLED
+    #
+    # So this is not a cold-cache problem — the benchmark itself is slower by
+    # day, along with the whole nightly (the Python W&P arm's cognify p50 moved
+    # 425s -> 475s across the same runs), which points at LLM API latency rather
+    # than anything in the pipeline. A cancelled job is the worst outcome
+    # available: it produces no report, no metrics and no Slack link, and it
+    # kills the fail-gate too, so the CLO-490 handling cannot rescue it.
+    #
+    # 150 leaves the report room to reach ~125 min against a 54-min best case.
+    # The other three arms finish far sooner, so the only cost is a longer
+    # worst case for a genuinely hung job.
+    timeout-minutes: 150
+    outputs:
+      metrics: ${{ steps.parse.outputs.metrics }}
+      html_key: ${{ steps.upload.outputs.html_key }}
+    steps:
+      # cognee (this repo) supplies the shared orchestrator + reporter.
+      - name: Checkout cognee (orchestrator)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      # cognee-rs supplies the CLI, the perf harness, and the committed cassette.
+      - name: Checkout cognee-rs (latest)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          repository: topoteretes/cognee-rs
+          ref: ${{ inputs.cognee_rs_ref }}
+          path: cognee-rs
+
+      # Toolchain pin comes from cognee-rs/rust-toolchain.toml (rustup honours it).
+      # The action normally infers the toolchain from the @ref; with the ref
+      # pinned to a commit SHA the toolchain must be passed explicitly.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c  # stable
+        with:
+          toolchain: stable
+
+      - name: Install mold linker
+        uses: rui314/setup-mold@7e4f20ad28a2e8ca6fd0892ccf72e2abb706b9c3  # v1
+        with:
+          make-default: true
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # main
+        with:
+          tool-cache: false
+          # large-packages removes ^llvm-.* (libclang) which litert bindgen needs.
+          large-packages: false
+          docker-images: true
+          swap-storage: true
+
+      - name: Cache cargo + target
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
+        with:
+          workspaces: cognee-rs
+          shared-key: perf-rust
+
+      - name: Cache ORT binary
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: cognee-rs/target/ort-cache
+          key: ort-perf-rust-linux-x86_64
+
+      - name: Build cognee-cli (release, bench)
+        working-directory: cognee-rs
+        run: cargo build --release -p cognee-cli --features bench
+
+      # Cassette-freshness guard. The committed cassette is a static fixture with
+      # no auto-refresh (record-cassettes.yml does not cover scripts/perf). When
+      # cognify prompts, the KnowledgeGraph/SummarizedContent schemas, chunking,
+      # or the model drift, replay silently falls back to EmptyGraph — no
+      # entity-type nodes get created and the benchmark keeps reporting "success"
+      # with meaningless timings. A cassette HIT replays the recorded graph and
+      # logs "Stored N entity types as graph nodes".
+      #
+      # On drift this WARNS rather than fails: the perf run still completes and
+      # reports (empty-graph timings are cheap but not representative), and the
+      # nightly stays green. The warning surfaces as a GitHub annotation + step
+      # summary so it is visible without red-failing the whole nightly. Re-record
+      # cognee-rs/scripts/perf/fixtures/cassette.json to clear it (see its README).
+      #
+      # LOG_LEVEL=info is pinned so the log-scraping check is deterministic
+      # regardless of any RUST_LOG/LOG_LEVEL inherited by the runner.
+      - name: Verify cassette freshness (warn on drift)
+        # Cassette only exists / matters in mock mode; real-LLM mode calls the API.
+        if: ${{ inputs.mode == 'mock_llm' }}
+        working-directory: cognee-rs
+        env:
+          LOG_LEVEL: info
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          MOCK_EMBEDDING=deterministic ./target/release/cognee-cli bench \
+            --mock-llm \
+            --mock-memories "${{ inputs.cassette }}" \
+            --memories "${{ inputs.memories }}" \
+            --num-memories 8 \
+            --output /tmp/freshness.json >"$log" 2>&1 || { cat "$log"; }
+          entities="$(grep -oE 'Stored [0-9]+ entity types as graph nodes' "$log" \
+                      | grep -oE '[0-9]+' | head -1 || true)"
+          echo "entity-type nodes created on replay: ${entities:-0}"
+          if [ -z "${entities:-}" ] || [ "${entities:-0}" -lt 1 ]; then
+            msg="cognee-rs perf cassette looks STALE — replay produced no entity-type nodes (EmptyGraph fallback). Timings below are NOT representative. Re-record cognee-rs/scripts/perf/fixtures/cassette.json (see its README)."
+            echo "::warning::$msg"
+            echo "⚠️ $msg" >> "$GITHUB_STEP_SUMMARY"
+            cat "$log" >&2
+          else
+            echo "✅ Cassette fresh — replay created ${entities} entity-type nodes." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── Run the report (both modes) ──────────────────────────────────────────
+      # One step for both modes so the failure handling below cannot drift
+      # between them (mirrors performance_report.yml, which also branches on
+      # mode inside a single step).
+      #
+      # Mock mode: run_mock_bench.sh forwards --mock-llm/--mock-memories to the
+      # orchestrator (which passes them through to the bench subcommand) and puts
+      # --memories in BENCH_CMD, so --memories is never duplicated.
+      #
+      # Real-LLM mode: BENCH_CMD holds the bench invocation + corpus; the
+      # orchestrator adds --output and sleeps 60s between runs. LLM + embedding
+      # config comes from the same standard CI secrets as the Python perf arms
+      # (performance_report.yml), so all nightly benchmarks measure one model
+      # fleet. Note: the mock cassette was recorded with gpt-4o-mini — mock vs
+      # real comparability now depends on the org secrets matching the cassette.
+      - name: Run performance report
+        id: run
+        env:
+          PYTHONFAULTHANDLER: 1
+          COGNEE_SKIP_CONNECTION_TEST: 'true'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          EMBEDDING_MODEL_RAW: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/perf-out"
+
+          if [ "${{ inputs.mode }}" = "llm" ]; then
+            # The Rust embedding client sends the model id verbatim to the API,
+            # so a litellm-style prefixed secret ("openai/text-embedding-3-small")
+            # 400s with "invalid model ID". Split the secret into the bare model
+            # and a provider the Rust client understands.
+            if [[ "${EMBEDDING_MODEL_RAW:-}" == */* ]]; then
+              export EMBEDDING_PROVIDER="${EMBEDDING_MODEL_RAW%%/*}"
+            else
+              export EMBEDDING_PROVIDER="openai"
+            fi
+            export EMBEDDING_MODEL="${EMBEDDING_MODEL_RAW##*/}"
+            # The Rust client also does not send OpenAI's `dimensions` truncation
+            # parameter (the Python arms get 1536-d vectors that way), so size the
+            # vector store to the model's NATIVE output or every insert fails with
+            # a dimension mismatch. Unknown models keep the client default.
+            case "$EMBEDDING_MODEL" in
+              text-embedding-3-large) export EMBEDDING_DIMENSIONS=3072 ;;
+              text-embedding-3-small | text-embedding-ada-002) export EMBEDDING_DIMENSIONS=1536 ;;
+            esac
+          fi
+
+          # Capture the exit code instead of failing here: the report writes its
+          # JSON/HTML even when runs fail, and the stage + upload + metrics steps
+          # must still run so a partially-failed arm keeps its Slack numbers and
+          # its report link. The job fails at the end via REPORT_RC.
+          set +e
+          if [ "${{ inputs.mode }}" = "mock_llm" ]; then
+            COGNEE_PY="$GITHUB_WORKSPACE" \
+            BENCH_BIN="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli" \
+            RUNS="${{ inputs.runs }}" \
+            OUT_DIR="$GITHUB_WORKSPACE/perf-out" \
+            CASSETTE="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.cassette }}" \
+            MEMORIES="$GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
+              bash "$GITHUB_WORKSPACE/cognee-rs/scripts/perf/run_mock_bench.sh"
+          else
+            BENCH_CMD="$GITHUB_WORKSPACE/cognee-rs/target/release/cognee-cli bench --memories $GITHUB_WORKSPACE/cognee-rs/${{ inputs.memories }}" \
+              python3 "$GITHUB_WORKSPACE/cognee/tests/performance/statistics_percentile_report.py" \
+                --runs "${{ inputs.runs }}" \
+                --output "$GITHUB_WORKSPACE/perf-out/report.json" \
+                --html "$GITHUB_WORKSPACE/perf-out/report.html"
+          fi
+          REPORT_RC=$?
+          set -e
+          echo "REPORT_RC=$REPORT_RC" >> "$GITHUB_ENV"
+
+      # ── Stage the report (common to both modes) for S3 upload ────────────────
+      - name: Stage report
+        run: |
+          set -euo pipefail
+          TS="$(date -u '+%Y-%m-%d_%H-%M-%SZ')"
+          JSON_PATH="performance_results/rust_file_based/${{ inputs.label }}/${{ inputs.mode }}_${TS}.json"
+          HTML_PATH="performance_results/rust_file_based/${{ inputs.label }}/${{ inputs.mode }}_${TS}.html"
+          mkdir -p "$(dirname "$JSON_PATH")"
+          cp "$GITHUB_WORKSPACE/perf-out/report.json" "$JSON_PATH"
+          cp "$GITHUB_WORKSPACE/perf-out/report.html" "$HTML_PATH"
+          echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
+          echo "HTML_PATH=$HTML_PATH" >> "$GITHUB_ENV"
+
+      - name: Upload reports to S3
+        id: upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-1
+        run: |
+          set -euo pipefail
+          aws s3 cp "$JSON_PATH" "s3://$BUCKET/$JSON_PATH" --content-type application/json
+          aws s3 cp "$HTML_PATH" "s3://$BUCKET/$HTML_PATH" --content-type text/html
+          # Presigning is done by the caller (the Slack job), NOT here — see the
+          # note in performance_report.yml. Pass only the (non-secret) object key.
+          echo "html_key=$HTML_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Parse headline metrics
+        id: parse
+        run: |
+          set -euo pipefail
+          METRICS="$(jq -c '{
+            success: "\(.succeeded)/\(.num_runs)",
+            add:     {p50: .stats.add_time_s.p50,          p90: .stats.add_time_s.p90,          p99: .stats.add_time_s.p99},
+            cognify: {p50: .stats.cognify_time_s.p50,      p90: .stats.cognify_time_s.p90,      p99: .stats.cognify_time_s.p99},
+            search:  {p50: .stats.search_time.p50,         p90: .stats.search_time.p90,         p99: .stats.search_time.p99},
+            total:   {p50: .stats.total_ingest_time_s.p50, p90: .stats.total_ingest_time_s.p90, p99: .stats.total_ingest_time_s.p99}
+          }' "$JSON_PATH")"
+          echo "metrics=$METRICS" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if any benchmark run failed
+        if: ${{ env.REPORT_RC != '0' }}
+        run: |
+          echo "Performance report exited with code $REPORT_RC — one or more benchmark runs failed."
+          exit 1

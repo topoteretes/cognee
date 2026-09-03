@@ -27,15 +27,19 @@ async def create_role(
         None
     """
     db_engine = get_relational_engine()
+
+    # Resolve user + tenant (each opens its own session) BEFORE opening ours, so
+    # this request never holds two pooled connections at once — that overlap
+    # deadlocks the pool under concurrency (issue #4197 class).
+    user = await get_user(owner_id)
+    tenant = await get_tenant(user.tenant_id)
+
+    if owner_id != tenant.owner_id:
+        raise PermissionDeniedError(
+            "User submitting request does not have permission to create role for tenant."
+        )
+
     async with db_engine.get_async_session() as session:
-        user = await get_user(owner_id)
-        tenant = await get_tenant(user.tenant_id)
-
-        if owner_id != tenant.owner_id:
-            raise PermissionDeniedError(
-                "User submitting request does not have permission to create role for tenant."
-            )
-
         try:
             # Add association directly to the association table
             role = Role(name=role_name, tenant_id=tenant.id)

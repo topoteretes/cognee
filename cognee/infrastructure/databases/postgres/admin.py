@@ -9,13 +9,62 @@ credentials came from.
 
 import json
 import os
+import re
 from typing import Union
+from uuid import UUID
 
 from sqlalchemy import URL, text
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.schema import DDLElement
 
 
 _MAINTENANCE_DB_NAME = "postgres"
+# Dataset databases are named after dataset UUIDs (hyphens, leading digits), so
+# this is looser than an unquoted Postgres identifier; the compiled DDL below
+# always quotes the name via compiler.preparer.quote, which is what actually
+# prevents injection. The regex still rejects quotes, whitespace, and other
+# metacharacters as defense in depth, and enforces the 63-byte name limit.
+_POSTGRES_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_$-]{0,62}$")
+
+
+def _validate_database_identifier(db_name: str) -> str:
+    if not _POSTGRES_IDENTIFIER_RE.fullmatch(db_name):
+        raise ValueError("Invalid Postgres database name")
+    return db_name
+
+
+class CreateDatabase(DDLElement):
+    def __init__(self, db_name: str) -> None:
+        self.db_name = _validate_database_identifier(db_name)
+
+
+class DropDatabaseIfExists(DDLElement):
+    def __init__(self, db_name: str) -> None:
+        self.db_name = _validate_database_identifier(db_name)
+
+
+@compiles(CreateDatabase)
+def _compile_create_database(element: CreateDatabase, compiler, **kwargs) -> str:
+    return "CREATE DATABASE " + compiler.preparer.quote(element.db_name)
+
+
+@compiles(DropDatabaseIfExists)
+def _compile_drop_database_if_exists(element: DropDatabaseIfExists, compiler, **kwargs) -> str:
+    return "DROP DATABASE IF EXISTS " + compiler.preparer.quote(element.db_name)
+
+
+def dataset_schema_name(dataset_id: Union[UUID, str]) -> str:
+    """Postgres schema name used to isolate a dataset in shared-database mode.
+
+    Returns ``ds_<dataset_id_hex>`` — a valid, lower-case Postgres identifier
+    (``ds_`` + 32 hex chars = 35 chars, well under the 63-char limit). The
+    leading ``ds_`` keeps the name a valid identifier even though a raw UUID
+    starts with a digit, and namespaces these schemas so they never collide
+    with ``public`` or cognee's relational tables.
+    """
+    raw = dataset_id.hex if isinstance(dataset_id, UUID) else str(dataset_id).replace("-", "")
+    return f"ds_{raw}"
 
 
 def _admin_connect_args() -> dict:
@@ -57,6 +106,81 @@ def _build_maintenance_url(host: str, port: Union[int, str], username: str, pass
     )
 
 
+def _build_db_url(
+    db_name: str, host: str, port: Union[int, str], username: str, password: str
+) -> URL:
+    """Connection URL to a specific (already existing) database.
+
+    Unlike ``_build_maintenance_url`` this targets ``db_name`` directly, since
+    schema DDL (CREATE/DROP SCHEMA) runs inside the target database rather than
+    against the cluster's maintenance database.
+    """
+    return URL.create(
+        "postgresql+asyncpg",
+        username=username,
+        password=password,
+        host=_direct_host(host),
+        port=int(port),
+        database=db_name,
+    )
+
+
+async def create_pg_schema_if_not_exists(
+    db_name: str,
+    schema: str,
+    host: str,
+    port: Union[int, str],
+    username: str,
+    password: str,
+    with_vector_extension: bool = False,
+) -> None:
+    """Create a Postgres schema inside ``db_name`` if it does not already exist.
+
+    Used by the shared-database dataset handlers, which isolate each dataset in
+    its own schema (``ds_<dataset_id>``) inside one shared database instead of
+    provisioning a whole database per dataset. When ``with_vector_extension`` is
+    set the pgvector extension is ensured in the database (it installs into the
+    database's ``public`` schema and is reachable from any schema via the
+    search path).
+    """
+    engine = create_async_engine(
+        _build_db_url(db_name, host, port, username, password),
+        connect_args=_admin_connect_args(),
+    )
+    try:
+        async with engine.begin() as connection:
+            if with_vector_extension:
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            await connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}";'))
+    finally:
+        await engine.dispose()
+
+
+async def drop_pg_schema_if_exists(
+    db_name: str,
+    schema: str,
+    host: str,
+    port: Union[int, str],
+    username: str,
+    password: str,
+) -> None:
+    """Drop a dataset schema (and everything in it) from ``db_name``.
+
+    ``DROP SCHEMA ... CASCADE`` removes every table/index the dataset created,
+    giving the shared-database handlers an atomic, single-statement cleanup that
+    mirrors ``drop_pg_database_if_exists`` for the database-per-dataset mode.
+    """
+    engine = create_async_engine(
+        _build_db_url(db_name, host, port, username, password),
+        connect_args=_admin_connect_args(),
+    )
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE;'))
+    finally:
+        await engine.dispose()
+
+
 async def create_pg_database_if_not_exists(
     db_name: str,
     host: str,
@@ -86,7 +210,7 @@ async def create_pg_database_if_not_exists(
             )
             if result.scalar():
                 return False
-            await connection.execute(text(f'CREATE DATABASE "{db_name}";'))
+            await connection.execute(CreateDatabase(db_name))
             return True
         finally:
             await connection.close()
@@ -123,7 +247,7 @@ async def drop_pg_database_if_exists(
                 ),
                 {"db": db_name},
             )
-            await connection.execute(text(f'DROP DATABASE IF EXISTS "{db_name}";'))
+            await connection.execute(DropDatabaseIfExists(db_name))
         finally:
             await connection.close()
     finally:

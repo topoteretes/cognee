@@ -2,7 +2,8 @@
 
 Drives the built ``cognee/cognee-mcp`` image through a real MCP session: boots it
 with ``TRANSPORT_MODE=http``, connects an MCP client at ``/mcp``, asserts the tool
-surface, exercises a ``remember`` -> ``recall`` round-trip, and validates
+surface (pinned + search transform, with unadvertised tools still callable),
+exercises a ``remember`` -> ``recall`` round-trip, and validates
 ``MCP_ALLOWED_HOSTS`` / DNS-rebinding behaviour on the ``0.0.0.0`` bind.
 """
 
@@ -17,20 +18,25 @@ from mcp_harness import mcp_client_session, run_mcp_http_container
 
 pytestmark = pytest.mark.deployment
 
-# Mirrors EXPECTED_TOOLS in cognee-mcp/tests/test_mcp_server_hardening.py and
-# cognee-mcp/src/test_client.py.
-EXPECTED_TOOLS = {
+# DANGER: IF THE MCP TOOLING CHANGES, UPDATE THIS LIST OR ELSE IT WILL FAIL!
+# What the image advertises in COGNEE_MCP_TOOL_MODE=default: the pinned tools
+# plus the two synthetic tools FastMCP's search transform adds. Spelled out
+# rather than derived from cognee-mcp's registry because this suite tests the
+# container from the outside and its runner installs neither cognee-mcp nor
+# fastmcp — see .github/workflows/test_deployment_mcp.yml.
+PINNED_TOOLS = {
     "remember",
     "recall",
     "forget",
-    "visualize_graph_ui",
-    "upload_file_ui",
-    "open_cognee_workspace",
-    "cognify_file",
-    "list_datasets_json",
-    "list_dataset_data_json",
-    "create_dataset_json",
-    "get_client_info_json",
+}
+SEARCH_TRANSFORM_TOOLS = {"search_tools", "call_tool"}
+EXPECTED_TOOLS = PINNED_TOOLS | SEARCH_TRANSFORM_TOOLS
+
+# Registered but deliberately not advertised; reachable by name and via search.
+# Not exhaustive on purpose — asserted as a subset, so the catalog can change
+# without touching this list.
+HIDDEN_TOOLS = {
+    "cognify_status",
 }
 
 # The MCP SDK's transport-security middleware rejects a bad Host with 421 (and a
@@ -100,6 +106,29 @@ async def test_list_tools_over_http(mcp_http_container):
         f"Tool surface mismatch. "
         f"Missing: {sorted(EXPECTED_TOOLS - names)}. "
         f"Unexpected: {sorted(names - EXPECTED_TOOLS)}."
+    )
+
+
+@pytest.mark.asyncio
+async def test_hidden_tools_stay_reachable_over_http(mcp_http_container):
+    """Gating ``tools/list`` must not gate calling.
+
+    Unadvertised tools stay callable by name, so a tool that stopped being
+    callable would break callers without failing the surface assertion above.
+    """
+    async with mcp_client_session(mcp_http_container.mcp_url) as session:
+        listed = {tool.name for tool in (await session.list_tools()).tools}
+        assert not (HIDDEN_TOOLS & listed), "hidden tools should not be advertised"
+
+        direct = await session.call_tool("cognify_status", arguments={})
+        assert not direct.isError, _text_of(direct)
+
+        found = await session.call_tool(
+            "search_tools", arguments={"query": "check ingestion status"}
+        )
+
+    assert "cognify_status" in _text_of(found), (
+        f"search_tools did not surface the hidden tool: {_text_of(found)!r}"
     )
 
 

@@ -9,8 +9,10 @@ pipeline. No real API keys are required (get_cognify_config is patched; config +
 chunk_size are passed so no ontology/LLM setup runs).
 """
 
+import importlib
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,18 +23,36 @@ from cognee.api.v1.remember.remember import remember
 from cognee.modules.cognify.config import CognifyConfig
 from cognee.tasks.graph.models import Contradiction, ContradictionList
 
+# Patching by the dotted string "cognee.api.v1.serve.state…" fails on
+# Python 3.10: `cognee.api.v1.serve` is shadowed by the re-exported serve()
+# function, and pre-3.11 mock walks attributes instead of importing modules.
+from cognee.api.v1.serve import state as serve_state_module
+
 # `from cognee.api.v1.cognify import cognify` would resolve to the re-exported
 # cognify FUNCTION; grab the actual module objects for patching.
 cognify_module = sys.modules["cognee.api.v1.cognify.cognify"]
 remember_module = sys.modules["cognee.api.v1.remember.remember"]
 
-# The canonical pre-detection task order.
+# String targets like patch("cognee.api.v1.serve.state.get_remote_client") break
+# on Python 3.10: its mock resolves dotted paths by getattr per component, and
+# package __init__ re-exports shadow submodules with same-named FUNCTIONS
+# (v1.serve is the serve() function), so resolution dies with
+# "'function' object has no attribute 'state'". Python 3.11+ resolves via
+# pkgutil.resolve_name (module-first) and doesn't hit this. Import the module
+# objects and use patch.object instead.
+_mod_serve_state = importlib.import_module("cognee.api.v1.serve.state")
+_mod_migrations_startup = importlib.import_module("cognee.modules.migrations.startup")
+_mod_engine_setup = importlib.import_module("cognee.modules.engine.operations.setup")
+_pkg_add = importlib.import_module("cognee.api.v1.add")
+_mod_users_methods = importlib.import_module("cognee.modules.users.methods")
+
+# The canonical pre-detection task order. The legacy DLT task left this
+# list when legacy DLT rows got their own cognify route (SDK-38).
 _BASE_SEQUENCE = [
     "classify_documents",
     "extract_chunks_from_documents",
     "extract_graph_and_summarize",
     "add_data_points",
-    "extract_dlt_fk_edges",
 ]
 
 
@@ -118,7 +138,15 @@ class TestRememberInheritsTheFlag:
 
         def _fake_executor(run_in_background=False):
             async def _run(**executor_kwargs):
-                captured["tasks"] = [task.executable.__name__ for task in executor_kwargs["tasks"]]
+                tasks_arg = executor_kwargs["tasks"]
+                # cognify passes a per-item resolver as ``tasks``; resolve a
+                # plain text item to obtain the standard list.
+                resolved = (
+                    tasks_arg(SimpleNamespace(system_metadata=None, extension="txt"))
+                    if callable(tasks_arg)
+                    else tasks_arg
+                )
+                captured["tasks"] = [task.executable.__name__ for task in resolved]
                 return {}
 
             return _run
@@ -128,12 +156,13 @@ class TestRememberInheritsTheFlag:
             patch.dict(os.environ, {"TELEMETRY_DISABLED": "1"}),
             patch.object(cognify_module, "get_cognify_config", return_value=config),
             patch.object(cognify_module, "get_pipeline_executor", _fake_executor),
-            patch("cognee.modules.migrations.startup.run_migrations_and_block", new=AsyncMock()),
-            patch("cognee.api.v1.serve.state.get_remote_client", return_value=None),
-            patch("cognee.modules.engine.operations.setup.setup", new=AsyncMock()),
-            patch("cognee.api.v1.add.add", new=AsyncMock()),
-            patch(
-                "cognee.modules.users.methods.get_default_user",
+            patch.object(_mod_migrations_startup, "run_migrations_and_block", new=AsyncMock()),
+            patch.object(_mod_serve_state, "get_remote_client", return_value=None),
+            patch.object(_mod_engine_setup, "setup", new=AsyncMock()),
+            patch.object(_pkg_add, "add", new=AsyncMock()),
+            patch.object(
+                _mod_users_methods,
+                "get_default_user",
                 new=AsyncMock(return_value=object()),
             ),
             patch.object(

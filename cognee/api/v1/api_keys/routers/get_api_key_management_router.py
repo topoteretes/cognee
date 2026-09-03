@@ -24,9 +24,10 @@ def get_api_key_management_router():
 
     @api_key_management_router.get("/api-keys")
     async def get_api_keys_for_user(user: User = Depends(get_authenticated_user)):
+        """Get api keys for user — GET /api/v1/auth/api-keys."""
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/auth/api-keys",
             },
@@ -61,9 +62,15 @@ def get_api_key_management_router():
         payload: ApiKeyCreationPayload,
         user: User = Depends(get_authenticated_user),
     ):
+        """Create api key for user — POST /api/v1/auth/api-keys.
+
+        ## Request Parameters
+        - **name** (Optional[str]): Human-readable label to store with the generated API
+          key.
+        """
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/auth/api-keys",
             },
@@ -87,9 +94,14 @@ def get_api_key_management_router():
         api_key_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
+        """Delete api key for user — DELETE /api/v1/auth/api-keys/{api_key_id}.
+
+        ## Path Parameters
+        - **api_key_id** (UUID): UUID of the API key (from GET /api/v1/auth/api-keys).
+        """
         send_telemetry(
             "Api Key Management API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "DELETE /v1/auth/api-keys",
             },

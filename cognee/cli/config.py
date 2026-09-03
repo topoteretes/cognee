@@ -31,18 +31,24 @@ COMMAND_DESCRIPTIONS = {
     "current": "Show each database's stamped migration revision (and last failure, if any)",
     "push": "Upload a local dataset's knowledge graph to Cognee Cloud",
     "report": "Generate a Graph Insight Report (hub nodes, surprising links, confidence tags, suggested questions)",
+    "doctor": "Diagnose configuration and local services (config traps, databases, providers)",
 }
 
 # Search type choices
 SEARCH_TYPE_CHOICES = [
     "GRAPH_COMPLETION",
+    "HYBRID_COMPLETION",
     "RAG_COMPLETION",
     "CHUNKS",
     "SUMMARIES",
     "CODE",
     "CYPHER",
     "GRAPH_REPORT",
+    "SKILLS",
 ]
+
+DEFAULT_SEARCH_TYPE = "HYBRID_COMPLETION"
+COMPLETION_SEARCH_TYPES = frozenset({"GRAPH_COMPLETION", "HYBRID_COMPLETION", "RAG_COMPLETION"})
 
 # Chunker choices
 CHUNKER_CHOICES = ["TextChunker", "LangchainChunker", "CsvChunker"]

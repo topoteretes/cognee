@@ -212,10 +212,14 @@ def get_llm_router() -> APIRouter:
     ):
         """
         Generate a custom extraction prompt from a provided graph model schema JSON.
+
+        ## Request Parameters
+        - **graphModel** (Dict[str, Any]): Graph model schema as JSON object.
+        - **parameters** (Dict[str, Any]): Additional kwargs forwarded to LLMGateway.
         """
         send_telemetry(
             "LLM Custom Prompt Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/llm/custom-prompt",
                 "response_model": "str",
@@ -246,14 +250,25 @@ def get_llm_router() -> APIRouter:
 
             return CustomPromptGenerationResponseDTO(custom_prompt=llm_output)
         except LLMPaymentRequiredError as error:
+            logger.warning("LLM custom prompt generation hit the token budget: %s", error)
             return JSONResponse(
-                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+                status_code=402,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": "The configured LLM token budget is exhausted.",
+                },
             )
         except ValueError as error:
-            return JSONResponse(status_code=400, content={"error": str(error)})
+            logger.warning("LLM custom prompt generation validation failed: %s", error)
+            return JSONResponse(
+                status_code=400, content={"error": "Invalid custom prompt request."}
+            )
         except Exception as error:
-            logger.error("LLM custom prompt generation request failed")
-            return JSONResponse(status_code=500, content={"error": str(error)})
+            logger.error("LLM custom prompt generation request failed: %s", error)
+            return JSONResponse(
+                status_code=500,
+                content={"error": "LLM custom prompt generation failed."},
+            )
 
     @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
     @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
@@ -270,10 +285,18 @@ def get_llm_router() -> APIRouter:
         Analyze sample text and/or uploaded files, and propose a JSON Schema describing the entity types
         and relationships present. The returned schema can be passed directly to
         ``/v1/llm/custom-prompt`` or ``/v1/cognify``.
+
+        ## Request Parameters
+        - **data** (List[UploadFile]): Files to load and sample as input for schema
+          inference; at least one file or text is required.
+        - **parameters** (str): JSON string of additional kwargs forwarded to LLMGateway. Defaults
+          to '{}'.
+        - **text** (str): Sample text to analyze for schema inference; at least one file or
+          text is required.
         """
         send_telemetry(
             "LLM Infer Schema Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/llm/infer-schema",
                 "filenames": [f.filename for f in (data or [])],
@@ -349,21 +372,28 @@ def get_llm_router() -> APIRouter:
 
             return InferSchemaResponseDTO(graph_schema=schema_dict)
         except json.JSONDecodeError as error:
+            logger.warning("Invalid JSON in infer-schema parameters: %s", error)
             return JSONResponse(
                 status_code=422,
-                content={"error": f"Invalid JSON in request parameters: {error}"},
+                content={"error": "Invalid JSON in request parameters."},
             )
         except ValidationError as error:
+            logger.warning("LLM schema inference output validation failed: %s", error)
             return JSONResponse(
                 status_code=422,
-                content={"error": f"LLM output did not match expected schema: {error}"},
+                content={"error": "LLM output did not match expected schema."},
             )
         except LLMPaymentRequiredError as error:
+            logger.warning("LLM schema inference hit the token budget: %s", error)
             return JSONResponse(
-                status_code=402, content={"error": "Token budget exhausted", "detail": str(error)}
+                status_code=402,
+                content={
+                    "error": "Token budget exhausted",
+                    "detail": "The configured LLM token budget is exhausted.",
+                },
             )
         except Exception as error:
             logger.error("LLM schema inference failed: %s", error)
-            return JSONResponse(status_code=500, content={"error": str(error)})
+            return JSONResponse(status_code=500, content={"error": "LLM schema inference failed."})
 
     return router

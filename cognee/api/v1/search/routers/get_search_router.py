@@ -9,12 +9,9 @@ from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse, InDTO, OutDTO
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
-from cognee.modules.search.types import SearchResult, SearchType
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
+from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
@@ -25,12 +22,12 @@ from cognee.shared.utils import send_telemetry
 #       To search for datasets not owned by the request sender dataset UUID is needed
 class SearchPayloadDTO(InDTO):
     search_type: SearchType = Field(
-        default=SearchType.GRAPH_COMPLETION,
+        default=SearchType.HYBRID_COMPLETION,
         description=(
-            "Retrieval strategy. Common values: GRAPH_COMPLETION (default, graph context + LLM"
-            " answer), CODE (deterministic code graph), RAG_COMPLETION, CHUNKS, SUMMARIES,"
-            " TEMPORAL, FEELING_LUCKY (auto-select),"
-            " AGENTIC_COMPLETION (enables skills/tools/max_iter)."
+            "Retrieval strategy. Common values: HYBRID_COMPLETION (default, passages + entities +"
+            " LLM answer), GRAPH_COMPLETION (graph context + LLM answer), CODE (deterministic"
+            " code graph), RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, FEELING_LUCKY"
+            " (auto-select), AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
     datasets: Optional[list[str]] = Field(
@@ -49,7 +46,11 @@ class SearchPayloadDTO(InDTO):
             " When provided, the datasets name list is ignored."
         ),
     )
-    query: str = Field(default="What is in the document?")
+    query: str = Field(
+        ...,
+        examples=["What is in the document?"],
+        description="The question to answer. Required; there is no default query.",
+    )
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
@@ -63,6 +64,25 @@ class SearchPayloadDTO(InDTO):
     )
     top_k: Optional[int] = Field(default=15)
     only_context: bool = Field(default=False)
+    context_format: ContextFormat = Field(
+        default=ContextFormat.CONTEXT,
+        examples=[ContextFormat.CONTEXT.value],
+        description=(
+            "Shape of an only_context result. 'context' returns the bare retrieval"
+            " context; 'prompt' returns the full envelope a completion would have"
+            " received — session guidance, conversation history, and the rendered"
+            " user and system prompts. The session layer comes from session_id"
+            " (the default session when omitted). Ignored unless only_context is true."
+        ),
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        examples=[None],
+        description=(
+            "Session whose history and guidance feed the completion (or the"
+            " only_context prompt preview). Omit to use the default session."
+        ),
+    )
     verbose: bool = Field(
         default=False,
         description=(
@@ -114,6 +134,8 @@ def get_search_router() -> APIRouter:
         text: str
         user: str
         created_at: datetime
+        # Null when the search was not scoped to a single dataset.
+        dataset_id: Optional[UUID] = None
 
     @router.get(
         "",
@@ -143,7 +165,7 @@ def get_search_router() -> APIRouter:
         """
         send_telemetry(
             "Search API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={"endpoint": "GET /v1/search", "cognee_version": cognee_version},
         )
 
@@ -179,7 +201,7 @@ def get_search_router() -> APIRouter:
         types and can be scoped to specific datasets.
 
         ## Request Parameters
-        - **search_type** (SearchType): Type of search to perform (default: GRAPH_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
+        - **search_type** (SearchType): Type of search to perform (default: HYBRID_COMPLETION). Use AGENTIC_COMPLETION to enable skills, tools and max_iter.
         - **datasets** (Optional[List[str]]): List of dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
@@ -187,6 +209,8 @@ def get_search_router() -> APIRouter:
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
+        - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
+        - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the prompt preview; the default session when omitted.
         - **verbose** (bool): Return detailed result information including the graph representation when available (default: false)
         - **skills** (Optional[List[str]]): Skill names to load into the agentic retriever (AGENTIC_COMPLETION only)
         - **tools** (Optional[List[str]]): Tool whitelist for AGENTIC_COMPLETION searches
@@ -198,8 +222,9 @@ def get_search_router() -> APIRouter:
         Returns a list of search results containing relevant nodes from the graph.
 
         ## Error Codes
-        - **403 Forbidden**: User lacks permission on the requested datasets (error body)
-        - **422 Unprocessable Content**: Search prerequisites not met (run add + cognify first), or skills/tools sent without search_type=AGENTIC_COMPLETION, or max_iter < 1
+        - **402/403/404/409/422**: Cognee errors (payment required, permission
+          denied, missing user, session-dataset conflict, prerequisites not met)
+          return their own status code and message via the global error handler
         - **500 Internal Server Error**: Unexpected error during search
 
         ## Notes
@@ -209,23 +234,27 @@ def get_search_router() -> APIRouter:
         """
         send_telemetry(
             "Search API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/search",
                 "search_type": str(payload.search_type),
                 "datasets": payload.datasets,
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
-                "query": payload.query,
-                "system_prompt": payload.system_prompt,
-                "node_name": payload.node_name,
+                # Request fields are recorded by size, matching the recall
+                # endpoint's convention (see recall.py telemetry).
+                "query": len(payload.query or ""),
+                "system_prompt": len(payload.system_prompt or ""),
+                "node_name": len(payload.node_name or []),
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
+                "context_format": payload.context_format,
+                "session_id": payload.session_id,
                 "verbose": payload.verbose,
                 "skills": payload.skills,
                 "tools": payload.tools,
                 "max_iter": payload.max_iter,
                 "include_references": payload.include_references,
-                "code_query": payload.code_query,
+                "code_query": len(str(payload.code_query)) if payload.code_query else 0,
                 "cognee_version": cognee_version,
             },
         )
@@ -246,6 +275,8 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
                 verbose=payload.verbose,
                 only_context=payload.only_context,
+                context_format=payload.context_format,
+                session_id=payload.session_id,
                 skills=payload.skills,
                 tools=payload.tools,
                 max_iter=payload.max_iter,
@@ -254,32 +285,12 @@ def get_search_router() -> APIRouter:
             )
 
             return jsonable_encoder(results)
-        except PermissionDeniedError as e:
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content=ErrorResponse(
-                    error="Permission denied",
-                    detail=str(e),
-                ).model_dump(),
-            )
-        except LLMPaymentRequiredError as error:
-            return JSONResponse(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                content=ErrorResponse(
-                    error="Token budget exhausted",
-                    detail=str(error),
-                ).model_dump(),
-            )
-        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
-            status_code = getattr(e, "status_code", status.HTTP_422_UNPROCESSABLE_CONTENT)
-            return JSONResponse(
-                status_code=status_code,
-                content=ErrorResponse(
-                    error="Search prerequisites not met, hint: Run `await cognee.add(...)` then `await cognee.cognify()` before searching.",
-                    detail=str(e),
-                    # Previous hint not matching "Error Response" structure defined in cognee.api.DTO, included in error.
-                ).model_dump(),
-            )
+        except CogneeApiError:
+            # Cognee errors (permission denied, payment required, prerequisites,
+            # session-dataset conflicts, ...) carry their own status code and
+            # actionable message; the global handler in cognee/api/client.py
+            # returns them to the caller.
+            raise
         except Exception as error:
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

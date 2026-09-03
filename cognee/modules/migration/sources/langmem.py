@@ -22,7 +22,7 @@ from cognee.modules.migration.cogx import (
     COGXScope,
     parse_timestamp,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 _CONTENT_KEYS = ("content", "text", "memory", "data", "message")
 
@@ -41,17 +41,26 @@ class LangMemSource(MemorySource):
     def _load_raw(self) -> List[Dict[str, Any]]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if isinstance(data, dict):
+            recognized = False
             for key in ("memories", "results", "items", "data"):
-                if isinstance(data.get(key), list):
-                    data = data[key]
-                    break
-            else:
+                value = data.get(key)
+                if not isinstance(value, list):
+                    continue
+                recognized = True
+                # An accepted alias that is present but empty must not shadow a
+                # populated one later in the list -- unwrapping on it imports
+                # nothing at all. Same rule as sources/zep.py's _first_list.
+                records = [item for item in value if isinstance(item, dict)]
+                if records:
+                    return records
+            if not recognized:
                 raise ValueError(
                     "Unrecognized LangMem export shape: expected a list or a dict "
                     "with a 'memories'/'results' key."
                 )
+            return []
         if not isinstance(data, list):
             raise ValueError("Unrecognized LangMem export shape: expected a list of memories.")
         return [item for item in data if isinstance(item, dict)]

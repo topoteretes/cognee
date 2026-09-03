@@ -45,6 +45,12 @@ class GraphDBInterface(ABC):
     - get_connections
     """
 
+    # Whether this backend executes raw Cypher through ``query()``. Declared on
+    # the adapter class so callers (CYPHER / NATURAL_LANGUAGE retrievers) can
+    # check the capability on the engine instance they already hold, without
+    # importing optional backend packages that slim images do not ship.
+    supports_cypher_queries: bool = True
+
     @abstractmethod
     async def is_empty(self) -> bool:
         """Return True when the graph contains no nodes."""
@@ -666,6 +672,28 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("set_node_truth_state is not implemented for this adapter")
 
+    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+        """
+        Merge *values* into an existing node's properties, leaving every field not
+        named in *values* untouched. Used to patch a single scalar (e.g. stamping
+        ``valid_to`` when a fact is superseded) without rewriting the whole node.
+
+        Optional extension — implemented by LadybugAdapter (the default backend).
+        Other adapters may not support partial node updates yet and raise here.
+
+        Parameters:
+        -----------
+
+            - node_id (str): Id of the node to patch.
+            - values (Dict[str, Any]): Property name -> new value to merge in.
+
+        Returns:
+        --------
+
+            - bool: True if the node existed and was updated, False if not found.
+        """
+        raise NotImplementedError("update_node is not implemented for this adapter")
+
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         """
         Retrieve edge feedback weights for multiple edge_object_ids.
@@ -685,7 +713,7 @@ class GraphDBInterface(ABC):
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of triplets (source, edge, target).
 
-        Optional extension — implemented by PostgresAdapter, Neo4jAdapter,
+        Optional extension — implemented by PostgresDemoAdapter, Neo4jAdapter,
         and LadybugAdapter but not NeptuneGraphDB.
 
         Parameters

@@ -6,6 +6,11 @@ import asyncio
 import threading
 import tempfile
 from uuid import UUID, uuid5, NAMESPACE_OID
+
+# Importing this package registers the Windows DLL search path ladybug's native
+# extension needs, so it has to precede the ``ladybug`` imports below. See
+# cognee_db_workers/_windows_openssl.py.
+import cognee_db_workers  # noqa: F401
 from ladybug import Connection
 from ladybug.database import Database
 from datetime import datetime, timezone
@@ -49,6 +54,17 @@ from cognee.modules.observability.tracing import (
 )
 
 logger = get_logger()
+
+
+# Rows per bulk MERGE statement (same convention as the Postgres/Turso
+# adapters' _WRITE_CHUNK_SIZE). Bulk node/edge writes are split into chunks of
+# this size so no single statement can exceed the subprocess engine's per-call
+# deadline on large graphs (e.g. code-graph ingests with tens of thousands of
+# facts). Each chunk is its own statement; the writes are idempotent MERGEs
+# and failed runs are swept by the pipeline rollback ledger, so partial
+# progress is safe. Does not change how many data points the pipeline batches.
+_WRITE_CHUNK_SIZE = 2000
+
 
 DEFAULT_KUZU_BUFFER_POOL_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
 DEFAULT_KUZU_MAX_DB_SIZE = 1 << 35  # 32 GB (must be a power of 2 for Kuzu)
@@ -985,11 +1001,11 @@ class LadybugAdapter(GraphDBInterface):
                 relationship_name: $relationship_name
             }]->(to)
             ON CREATE SET
-                r.created_at = timestamp($created_at),
-                r.updated_at = timestamp($updated_at),
+                r.created_at = TIMESTAMP($created_at),
+                r.updated_at = TIMESTAMP($updated_at),
                 r.properties = $properties
             ON MATCH SET
-                r.updated_at = timestamp($updated_at),
+                r.updated_at = TIMESTAMP($updated_at),
                 r.properties = $properties
         """
         params = {
@@ -1070,7 +1086,7 @@ class LadybugAdapter(GraphDBInterface):
 
             # Add timestamp fields
             fields.extend(
-                ["created_at: timestamp($created_at)", "updated_at: timestamp($updated_at)"]
+                ["created_at: TIMESTAMP($created_at)", "updated_at: TIMESTAMP($updated_at)"]
             )
             params.update({"created_at": now, "updated_at": now})
 
@@ -1151,22 +1167,27 @@ class LadybugAdapter(GraphDBInterface):
                     n.name = node.name,
                     n.type = node.type,
                     n.properties = node.properties,
-                    n.created_at = timestamp(node.created_at),
-                    n.updated_at = timestamp(node.updated_at)
+                    n.created_at = TIMESTAMP(node.created_at),
+                    n.updated_at = TIMESTAMP(node.updated_at)
                 ON MATCH SET
                     n.name = node.name,
                     n.type = node.type,
                     n.properties = node.properties,
-                    n.updated_at = timestamp(node.updated_at)
+                    n.updated_at = TIMESTAMP(node.updated_at)
                 """
-                query_params = {"nodes": node_params}
+                extra_params = {}
                 if source_ref_key is not None:
                     merge_query += _provenance_fold_clause("n")
-                    query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+                    extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
-                await self.query(merge_query, query_params)
+                total = len(node_params)
+                for start in range(0, total, _WRITE_CHUNK_SIZE):
+                    chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                    await self.query(merge_query, {"nodes": chunk, **extra_params})
+                    if total > _WRITE_CHUNK_SIZE:
+                        logger.info("Merged nodes %d/%d", start + len(chunk), total)
                 await self.checkpoint()
-                logger.debug(f"Processed {len(node_params)} nodes in batch")
+                logger.debug(f"Processed {total} nodes in batch")
 
         except Exception as e:
             logger.error(f"Failed to add nodes in batch: {e}")
@@ -1221,30 +1242,37 @@ class LadybugAdapter(GraphDBInterface):
         self, node_ids: List[str]
     ) -> Dict[str, Tuple[List[str], List[str]]]:
         """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
-        rows = await self.query(
-            """
-            MATCH (n:Node) WHERE n.id IN $ids
-            RETURN n.id, n.source_ref_keys, n.source_run_refs
-            """,
-            {"ids": list(node_ids)},
-        )
+        ids = list(node_ids)
+        rows = []
+        for start in range(0, len(ids), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $ids AS nid
+                    MATCH (n:Node {id: nid})
+                    RETURN n.id, n.source_ref_keys, n.source_run_refs
+                    """,
+                    {"ids": ids[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         return {row[0]: (_decode_refs(row[1]), _decode_refs(row[2])) for row in rows}
 
     async def _write_node_provenance(self, batch: List[dict]) -> None:
         if not batch:
             return
         encoded_batch = [_encode_provenance_row(row) for row in batch]
-        await self.query(
-            """
-            UNWIND $batch AS row
-            MATCH (n:Node) WHERE n.id = row.id
-            SET n.source_ref_keys = row.refs,
-                n.source_dataset_ids = row.datasets,
-                n.source_run_ids = row.runs,
-                n.source_run_refs = row.run_refs
-            """,
-            {"batch": encoded_batch},
-        )
+        for start in range(0, len(encoded_batch), _WRITE_CHUNK_SIZE):
+            await self.query(
+                """
+                UNWIND $batch AS row
+                MATCH (n:Node {id: row.id})
+                SET n.source_ref_keys = row.refs,
+                    n.source_dataset_ids = row.datasets,
+                    n.source_run_ids = row.runs,
+                    n.source_run_refs = row.run_refs
+                """,
+                {"batch": encoded_batch[start : start + _WRITE_CHUNK_SIZE]},
+            )
         await self.checkpoint()
 
     async def _read_edge_provenance(
@@ -1255,15 +1283,19 @@ class LadybugAdapter(GraphDBInterface):
             {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
             for edge in edges
         ]
-        rows = await self.query(
-            """
-            UNWIND $edges AS e
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
-            RETURN a.id, b.id, r.relationship_name, r.source_ref_keys, r.source_run_refs
-            """,
-            {"edges": edge_params},
-        )
+        rows = []
+        for start in range(0, len(edge_params), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (a:Node {id: e.s})-[r:EDGE]->(b:Node {id: e.t})
+                    WHERE r.relationship_name = e.rel
+                    RETURN a.id, b.id, r.relationship_name, r.source_ref_keys, r.source_run_refs
+                    """,
+                    {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
         for row in rows:
             edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
@@ -1274,18 +1306,19 @@ class LadybugAdapter(GraphDBInterface):
         if not batch:
             return
         encoded_batch = [_encode_provenance_row(row) for row in batch]
-        await self.query(
-            """
-            UNWIND $batch AS row
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = row.s AND b.id = row.t AND r.relationship_name = row.rel
-            SET r.source_ref_keys = row.refs,
-                r.source_dataset_ids = row.datasets,
-                r.source_run_ids = row.runs,
-                r.source_run_refs = row.run_refs
-            """,
-            {"batch": encoded_batch},
-        )
+        for start in range(0, len(encoded_batch), _WRITE_CHUNK_SIZE):
+            await self.query(
+                """
+                UNWIND $batch AS row
+                MATCH (a:Node {id: row.s})-[r:EDGE]->(b:Node {id: row.t})
+                WHERE r.relationship_name = row.rel
+                SET r.source_ref_keys = row.refs,
+                    r.source_dataset_ids = row.datasets,
+                    r.source_run_ids = row.runs,
+                    r.source_run_refs = row.run_refs
+                """,
+                {"batch": encoded_batch[start : start + _WRITE_CHUNK_SIZE]},
+            )
         await self.checkpoint()
 
     @staticmethod
@@ -1413,28 +1446,35 @@ class LadybugAdapter(GraphDBInterface):
         ]
         # DELETE r (not DETACH DELETE) removes only the matched relationships and
         # preserves the endpoint nodes.
-        await self.query(
-            """
-            UNWIND $edges AS e
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
-            DELETE r
-            """,
-            {"edges": edge_params},
-        )
+        for start in range(0, len(edge_params), _WRITE_CHUNK_SIZE):
+            await self.query(
+                """
+                UNWIND $edges AS e
+                MATCH (a:Node {id: e.s})-[r:EDGE]->(b:Node {id: e.t})
+                WHERE r.relationship_name = e.rel
+                DELETE r
+                """,
+                {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
+            )
         await self.checkpoint()
 
     async def get_node_delete_data(self, node_ids: list[str]) -> dict[str, NodeDeleteData]:
         if not node_ids:
             return {}
-        rows = await self.query(
-            """
-            MATCH (n:Node) WHERE n.id IN $ids
-            RETURN n.id, n.name, n.type, n.properties,
-                   n.source_ref_keys, n.source_dataset_ids, n.source_run_ids, n.source_run_refs
-            """,
-            {"ids": list(node_ids)},
-        )
+        ids = list(node_ids)
+        rows = []
+        for start in range(0, len(ids), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $ids AS nid
+                    MATCH (n:Node {id: nid})
+                    RETURN n.id, n.name, n.type, n.properties,
+                           n.source_ref_keys, n.source_dataset_ids, n.source_run_ids, n.source_run_refs
+                    """,
+                    {"ids": ids[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         result: dict[str, NodeDeleteData] = {}
         for row in rows:
             node_id, name, node_type, raw_props = row[0], row[1], row[2], row[3]
@@ -1469,16 +1509,20 @@ class LadybugAdapter(GraphDBInterface):
             {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
             for edge in edges
         ]
-        rows = await self.query(
-            """
-            UNWIND $edges AS e
-            MATCH (a:Node)-[r:EDGE]->(b:Node)
-            WHERE a.id = e.s AND b.id = e.t AND r.relationship_name = e.rel
-            RETURN a.id, b.id, r.relationship_name, r.properties,
-                   r.source_ref_keys, r.source_dataset_ids, r.source_run_ids, r.source_run_refs
-            """,
-            {"edges": edge_params},
-        )
+        rows = []
+        for start in range(0, len(edge_params), _WRITE_CHUNK_SIZE):
+            rows.extend(
+                await self.query(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (a:Node {id: e.s})-[r:EDGE]->(b:Node {id: e.t})
+                    WHERE r.relationship_name = e.rel
+                    RETURN a.id, b.id, r.relationship_name, r.properties,
+                           r.source_ref_keys, r.source_dataset_ids, r.source_run_ids, r.source_run_refs
+                    """,
+                    {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
+                )
+            )
         # Lazy import: prepare_edges_for_storage lives in the modules layer, whose
         # package __init__ imports get_graph_engine -> this adapter. Importing it
         # at module load would create a cycle; at delete-time it is safe.
@@ -1835,8 +1879,15 @@ class LadybugAdapter(GraphDBInterface):
             return existing_edges
 
         except Exception as e:
+            # A failed existence check is NOT an empty existence check: callers
+            # (e.g. the cognify dedup in retrieve_existing_edges) read [] as
+            # "none of these edges exist" and proceed to write them. When the
+            # store is unavailable/corrupt those writes also fail, and the run
+            # reports success while persisting nothing (issue #4348). Surface
+            # the failure like the other backends do (neo4j re-raises;
+            # postgres/turso let it propagate) instead of masking it.
             logger.error(f"Failed to check edges in batch: {e}")
-            return []
+            raise
 
     async def add_edge(
         self,
@@ -1913,27 +1964,43 @@ class LadybugAdapter(GraphDBInterface):
                 for from_node, to_node, relationship_name, properties in edges
             ]
 
+            # Property-map matches (primary-key index seeks) instead of a
+            # cartesian MATCH + WHERE, which planned as a scan on large graphs.
+            #
+            # Both endpoints must be matched in ONE comma-separated clause.
+            # Splitting them into two MATCH clauses segfaults ladybug 0.19.x
+            # mid-write (SIGSEGV in the native engine, surfacing through the
+            # subprocess worker as "Subprocess exited unexpectedly (exit code
+            # -11)") — 0.19.0 introduced a row-driven primary-key lookup for
+            # MATCH (LadybugDB/ladybug#722) that this shape lands on. The comma
+            # form keeps the index seeks and is equally fast on 0.17.1, 0.18.2
+            # and 0.19.0 (~80s for 20k edges on all three), and writes an
+            # identical graph. See COG-6185.
             query = """
             UNWIND $edges AS edge
-            MATCH (from:Node), (to:Node)
-            WHERE from.id = edge.from_id AND to.id = edge.to_id
+            MATCH (from:Node {id: edge.from_id}), (to:Node {id: edge.to_id})
             MERGE (from)-[r:EDGE {
                 relationship_name: edge.relationship_name
             }]->(to)
             ON CREATE SET
-                r.created_at = timestamp(edge.created_at),
-                r.updated_at = timestamp(edge.updated_at),
+                r.created_at = TIMESTAMP(edge.created_at),
+                r.updated_at = TIMESTAMP(edge.updated_at),
                 r.properties = edge.properties
             ON MATCH SET
-                r.updated_at = timestamp(edge.updated_at),
+                r.updated_at = TIMESTAMP(edge.updated_at),
                 r.properties = edge.properties
             """
-            query_params = {"edges": edge_params}
+            extra_params = {}
             if source_ref_key is not None:
                 query += _provenance_fold_clause("r")
-                query_params.update(_provenance_fold_params(source_ref_key, pipeline_run_id))
+                extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
-            await self.query(query, query_params)
+            total = len(edge_params)
+            for start in range(0, total, _WRITE_CHUNK_SIZE):
+                chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
+                await self.query(query, {"edges": chunk, **extra_params})
+                if total > _WRITE_CHUNK_SIZE:
+                    logger.info("Merged edges %d/%d", start + len(chunk), total)
             await self.checkpoint()
 
         except Exception as e:
@@ -2182,7 +2249,7 @@ class LadybugAdapter(GraphDBInterface):
         MATCH (n:Node)
         WHERE n.id = item.node_id
         SET n.properties = item.properties,
-            n.updated_at = timestamp($updated_at)
+            n.updated_at = TIMESTAMP($updated_at)
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
@@ -2224,7 +2291,7 @@ class LadybugAdapter(GraphDBInterface):
         MATCH (n:Node)
         WHERE n.id = item.node_id
         SET n.properties = item.properties,
-            n.updated_at = timestamp($updated_at)
+            n.updated_at = TIMESTAMP($updated_at)
         RETURN n.id AS node_id
         """
         result = await self.query(query, {"items": updates, "updated_at": now})
@@ -2275,7 +2342,7 @@ class LadybugAdapter(GraphDBInterface):
           AND to.id = item.to_id
           AND r.relationship_name = item.relationship_name
         SET r.properties = item.properties,
-            r.updated_at = timestamp($updated_at)
+            r.updated_at = TIMESTAMP($updated_at)
         RETURN item.edge_object_id AS edge_object_id
         """
         result = await self.query(query, {"items": edge_updates, "updated_at": now})
@@ -2358,6 +2425,41 @@ class LadybugAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
+    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+        """Merge *values* into an existing node's JSON property blob.
+
+        Reads the node, layers the patch on top of its current properties, and writes
+        the blob back in a single MATCH/SET. Only ``id``/``name``/``type`` are excluded
+        when rebuilding the blob: those are the native columns ``get_node`` injects and
+        ``add_node`` keeps out of the blob. Every other field — ``created_at``,
+        ``updated_at``, ``version``, ... — lives *inside* the blob (that is where
+        ``get_node`` reads them from), so it is carried through untouched and a patch
+        never silently drops a field the caller did not name. Returns False if the node
+        does not exist (or *values* is empty, i.e. there is nothing to patch).
+        """
+        if not isinstance(node_id, str) or not node_id or not values:
+            return False
+        node = await self.get_node(node_id)
+        if node is None:
+            return False
+        # get_node merges the JSON blob with the native id/name/type columns; rebuild
+        # the blob from everything except those three (created_at/updated_at and the
+        # rest are stored in the blob, not as native columns get_node returns), then
+        # layer the patch on top.
+        properties = {k: v for k, v in node.items() if k not in {"id", "name", "type"}}
+        properties.update(values)
+        query = """
+        MATCH (n:Node)
+        WHERE n.id = $id
+        SET n.properties = $properties
+        RETURN n.id AS id
+        """
+        result = await self.query(
+            query,
+            {"id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)},
+        )
+        return bool(result)
+
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}
@@ -2429,18 +2531,28 @@ class LadybugAdapter(GraphDBInterface):
                 query_str = """
                 MATCH (n)<-[r:EDGE]-(m)
                 WHERE n.id = $id AND r.relationship_name = $edge_label
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id), "edge_label": edge_label}
             else:
                 query_str = """
                 MATCH (n)<-[r:EDGE]-(m)
                 WHERE n.id = $id
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
-            return [row[0] for row in result] if result else []
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get predecessors for node {node_id}: {e}")
             return []
@@ -2473,18 +2585,28 @@ class LadybugAdapter(GraphDBInterface):
                 query_str = """
                 MATCH (n)-[r:EDGE]->(m)
                 WHERE n.id = $id AND r.relationship_name = $edge_label
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id), "edge_label": edge_label}
             else:
                 query_str = """
                 MATCH (n)-[r:EDGE]->(m)
                 WHERE n.id = $id
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
-            return [row[0] for row in result] if result else []
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get successors for node {node_id}: {e}")
             return []
@@ -2766,8 +2888,9 @@ class LadybugAdapter(GraphDBInterface):
 
             # Fetch all nodes
             nodes_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)
-            WHERE n.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, {
                 name: n.name,
                 type: n.type,
@@ -2795,16 +2918,24 @@ class LadybugAdapter(GraphDBInterface):
 
             # Fetch all edges between the collected nodes
             edges_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)-[r]->(m:Node)
-            WHERE n.id IN $ids AND m.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edge_rows = await self.query(edges_query, {"ids": all_ids})
+            # The far endpoint is filtered here rather than with a second
+            # ``m.id IN $ids`` predicate: that predicate cannot use the primary
+            # key index and costs a table scan per id, which is the whole reason
+            # this query drives off UNWIND in the first place.
+            kept_ids = set(all_ids)
             formatted_edges = []
             for e in edge_rows:
                 if e and len(e) >= 3:
                     source_id = str(e[0])
                     target_id = str(e[1])
+                    if target_id not in kept_ids:
+                        continue
                     rel_type = str(e[2])
                     props = {}
                     if len(e) > 3 and e[3]:
@@ -2884,8 +3015,9 @@ class LadybugAdapter(GraphDBInterface):
         all_ids = list({*primary_ids, *neighbor_ids})
 
         nodes_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)
-            WHERE n.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, n.name, n.type, n.properties
         """
         node_rows = await self.query(nodes_query, {"ids": all_ids})
@@ -2900,13 +3032,19 @@ class LadybugAdapter(GraphDBInterface):
             nodes.append((node_id, data))
 
         edges_query = """
+            UNWIND $ids AS wanted
             MATCH (a:Node)-[r:EDGE]-(b:Node)
-            WHERE a.id IN $ids AND b.id IN $ids
+            WHERE a.id = wanted
             RETURN a.id, b.id, r.relationship_name, r.properties
         """
         edge_rows = await self.query(edges_query, {"ids": all_ids})
+        # See get_neighborhood: the far endpoint is filtered in Python because
+        # a second ``b.id IN $ids`` predicate would reintroduce the per-id scan.
+        kept_ids = set(all_ids)
         edges: List[Tuple[str, str, str, dict]] = []
         for from_id, to_id, rel_type, props in edge_rows:
+            if to_id not in kept_ids:
+                continue
             data = {}
             if props:
                 try:
@@ -3248,7 +3386,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = """
         MATCH (n:Node)
-        WHERE NOT EXISTS((n)-[]-())
+        WHERE NOT (n)-[:EDGE]-()
         RETURN n.id
         """
         result = await self.query(query_str)
@@ -3602,6 +3740,9 @@ class LadybugAdapter(GraphDBInterface):
 
         query = """
         MATCH (start_node:Node)-[relationship:EDGE]->(end_node:Node)
+        WITH start_node, relationship, end_node
+        ORDER BY start_node.id, end_node.id, relationship.relationship_name
+        SKIP $offset LIMIT $limit
         RETURN {
             start_node: {
                 id: start_node.id,
@@ -3620,7 +3761,6 @@ class LadybugAdapter(GraphDBInterface):
                 properties: end_node.properties
             }
         } AS triplet
-        SKIP $offset LIMIT $limit
         """
 
         try:

@@ -22,6 +22,7 @@ from cognee.infrastructure.session.session_context_models import (
     AgentCandidateContextUpdateVariant,
     CandidateContextUpdate,
     ContextProfile,
+    ContextSection,
     SessionContextEntry,
     normalize_content,
     valid_sections_for,
@@ -195,6 +196,71 @@ def select_context_entries(
     return selected
 
 
+def fit_preference_lines(
+    preference_lines: List[str],
+    *,
+    preferences_used: int,
+    total_used: int,
+    per_section_char_budget: int,
+    total_char_budget: int,
+    existing_normalized: set,
+) -> List[str]:
+    """Fit durable preference lines (newest first) into the leftover ``preferences`` budget.
+
+    The guidance block has one owner and one size limit, so durable preference
+    lines from the graph node share the ``preferences`` section's budgets with
+    this session's entries instead of forming a second block. Lines duplicating
+    an already-selected entry (or an earlier line) are skipped, only whole lines
+    are kept, and the kept lines are returned oldest first — ready to render
+    ahead of this session's entries so later items win conflicts.
+    """
+    kept: List[str] = []
+    seen = set(existing_normalized)
+    for line in preference_lines or []:
+        content = (line or "").strip()
+        if not content:
+            continue
+        normalized = normalize_content(content)
+        if normalized in seen:
+            continue
+        cost = len(content)
+        if preferences_used + cost > per_section_char_budget:
+            continue
+        if total_used + cost > total_char_budget:
+            continue
+        kept.append(content)
+        seen.add(normalized)
+        preferences_used += cost
+        total_used += cost
+    kept.reverse()
+    return kept
+
+
+def render_preference_block(
+    preference_lines: List[str],
+    *,
+    per_section_char_budget: int = DEFAULT_PER_SECTION_CHAR_BUDGET,
+    total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
+) -> str:
+    """Render durable preference lines as a preferences-only guidance block.
+
+    Used when the stored-entry guidance layer is off (auto feedback disabled) but
+    preference personalization still has lines to serve — same owner, same
+    budgets, same block shape as ``build_active_context_block``.
+    """
+    kept = fit_preference_lines(
+        preference_lines,
+        preferences_used=0,
+        total_used=0,
+        per_section_char_budget=per_section_char_budget,
+        total_char_budget=total_char_budget,
+        existing_normalized=set(),
+    )
+    if not kept:
+        return ""
+    return _render_block([("Preferences", kept)])
+
+
 def _time_label(timestamp: str) -> str:
     """Return a compact HH:MM:SS label from an ISO timestamp; invalid/missing -> unknown."""
     if not timestamp:
@@ -249,12 +315,17 @@ async def build_active_context_block(
     total_char_budget: int = DEFAULT_TOTAL_CHAR_BUDGET,
     context_profile: str = ContextProfile.QA.value,
     stamp_served: bool = True,
+    preference_lines: List[str] | None = None,
 ) -> Tuple[str, List[str]]:
     """Load active context entries, rank them, budget-cap, and render a compact block.
 
-    Renders only ``context_profile`` entries. With ``stamp_served=False`` the call performs
-    no writes (used by read-only recall); the mutating default stamps ``last_served_at`` on
-    the rendered entries. Returns ``(block_str, served_ids)`` — the entry ids rendered into the
+    Renders only ``context_profile`` entries. ``preference_lines`` (durable stated
+    preferences from the user's preference node, newest first) are merged into the
+    ``Preferences`` section as one more source, under the same per-section and total
+    budgets and with duplicate lines skipped — the guidance channel has one block and
+    one size limit. With ``stamp_served=False`` the call performs no writes (used by
+    read-only recall); the mutating default stamps ``last_served_at`` on the rendered
+    entries. Returns ``(block_str, served_ids)`` — the entry ids rendered into the
     block — or ``("", [])`` on any exception (fail-open).
     """
     try:
@@ -265,28 +336,40 @@ async def build_active_context_block(
             user_id=user_id,
             session_id=session_id,
         )
-        if not raw_entries:
-            return "", []
+        entries = coerce_active_context_entries(raw_entries) if raw_entries else []
 
-        entries = coerce_active_context_entries(raw_entries)
-        if not entries:
-            return "", []
-
-        selected = select_context_entries(
-            entries=entries,
-            query=query,
-            ranker=ranker,
-            per_section_char_budget=per_section_char_budget,
-            total_char_budget=total_char_budget,
-            context_profile=context_profile,
-        )
-        if not selected:
-            return "", []
+        selected = []
+        if entries:
+            selected = select_context_entries(
+                entries=entries,
+                query=query,
+                ranker=ranker,
+                per_section_char_budget=per_section_char_budget,
+                total_char_budget=total_char_budget,
+                context_profile=context_profile,
+            )
 
         headings = headings_for_profile(context_profile)
         by_section = {key: [] for key, _ in headings}
         for entry in selected:
             by_section[entry.section].append(entry)
+
+        fitted_preference_lines: List[str] = []
+        preferences_key = ContextSection.PREFERENCES.value
+        if preference_lines and preferences_key in by_section:
+            fitted_preference_lines = fit_preference_lines(
+                preference_lines,
+                preferences_used=sum(
+                    len(entry.content.strip()) for entry in by_section[preferences_key]
+                ),
+                total_used=sum(len(entry.content.strip()) for entry in selected),
+                per_section_char_budget=per_section_char_budget,
+                total_char_budget=total_char_budget,
+                existing_normalized={normalize_content(entry.content) for entry in selected},
+            )
+
+        if not selected and not fitted_preference_lines:
+            return "", []
 
         grouped_rendered: List[Tuple[str, List[str]]] = []
         for section_key, heading_label in headings:
@@ -295,6 +378,10 @@ async def build_active_context_block(
                 key=lambda entry: entry.created_at or "",
             )
             bullets = [_render_entry(entry) for entry in section_entries]
+            if section_key == preferences_key and fitted_preference_lines:
+                # Durable lines lead the section: this session's entries come later,
+                # so under the conflict instruction they win.
+                bullets = fitted_preference_lines + bullets
             grouped_rendered.append((heading_label, bullets))
 
         served_ids = [entry.id for entry in selected]

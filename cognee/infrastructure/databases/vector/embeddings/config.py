@@ -80,7 +80,16 @@ class EmbeddingConfig(BaseSettings):
     embedding_api_version: Optional[str] = None
     embedding_max_completion_tokens: Optional[int] = 8191
     embedding_batch_size: Optional[int] = None
+    # Total data points allowed in flight to the embedding engine during indexing.
+    # Concurrent embedding requests = max(1, this // embedding_batch_size).
+    embedding_max_concurrent_data_points: int = 150
     huggingface_tokenizer: Optional[str] = None
+    # Some providers (e.g. NVIDIA NIM's nv-embed family) require an
+    # "input_type" field in the embedding request body (typically "query" or
+    # "passage"/"document"). This is not part of the OpenAI embeddings spec,
+    # so it has no effect on providers that don't recognize it. Configure via
+    # the EMBEDDING_INPUT_TYPE env var.
+    embedding_input_type: Optional[str] = None
     # Rate-limiting for embedding requests. Lives here (not in LLMConfig) so the
     # knobs sit with the embedding settings they govern.
     embedding_rate_limit_enabled: bool = False
@@ -130,7 +139,9 @@ class EmbeddingConfig(BaseSettings):
             "embedding_api_version": self.embedding_api_version,
             "embedding_max_completion_tokens": self.embedding_max_completion_tokens,
             "huggingface_tokenizer": self.huggingface_tokenizer,
+            "embedding_input_type": self.embedding_input_type,
             "embedding_batch_size": self.embedding_batch_size,
+            "embedding_max_concurrent_data_points": self.embedding_max_concurrent_data_points,
             "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
             "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
             "embedding_rate_limit_interval": self.embedding_rate_limit_interval,

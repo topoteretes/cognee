@@ -34,14 +34,22 @@ from cognee.modules.migration.cogx import (
     COGXTurn,
     parse_timestamp,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 
 def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
+    """Return the records under the first alias that carries any.
+
+    A graph export may emit several aliases for the same collection and fill
+    only one, so an empty alias must not shadow a populated one later in the
+    list -- returning on it imports nothing at all.
+    """
     for key in keys:
         value = container.get(key)
         if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
+            records = [item for item in value if isinstance(item, dict)]
+            if records:
+                return records
     return []
 
 
@@ -55,7 +63,7 @@ class ZepSource(MemorySource):
     def _load_raw(self) -> Dict[str, Any]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if not isinstance(data, dict):
             raise ValueError("Unrecognized Zep/Graphiti export: expected a JSON object.")
         return data
@@ -101,7 +109,7 @@ class ZepSource(MemorySource):
                 description=node.get("summary") or node.get("description"),
                 attributes=node.get("attributes") or {},
                 created_at=parse_timestamp(node.get("created_at")),
-                scope=COGXScope(session_id=node.get("group_id")),
+                scope=COGXScope(session_id=node.get("group_id") or node.get("session_id")),
             )
 
         for index, edge in enumerate(_first_list(data, "facts", "edges", "entity_edges")):
@@ -120,7 +128,7 @@ class ZepSource(MemorySource):
                 invalid_at=parse_timestamp(edge.get("invalid_at") or edge.get("expired_at")),
                 created_at=parse_timestamp(edge.get("created_at")),
                 provenance=[str(episode) for episode in edge.get("episodes") or []],
-                scope=COGXScope(session_id=edge.get("group_id")),
+                scope=COGXScope(session_id=edge.get("group_id") or edge.get("session_id")),
             )
 
 

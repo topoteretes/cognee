@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, ANY
 import cognee
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
+from cognee.cli.commands.recall_command import RecallCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
@@ -144,7 +145,7 @@ class TestSearchCommand:
         assert "output_format" in actions
 
         # Check default values
-        assert actions["query_type"].default == "GRAPH_COMPLETION"
+        assert actions["query_type"].default == "HYBRID_COMPLETION"
         assert actions["top_k"].default == 10
         assert actions["output_format"].default == "pretty"
 
@@ -202,6 +203,86 @@ class TestSearchCommand:
 
         with pytest.raises(CliCommandException):
             command.execute(args)
+
+
+class TestRecallCommand:
+    def test_configure_parser_accepts_hybrid_and_omits_query_type_by_default(self):
+        command = RecallCommand()
+        parser = argparse.ArgumentParser()
+        command.configure_parser(parser)
+        actions = {action.dest: action for action in parser._actions}
+
+        assert actions["query_type"].default is None
+        assert "HYBRID_COMPLETION" in actions["query_type"].choices
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_session_only_when_query_type_is_omitted(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(
+            return_value=[{"_source": "session", "question": "q", "answer": "a"}]
+        )
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type=None,
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        mock_cognee.recall.assert_awaited_once()
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert "query_type" not in kwargs
+        assert kwargs["session_id"] == "sess"
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_explicit_hybrid_with_session_is_not_session_only(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="HYBRID_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert kwargs["query_type"].name == "HYBRID_COMPLETION"
+        assert kwargs["session_id"] == "sess"
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_explicit_graph_completion_with_session_is_not_session_only(self, mock_asyncio_run):
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="GRAPH_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                session_id="sess",
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert kwargs["query_type"].name == "GRAPH_COMPLETION"
+        assert kwargs["session_id"] == "sess"
 
 
 class TestCognifyCommand:
@@ -659,3 +740,91 @@ class TestConfigCommand:
         # This should not raise CliCommandException, just handle it gracefully
         # The config command handles unknown actions by showing an error message
         command.execute(args)
+
+
+class TestConfigGetSetPersistence:
+    """Exercise the real (unmocked) cognee.config.get/get_all/set behavior.
+
+    These reproduce the originally reported bugs directly against
+    cognee.config rather than through ConfigCommand, since that's where the
+    actual get/get_all/persistence logic lives.
+    """
+
+    def test_get_unknown_key_raises(self):
+        from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
+
+        with pytest.raises(InvalidConfigAttributeError):
+            cognee.config.get("not_a_real_config_key")
+
+    def test_get_reflects_in_process_set(self):
+        from cognee.infrastructure.data.chunking.config import get_chunk_config
+
+        original = get_chunk_config().chunk_size
+        try:
+            cognee.config.set("chunk_size", 777)
+            assert cognee.config.get("chunk_size") == 777
+        finally:
+            cognee.config.set_chunk_size(original)
+
+    def test_get_masks_secret_by_default(self):
+        from cognee.infrastructure.llm.config import get_llm_config
+
+        original = get_llm_config().llm_api_key
+        try:
+            cognee.config.set_llm_api_key("sk-1234567890abcdef")
+
+            masked = cognee.config.get("llm_api_key")
+            assert masked != "sk-1234567890abcdef"
+            assert masked.startswith("sk-")
+
+            full = cognee.config.get("llm_api_key", reveal_secrets=True)
+            assert full == "sk-1234567890abcdef"
+        finally:
+            cognee.config.set_llm_api_key(original)
+
+    def test_get_all_covers_documented_keys(self):
+        config_dict = cognee.config.get_all()
+
+        for key in (
+            "llm_provider",
+            "llm_model",
+            "chunk_size",
+            "chunk_overlap",
+            "vector_db_provider",
+            "graph_database_provider",
+        ):
+            assert key in config_dict
+
+    def test_set_persists_across_process_boundary(self, tmp_path, monkeypatch):
+        """Reproduces the originally reported bug: `config set` must survive
+        past the current process, since each `cognee-cli` invocation is a
+        fresh process re-reading config from scratch."""
+        from cognee.infrastructure.data.chunking.config import get_chunk_config
+
+        # A real CHUNK_SIZE env var (e.g. leftover from `dotenv.load_dotenv`
+        # picking up a developer's own .env at cognee import time) would
+        # outrank the .env file this test writes below, since pydantic-settings
+        # prioritizes real environment variables over dotenv-file values.
+        monkeypatch.delenv("CHUNK_SIZE", raising=False)
+
+        original_cwd = os.getcwd()
+        original_chunk_size = get_chunk_config().chunk_size
+        try:
+            os.chdir(tmp_path)
+
+            result = cognee.config.set("chunk_size", "999", persist=True)
+
+            assert result["created"] is True
+            env_path = tmp_path / ".env"
+            assert env_path.exists()
+            # dotenv.set_key quotes values, e.g. CHUNK_SIZE='999'.
+            assert "CHUNK_SIZE=" in env_path.read_text()
+            assert "999" in env_path.read_text()
+
+            # Simulate a fresh process re-reading config from the persisted .env.
+            get_chunk_config.cache_clear()
+            assert get_chunk_config().chunk_size == 999
+        finally:
+            os.chdir(original_cwd)
+            get_chunk_config.cache_clear()
+            get_chunk_config().chunk_size = original_chunk_size

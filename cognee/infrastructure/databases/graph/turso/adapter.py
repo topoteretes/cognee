@@ -50,6 +50,9 @@ def _id_subquery(prefix: str, ids: List[str]) -> Tuple[str, Dict[str, str]]:
 class TursoAdapter(GraphDBInterface):
     """Graph-as-tables adapter backed by Turso/libSQL, accessed via SQLAlchemy async sessions."""
 
+    # ``query()`` executes SQL against the graph tables, not Cypher.
+    supports_cypher_queries = False
+
     _ALLOWED_FILTER_ATTRS = {"id", "name", "type"}
 
     def __init__(self, connection_string: str) -> None:
@@ -659,7 +662,7 @@ class TursoAdapter(GraphDBInterface):
             return nodes, edges
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
-        """Compute graph metrics matching the PostgresAdapter output schema."""
+        """Compute graph metrics matching the PostgresDemoAdapter output schema."""
         async with self._session() as session:
             n_result = await session.execute(text("SELECT count(*) FROM graph_node"))
             num_nodes = n_result.scalar()

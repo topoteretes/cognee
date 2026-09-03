@@ -9,6 +9,11 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.merge_results import (
+    conversational_reserve,
+    edge_identity,
+    merge_ranked,
+)
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
@@ -18,12 +23,13 @@ from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
 )
-from cognee.modules.retrieval.utils.references import append_answer_grounded_evidence
+from cognee.modules.retrieval.utils.evidence import graph_context_evidence
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.context_global_variables import session_user
@@ -66,11 +72,13 @@ class GraphCompletionRetriever(BaseRetriever):
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
         self.top_k = top_k if top_k is not None else 5
-        self.wide_search_top_k = wide_search_top_k
+        self.wide_search_top_k = 100 if wide_search_top_k is None else wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
         self.node_name_filter_operator = node_name_filter_operator
-        self.triplet_distance_penalty = triplet_distance_penalty
+        self.triplet_distance_penalty = (
+            6.5 if triplet_distance_penalty is None else triplet_distance_penalty
+        )
         self.feedback_influence = feedback_influence
         # session_id (Optional[str]): Identifier for managing conversation history.
         self.session_id = session_id
@@ -175,6 +183,13 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         collections = self._get_vector_index_collections()
         unified_engine = getattr(self, "_unified_engine", None)
+        # Personal prefers weights ride into the triplet scorer. The lookup is
+        # memoized per context — on a concurrent session turn each gather lane
+        # inherits the read warmed by warm_preference_cache; without that warm
+        # a lane's read is its own — and fails open: flag off, no node, or any
+        # error yields {}, so the search stays byte-identical to an
+        # un-personalized run.
+        personal_weights = await load_preference_weights()
         return await brute_force_triplet_search(
             query,
             query_batch,
@@ -189,6 +204,7 @@ class GraphCompletionRetriever(BaseRetriever):
             unified_engine=unified_engine,
             neighborhood_depth=self.neighborhood_depth,
             neighborhood_seed_top_k=self.neighborhood_seed_top_k,
+            personal_weights=personal_weights or None,
         )
 
     async def get_triplets_batch(
@@ -275,13 +291,26 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         return format_global_context_prelude(root_text, top_summaries)
 
-    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def merge_retrieved_objects(self, primary: Any, secondary: Any) -> Any:
+        return merge_ranked(
+            primary,
+            secondary,
+            identity=edge_identity,
+            limit=self.top_k,
+            secondary_reserve=conversational_reserve(self.top_k),
+        )
+
+    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """Extract node_ids and edge_ids from list of Edge. Only used for single-query session path."""
         if not isinstance(retrieved_objects, list) or not retrieved_objects:
             return None
         if not is_edge_list(retrieved_objects):
             return None
         return extract_from_edges(retrieved_objects)
+
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        """Return the exact graph nodes and edges rendered into completion context."""
+        return graph_context_evidence(retrieved_objects, dataset_id=dataset_id)
 
     def _completion_kwargs(self, context: str) -> dict:
         """Common kwargs for completion calls (no session)."""
@@ -301,25 +330,38 @@ class GraphCompletionRetriever(BaseRetriever):
     ) -> List[Any]:
         """Generate completion(s) without session; returns list of completions."""
         kwargs = self._completion_kwargs(context)
+        # Sessionless guidance site: preference text rides the guidance channel
+        # (conversation_history), never context. The lookup is memoized per
+        # context; this sessionless path runs retrieval and completion in one
+        # context, so this reuses the get_triplets read. (Across a task
+        # fan-out that sharing needs warm_preference_cache in the parent — the
+        # ContextVar does not propagate out of gather lanes.) Empty text is
+        # falsy and leaves the system prompt untouched. The session path never
+        # reaches this method, so it cannot collide with the session guidance
+        # block, which owns preference rendering on that path.
+        preference_text = await load_preference_text()
         if query_batch:
-            return await generate_completion_batch(query_batch=query_batch, **kwargs)
-        completion = await generate_completion(query=query, **kwargs)
+            return await generate_completion_batch(
+                query_batch=query_batch, conversation_history=preference_text, **kwargs
+            )
+        completion = await generate_completion(
+            query=query, conversation_history=preference_text, **kwargs
+        )
         return [completion]
 
     async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:
-        """Append an answer-grounded chunk Evidence block to string completions.
+        """Compatibility no-op; graph evidence is now returned as structured payload data.
 
-        Each answer is run as a vector query against the chunk index, so the
-        Evidence bullets reflect where the answer text is grounded in the corpus
-        rather than which graph elements happened to be retrieved. Evidence is
-        appended only when references are enabled and the completion is a plain
-        string (never corrupt a structured response_model); search failures
-        degrade to no Evidence.
+        The previous implementation embedded every answer and performed another
+        chunk-index search. Besides adding latency, that described post-hoc
+        similarity rather than the graph context used for generation.
         """
-        return await append_answer_grounded_evidence(
-            completions,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return completions
+
+    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+        # Graph evidence is grounded in the answer text, not the retrieved edges, so
+        # retrieved_objects is deliberately unused here.
+        return await self._append_graph_evidence(completions)
 
     async def get_completion_from_context(
         self,
@@ -351,7 +393,7 @@ class GraphCompletionRetriever(BaseRetriever):
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()
-            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
+            used_graph_element_ids = self.extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -373,10 +415,12 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         # Session and non-session branches rejoin here so every variant that calls
-        # this method (including via super()) appends references once. Evidence is
-        # grounded in each completion's own text, so a cache-hit answer never
-        # cites chunks that share nothing with it.
-        return await self._append_graph_evidence(completions)
+        # this method (including via super()) applies the append_references hook
+        # once. For graph completion that hook is a no-op: the search coordinator
+        # attaches structured evidence from the exact retrieved graph context
+        # after this method returns, keeping completion generation free of any
+        # post-hoc vector lookup.
+        return await self.append_references(completions, retrieved_objects)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

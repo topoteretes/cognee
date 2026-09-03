@@ -15,6 +15,9 @@ class CognifyConfig(BaseSettings):
     contradiction_detection: bool = False
     contradiction_confidence_threshold: float = 0.5
     contradiction_max_facts: int = 500
+    # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
+    # OFF so the standard cognify pipeline is unchanged.
+    provenance_tracking: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -26,6 +29,7 @@ class CognifyConfig(BaseSettings):
             "contradiction_detection": self.contradiction_detection,
             "contradiction_confidence_threshold": self.contradiction_confidence_threshold,
             "contradiction_max_facts": self.contradiction_max_facts,
+            "provenance_tracking": self.provenance_tracking,
         }
 
 

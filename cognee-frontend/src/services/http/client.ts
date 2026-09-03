@@ -243,6 +243,12 @@ export function createHttpClient() {
           }
         }
 
+        // Checked directly against our own controller rather than e.name: on
+        // Safari (pre-17.4), fetch doesn't propagate the custom TimeoutError
+        // abort reason and throws a generic AbortError instead, which would
+        // otherwise leak past normalizeError's e.name check straight into the UI.
+        if (timeoutController.signal.aborted) throw new Error("Request timed out.");
+
         throw normalizeError(e);
       } finally {
         clearTimeout(timer);

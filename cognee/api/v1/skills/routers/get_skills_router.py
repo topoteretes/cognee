@@ -19,6 +19,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -98,6 +99,13 @@ def get_skills_router() -> APIRouter:
 
         JSON-native companion to ``POST /api/v1/remember`` (content_type=skills),
         for no-code clients. Reuses the same skills ingestion pipeline.
+
+        ## Request Parameters
+        - **dataset_id** (Optional[UUID]): Target dataset UUID (alternative to dataset_name).
+        - **dataset_name** (Optional[str]): Target dataset name (created if needed). Required unless
+          dataset_id is given.
+        - **skill_name** (Optional[str]): Name/slug for the skill (defaults to 'skill').
+        - **skills_text** (str): Inline SKILL.md markdown to ingest as a Skill node.
         """
         if not payload.dataset_name and payload.dataset_id is None:
             return JSONResponse(
@@ -107,7 +115,7 @@ def get_skills_router() -> APIRouter:
 
         send_telemetry(
             "Skill Ingest API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "POST /v1/skills",
                 "cognee_version": cognee_version,
@@ -119,7 +127,7 @@ def get_skills_router() -> APIRouter:
         try:
             result = await cognee_remember(
                 "",
-                dataset_name=payload.dataset_name or "main_dataset",
+                dataset_name=payload.dataset_name or DEFAULT_DATASET_NAME,
                 content_type="skills",
                 skills_text=payload.skills_text,
                 skill_name=payload.skill_name,
@@ -152,10 +160,19 @@ def get_skills_router() -> APIRouter:
         offset: int = Query(default=0, ge=0, description="Number of skills to skip."),
         user: User = Depends(get_authenticated_user),
     ) -> list[dict]:
-        """Return the skills available in an authorized dataset, with publisher metadata."""
+        """Return the skills available in an authorized dataset, with publisher metadata.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID to scope the skills to. List your datasets via GET
+          /api/v1/datasets to find it.
+        - **include_inactive** (bool): Include skills whose is_active flag is false. Defaults to
+          False.
+        - **limit** (int): Max skills to return. Defaults to 200.
+        - **offset** (int): Number of skills to skip. Defaults to 0.
+        """
         send_telemetry(
             "Skills List API Endpoint Invoked",
-            user.id,
+            user,
             additional_properties={
                 "endpoint": "GET /v1/skills",
                 "dataset_id": str(dataset_id),
@@ -195,7 +212,14 @@ def get_skills_router() -> APIRouter:
         dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
         user: User = Depends(get_authenticated_user),
     ):
-        """Return one skill, including its full procedure body."""
+        """Return one skill, including its full procedure body.
+
+        ## Path Parameters
+        - **skill_id** (str): ID of the skill (from GET /api/v1/skills/).
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the skill belongs to.
+        """
         from cognee.api.v1.skills.list_skills import get_skill
 
         try:
@@ -211,5 +235,43 @@ def get_skills_router() -> APIRouter:
         except Exception as exc:
             logger.error("get skill failed: %s", exc, exc_info=True)
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
+
+    @router.delete(
+        "/{skill_id}",
+        response_model=dict,
+        responses={
+            403: {"model": ErrorResponse},
+            404: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
+        },
+    )
+    async def delete_dataset_skill(
+        skill_id: str,
+        dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """Delete one skill (graph node + embeddings) from an authorized dataset.
+
+        ## Path Parameters
+        - **skill_id** (str): ID of the skill (from GET /api/v1/skills/).
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the skill belongs to.
+        """
+        from cognee.api.v1.skills.list_skills import delete_skill
+
+        try:
+            dataset = await _authorized_dataset(dataset_id, user, "delete")
+            deleted = await delete_skill(skill_id, dataset.id)
+            if not deleted:
+                return JSONResponse(status_code=404, content={"error": "Skill not found"})
+            return {"status": "deleted", "id": skill_id, "dataset_id": str(dataset_id)}
+        except PermissionDeniedError:
+            return JSONResponse(
+                status_code=403, content={"error": "Not authorized for this dataset"}
+            )
+        except Exception as exc:
+            logger.error("delete skill failed: %s", exc, exc_info=True)
+            return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})
 
     return router

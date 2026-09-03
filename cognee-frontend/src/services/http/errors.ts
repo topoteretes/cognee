@@ -1,5 +1,5 @@
 export type ApiErrorBody = {
-  detail?: string;
+  detail?: string | { message?: string };
   error?: string;
   message?: string;
   [key: string]: unknown;
@@ -9,12 +9,26 @@ export function isApiErrorBody(v: unknown): v is ApiErrorBody {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+// cognee's error handler nests the real message as `detail.message` (e.g.
+// `{"detail": {"message": "... [EntityAlreadyExistsError]"}}`) instead of
+// putting it directly on `detail`.
+function extractDetailMessage(detail: ApiErrorBody["detail"]): string | undefined {
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail.message === "string") return detail.message;
+  return undefined;
+}
+
 export class HttpError extends Error {
   constructor(
     public readonly status: number,
     public readonly statusText: string,
     message: string,
     public readonly body?: ApiErrorBody | string,
+    // Raw Retry-After header, carried on the error because the Response is out
+    // of reach by the time a caller handles the throw. A 429 handler that only
+    // reads the body silently ignores the standard header the server actually
+    // sends, and falls back to a fixed delay forever.
+    public readonly retryAfter?: string | null,
   ) {
     super(message);
     this.name = "HttpError";
@@ -32,7 +46,7 @@ export async function toHttpError(res: Response): Promise<never> {
     const parsed: unknown = JSON.parse(text);
     if (isApiErrorBody(parsed)) {
       body = parsed;
-      message = String(body.detail ?? body.error ?? body.message ?? res.statusText);
+      message = extractDetailMessage(body.detail) ?? String(body.error ?? body.message ?? res.statusText);
     } else {
       body = text;
       message = text || res.statusText;
@@ -41,7 +55,7 @@ export async function toHttpError(res: Response): Promise<never> {
     body = text;
     message = text || res.statusText;
   }
-  throw new HttpError(res.status, res.statusText, message, body);
+  throw new HttpError(res.status, res.statusText, message, body, res.headers.get("Retry-After"));
 }
 
 // Next.js throws an error with this message when redirect() is called inside
