@@ -15,6 +15,9 @@ These tests pin the three properties that change makes load-bearing:
 
 import asyncio
 import importlib
+import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -168,3 +171,33 @@ def test_chain_heals_a_legacy_create_all_database_without_bookkeeping():
     healed = asyncio.run(_reflect())
     assert "alembic_version" in healed
     assert "users" in healed and "user_id" in healed["pipeline_runs"]
+
+
+def test_create_database_follows_the_adapters_dialect_not_the_configured_engines():
+    """A SQLite adapter must build its database even when the GLOBAL config
+    points at Postgres: every revision decides its dialect from op.get_bind(),
+    never from get_relational_engine(). (1d0bb7fede17 used the configured
+    engine and would emit ALTER TYPE against SQLite.) Run in a child process
+    so the configured engine is a real, unconnected asyncpg engine."""
+    own = f"{tempfile.mkdtemp()}/own.db"
+    code = (
+        "import asyncio\n"
+        "from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter\n"
+        "from cognee.infrastructure.databases.relational import get_relational_engine\n"
+        "assert get_relational_engine().engine.dialect.name == 'postgresql'\n"
+        f"asyncio.run(SQLAlchemyAdapter('sqlite+aiosqlite:///{own}').create_database())\n"
+        "print('built')\n"
+    )
+    env = {
+        **os.environ,
+        "DB_PROVIDER": "postgres",
+        "DB_HOST": "127.0.0.1",
+        "DB_PORT": "5432",
+        "DB_USERNAME": "nobody",
+        "DB_PASSWORD": "nobody",
+        "DB_NAME": "never_connected",
+    }
+    result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr[-3000:]
+    tables = set(sa.inspect(sa.create_engine(f"sqlite:///{own}")).get_table_names())
+    assert {"users", "pipeline_runs", "alembic_version"} <= tables

@@ -22,7 +22,6 @@ its contract:
 
 import asyncio
 import importlib
-import importlib.util
 import tempfile
 import uuid
 from pathlib import Path
@@ -55,23 +54,11 @@ def _register_all_models() -> None:
 
 
 def _frozen_table_names() -> set[str]:
-    """The tables the initial revision's frozen surface carries, read from the
-    reconcile revision's own declaration (loaded by path; a migration module is
-    not importable by name). Needs an Alembic op context for its enum helper."""
-    from alembic.operations import Operations
-    from alembic.runtime.migration import MigrationContext
-    from cognee.modules.migrations.lockstep import packaged_script_location
+    """The tables the frozen surface carries, from the module both revisions
+    build from."""
+    from cognee.alembic.frozen_schema import frozen_metadata
 
-    path = (
-        Path(packaged_script_location()) / "versions" / "1c22e6cb5aec_reconcile_to_frozen_schema.py"
-    )
-    spec = importlib.util.spec_from_file_location("reconcile_revision", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    with sa.create_engine("sqlite://").connect() as connection:
-        with Operations.context(MigrationContext.configure(connection)):
-            module._define_frozen_schema()
-    return set(module._FROZEN.tables)
+    return set(frozen_metadata("sqlite").tables)
 
 
 def _adapter():
