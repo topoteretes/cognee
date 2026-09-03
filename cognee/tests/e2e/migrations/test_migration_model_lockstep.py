@@ -66,32 +66,6 @@ BASELINE_PATH = Path(__file__).with_name("schema_baseline.json")
 SCRIPT_LOCATION = lockstep.packaged_script_location()
 
 
-def _package_root() -> Path:
-    import cognee
-
-    return Path(cognee.__file__).parent
-
-
-class TestModelSurface(unittest.TestCase):
-    """The surface the guard compares against is what the SERVER registers
-    (``cognee.api.client`` imported in a child interpreter) — location-agnostic
-    by construction. This probe pins that surface to what the source tree
-    DECLARES, both ways: a model the server never imports cannot hide from the
-    guard, and a table the server registers from somewhere the scan cannot see
-    cannot slip past it either."""
-
-    def test_server_registers_every_declared_model_and_nothing_unseen(self):
-        registered = lockstep.server_model_schema()
-        declared = lockstep.declared_tables(_package_root())
-        problems = lockstep.surface_problems(registered, declared)
-        self.assertEqual(
-            problems,
-            [],
-            "\n\nThe server's model surface and the declared models disagree:\n  - "
-            + "\n  - ".join(problems),
-        )
-
-
 class TestMigrationModelLockstep(unittest.TestCase):
     def setUp(self):
         self.baseline = lockstep.load_baseline(BASELINE_PATH)

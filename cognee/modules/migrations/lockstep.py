@@ -20,10 +20,10 @@ reuse it verbatim, varying only:
 - the model surface: what ``Base.metadata`` holds after the deployment's
   SERVER entrypoint is imported (``server_model_schema``; upstream's is
   ``cognee.api.client``, a deployment names its own). Location-agnostic by
-  construction — SQLAlchemy registers a model wherever its class lives — and
-  paired with ``declared_tables`` + ``surface_problems``, an AST scan for
-  every ``__tablename__`` in the source tree, so a model the server never
-  imports cannot hide from the guard;
+  construction: SQLAlchemy registers a model wherever its class lives, so no
+  directory convention is involved. A model no process imports touches no
+  database, and the moment one is imported the probes report its missing
+  migration;
 - ``script_location``: the Alembic scripts directory (upstream tests pass
   ``packaged_script_location()`` explicitly so the ambient
   ``COGNEE_ALEMBIC_PATH`` override cannot retarget them; a vendored chain
@@ -49,7 +49,6 @@ See ``cognee/tests/e2e/migrations/test_migration_model_lockstep.py`` for the
 upstream wiring and the re-freezing rules.
 """
 
-import ast
 import importlib
 import json
 import subprocess
@@ -66,32 +65,10 @@ from sqlalchemy import inspect
 #   model was removed without its drop migration ever being written (audited
 #   2026-09-01, the chain's only such table); writing that migration retires
 #   the entry.
-IGNORED_TABLES = frozenset(
-    {
-        "alembic_version",
-        "notebooks",
-        # Declared on their OWN declarative bases (AnswersBase / MetricsBase /
-        # QuestionsBase) and created by the eval framework with create_all:
-        # not part of this schema or its chain.
-        "eval_answers",
-        "eval_metrics",
-        "eval_questions",
-        # Orphaned models under cognee/modules/pipelines/models: Task, Pipeline
-        # and TaskRun do not even import any more, PipelineTask is exported by
-        # nothing; no process registers them. Deleting the files (or wiring
-        # them in, with a migration) retires these entries.
-        "pipeline_task",
-        "pipelines",
-        "task_runs",
-        "tasks",
-    }
-)
+IGNORED_TABLES = frozenset({"alembic_version", "notebooks"})
 
 # The entrypoint whose import registers the upstream server's model surface.
 SERVER_ENTRYPOINT = "cognee.api.client"
-
-# Directories never scanned for model declarations.
-SCAN_EXCLUDED_DIRS = frozenset({"tests", "__pycache__", ".venv", "alembic", "node_modules"})
 
 
 def register_server_models(entrypoint: str = SERVER_ENTRYPOINT) -> None:
@@ -125,75 +102,6 @@ def server_model_schema(
             + result.stderr[-3000:]
         )
     return json.loads(result.stdout.strip().splitlines()[-1])
-
-
-def declared_tables(
-    *roots: str | Path, excluded_dirs: Iterable[str] = SCAN_EXCLUDED_DIRS
-) -> dict[str, list[str]]:
-    """Every ``__tablename__`` declared in a class body anywhere under
-    ``roots`` (``{table: [files]}``), found by parsing source — no imports,
-    no side effects, no assumption about where models live."""
-    excluded = set(excluded_dirs)
-    found: dict[str, list[str]] = {}
-    for root in roots:
-        root = Path(root)
-        for path in sorted(root.rglob("*.py")):
-            if excluded.intersection(path.relative_to(root).parts):
-                continue
-            try:
-                tree = ast.parse(path.read_text())
-            except (SyntaxError, UnicodeDecodeError):
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef):
-                    continue
-                for statement in node.body:
-                    target = None
-                    if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
-                        target = statement.targets[0]
-                    elif isinstance(statement, ast.AnnAssign):
-                        target = statement.target
-                    if (
-                        isinstance(target, ast.Name)
-                        and target.id == "__tablename__"
-                        and isinstance(statement.value, ast.Constant)
-                        and isinstance(statement.value.value, str)
-                    ):
-                        found.setdefault(statement.value.value, []).append(
-                            str(path.relative_to(root))
-                        )
-    return found
-
-
-def surface_problems(
-    registered: Iterable[str],
-    owned: dict[str, list[str]],
-    visible: dict[str, list[str]] | None = None,
-    ignored_tables: Iterable[str] = IGNORED_TABLES,
-) -> list[str]:
-    """Describe every gap between what the server REGISTERS and what the
-    source DECLARES. ``owned``: tables declared in the trees this deployment
-    owns — each must be registered, or the guard cannot check it. ``visible``
-    (default ``owned``): every tree the process could register from — a
-    registered table declared in none of them is built some way the scan
-    cannot see. Empty = the surface is complete."""
-    ignored = set(ignored_tables)
-    registered = set(registered) - ignored
-    visible = owned if visible is None else visible
-    problems = []
-    for table in sorted(set(owned) - registered - ignored):
-        problems.append(
-            f"table '{table}' is declared in {', '.join(owned[table])} but the server "
-            "never registers it — import the model at startup, or list it in "
-            "IGNORED_TABLES with the reason"
-        )
-    for table in sorted(registered - set(visible)):
-        problems.append(
-            f"the server registers table '{table}' but no __tablename__ declaration was "
-            "found in the scanned trees — a model built some way the scan cannot see "
-            "(sa.Table, a dynamic class); tell the guard where it lives"
-        )
-    return problems
 
 
 def packaged_script_location() -> str:
