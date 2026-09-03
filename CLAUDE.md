@@ -45,7 +45,6 @@ pre-commit install
 - **huggingface** - HuggingFace transformers
 - **aws** - S3 storage backend
 - **redis** - Redis caching
-- **graphiti** - Graphiti-core integration
 - **baml** - BAML structured output
 - **dlt** - Data load tool (dlt) integration
 - **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
@@ -349,7 +348,7 @@ GRAPH_DATABASE_PASSWORD=your_password
 
 # Postgres (requires postgres extra: pip install cognee[postgres])
 # DEMO, not production-ready — see the warning below.
-# Does not support raw Cypher queries, natural language search, or Graphiti.
+# Does not support raw Cypher queries or natural language search.
 # The legacy value `postgres` still resolves to this same adapter.
 GRAPH_DATABASE_PROVIDER=postgres_demo
 GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
