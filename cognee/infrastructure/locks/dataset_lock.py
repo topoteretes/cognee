@@ -12,9 +12,8 @@ DatasetQueue slot (``set_database_global_context_variables``). A task that
 already holds a queue slot must never wait on a dataset lock — slots are a
 global, finite resource (semaphore), so slot-holding lock-waiters can exhaust
 them and deadlock the whole process against lock-holding slot-waiters.
-``get_dataset_lock`` logs violations at acquisition time (it does not raise:
-the deprecated ``await set_database_global_context_variables`` form holds a
-task-lifetime slot by design, so pre-existing callers of it must keep working).
+``get_dataset_lock`` enforces this: same-dataset violations raise, cross-dataset
+ones log a warning.
 
 NOTE: process-local only (asyncio) — this does NOT protect against multiple
 processes/workers operating on the same dataset. To be replaced by a
@@ -36,16 +35,13 @@ _dataset_locks_guard = asyncio.Lock()
 
 
 def _check_lock_slot_order(dataset_id: UUID) -> None:
-    """Log the slot->lock order inversion that deadlocked SDK-483.
+    """Fail fast on the slot->lock order inversion instead of deadlocking.
 
     A 56h production hang (SDK-483) came from tasks acquiring a DatasetQueue
     slot and then waiting on a dataset lock while lock holders waited for
-    slots. Detection only — no raise: the deprecated ``await
-    set_database_global_context_variables`` form legitimately holds a
-    task-lifetime slot (it also pins the dataset's engines open), so existing
-    callers of it must keep working. The log is deterministic on every
-    slot->lock acquisition, so a reintroduced inversion is visible in dev and
-    CI logs long before it deadlocks under load.
+    slots. Same-dataset inversions have no legitimate caller, so they raise;
+    a slot held for a different dataset can still form a cross-dataset cycle,
+    so it is loudly logged.
     """
     # Imported lazily: the queue package imports engine-cache modules that must
     # not load at lock-module import time.
@@ -55,14 +51,12 @@ def _check_lock_slot_order(dataset_id: UUID) -> None:
     if not held:
         return
     if str(dataset_id) in held:
-        logger.error(
-            "Lock-order inversion: current task holds a DatasetQueue slot for dataset %s "
-            "and is acquiring that dataset's lock. Canonical order is dataset lock -> "
-            "queue slot; under queue pressure this shape deadlocks the process (SDK-483). "
-            "Close the set_database_global_context_variables scope before taking the lock.",
-            dataset_id,
+        raise RuntimeError(
+            f"Lock-order inversion: current task holds a DatasetQueue slot for dataset "
+            f"{dataset_id} and is trying to acquire that dataset's lock. Canonical order "
+            "is dataset lock -> queue slot; close the set_database_global_context_variables "
+            "scope before acquiring the lock (see SDK-483)."
         )
-        return
     logger.warning(
         "Task holds DatasetQueue slot(s) for dataset(s) %s while acquiring the lock for "
         "dataset %s. Canonical order is dataset lock -> queue slot; this risks a "

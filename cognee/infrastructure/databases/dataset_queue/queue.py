@@ -7,7 +7,7 @@ slot against the shared budget.
 LOCK ORDERING (SDK-483): when a per-dataset lock is also needed, acquire it
 BEFORE the slot (dataset lock -> queue slot) and never wait on a lock while
 holding a slot — slot-holding lock-waiters exhaust the semaphore and deadlock
-the process. ``get_dataset_lock`` logs violations at acquisition time.
+the process. ``get_dataset_lock`` enforces this order at acquisition time.
 
 Ref-counting model (per (task, dataset)):
 
