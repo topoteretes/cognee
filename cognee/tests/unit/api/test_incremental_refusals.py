@@ -535,6 +535,75 @@ async def test_a_dataset_collaborator_may_update_a_row_they_do_not_own(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_the_recorded_budget_lookup_reads_the_dataset_owners_store(monkeypatch):
+    """The refusal path reads the same store the incremental path writes.
+
+    recorded_chunk_budget hands the full rebuild the token budget the stored
+    chunks were cut against. Opening the dataset as the CALLER sent a
+    collaborator's lookup to a different per-user store, where it found no
+    chunks and reported "no recorded budget" — so the rebuild silently cut the
+    document at the current default, which is the granularity drift this
+    helper exists to prevent.
+    """
+    import cognee.api.v1.update.incremental as incremental
+
+    data_id, dataset_id, owner_id = uuid4(), uuid4(), uuid4()
+    collaborator = SimpleNamespace(id=uuid4())
+
+    class _Context:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    seen_owner = {}
+
+    def _context(_dataset_id, user_id):
+        seen_owner["user_id"] = user_id
+        return _Context()
+
+    monkeypatch.setattr(
+        incremental,
+        "get_authorized_dataset",
+        AsyncMock(return_value=SimpleNamespace(id=dataset_id, owner_id=owner_id)),
+    )
+    monkeypatch.setattr(incremental, "set_database_global_context_variables", _context)
+    monkeypatch.setattr(
+        incremental,
+        "_get_stored_chunks",
+        AsyncMock(return_value=[{"id": str(uuid4()), "max_chunk_tokens": 512}]),
+    )
+    monkeypatch.setattr(incremental, "get_max_chunk_tokens", AsyncMock(return_value=8192))
+
+    budget = await incremental.recorded_chunk_budget(data_id, dataset_id, collaborator)
+
+    assert budget == 512, "the document's recorded budget must survive the fallback"
+    assert seen_owner["user_id"] == owner_id, (
+        "the budget lookup resolves the dataset's store by dataset owner, like the write path"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_recorded_budget_lookup_never_fails_the_update(monkeypatch):
+    """It is an optimization on the fallback path, so it degrades, never raises."""
+    import cognee.api.v1.update.incremental as incremental
+
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    monkeypatch.setattr(
+        incremental,
+        "get_authorized_dataset",
+        AsyncMock(side_effect=PermissionDeniedError("nope")),
+    )
+
+    assert (
+        await incremental.recorded_chunk_budget(uuid4(), uuid4(), SimpleNamespace(id=uuid4()))
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
     """A big edit must not become one oversized, all-or-nothing extraction.
 

@@ -233,11 +233,23 @@ async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> 
     guard on every later update. Returns None when the graph holds no usable
     baseline or the recorded budget is larger than the current provider limit
     (then the default is the only safe cut).
+
+    Resolves the dataset's databases as the DATASET OWNER, like
+    ``incremental_update`` and ``run_tasks``. Passing the caller would send a
+    collaborator's lookup to a different per-user store, find no chunks there,
+    and silently report "no recorded budget" — reintroducing the granularity
+    drift this helper exists to prevent, for exactly the collaborator the
+    dataset ACL was meant to serve.
+
+    Never raises: this is an optimization on the fallback path, so a lookup it
+    cannot complete degrades to the current default rather than failing the
+    update.
     """
     try:
-        async with set_database_global_context_variables(dataset_id, user.id):
+        dataset = await get_authorized_dataset(user, dataset_id, "write")
+        async with set_database_global_context_variables(dataset_id, dataset.owner_id):
             stored_chunks = await _get_stored_chunks(data_id)
-    except IncrementalUpdateNotPossible:
+    except (IncrementalUpdateNotPossible, PermissionDeniedError):
         return None
     recorded = next(
         (int(node["max_chunk_tokens"]) for node in stored_chunks if node.get("max_chunk_tokens")),
