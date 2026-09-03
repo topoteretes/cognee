@@ -1,11 +1,44 @@
 """Unit tests for TextChunker and TextChunkerWithOverlap behavioral equivalence."""
 
+import importlib
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 from uuid import uuid4
 
+from cognee.infrastructure.llm.tokenizer.TikToken.adapter import TikTokenTokenizer
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.text_chunker_with_overlap import TextChunkerWithOverlap
 from cognee.modules.data.processing.document_types import Document
+
+# importlib rather than `import ... as`: tasks/chunks/__init__.py re-exports
+# the functions under the same names as their modules, so the dotted import
+# resolves to the function and patch.object has nothing to patch.
+_chunk_by_row = importlib.import_module("cognee.tasks.chunks.chunk_by_row")
+_chunk_by_sentence = importlib.import_module("cognee.tasks.chunks.chunk_by_sentence")
+
+
+@pytest.fixture(autouse=True)
+def _pinned_tokenizer():
+    """Count tokens with the default engine's tiktoken, whatever ran before.
+
+    The expected chunk counts below assume tiktoken on text-embedding-3-large
+    (a word plus its trailing space is 2 tokens). chunk_by_sentence reads the
+    engine through the context-scoped embedding config, and an earlier test in
+    the same process can leave that pointing at a provider with no tokenizer,
+    where chunk_by_row falls back to one token per word and every count here
+    halves. That only showed up once the suite was sharded and this file
+    stopped running early. Pin the engine so the file is order-independent.
+    """
+    engine = SimpleNamespace(
+        tokenizer=TikTokenTokenizer(model="text-embedding-3-large", max_completion_tokens=8191)
+    )
+    with (
+        patch.object(_chunk_by_sentence, "get_embedding_engine", return_value=engine),
+        patch.object(_chunk_by_row, "get_embedding_engine", return_value=engine),
+    ):
+        yield
 
 
 @pytest.fixture(params=["TextChunker", "TextChunkerWithOverlap"])

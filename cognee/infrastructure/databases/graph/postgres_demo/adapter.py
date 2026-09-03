@@ -9,7 +9,9 @@ Interested in further development or production use of Postgres as a graph datab
 us at social@cognee.ai to explore the options.
 """
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from uuid import UUID
 from typing import Callable, Dict, Any, List, Union, Optional, Tuple, Type
 
@@ -169,6 +171,37 @@ def _select_nodeset_neighbor_ids(
     }
 
 
+_DEFAULT_POOL_ARGS = {
+    "pool_size": 2,
+    "max_overflow": 20,  # 22-connection ceiling, PER DATASET
+    "pool_pre_ping": True,
+    "pool_recycle": 280,
+    "pool_timeout": 280,
+}
+
+
+def _resolve_engine_args(configured_pool_args) -> dict:
+    """Turn the configured POOL_ARGS into create_async_engine kwargs.
+
+    Defaults mirror PGVectorAdapter._ACCESS_CONTROL_DEFAULT_POOL_ARGS (2/20),
+    NOT SqlAlchemyAdapter's 5/35. Like PGVector's, this engine is created per
+    dataset — the engine-cache key includes graph_database_schema — so its
+    ceiling is multiplied by dataset count, not paid once. dict() handles the
+    config's tuple-of-pairs form (relational/config.py stores POOL_ARGS as
+    tuple(sorted(parsed.items()))).
+
+    Until now only ``poolclass == "nullpool"`` was honoured and every sizing key
+    was dropped, so the adapter always ran SQLAlchemy's stock 5/10/30s pool.
+    """
+    pool_args = dict(configured_pool_args or {})
+    if str(pool_args.get("poolclass", "")).lower() == "nullpool":
+        return {"poolclass": NullPool}
+    pool_args.pop("poolclass", None)
+    for key, value in _DEFAULT_POOL_ARGS.items():
+        pool_args.setdefault(key, value)
+    return pool_args
+
+
 class PostgresDemoAdapter(GraphDBInterface):
     """Reference graph adapter using one node table and one directed-edge table."""
 
@@ -197,14 +230,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         self.schema = schema or ""
 
         relational_config = get_relational_config()
-        configured_pool_args = (
-            dict(relational_config.pool_args) if relational_config.pool_args else {}
-        )
-        engine_args = {}
-        if str(configured_pool_args.get("poolclass", "")).lower() == "nullpool":
-            engine_args["poolclass"] = NullPool
-        else:
-            engine_args["pool_pre_ping"] = True
+        engine_args = _resolve_engine_args(relational_config.pool_args)
         connect_args: dict = (
             dict(relational_config.database_connect_args)
             if relational_config.database_connect_args
@@ -223,15 +249,77 @@ class PostgresDemoAdapter(GraphDBInterface):
             **engine_args,
         )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+        self._write_gate = None
+        self._write_gate_loop = None
+        self._initialized = False
+        self._init_lock = None
+        self._init_lock_loop = None
+
+    def _get_write_gate(self) -> asyncio.Lock:
+        """Per-running-loop write gate.
+
+        The adapter is process-cached (closing_lru_cache) and can outlive the
+        loop it was built on; an asyncio.Lock binds to the first loop that
+        awaits it, so an __init__-time Lock is a latent "bound to a different
+        event loop" RuntimeError under repeated asyncio.run (CLI, unit tests).
+        Correctness never depends on this lock — pg_advisory_xact_lock does —
+        so a fresh gate per loop is safe.
+        """
+        loop = asyncio.get_running_loop()
+        if self._write_gate_loop is not loop:
+            self._write_gate = asyncio.Lock()
+            self._write_gate_loop = loop
+        return self._write_gate
+
+    def _get_init_lock(self) -> asyncio.Lock:
+        """Per-running-loop lock for initialize(); same rationale as the write gate."""
+        loop = asyncio.get_running_loop()
+        if self._init_lock_loop is not loop:
+            self._init_lock = asyncio.Lock()
+            self._init_lock_loop = loop
+        return self._init_lock
+
+    @asynccontextmanager
+    async def _write_session(self):
+        """One serialized graph-write transaction.
+
+        Writes are already serialized cluster-wide by pg_advisory_xact_lock.
+        Without this process-local gate every concurrent writer checks a
+        connection out of the pool and *then* blocks on that advisory lock, so
+        N in-flight writers pin min(N, pool ceiling) connections while exactly
+        one makes progress — starving the adapter's own reads (see
+        get_graph_metadata). The gate puts the queue in front of the pool
+        instead of behind it. It is an optimization, not the correctness
+        mechanism: the advisory lock still orders writes across processes.
+        """
+        async with self._get_write_gate():
+            async with self.sessionmaker() as session:
+                await _lock_graph_writes(session)
+                yield session
 
     async def close(self) -> None:
         """Dispose the database engine."""
         await self.engine.dispose(close=True)
+        self._initialized = False
 
     async def initialize(self) -> None:
-        """Create the existing graph schema when it is absent."""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(_meta.create_all, checkfirst=True)
+        """Create the graph schema when absent. Idempotent per adapter.
+
+        Every get_graph_engine() builds a fresh _GraphEngineHandle whose
+        _ensure_initialized calls this, and get_graph_metadata()/is_empty()
+        call it again — so a 164-item batch ran hundreds of
+        create_all(checkfirst=True) reflections, each holding a pooled
+        connection for a stack of catalog round-trips. That is what exhausted
+        the pool on the read path (job 98411831471).
+        """
+        if self._initialized:
+            return
+        async with self._get_init_lock():
+            if self._initialized:
+                return
+            async with self.engine.begin() as conn:
+                await conn.run_sync(_meta.create_all, checkfirst=True)
+            self._initialized = True
 
     async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
         """Reject raw Cypher; callers must use the typed graph methods."""
@@ -279,8 +367,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 properties = EXCLUDED.properties,
                 updated_at = now()
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(upsert, rows)
             if source_ref_key is not None:
                 await self._update_node_provenance(
@@ -329,8 +416,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         """Delete nodes by id; the schema's foreign keys remove their incident edges."""
         if not node_ids:
             return
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(
                 text("DELETE FROM graph_node WHERE id = ANY(:ids)"),
                 {"ids": [str(node_id) for node_id in node_ids]},
@@ -407,8 +493,7 @@ class PostgresDemoAdapter(GraphDBInterface):
                 properties = EXCLUDED.properties,
                 updated_at = now()
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(upsert, rows)
             if source_ref_key is not None:
                 await self._update_edge_provenance(
@@ -816,8 +901,7 @@ class PostgresDemoAdapter(GraphDBInterface):
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(text("TRUNCATE graph_edge, graph_node CASCADE"))
             await session.commit()
 
@@ -919,8 +1003,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_add = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_node_provenance(
                 session,
                 node_ids,
@@ -939,8 +1022,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_add = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_edge_provenance(
                 session,
                 edges,
@@ -958,8 +1040,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_remove = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_node_provenance(
                 session,
                 node_ids,
@@ -975,8 +1056,7 @@ class PostgresDemoAdapter(GraphDBInterface):
         if not source_ref_keys:
             return
         keys_to_remove = list(source_ref_keys)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await self._update_edge_provenance(
                 session,
                 edges,
@@ -994,8 +1074,7 @@ class PostgresDemoAdapter(GraphDBInterface):
               AND target_id = :target_id
               AND relationship_name = :relationship_name
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             for source_id, target_id, relationship_name in _edge_identities(edges):
                 await session.execute(
                     statement,
@@ -1233,8 +1312,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             VALUES (:key, :value)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """)
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             await session.execute(upsert, rows)
             await session.commit()
 
@@ -1277,8 +1355,7 @@ class PostgresDemoAdapter(GraphDBInterface):
             WHERE id = :id
         """)
 
-        async with self.sessionmaker() as session:
-            await _lock_graph_writes(session)
+        async with self._write_session() as session:
             if node_ids is None:
                 result = await session.execute(select_all)
             else:
