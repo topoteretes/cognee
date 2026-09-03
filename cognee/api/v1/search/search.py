@@ -340,14 +340,19 @@ async def search(
             ):
                 operation_context.set_dataset(target_dataset_ids[0])
 
-            if query_type is SearchType.AGENTIC_COMPLETION:
+            if query_type in (SearchType.AGENTIC_COMPLETION, SearchType.SKILLS):
                 active_dataset_refs = dataset_ids if dataset_ids else datasets
                 if isinstance(active_dataset_refs, UUID):
                     active_dataset_refs = [active_dataset_refs]
                 if not active_dataset_refs or len(active_dataset_refs) != 1:
+                    if query_type is SearchType.AGENTIC_COMPLETION:
+                        raise CogneeValidationError(
+                            message="Agentic skill search requires exactly one explicit dataset.",
+                            name="InvalidAgenticDatasetScope",
+                        )
                     raise CogneeValidationError(
-                        message="Agentic skill search requires exactly one explicit dataset.",
-                        name="InvalidAgenticDatasetScope",
+                        message="SKILLS search requires exactly one explicit dataset.",
+                        name="InvalidSkillsDatasetScope",
                     )
 
             if any(v is not None for v in agentic_overrides.values()):
