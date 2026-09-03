@@ -139,8 +139,8 @@ langchain = [
     "langchain-core>=1.2.5"
 ]
 llama-index = ["llama-index-core>=0.14.20,<0.15"]
-huggingface = ["transformers>=4.46.3,<5"]
-ollama = ["transformers>=4.46.3,<5"]
+huggingface = ["transformers>=4.46.3,<6"]
+ollama = ["transformers>=4.46.3,<6"]
 mistral = ["mistral-common>=1.5.2,<2", "mistralai>=1.9.10,<2"]
 anthropic = ["anthropic>=0.27"]
 azure = ["azure-identity>=1.15.0,<2"]
@@ -158,7 +158,7 @@ docs = [
 ]
 codegraph = [
     "fastembed<=0.8.0 ; python_version < '3.14'",
-    "transformers>=4.46.3,<5",
+    "transformers>=4.46.3,<6",
 ]
 evals = [
     "plotly>=6.0.0,<7",
