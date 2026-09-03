@@ -124,6 +124,7 @@ class DatabaseContextManager:
         "_llm_config",
         "_embedding_config",
         "_applied",
+        "_scoped",
         "_dataset_token",
         "_llm_token",
         "_embedding_token",
@@ -141,6 +142,12 @@ class DatabaseContextManager:
         self._llm_config = llm_config
         self._embedding_config = embedding_config
         self._applied = False
+        # Only the `async with` form participates in the DatasetQueue: a slot
+        # needs a release point, and only a scope has one. The legacy `await`
+        # form used to hold its slot until task end, which let a later lock
+        # acquisition in the same task deadlock the queue (SDK-483) — so it
+        # now sets context only and takes no slot.
+        self._scoped = False
         self._dataset_token = None
         self._llm_token = None
         self._embedding_token = None
@@ -179,10 +186,11 @@ class DatabaseContextManager:
                 "A dataset must be provided when backend access control is enabled."
             )
 
-        # Imported lazily to avoid circular imports at module load.
-        from cognee.infrastructure.databases.dataset_queue import dataset_queue
+        if self._scoped:
+            # Imported lazily to avoid circular imports at module load.
+            from cognee.infrastructure.databases.dataset_queue import dataset_queue
 
-        await dataset_queue().ensure_slot(dataset)
+            await dataset_queue().ensure_slot(dataset)
 
         user = await get_user(user_id)
 
@@ -282,19 +290,23 @@ class DatabaseContextManager:
 
     def __await__(self):
         # Legacy ``await set_database_global_context_variables(...)`` call shape.
-        # Deprecated — emit a warning pointing users at the ``async with`` form,
-        # which scopes the dataset queue slot to a block and releases it on exit.
+        # Deprecated — sets the context variables only and does NOT take a
+        # DatasetQueue slot: a slot needs a release point, and holding one for
+        # the rest of the task while later code acquires dataset locks is the
+        # SDK-483 deadlock. Queue admission requires the ``async with`` form.
         warnings.warn(
             "`await set_database_global_context_variables(...)` is deprecated. "
-            "Use `async with set_database_global_context_variables(...):` instead "
-            "for scoped dataset-queue slot management; the `async with` form "
-            "releases the database queue slot automatically on block exit, the deprecated method does not.",
+            "Use `async with set_database_global_context_variables(...):` instead. "
+            "The deprecated await form sets the database context only and does not "
+            "participate in the dataset queue; the `async with` form acquires a queue "
+            "slot on enter and releases it on block exit.",
             DeprecationWarning,
             stacklevel=2,
         )
         return self._apply().__await__()
 
     async def __aenter__(self) -> "DatabaseContextManager":
+        self._scoped = True
         await self._apply()
         return self
 
@@ -329,24 +341,28 @@ def set_database_global_context_variables(
 ) -> "DatabaseContextManager":
     """Returns a dual-mode helper that is both awaitable and an async context manager.
 
-    - ``await set_database_global_context_variables(ds, user_id)`` — legacy;
-      applies the context and relies on task-end queue cleanup to release the
-      slot.
+    - ``await set_database_global_context_variables(ds, user_id)`` — legacy,
+      deprecated; applies the context only and does NOT take a dataset-queue
+      slot (an unreleasable slot held for the rest of the task is the SDK-483
+      deadlock shape).
     - ``async with set_database_global_context_variables(ds, user_id):`` —
-      applies the context on enter; explicitly releases this dataset's queue
-      slot on exit. Preferred for sequential multi-dataset loops and scoped
-      operations.
+      applies the context on enter, acquires this dataset's queue slot, and
+      releases it on exit. Preferred for sequential multi-dataset loops and
+      scoped operations.
 
     If backend access control is enabled this ensures all datasets have their
     own databases, access to which will be enforced by given permissions.
     Database name will be determined by dataset and the appropriate vector and
     graph database handlers will be enforced.
 
-    Additionally, this acts as the queue gate for dataset-level operations:
-    applying the context ensures the current asyncio task holds a
-    :class:`DatasetQueue` slot for ``dataset``. Repeated calls in the same
-    task for the same dataset are no-ops;. The dataset queue slot is released automatically when the
-    task completes (legacy mode) or on async-with exit (scoped mode).
+    Additionally, the ``async with`` form acts as the queue gate for
+    dataset-level operations: entering the scope ensures the current asyncio
+    task holds a :class:`DatasetQueue` slot for ``dataset``. Repeated entries
+    in the same task for the same dataset are no-ops. The slot is released on
+    async-with exit (task end remains the crash backstop). Never wait on a
+    per-dataset lock while inside such a scope — canonical order is dataset
+    lock -> queue slot (SDK-483), and ``get_dataset_lock`` raises on the
+    same-dataset violation.
 
     If ``llm_config`` and/or ``embedding_config`` are provided they are set on
     their respective ContextVars and picked up by ``get_llm_client`` (LiteLLM)
