@@ -192,7 +192,13 @@ async def search(
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
         code_query: Structured deterministic CODE operation and arguments. Supported
                     operations are query_facts, explore, traverse, find_path,
-                    impact_analysis, and delta (what the last ingestion changed).
+                    impact_analysis, insights (enola explainer findings with their
+                    evidence facts, filterable by source/min_confidence), architecture
+                    (module-level overview with symbol edges rolled up to modules), and
+                    delta (what the last ingestion changed, plus the snapshot receipt).
+                    Add ``"diagram": "mermaid"`` (or ``"dot"``) to any operation to get
+                    the result rendered as diagram source under ``result["diagram"]``;
+                    architecture includes a Mermaid diagram unless ``"diagram": False``.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
