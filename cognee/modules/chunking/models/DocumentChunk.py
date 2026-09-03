@@ -58,10 +58,18 @@ class DocumentChunk(DataPoint):
     truth_alignment: Optional[list[float]] = None
     truth_epoch: Optional[int] = None
     metadata: dict = {"index_fields": ["text"]}
+
+    # Two records of the same extraction, kept apart because their readers
+    # need different shapes. Both are filled by
+    # ``construct_data_points_and_edges`` before edge deduplication, so both
+    # see edges the graph already held. Private: never persisted as node
+    # properties.
+    #
     # Relationship edges this chunk's OWN extraction yielded, as
-    # (source_id, target_id, relationship_name) — recorded by
-    # ``construct_data_points_and_edges`` whether or not the graph already held
-    # the edge. Chunk ownership is derived from this record, not from the
-    # entities' ``relations`` lists (which accumulate edges from every chunk in
-    # a batch). Private: never persisted as a node property.
+    # (source_id, target_id, relationship_name), deduplicated. Chunk ownership
+    # is derived from this record, not from the entities' ``relations`` lists
+    # (which accumulate edges from every chunk in a batch).
     _produced_edge_identities: list = PrivateAttr(default_factory=list)
+    # Per-chunk semantic graph identities used by the provenance sidecar,
+    # carrying the edge text and every occurrence rather than a unique set.
+    _provenance_edges: list = PrivateAttr(default_factory=list)

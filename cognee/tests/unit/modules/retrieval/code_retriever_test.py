@@ -831,3 +831,521 @@ async def test_repository_nodes_stay_out_of_fact_operations():
         result = await retriever.get_retrieved_objects("")
 
     assert all(fact["type"] != "CodeRepository" for fact in result["facts"])
+
+
+# --- enola 0.4.x: insights, writer ids, receipt, new kinds ---------------------
+
+ENOLA_ID_DB = "a" * 32
+ENOLA_ID_API = "b" * 32
+
+
+def _insight_graph():
+    nodes = [
+        (
+            "repo-a",
+            {
+                "name": "repo-a",
+                "type": "CodeRepository",
+                "path": "/src/repo-a",
+                "last_snapshot_id": "sha256:abc",
+                "last_receipt": {
+                    "format_version": 1,
+                    "enola_version": "0.4.12",
+                    "quality": {"files_seen": 6, "files_parsed": 5, "parse_errors": 0},
+                },
+            },
+        ),
+        (
+            "db",
+            {
+                "name": "app/db.Database",
+                "type": "CodeSymbol",
+                "file_path": "app/db.py",
+                "line": 4,
+                "end_line": 40,
+                "repo": "repo-a",
+                "symbol_kind": "class",
+                "enola_id": ENOLA_ID_DB,
+            },
+        ),
+        (
+            "api",
+            {
+                "name": "app/api.handler",
+                "type": "CodeSymbol",
+                "file_path": "app/api.py",
+                "repo": "repo-a",
+                "symbol_kind": "function",
+                "enola_id": ENOLA_ID_API,
+            },
+        ),
+        (
+            "hot",
+            {
+                "name": "Call-graph hotspot: app/db.Database",
+                "type": "CodeInsight",
+                "repo": "repo-a",
+                "description": "A pinch point.",
+                "fact_properties": {
+                    "source": "hotspots",
+                    "confidence": 0.7,
+                    "metrics": {"fan_in": 9},
+                },
+            },
+        ),
+        (
+            "cyc",
+            {
+                "name": "Dependency cycle: app/api -> app/db -> app/api",
+                "type": "CodeInsight",
+                "repo": "repo-a",
+                "fact_properties": {"source": "cycles", "confidence": 1.0},
+            },
+        ),
+        (
+            "info",
+            {
+                "name": "Domain findings do not apply to this repository",
+                "type": "CodeInsight",
+                "repo": "repo-a",
+                "fact_properties": {"source": "domain", "confidence": 1.0, "informational": True},
+            },
+        ),
+        (
+            "extraction",
+            {
+                "name": "python:calls",
+                "type": "CodeExtractionAccount",
+                "repo": "repo-a",
+                "fact_properties": {"extractor": "python", "language": "python"},
+            },
+        ),
+    ]
+    edges = [
+        ("hot", "db", "evidences", {}),
+        ("cyc", "api", "evidences", {}),
+        ("cyc", "db", "evidences", {}),
+        ("api", "db", "calls", {}),
+    ]
+    return nodes, edges
+
+
+def _insight_graph_patch():
+    nodes, edges = _insight_graph()
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, edges))
+    return patch(
+        "cognee.modules.retrieval.code_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    )
+
+
+@pytest.mark.asyncio
+async def test_insights_operation_filters_by_confidence_and_resolves_evidence():
+    retriever = CodeRetriever(
+        config={"operation": "insights", "min_confidence": 0.9, "informational": False}
+    )
+
+    with _insight_graph_patch():
+        result = await retriever.get_retrieved_objects("")
+
+    assert result["operation"] == "insights"
+    assert result["total"] == 1
+    assert result["by_source"] == {"cycles": 1}
+    (cycle,) = result["insights"]
+    assert cycle["kind"] == "insight"
+    assert cycle["name"].startswith("Dependency cycle")
+    assert cycle["properties"] == {"source": "cycles", "confidence": 1.0}
+    assert [fact["name"] for fact in cycle["evidence"]] == ["app/api.handler", "app/db.Database"]
+    assert cycle["evidence"][1]["enola_id"] == ENOLA_ID_DB
+    assert cycle["evidence"][1]["end_line"] == 40
+    assert "relations" not in cycle
+
+
+@pytest.mark.asyncio
+async def test_insights_operation_orders_by_confidence_then_name_and_filters_source():
+    with _insight_graph_patch():
+        everything = await CodeRetriever(config={"operation": "insights"}).get_retrieved_objects("")
+
+    assert everything["total"] == 3
+    assert [insight["id"] for insight in everything["insights"]] == ["cyc", "info", "hot"]
+    assert everything["by_source"] == {"cycles": 1, "domain": 1, "hotspots": 1}
+
+    with _insight_graph_patch():
+        hotspots = await CodeRetriever(
+            config={"operation": "insights", "source": "hotspots"}
+        ).get_retrieved_objects("")
+
+    assert [insight["id"] for insight in hotspots["insights"]] == ["hot"]
+    assert hotspots["insights"][0]["properties"]["metrics"] == {"fan_in": 9}
+    assert hotspots["insights"][0]["description"] == "A pinch point."
+
+    # Like query_facts: the query text is a title substring only for an
+    # otherwise unconfigured call, and never narrows a structured one.
+    with _insight_graph_patch():
+        by_title = await CodeRetriever(config={"operation": "insights"}).get_retrieved_objects(
+            "cycle"
+        )
+    assert [insight["id"] for insight in by_title["insights"]] == ["cyc"]
+
+    with _insight_graph_patch():
+        structured = await CodeRetriever(
+            config={"operation": "insights", "limit": 10}
+        ).get_retrieved_objects("What did the explainers find?")
+    assert structured["total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_insights_operation_paginates_and_validates_arguments():
+    with _insight_graph_patch():
+        page = await CodeRetriever(
+            config={"operation": "insights", "offset": 1, "limit": 1}
+        ).get_retrieved_objects("")
+
+    assert page["total"] == 3
+    assert page["has_more"] is True
+    assert [insight["id"] for insight in page["insights"]] == ["info"]
+
+    for bad in ({"min_confidence": 2}, {"min_confidence": "high"}, {"informational": "maybe"}):
+        with pytest.raises(CodeSearchValidationError):
+            with _insight_graph_patch():
+                await CodeRetriever(config={"operation": "insights", **bad}).get_retrieved_objects(
+                    ""
+                )
+
+
+@pytest.mark.asyncio
+async def test_operations_accept_enola_fact_ids_as_seeds():
+    with _insight_graph_patch():
+        explored = await CodeRetriever(
+            config={"operation": "explore", "id": ENOLA_ID_DB}
+        ).get_retrieved_objects("")
+
+    assert explored["focus"]["id"] == "db"
+    assert explored["focus"]["enola_id"] == ENOLA_ID_DB
+    assert explored["focus"]["name"] == "app/db.Database"
+
+    with _insight_graph_patch():
+        path = await CodeRetriever(
+            config={"operation": "find_path", "source_id": ENOLA_ID_API, "target_id": ENOLA_ID_DB}
+        ).get_retrieved_objects("")
+
+    assert path["found"] is True
+    assert [node["id"] for node in path["path"]] == ["api", "db"]
+
+    with pytest.raises(CodeSearchValidationError, match="could not resolve"):
+        with _insight_graph_patch():
+            await CodeRetriever(
+                config={"operation": "explore", "id": "f" * 32}
+            ).get_retrieved_objects("")
+
+
+@pytest.mark.asyncio
+async def test_delta_operation_reports_the_stamped_receipt():
+    with _insight_graph_patch():
+        result = await CodeRetriever(config={"operation": "delta"}).get_retrieved_objects("")
+
+    (repository,) = result["repositories"]
+    assert repository["last_snapshot_id"] == "sha256:abc"
+    assert repository["receipt"]["format_version"] == 1
+    assert repository["receipt"]["enola_version"] == "0.4.12"
+    assert repository["receipt"]["quality"]["files_parsed"] == 5
+
+
+@pytest.mark.asyncio
+async def test_new_fact_kinds_are_queryable():
+    with _insight_graph_patch():
+        result = await CodeRetriever(
+            config={"operation": "query_facts", "kind": "extraction"}
+        ).get_retrieved_objects("")
+
+    assert result["total"] == 1
+    assert result["facts"][0]["kind"] == "extraction"
+    assert result["facts"][0]["type"] == "CodeExtractionAccount"
+    assert result["facts"][0]["properties"]["extractor"] == "python"
+
+
+# --- diagrams and the architecture overview ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_diagram_option_attaches_mermaid_source_to_any_operation():
+    _engine, graph_patch = _graph_patch()
+    with graph_patch:
+        result = await CodeRetriever(
+            config={"operation": "explore", "name": "pkg.Widget.run", "diagram": True}
+        ).get_retrieved_objects("")
+
+    diagram = result["diagram"]
+    assert diagram["format"] == "mermaid"
+    assert diagram["nodes"] == len(result["nodes"])
+    assert diagram["edges"] == len(result["edges"])
+    source = diagram["source"]
+    assert source.startswith('---\ntitle: "explore: pkg.Widget.run"\n---\nflowchart LR\n')
+    # Every node is declared with a kind-specific shape and a quoted label...
+    assert '(["pkg.Widget.run"])' in source
+    assert '[("widget_db")]' in source
+    # ...edges carry the relation name, and the focus is highlighted.
+    assert '-- "has_method" -->' in source
+    assert "classDef highlight" in source
+    assert "\n    class n" in source
+    # Deterministic: rendering the same result twice is byte-identical.
+    _engine, graph_patch = _graph_patch(reverse=True)
+    with graph_patch:
+        again = await CodeRetriever(
+            config={"operation": "explore", "name": "pkg.Widget.run", "diagram": "mermaid"}
+        ).get_retrieved_objects("")
+    assert again["diagram"]["source"] == source
+
+
+@pytest.mark.asyncio
+async def test_diagram_groups_repositories_and_renders_dot():
+    _engine, graph_patch = _graph_patch()
+    with graph_patch:
+        result = await CodeRetriever(
+            config={
+                "operation": "impact_analysis",
+                "name": "pkg.Widget.run",
+                "max_depth": 5,
+                "diagram": "dot",
+            }
+        ).get_retrieved_objects("")
+
+    source = result["diagram"]["source"]
+    assert result["diagram"]["format"] == "dot"
+    assert source.startswith("digraph code_graph {")
+    # repo-a and repo-b both appear -> one cluster per repository.
+    assert 'label="repo-a";' in source and 'label="repo-b";' in source
+    assert "subgraph cluster_0 {" in source and "subgraph cluster_1 {" in source
+    assert '[label="calls"];' in source
+    # The impact target is highlighted.
+    assert "penwidth=3" in source
+
+    _engine, graph_patch = _graph_patch()
+    with graph_patch:
+        path = await CodeRetriever(
+            config={
+                "operation": "find_path",
+                "source": "api.handler",
+                "target": "widget_db",
+                "diagram": "mermaid",
+            }
+        ).get_retrieved_objects("")
+    assert path["found"] is True
+    assert path["diagram"]["nodes"] == len(path["path"])
+    assert path["diagram"]["source"].count("-->") == len(path["edges"])
+
+
+@pytest.mark.asyncio
+async def test_diagram_option_is_validated_and_off_by_default():
+    _engine, graph_patch = _graph_patch()
+    with graph_patch:
+        plain = await CodeRetriever(config={"operation": "explore"}).get_retrieved_objects(
+            "pkg.Widget.run"
+        )
+    assert "diagram" not in plain
+
+    with pytest.raises(CodeSearchValidationError, match="diagram"):
+        CodeRetriever(config={"operation": "explore", "diagram": "png"})
+
+    _engine, graph_patch = _graph_patch()
+    with graph_patch:
+        delta = await CodeRetriever(
+            config={"operation": "delta", "diagram": True}
+        ).get_retrieved_objects("")
+    assert delta["diagram"]["source"] is None
+    assert delta["diagram"]["nodes"] == 0
+    assert "note" in delta["diagram"]
+
+
+def test_diagram_labels_are_escaped_for_both_formats():
+    from cognee.modules.retrieval.code_graph_diagram import render_dot, render_mermaid
+
+    nodes = [
+        {"id": "a", "kind": "route", "name": 'GET /items?q="x"<y>#1&2', "repo": "r"},
+        {"id": "b", "kind": "module", "name": ".", "repo": "r"},
+    ]
+    edges = [{"source_id": "a", "target_id": "b", "type": "declares", "count": 3}]
+
+    mermaid = render_mermaid(nodes, edges, title='a "quoted" # title: Vec<T>')
+    # The front-matter title is YAML (quoted; angle brackets swapped for
+    # guillemets, which Mermaid draws verbatim), the labels use entity codes.
+    assert mermaid.startswith('---\ntitle: "a \\"quoted\\" # title: Vec\u2039T\u203a"\n---\n')
+    assert 'n0>"GET /items?q=#quot;x#quot;#lt;y#gt;#35;1#38;2"]' in mermaid
+    assert 'n1[["(root)"]]' in mermaid
+    assert 'n0 -- "declares x3" --> n1' in mermaid
+    assert "classDef" not in mermaid
+
+    dot = render_dot(nodes, edges, highlight_ids=["b"])
+    assert 'n0 [label="GET /items?q=\\"x\\"<y>#1&2" shape=cds];' in dot
+    assert 'n1 [label="(root)" shape=component color="#d64545" penwidth=3];' in dot
+    assert 'n0 -> n1 [label="declares x3"];' in dot
+
+
+def _architecture_graph():
+    nodes = [
+        ("repo", {"name": "shop", "type": "CodeRepository", "path": "/src/shop"}),
+        ("m_root", {"name": ".", "type": "CodeModule", "file_path": ".", "repo": "shop"}),
+        (
+            "m_inv",
+            {"name": "inventory", "type": "CodeModule", "file_path": "inventory", "repo": "shop"},
+        ),
+        ("m_api", {"name": "api", "type": "CodeModule", "file_path": "api", "repo": "shop"}),
+        (
+            "s_main",
+            {
+                "name": "main.main",
+                "type": "CodeSymbol",
+                "file_path": "main.py",
+                "repo": "shop",
+                "symbol_kind": "function",
+            },
+        ),
+        (
+            "s_total",
+            {
+                "name": "inventory/pricing.total",
+                "type": "CodeSymbol",
+                "file_path": "inventory/pricing.py",
+                "repo": "shop",
+                "symbol_kind": "function",
+            },
+        ),
+        (
+            "s_line",
+            {
+                "name": "inventory/pricing.line",
+                "type": "CodeSymbol",
+                "file_path": "inventory/pricing.py",
+                "repo": "shop",
+                "symbol_kind": "function",
+            },
+        ),
+        (
+            "s_handler",
+            {
+                "name": "api/routes.orders",
+                "type": "CodeSymbol",
+                "file_path": "api/routes.py",
+                "repo": "shop",
+                "symbol_kind": "function",
+            },
+        ),
+        (
+            "route",
+            {
+                "name": "GET /orders",
+                "type": "ApiEndpoint",
+                "file_path": "api/routes.py",
+                "repo": "shop",
+            },
+        ),
+        (
+            "db",
+            {
+                "name": "orders_table",
+                "type": "StorageResource",
+                "file_path": "inventory/store.py",
+                "repo": "shop",
+            },
+        ),
+        (
+            "dep",
+            {
+                "name": "main -> requests",
+                "type": "ExternalDependency",
+                "file_path": "main.py",
+                "repo": "shop",
+            },
+        ),
+    ]
+    edges = [
+        ("s_main", "m_root", "declares", {}),
+        ("s_total", "m_inv", "declares", {}),
+        ("s_line", "m_inv", "declares", {}),
+        ("s_handler", "m_api", "declares", {}),
+        ("route", "m_api", "declares", {}),
+        ("db", "m_inv", "declares", {}),
+        # cross-module calls roll up to module edges with counts
+        ("s_main", "s_total", "calls", {}),
+        ("s_main", "s_line", "calls", {}),
+        ("s_handler", "s_total", "calls", {}),
+        # intra-module call: dropped
+        ("s_total", "s_line", "calls", {}),
+        ("route", "s_handler", "handled_by", {}),
+        ("s_total", "db", "uses", {}),
+        ("dep", "m_root", "declares", {}),
+        # containment edges are never drawn
+        ("s_main", "repo", "part_of", {}),
+    ]
+    engine = AsyncMock()
+    engine.get_filtered_graph_data = AsyncMock(return_value=(nodes, edges))
+    return patch(
+        "cognee.modules.retrieval.code_retriever.get_graph_engine",
+        AsyncMock(return_value=engine),
+    )
+
+
+@pytest.mark.asyncio
+async def test_architecture_rolls_symbol_edges_up_to_modules_and_draws_by_default():
+    with _architecture_graph():
+        result = await CodeRetriever(config={"operation": "architecture"}).get_retrieved_objects("")
+
+    assert result["operation"] == "architecture"
+    assert result["repos"] == ["shop"]
+    assert [node["name"] for node in result["nodes"]] == [
+        "GET /orders",
+        ".",
+        "api",
+        "inventory",
+        "orders_table",
+    ]
+    assert [(e["source"], e["target"], e["type"], e["count"]) for e in result["edges"]] == [
+        (".", "inventory", "calls", 2),
+        ("api", "inventory", "calls", 1),
+        ("api", "GET /orders", "declares", 1),
+        ("inventory", "orders_table", "declares", 1),
+        ("GET /orders", "api", "handled_by", 1),
+        ("inventory", "orders_table", "uses", 1),
+    ]
+    assert result["stats"] == {
+        "nodes_total": 5,
+        "nodes_shown": 5,
+        "edges_shown": 6,
+        "truncated": False,
+    }
+    diagram = result["diagram"]
+    assert diagram["format"] == "mermaid"
+    assert 'title: "architecture: shop"' in diagram["source"]
+    assert '[["(root)"]]' in diagram["source"]
+    assert '-- "calls x2" -->' in diagram["source"]
+    assert '>"GET /orders"]' in diagram["source"]
+
+
+@pytest.mark.asyncio
+async def test_architecture_respects_filters_bounds_and_opt_out():
+    with _architecture_graph():
+        modules_only = await CodeRetriever(
+            config={
+                "operation": "architecture",
+                "node_types": ["module"],
+                "relation_types": ["calls"],
+                "max_nodes": 2,
+                "diagram": False,
+            }
+        ).get_retrieved_objects("")
+
+    assert "diagram" not in modules_only
+    # Best-connected modules survive the cap: "." and "inventory" (api is dropped).
+    assert [node["name"] for node in modules_only["nodes"]] == [".", "inventory"]
+    assert [(e["source"], e["target"], e["count"]) for e in modules_only["edges"]] == [
+        (".", "inventory", 2)
+    ]
+    assert modules_only["stats"]["truncated"] is True
+
+    with _architecture_graph():
+        other_repo = await CodeRetriever(
+            config={"operation": "architecture", "repo": "elsewhere", "diagram": "dot"}
+        ).get_retrieved_objects("")
+    assert other_repo["nodes"] == [] and other_repo["edges"] == []
+    assert other_repo["diagram"]["source"].startswith("digraph code_graph {")

@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from cognee.infrastructure.engine.models.Edge import Edge
+from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.modules.engine.models import Entity
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     attach_new_edges_to_data_points,
@@ -18,6 +19,7 @@ def _make_chunk(importance_weight=0.5):
     chunk.contains = None
     chunk.belongs_to_set = []
     chunk.importance_weight = importance_weight
+    chunk._provenance_edges = []
     return chunk
 
 
@@ -65,6 +67,77 @@ def test_entity_relations_populated_from_graph_edges():
     assert target.name == "bob"
     assert edge_obj.relationship_type == "knows"
     assert edge_obj.edge_text is None
+
+
+def test_existing_graph_edge_stays_out_of_datapoint_relations():
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [
+            Node(id="n1", name="Alice", type="Person", description="desc"),
+            Node(id="n2", name="Bob", type="Person", description="desc"),
+        ],
+        [KGEdge(source_node_id="n1", target_node_id="n2", relationship_name="knows")],
+    )
+    existing_edge_identity = EdgeIdentity(
+        source_id=str(Entity.id_for("Alice")),
+        target_id=str(Entity.id_for("Bob")),
+        relationship_name="knows",
+    )
+
+    data_points_by_id, edges_by_identity = construct_data_points_and_edges([chunk], [graph])
+    attach_new_edges_to_data_points(
+        data_points_by_id,
+        edges_by_identity,
+        {existing_edge_identity},
+    )
+
+    alice = next(
+        data_point for data_point in data_points_by_id.values() if data_point.name == "alice"
+    )
+    assert alice.relations == []
+    assert chunk._provenance_edges == [
+        (
+            str(Entity.id_for("Alice")),
+            str(Entity.id_for("Bob")),
+            "knows",
+            {"edge_text": None},
+        )
+    ]
+
+
+def test_edge_evidence_uses_post_ontology_node_ids():
+    from types import SimpleNamespace
+
+    from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+        construct_data_points_and_edges_with_ontology,
+    )
+
+    resolver = MagicMock()
+
+    def get_subgraph(node_name, node_type):
+        if node_type == "individuals" and node_name == "alice":
+            return [], [], SimpleNamespace(name="Alicia", uri=None)
+        if node_type == "individuals" and node_name == "bob":
+            return [], [], SimpleNamespace(name="Robert", uri=None)
+        return [], [], None
+
+    resolver.get_subgraph.side_effect = get_subgraph
+    chunk = _make_chunk()
+    graph = _make_graph(
+        [
+            Node(id="Alice", name="Alice", type="Person", description="desc"),
+            Node(id="Bob", name="Bob", type="Person", description="desc"),
+        ],
+        [KGEdge(source_node_id="Alice", target_node_id="Bob", relationship_name="knows")],
+    )
+
+    construct_data_points_and_edges_with_ontology([chunk], [graph], resolver)
+
+    assert chunk._provenance_edges[0][:3] == (
+        str(Entity.id_for("Alicia")),
+        str(Entity.id_for("Robert")),
+        "knows",
+    )
 
 
 def test_chunk_contains_edge_text_uses_per_chunk_description():
