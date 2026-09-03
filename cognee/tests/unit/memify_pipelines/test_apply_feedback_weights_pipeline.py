@@ -49,10 +49,6 @@ async def test_apply_feedback_weights_pipeline_wires_memify_tasks():
             new=AsyncMock(return_value=[authorized_dataset]),
         ) as get_authorized_dataset,
         patch(
-            "cognee.memify_pipelines.apply_feedback_weights.set_database_global_context_variables",
-            new=_make_async_ctx_mock(),
-        ) as set_db_ctx,
-        patch(
             "cognee.memify_pipelines.apply_feedback_weights.memify",
             new=AsyncMock(return_value={"status": "ok"}),
         ) as memify_mock,
@@ -68,7 +64,12 @@ async def test_apply_feedback_weights_pipeline_wires_memify_tasks():
     assert result == {"status": "ok"}
     set_user_ctx.assert_awaited_once_with(user)
     get_authorized_dataset.assert_awaited_once()
-    set_db_ctx.assert_called_once_with("dataset-1", "owner-1")
+    # The pipeline must NOT enter the database context around memify: holding
+    # its queue slot while memify waits on the dataset lock is the SDK-483
+    # deadlock. memify's own run enters the context under the lock.
+    import cognee.memify_pipelines.apply_feedback_weights as afw_module
+
+    assert not hasattr(afw_module, "set_database_global_context_variables")
 
     memify_kwargs = memify_mock.call_args.kwargs
     assert memify_kwargs["dataset"] == "dataset-1"
