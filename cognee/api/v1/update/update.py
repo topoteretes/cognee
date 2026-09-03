@@ -22,6 +22,37 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("update")
 
 
+async def _restore_row_lineage(
+    data_id: UUID, legacy_id: Optional[UUID], owner_id: Optional[UUID]
+) -> None:
+    """Carry the replaced row's identity onto the one re-ingestion just minted.
+
+    The full fallback deletes the row and re-adds it, and ``add()`` builds a
+    fresh ``Data`` with ``owner_id=user.id``. Both values must survive that:
+
+    - ``legacy_id`` so a fork document's pre-fork id keeps resolving;
+    - ``owner_id`` so a collaborator updating a document does not silently
+      become its owner. Update is authorized by the dataset ACL, which says
+      nothing about who owns the row.
+    """
+    if legacy_id is None and owner_id is None:
+        return
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    db_engine = get_relational_engine()
+    async with db_engine.get_async_session() as session:
+        row = await session.get(Data, data_id)
+        if row is None:
+            return
+        if legacy_id is not None and row.legacy_id is None:
+            row.legacy_id = legacy_id
+        if owner_id is not None:
+            row.owner_id = owner_id
+        await session.commit()
+
+
 async def update(
     data_id: UUID,
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
@@ -144,11 +175,13 @@ async def update(
     pinned_id = resolved_id
 
     preserved_legacy_id = None
+    preserved_owner_id = None
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         old_row = await session.get(Data, resolved_id)
         if old_row is not None:
             preserved_legacy_id = old_row.legacy_id
+            preserved_owner_id = old_row.owner_id
 
     data_item_changes_metadata = isinstance(data, DataItem) and (
         data.label is not None or data.external_metadata is not None
@@ -254,15 +287,7 @@ async def update(
         data_cache=data_cache,
     )
 
-    # Restore fork lineage onto the recreated row: a fork document's pre-fork
-    # id must keep resolving across updates.
-    if preserved_legacy_id is not None:
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            new_row = await session.get(Data, pinned_id)
-            if new_row is not None and new_row.legacy_id is None:
-                new_row.legacy_id = preserved_legacy_id
-                await session.commit()
+    await _restore_row_lineage(pinned_id, preserved_legacy_id, preserved_owner_id)
 
     cognify_run = await cognify(
         datasets=[dataset_id],

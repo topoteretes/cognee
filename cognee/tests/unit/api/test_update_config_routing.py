@@ -27,6 +27,7 @@ pytestmark = pytest.mark.asyncio
 def _relational_engine_stub(row):
     session = MagicMock()
     session.get = AsyncMock(return_value=row)
+    session.commit = AsyncMock()
     context = MagicMock()
     context.__aenter__ = AsyncMock(return_value=session)
     context.__aexit__ = AsyncMock(return_value=False)
@@ -35,8 +36,8 @@ def _relational_engine_stub(row):
     return engine
 
 
-def _patches(data_id, incremental, full_result):
-    row = SimpleNamespace(id=data_id, legacy_id=None)
+def _patches(data_id, incremental, full_result, row=None):
+    row = row if row is not None else SimpleNamespace(id=data_id, legacy_id=None, owner_id=uuid4())
     relational_module = sys.modules["cognee.infrastructure.databases.relational"]
     return (
         patch.object(data_methods_module, "resolve_data_id", AsyncMock(return_value=data_id)),
@@ -166,6 +167,31 @@ async def test_single_item_list_is_unwrapped():
         )
 
     assert incremental.await_args.kwargs["data"] == "only document"
+
+
+async def test_the_full_fallback_keeps_the_original_row_owner():
+    """Re-ingestion must not hand the document to whoever updated it.
+
+    The fallback deletes the row and calls add(), which mints a fresh Data
+    with owner_id=user.id. A collaborator authorized by the dataset ACL would
+    otherwise take ownership of a document they merely edited — a permission
+    change nobody asked for, and one the incremental branch never makes.
+    """
+    data_id, dataset_id, original_owner = uuid4(), uuid4(), uuid4()
+    row = SimpleNamespace(id=data_id, legacy_id=None, owner_id=original_owner)
+    collaborator = SimpleNamespace(id=uuid4())
+
+    p1, p2, p3, p4, p5, p6 = _patches(data_id, AsyncMock(), {"run": "full"}, row=row)
+    with p1, p2, p3, p4, p5, p6:
+        await update_module.update(
+            data_id=data_id,
+            data="new content",
+            dataset_id=dataset_id,
+            user=collaborator,
+            chunk_level_diff=False,
+        )
+
+    assert row.owner_id == original_owner
 
 
 async def test_no_configs_take_the_incremental_path():
