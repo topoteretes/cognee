@@ -406,6 +406,7 @@ async def test_prompt_preview_receives_the_fan_outs_shared_history():
     assert preview.await_args.kwargs["session_id"] == "s1"
     assert preview.await_args.kwargs["shared_history"] is shared
 
+
 @pytest.mark.asyncio
 async def test_get_retriever_output_attaches_structured_context_evidence():
     retriever = _EvidenceRetriever()
@@ -512,7 +513,6 @@ async def test_get_retriever_output_appends_graph_source_evidence():
         "supports_assertion",
     ]
     assert result.completion[0].endswith("Evidence:\n- chunk unknown of document unknown")
-
 
 
 def test_count_retrieved_objects_counts_structured_lists():

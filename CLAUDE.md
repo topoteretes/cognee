@@ -762,6 +762,21 @@ Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension
 - **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
 - **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
 
+### Provenance
+Cognee has five provenance mechanisms. They answer different questions and are controlled by three unrelated flags — do not confuse them:
+
+| # | Mechanism | Question it answers | Stored where | Flag (default) |
+|---|---|---|---|---|
+| 1 | Source stamping | who/which run wrote this node | `source_*` fields on the graph node | `COGNEE_PROVENANCE_MODE` (`lightweight`) |
+| 2 | Graph source-refs | which documents own this node/edge (drives `forget()` delete/rollback) | source-ref keys on graph nodes/edges | always on (`cognee/infrastructure/databases/provenance/`) |
+| 3 | Audit ledger | tamper-evident history for audits | `provenance_entries` table, hash-chained | `PROVENANCE_TRACKING` (**false**) |
+| 4 | Memory-provenance projection | who can access what (tenant → user → dataset → data + ACL grants) | computed on request from the relational DB (`GET /v1/schema/provenance`) | n/a |
+| 5 | Edge evidence | which document chunk supports this graph edge | `provenance_edge_evidence` table | `EDGE_EVIDENCE_ENABLED` (`true`) |
+
+All three table-backed systems (2, 3, 5) identify a document by the same `make_source_ref_key(dataset_id, data_id)` key.
+
+**Edge evidence** (5) is captured in memory during `add_data_points` and bulk-written once per data item (`EDGE_EVIDENCE_FLUSH_THRESHOLD`, default 10000, forces an earlier flush for huge documents). Search with `include_references=True` returns it as structured `EvidenceReference` objects. Rows are ignored at read time when their pipeline run did not complete or their document is gone, and swept when a document is deleted or its memory dropped with `forget(memory_only=True)`. Scope: only edges extracted from document chunks — contradiction edges, `improve()` enrichment, session bridging, and the code-graph route record no evidence yet (`evidence_kind` is the extension point). Implementation: `cognee/modules/provenance/edge_evidence/`.
+
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):
 - Read, write, delete, and share permissions per dataset

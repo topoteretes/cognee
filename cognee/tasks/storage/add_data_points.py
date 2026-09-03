@@ -260,7 +260,10 @@ async def add_data_points(
 
     # Capture only after graph/vector writes succeeded. This is memory-only for
     # normal documents and is flushed once at data-item completion; very large
-    # documents use a bounded bulk flush configured by PROVENANCE_FLUSH_THRESHOLD.
+    # documents use a bounded bulk flush configured by EDGE_EVIDENCE_FLUSH_THRESHOLD.
+    # The original ``data_points`` are passed, not the expanded ``nodes``: expansion
+    # rebuilds nodes as stripped copies, and the chunks a cognify batch carries are
+    # nested under its TextSummary objects — capture walks the object graph itself.
     await capture_graph_provenance(data_points, edges, ctx)
 
     return data_points
