@@ -99,8 +99,7 @@ def main():
         f"*Ran at:* `{env.get('STATUS_RAN_AT', '')}`  •  "
         f"*Branch:* `{branch}` (`{cadence}`)  •  *Commit:* `{sha}`\n"
         f"*Ollama:* `{env.get('STATUS_OLLAMA', '')}`  •  "
-        f"*Llama-cpp:* `{env.get('STATUS_LLAMACPP', '')}`  •  "
-        f"*Unit 3.11-3.13:* `{env.get('STATUS_UNIT_MID', '') or 'n/a'}`\n"
+        f"*Llama-cpp:* `{env.get('STATUS_LLAMACPP', '')}`\n"
     )
 
     blocks = [header]
