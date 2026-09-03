@@ -50,16 +50,6 @@ jobs:
     uses: ./.github/workflows/test_llamacpp.yml
     secrets: inherit
 
-  # The PR gate runs the search suite on one Python per backend combo. The
-  # two bare Neo4j jobs are the only ones where the Python dimension was ever
-  # real (the container jobs pin 3.11), so their version sweep runs here.
-  search-db-versions:
-    name: Search DB version sweep
-    uses: ./.github/workflows/search_db_tests.yml
-    with:
-      python-versions: '["3.10", "3.12", "3.13"]'
-    secrets: inherit
-
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -229,7 +219,6 @@ jobs:
     name: Test Completion Status
     needs: [
       ollama-tests,
-      search-db-versions,
       llamacpp-tests,
       perf-small-llm,
       perf-small-mock,
@@ -263,7 +252,6 @@ jobs:
         run: |
           if [[ "${{ needs.ollama-tests.result }}" == "success" &&
                 "${{ needs.llamacpp-tests.result }}" == "success" &&
-                "${{ needs.search-db-versions.result }}" == "success" &&
                 "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&

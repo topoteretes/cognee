@@ -265,7 +265,7 @@ jobs:
       # job labelled "Python 3.13" logged "Python 3.11.14". So those were the
       # same run four times. The Python dimension is the unit matrix's job;
       # this workflow's value is the four backend combos, which all stay.
-      # The full version sweep for the two bare Neo4j jobs runs nightly.
+      # The full version sweep for the two bare Neo4j jobs runs in release_test.yml.
       python-versions: '["3.11"]'
     secrets: inherit
 
