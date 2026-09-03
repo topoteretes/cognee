@@ -419,6 +419,12 @@ class SQLAlchemyAdapter:
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
 
+        # Edge-evidence rows have no foreign key to Data (graph deletion must
+        # never depend on the sidecar), so they are swept here explicitly.
+        from cognee.modules.provenance.edge_evidence.cleanup import delete_edge_evidence
+
+        await delete_edge_evidence(dataset_id, data_id)
+
         # Storage cleanup runs after the commit so the reference count reflects
         # the deletion. Both the derived text (raw_data_location) and the
         # stored original (original_data_location) are collected — originals

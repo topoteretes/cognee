@@ -1,6 +1,10 @@
 import { CogneeInstance } from "../instances/types";
 import { getPipelineSettingsFromStorage } from "../configuration/pipelineSettings";
 
+// HYBRID_COMPLETION over a large graph routinely exceeds the client's 30s
+// default — this is the endpoint CLO-333 was filed against.
+const RECALL_TIMEOUT_MS = 120_000;
+
 export type RecallScope =
   | "all"
   | "graph"
@@ -47,6 +51,7 @@ export default function recallKnowledge(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      timeoutMs: RECALL_TIMEOUT_MS,
     })
     .then(async (r) => {
       if (r.ok) return r.json();

@@ -53,6 +53,22 @@ class ResponseToolEntry(BaseModel):
     structured: Optional[dict] = None
 
 
+class ResponseSkillEntry(BaseModel):
+    """One skill surfaced by the deterministic skill gate.
+
+    Metadata-only: ``skill`` carries the projected Skill fields and never the
+    procedure body — progressive disclosure keeps bodies behind the
+    ``load_skill`` tool or ``GET /skills/{skill_id}``. ``text`` is a
+    renderable "name: description" line; ``score`` is the raw vector distance
+    (lower is better) when available.
+    """
+
+    source: Literal["skills"]
+    text: str
+    skill: dict
+    score: Optional[float] = None
+
+
 class ResponseMarkerEntry(BaseModel):
     """System-generated marker (not data), e.g. "memory still warming up".
 
@@ -65,6 +81,11 @@ class ResponseMarkerEntry(BaseModel):
     text: str
     datapoint_count: int
     threshold: int
+    # Populated when status == "build_failed": the root cause of the last
+    # errored build, so clients can show WHY memory has no answers instead
+    # of an unexplained empty result.
+    error_class: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 RecallResponse = Annotated[
@@ -74,6 +95,7 @@ RecallResponse = Annotated[
     | ResponseGraphEntry
     | ResponseCodeEntry
     | ResponseToolEntry
+    | ResponseSkillEntry
     | ResponseMarkerEntry,
     Field(discriminator="source"),
 ]
