@@ -1062,7 +1062,7 @@ class Neo4jAdapter(GraphDBInterface):
             - bool: True if the edge exists, otherwise False.
         """
         query = f"""
-            MATCH (from_node: `{BASE_LABEL}`)-[:`{edge_label}`]->(to_node: `{BASE_LABEL}`)
+            MATCH (from_node: `{BASE_LABEL}`)-[relationship: `{edge_label}`]->(to_node: `{BASE_LABEL}`)
             WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id
             RETURN COUNT(relationship) > 0 AS edge_exists
         """
@@ -1072,8 +1072,12 @@ class Neo4jAdapter(GraphDBInterface):
             "to_node_id": str(to_node),
         }
 
-        edge_exists = await self.query(query, params)
-        return edge_exists
+        results = await self.query(query, params)
+        # The query is an aggregation and always returns exactly one row
+        # ({"edge_exists": False} when absent); returning the raw result list made
+        # every call truthy, so callers like cross_connect_entities'
+        # `if not has_edge(...)` never saw a missing edge.
+        return bool(results[0]["edge_exists"]) if results else False
 
     async def has_edges(self, edges):
         """
