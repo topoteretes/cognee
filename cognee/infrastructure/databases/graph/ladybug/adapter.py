@@ -3585,54 +3585,99 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record[0] for record in result] if result else []
 
-    def _normalize_temporal_ids(self, ids: Union[List[str], str]) -> List[str]:
-        if isinstance(ids, str):
-            return [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
-
-        return ids
-
-    async def collect_events(self, ids: Union[List[str], str]) -> Any:
+    async def collect_events(self, ids: List[str]) -> List[Dict[str, Any]]:
         """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
+        Collect the Event nodes reachable within 1..2 hops of the given Timestamp ids,
+        each with its time anchors attached. See ``GraphDBInterface.collect_events``.
 
         Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
+            ids: Timestamp node ids (from ``collect_time_ids``).
 
         Returns:
-            List of events
+            One flat dict per distinct event: ``id``, ``name``, ``description``,
+            optional ``location``, and ``time_at`` or ``time_from`` / ``time_to``
+            in ms epoch when the event is linked to a Timestamp / Interval.
         """
+        ids = [str(uid) for uid in ids if uid]
+        if not ids:
+            return []
 
-        event_collection_cypher = """UNWIND $ids AS uid
-            MATCH (start {id: uid})
-            MATCH (start)-[*1..2]-(event)
+        event_rows = await self.query(
+            """
+            UNWIND $ids AS uid
+            MATCH (start:Node {id: uid})
+            MATCH (start)-[*1..2]-(event:Node)
             WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
+            RETURN DISTINCT event.id, event.name, event.properties
+            """,
+            {"ids": ids},
+        )
 
-        ids = self._normalize_temporal_ids(ids)
-        result = await self.query(event_collection_cypher, {"ids": ids})
-        events = []
-        if not result or not result[0] or not result[0][0]:
-            return [{"events": events}]
-
-        for node in result[0][0]:
-            props = json.loads(node["properties"])
-
-            event = {
-                "id": node["id"],
-                "name": node["name"],
+        events: Dict[str, Dict[str, Any]] = {}
+        for event_id, name, properties_json in event_rows:
+            props = json.loads(properties_json) if properties_json else {}
+            event: Dict[str, Any] = {
+                "id": event_id,
+                "name": name,
                 "description": props.get("description"),
             }
-
             if props.get("location"):
                 event["location"] = props["location"]
+            events[event_id] = event
 
-            events.append(event)
+        if not events:
+            return []
 
-        return [{"events": events}]
+        # Time anchors: Event -[at]-> Timestamp, or Event -[during]-> Interval
+        # -[time_from|time_to]-> Timestamp. time_at lives in the JSON blob.
+        anchor_rows = await self.query(
+            """
+            UNWIND $ids AS eid
+            MATCH (event:Node {id: eid})-[r:EDGE]->(t:Node)
+            WHERE t.type = 'Timestamp' OR t.type = 'Interval'
+            RETURN event.id, r.relationship_name, t.id, t.type, t.properties
+            """,
+            {"ids": list(events.keys())},
+        )
+
+        interval_to_event: Dict[str, str] = {}
+        for event_id, relationship_name, target_id, target_type, properties_json in anchor_rows:
+            if target_type == "Timestamp":
+                time_at = self._time_at_from_properties(properties_json)
+                if time_at is not None:
+                    events[event_id]["time_at"] = time_at
+            elif target_type == "Interval":
+                interval_to_event[target_id] = event_id
+
+        if interval_to_event:
+            bound_rows = await self.query(
+                """
+                UNWIND $ids AS iid
+                MATCH (interval:Node {id: iid})-[r:EDGE]->(t:Node)
+                WHERE t.type = 'Timestamp'
+                RETURN interval.id, r.relationship_name, t.properties
+                """,
+                {"ids": list(interval_to_event.keys())},
+            )
+            for interval_id, relationship_name, properties_json in bound_rows:
+                if relationship_name not in ("time_from", "time_to"):
+                    continue
+                time_at = self._time_at_from_properties(properties_json)
+                if time_at is not None:
+                    events[interval_to_event[interval_id]][relationship_name] = time_at
+
+        return list(events.values())
+
+    @staticmethod
+    def _time_at_from_properties(properties_json: Optional[str]) -> Optional[int]:
+        """Read the ms-epoch ``time_at`` out of a Timestamp node's JSON blob."""
+        if not properties_json:
+            return None
+        try:
+            value = json.loads(properties_json).get("time_at")
+            return int(value) if value not in (None, "") else None
+        except (ValueError, TypeError):
+            return None
 
     async def collect_time_ids(
         self,
@@ -3640,79 +3685,43 @@ class LadybugAdapter(GraphDBInterface):
         time_to: Optional[Timestamp] = None,
     ) -> List[str]:
         """
-        Collect IDs of Timestamp nodes between time_from and time_to.
+        Collect the ids of Timestamp nodes whose ``time_at`` lies inside the inclusive
+        window. See ``GraphDBInterface.collect_time_ids``.
 
         Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
+            time_from: Inclusive lower bound, optional.
+            time_to: Inclusive upper bound, optional.
 
         Returns:
-            A list of timestamp node IDs.
+            A list of Timestamp node ids; empty when no bound is given.
+        """
+        conditions = []
+        params: Dict[str, Any] = {}
+        if time_from:
+            conditions.append("t >= $time_from")
+            params["time_from"] = date_to_int(time_from)
+        if time_to:
+            conditions.append("t <= $time_to")
+            params["time_to"] = date_to_int(time_to)
+        if not conditions:
+            return []
+
+        cypher = f"""
+        MATCH (n:Node)
+        WHERE n.type = 'Timestamp'
+        // time_at lives in the JSON blob; extract and cast to INT64
+        WITH n, json_extract(n.properties, '$.time_at') AS t_str
+        WITH n,
+             CASE
+               WHEN t_str IS NULL OR t_str = '' THEN NULL
+               ELSE CAST(t_str AS INT64)
+             END AS t
+        WHERE {" AND ".join(conditions)}
+        RETURN n.id AS id
         """
 
-        ids: List[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t >= {time_from}
-            AND t <= {time_to}
-            RETURN n.id as id
-            """
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t >= {time_from}
-            RETURN n.id as id
-            """
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = f"""
-            MATCH (n:Node)
-            WHERE n.type = 'Timestamp'
-            // Extract time_at from the JSON string and cast to INT64
-            WITH n, json_extract(n.properties, '$.time_at') AS t_str
-            WITH n,
-                 CASE
-                   WHEN t_str IS NULL OR t_str = '' THEN NULL
-                   ELSE CAST(t_str AS INT64)
-                 END AS t
-            WHERE t <= {time_to}
-            RETURN n.id as id
-            """
-
-        else:
-            return ids
-
-        time_nodes = await self.query(cypher)
-        time_ids_list = [item[0] for item in time_nodes]
-
-        return time_ids_list
+        time_nodes = await self.query(cypher, params)
+        return [row[0] for row in time_nodes if row and row[0]]
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
