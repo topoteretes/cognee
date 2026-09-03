@@ -1,11 +1,11 @@
 {
   "cogx_version": "0.1",
   "source_system": "cognee",
-  "exported_at": "2026-08-31T07:08:04.761057Z",
+  "exported_at": "2026-09-03T21:40:01.865048Z",
   "counts": {
-    "raw_node": 12,
-    "entity": 25,
-    "fact": 71
+    "raw_node": 28,
+    "entity": 19,
+    "fact": 86
   },
   "embedding_model": "openai/text-embedding-3-large",
   "migration_revision": "rekey_fork_document_ids",

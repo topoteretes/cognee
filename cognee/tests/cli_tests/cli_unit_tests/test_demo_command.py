@@ -158,3 +158,34 @@ class TestBundledArchive:
                 properties = json.loads(line)
                 chunk_types.add(properties.get("type"))
         assert "DocumentChunk" in chunk_types
+
+    def _chunk_texts(self):
+        archive = self._archive_dir()
+        chunks = []
+        for line in archive.joinpath("nodes.jsonl").read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                node = json.loads(line)
+                if node.get("type") == "DocumentChunk":
+                    chunks.append(node.get("text") or "")
+        return chunks
+
+    def test_chunks_are_displayable_answers(self):
+        """The demo prints whole chunks as answers (no truncation), so the
+        archive must ship several small chunks with each built-in query's
+        fact in its own chunk — a single document-sized chunk made every
+        query print the same answer-free intro paragraph."""
+        chunks = self._chunk_texts()
+        assert len(chunks) >= 3
+        assert any("Alice works at Anthropic" in chunk for chunk in chunks)
+        assert any("depends on litellm" in chunk for chunk in chunks)
+        # Printed in full, every chunk must stay terminal-sized.
+        assert all(len(chunk) <= 400 for chunk in chunks)
+
+    def test_archive_leaks_no_build_machine_paths(self):
+        """The builder nulls raw_data_location: the bundled archive must not
+        ship the maintainer's filesystem layout or dead file:// provenance."""
+        archive = self._archive_dir()
+        for line in archive.joinpath("nodes.jsonl").read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                node = json.loads(line)
+                assert not node.get("raw_data_location")

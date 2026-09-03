@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from importlib import resources
 
 from cognee.cli.reference import SupportsCliCommand
@@ -100,6 +101,14 @@ Clean up with: cognee-cli forget --dataset demo
             from cognee.modules.migration.sources.cogx_archive import COGXArchiveSource
             from cognee.modules.search.types import SearchType
 
+            # The demo's contract is zero LLM calls. With the defaults
+            # (CACHING/AUTO_FEEDBACK on), every answered search fires one
+            # turn-analysis LLM call, which fails noisily — or hangs on a dead
+            # local endpoint — on exactly the keyless machines this command
+            # exists for. Pin it off for this process; set after `import
+            # cognee` so the .env load (override=True) cannot clobber it.
+            os.environ["AUTO_FEEDBACK"] = "false"
+
             archive_path = _resolve_archive_path()
             fmt.echo("Loading the bundled demo knowledge graph (no API key required)...")
 
@@ -141,10 +150,10 @@ Clean up with: cognee-cli forget --dataset demo
                 fmt.echo(f"Query: {query}")
                 if lines:
                     for index, line in enumerate(lines, 1):
-                        # Chunks can be whole paragraphs; keep the terminal legible.
-                        if len(line) > 280:
-                            line = line[:280].rstrip() + " …"
-                        fmt.echo(f"  {index}. {line}")
+                        # The bundled archive is built with small chunks
+                        # (tools/build_demo_archive.py), so a whole chunk IS
+                        # the answer: print it in full, flattened to one line.
+                        fmt.echo(f"  {index}. {' '.join(line.split())}")
                 else:
                     fmt.warning("  No results found.")
 

@@ -51,7 +51,11 @@ async def build() -> None:
 
     text = QUICKSTART.read_text(encoding="utf-8")
     print("Cognifying the quickstart sample (this makes real LLM calls)...")
-    await cognee.remember(text, dataset_name=DATASET_NAME, self_improvement=False)
+    # Small chunks, one per paragraph-ish: CHUNKS_LEXICAL returns whole chunks
+    # as answers and the demo prints them in full, so a chunk must BE a
+    # displayable answer — with one document-sized chunk every query returns
+    # the same intro text and the facts never fit on screen.
+    await cognee.remember(text, dataset_name=DATASET_NAME, self_improvement=False, chunk_size=60)
 
     print(f"Exporting COGX archive to {ARCHIVE_DIR} ...")
     if ARCHIVE_DIR.exists():
@@ -65,6 +69,24 @@ async def build() -> None:
         if path.exists():
             removed[kind] = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line)
             path.unlink()
+
+    # The exporter records absolute build-machine paths in raw_data_location;
+    # null them so the bundled archive neither ships the maintainer's
+    # filesystem layout nor imports dead file:// provenance on user machines.
+    # Exported nodes are flat dicts; handle a nested properties dict too so a
+    # future export-format change cannot silently re-leak the paths.
+    nodes_path = ARCHIVE_DIR / "nodes.jsonl"
+    if nodes_path.exists():
+        sanitized = []
+        for line in nodes_path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            node = json.loads(line)
+            for record in (node, node.get("properties")):
+                if isinstance(record, dict) and "raw_data_location" in record:
+                    record["raw_data_location"] = None
+            sanitized.append(json.dumps(node, default=str))
+        nodes_path.write_text("\n".join(sanitized) + "\n", encoding="utf-8")
 
     manifest_path = ARCHIVE_DIR / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
