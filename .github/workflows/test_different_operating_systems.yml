@@ -96,7 +96,7 @@ jobs:
         id: unit
         shell: bash
         continue-on-error: true
-        timeout-minutes: 25  # healthy runs are 15-17 min
+        timeout-minutes: 15  # green shards run 3-8 min; a wedge prints nothing after minute one
         env:
           # Unbuffered + faulthandler so a wedged interpreter leaves evidence
           # instead of a 60-minute silent cancel.
@@ -137,15 +137,30 @@ jobs:
             # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
             # which is where sed/grep/tee live on the Windows runner.
             python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
-            import subprocess, sys, threading, time
+            import re, subprocess, sys, threading, time
             def snap():
+                i = 0
                 while True:
-                    time.sleep(300)
+                    time.sleep(300); i += 1
                     try:
                         out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
                     except Exception as e:
                         out = f"snapshot failed: {e!r}"
                     print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
             threading.Thread(target=snap, daemon=False).start()
           PY
             WATCHDOG_PID=$!
@@ -206,7 +221,7 @@ jobs:
         if: steps.unit.outcome == 'failure' && steps.unit.outputs.ran != 'true'
         shell: bash
         continue-on-error: true
-        timeout-minutes: 25
+        timeout-minutes: 15
         env:
           # Unbuffered + faulthandler so a wedged interpreter leaves evidence
           # instead of a 60-minute silent cancel.
@@ -247,15 +262,30 @@ jobs:
             # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
             # which is where sed/grep/tee live on the Windows runner.
             python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
-            import subprocess, sys, threading, time
+            import re, subprocess, sys, threading, time
             def snap():
+                i = 0
                 while True:
-                    time.sleep(300)
+                    time.sleep(300); i += 1
                     try:
                         out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
                     except Exception as e:
                         out = f"snapshot failed: {e!r}"
                     print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
             threading.Thread(target=snap, daemon=False).start()
           PY
             WATCHDOG_PID=$!
@@ -365,7 +395,7 @@ jobs:
         id: library
         shell: bash
         continue-on-error: true
-        timeout-minutes: 20  # healthy runs are ~3.5 min
+        timeout-minutes: 15  # healthy runs are ~3.5 min
         env:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
@@ -402,15 +432,30 @@ jobs:
             # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
             # which is where sed/grep/tee live on the Windows runner.
             python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
-            import subprocess, sys, threading, time
+            import re, subprocess, sys, threading, time
             def snap():
+                i = 0
                 while True:
-                    time.sleep(300)
+                    time.sleep(300); i += 1
                     try:
                         out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
                     except Exception as e:
                         out = f"snapshot failed: {e!r}"
                     print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
             threading.Thread(target=snap, daemon=False).start()
           PY
             WATCHDOG_PID=$!
@@ -452,7 +497,7 @@ jobs:
         if: steps.library.outcome == 'failure' && steps.library.outputs.ran != 'true'
         shell: bash
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 15
         env:
           PYTHONUNBUFFERED: 1
           PYTHONFAULTHANDLER: 1
@@ -489,15 +534,30 @@ jobs:
             # Pure Python, no coreutils: the PATH guard above drops Git\usr\bin,
             # which is where sed/grep/tee live on the Windows runner.
             python -c "import sys,textwrap; exec(textwrap.dedent(sys.stdin.read()))" <<'PY' &
-            import subprocess, sys, threading, time
+            import re, subprocess, sys, threading, time
             def snap():
+                i = 0
                 while True:
-                    time.sleep(300)
+                    time.sleep(300); i += 1
                     try:
                         out = subprocess.run(["tasklist", "/FO", "CSV"], capture_output=True, text=True).stdout
                     except Exception as e:
                         out = f"snapshot failed: {e!r}"
                     print("---- process snapshot ----\n" + out, file=sys.stderr, flush=True)
+                    if i < 2:
+                        continue
+                    # Two snapshots in means ten minutes with the step still
+                    # running: this is the wedge. Dump a stack from every
+                    # python so SDK-540 finally gets its mechanism. uvx
+                    # fetches py-spy on demand; every failure is swallowed --
+                    # the watchdog must never become its own hang.
+                    for pid in re.findall(r'"python.exe","(\d+)"', out):
+                        try:
+                            d = subprocess.run(["uvx", "py-spy", "dump", "--pid", pid],
+                                               capture_output=True, text=True, timeout=60)
+                            print(f"---- py-spy pid {pid} ----\n" + (d.stdout or d.stderr), file=sys.stderr, flush=True)
+                        except Exception as e:
+                            print(f"---- py-spy pid {pid} failed: {e!r}", file=sys.stderr, flush=True)
             threading.Thread(target=snap, daemon=False).start()
           PY
             WATCHDOG_PID=$!
