@@ -312,17 +312,27 @@ async def add_data_points(
                 identities = [EdgeIdentity(key[0], key[1], key[2]) for key in edge_keys]
                 await graph_engine.attach_edge_source_refs(identities, list(keys), fold_run_arg)
 
+    # GRAPH BEFORE VECTORS, never concurrently. The two stores fail
+    # independently, and only one of the two orders is recoverable:
+    #
+    #   graph ok, vector fails -> the artifact carries its source ref, so
+    #     rollback and delete can both find it. Self-healing.
+    #   vector ok, graph fails -> the point exists with NO ref anywhere in the
+    #     graph. Nothing can discover it again, while CHUNKS retrieval reads
+    #     the vector collection directly and happily returns it — content from
+    #     a run that reported failure, served to users, permanently.
+    #
+    # Concurrency bought a little latency and made the second case reachable
+    # on every write, so the writes are sequenced instead.
     if use_hybrid:
         await graph_engine.add_nodes_with_vectors(nodes)
     elif graph_only:
         await _write_nodes_grouped()
     else:
-        await asyncio.gather(
-            _write_nodes_grouped(),
-            index_data_points(
-                [node.model_copy(deep=True) for node in nodes],
-                vector_engine=vector_engine,
-            ),
+        await _write_nodes_grouped()
+        await index_data_points(
+            [node.model_copy(deep=True) for node in nodes],
+            vector_engine=vector_engine,
         )
 
     if use_hybrid:
@@ -330,10 +340,8 @@ async def add_data_points(
     elif graph_only:
         await _write_edges_grouped(edges)
     else:
-        await asyncio.gather(
-            _write_edges_grouped(edges),
-            index_graph_edges(edges, vector_engine=vector_engine),
-        )
+        await _write_edges_grouped(edges)
+        await index_graph_edges(edges, vector_engine=vector_engine)
 
     if custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
@@ -348,14 +356,12 @@ async def add_data_points(
                 pipeline_run_id=fold_run_arg,
             )
         else:
-            await asyncio.gather(
-                graph_engine.add_edges(
-                    custom_edges,
-                    source_ref_key=fold_source_ref_key,
-                    pipeline_run_id=fold_run_arg,
-                ),
-                index_graph_edges(custom_edges, vector_engine=vector_engine),
+            await graph_engine.add_edges(
+                custom_edges,
+                source_ref_key=fold_source_ref_key,
+                pipeline_run_id=fold_run_arg,
             )
+            await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
         edges.extend(custom_edges)
 

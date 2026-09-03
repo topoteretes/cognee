@@ -120,6 +120,37 @@ async def test_add_data_points_indexes_nodes_and_edges(
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
+async def test_a_failed_graph_write_indexes_no_vectors(
+    mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
+):
+    """A vector point whose graph write failed is unreachable, and searchable.
+
+    It carries no source ref, so neither rollback nor delete can ever find it,
+    while CHUNKS retrieval reads the vector collection directly and returns
+    it — content from a failed run, served to users. Writing the graph first
+    makes the failure leave nothing behind; the opposite order (a graph
+    artifact with no vector) keeps its ref and heals.
+    """
+    dp1 = SimplePoint(text="first")
+    mock_get_graph.side_effect = [([dp1], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    graph_engine.add_nodes.side_effect = RuntimeError("graph is down")
+
+    with pytest.raises(RuntimeError):
+        await add_data_points([dp1])
+
+    mock_index_nodes.assert_not_awaited()
+    mock_index_edges.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
 async def test_add_data_points_indexes_triplets_when_enabled(
     mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
 ):
