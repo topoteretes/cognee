@@ -14,6 +14,21 @@ import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall_empty
 
+AUTO_QUERY_TYPE = "auto"
+
+
+def _resolved_search_type(results, fallback: str) -> str:
+    """Read the search type the SDK actually ran from the first result."""
+    if not results:
+        return fallback
+    first = results[0]
+    resolved = (
+        first.get("search_type") if isinstance(first, dict) else getattr(first, "search_type", None)
+    )
+    if resolved is None:
+        return fallback
+    return getattr(resolved, "value", resolved)
+
 
 class RecallCommand(SupportsCliCommand):
     command_string = "recall"
@@ -25,6 +40,10 @@ Recall information from the knowledge graph or session memory.
 When --session-id is provided without --datasets or --query-type,
 searches the session cache directly by keyword matching.
 Otherwise, this is a memory-oriented alias for `cognee search`.
+
+Without --query-type the query is auto-routed to a search strategy by a
+rule-based classifier (no LLM call); HYBRID_COMPLETION is the fallback.
+Pass --query-type to pin one. See docs/recall-vs-search.md.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -34,7 +53,10 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             "-t",
             choices=SEARCH_TYPE_CHOICES,
             default=None,
-            help="Search mode (default: HYBRID_COMPLETION)",
+            help=(
+                "Search mode. Omit to auto-route the query "
+                f"(fallback: {DEFAULT_SEARCH_TYPE}); pass a value to pin one."
+            ),
         )
         parser.add_argument(
             "--datasets",
@@ -80,7 +102,9 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             session_only = (
                 args.session_id is not None and not args.datasets and args.query_type is None
             )
-            effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
+            # No -t means "let the SDK route"; the label is refined from the
+            # results once the resolved search type is known.
+            effective_query_type = args.query_type or AUTO_QUERY_TYPE
 
             if session_only:
                 fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
@@ -106,10 +130,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             **session_kwargs,
                         )
                     else:
-                        query_type = SearchType[effective_query_type]
                         recall_kwargs = {
                             "query_text": args.query_text,
-                            "query_type": query_type,
                             "datasets": args.datasets,
                             "top_k": args.top_k,
                             "system_prompt_path": (
@@ -117,6 +139,8 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             ),
                             **session_kwargs,
                         }
+                        if args.query_type is not None:
+                            recall_kwargs["query_type"] = SearchType[args.query_type]
                         results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
@@ -158,10 +182,11 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         if i < len(results):
                             fmt.echo("-" * 40)
                 else:
-                    fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
+                    resolved_type = _resolved_search_type(results, effective_query_type)
+                    fmt.echo(f"\nFound {len(results)} result(s) using {resolved_type}:")
                     fmt.echo("=" * 60)
 
-                    if effective_query_type in COMPLETION_SEARCH_TYPES:
+                    if resolved_type in COMPLETION_SEARCH_TYPES:
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold('Response:')} {result}")
                             if i < len(results):

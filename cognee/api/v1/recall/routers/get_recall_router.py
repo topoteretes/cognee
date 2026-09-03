@@ -23,13 +23,16 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default is HYBRID_COMPLETION. Pass ``search_type: null`` explicitly
-    # to opt into auto-routing (the new ``cognee.recall`` default).
+    # Default is HYBRID_COMPLETION. Pass ``search_type: null`` explicitly to
+    # opt into auto-routing (the ``cognee.recall`` default). The default is
+    # kept explicit here because null also enables the session short-circuit
+    # when session_id is set; see docs/recall-vs-search.md.
     search_type: Optional[SearchType] = Field(
         default=SearchType.HYBRID_COMPLETION,
         description=(
             "Search strategy, e.g. HYBRID_COMPLETION, GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS. "
-            "Pass null to let cognee auto-route the query to the best strategy."
+            "Pass null to let cognee auto-route the query (rule-based, no LLM call; "
+            "see docs/recall-vs-search.md for the rule table)."
         ),
     )
     datasets: Optional[list[str]] = Field(

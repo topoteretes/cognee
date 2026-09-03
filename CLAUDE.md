@@ -150,7 +150,7 @@ Improve & Memify are virtually the same, though. So no reason not to use improve
 
 #### recall() vs search()
 
-`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (regex scoring, no LLM call, so auto-routing is free), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
+`recall()` wraps `search()` — its graph path calls the same authorized search — and adds three things: rule-based query routing when `query_type` is omitted (an ordered first-match rule table in `cognee/api/v1/recall/query_router.py`, no LLM call, so auto-routing is free; it only ever picks CYPHER, CHUNKS_LEXICAL, GRAPH_SUMMARY_COMPLETION, TEMPORAL with an explicit date token, CODING_RULES with an explicit phrase, or the HYBRID_COMPLETION default), session memory as a searchable source (`scope` = `graph` / `session` / `trace` / `session_context`; with a bare `session_id` a session hit short-circuits the graph search), and normalized results tagged with a `_source` key. Use `recall()` for ordinary retrieval. Drop to `search()` when you need the agentic extras as first-class parameters (`skills`, `tools`, `max_iter`, `code_query`, `node_type`), raw `SearchResult` objects instead of tagged entries, or a pinned `query_type` with no router in the path. Note `search(session_id=...)` only adds session history to the retrieval context — it never searches the session cache as a source; that is `recall()`-only. Full guide: `docs/recall-vs-search.md`.
 
 ### Key Architectural Patterns
 
@@ -256,7 +256,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 
-`recall()` picks one of these automatically when `query_type` is omitted. The CLI is narrower: `cognee-cli recall --query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES` and defaults to `HYBRID_COMPLETION`; the rest are SDK-only.
+`recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is `null` (its default stays `HYBRID_COMPLETION`). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
 
 Key files:
 - `cognee/api/v1/search/search.py`

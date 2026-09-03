@@ -394,7 +394,7 @@ async def recall(
         dataset_ids: Dataset UUIDs to search within. Takes precedence over datasets.
         top_k: Maximum results to return (default *15*).
         auto_route: If True and query_type is None, classify the query
-            automatically. If False, fall back to GRAPH_COMPLETION.
+            automatically. If False, fall back to HYBRID_COMPLETION.
         response_model: Pydantic model class for structured completion output.
             Forwarded to the retriever, which validates the LLM answer against
             it; each result then carries the validated payload as a dict in its
@@ -628,19 +628,12 @@ async def recall(
 
                 await set_session_user_context_variable(user)
 
-                local_query_type = query_type
-                if local_query_type is not None:
-                    if auto_route:
-                        from cognee.api.v1.recall.query_router import record_override, route_query
-
-                        result = route_query(query_text)
-                        routed_type = result.search_type
-                        record_override(routed_type, local_query_type)
+                if query_type is not None:
+                    local_query_type = query_type
                 elif auto_route:
                     from cognee.api.v1.recall.query_router import route_query
 
-                    result = route_query(query_text)
-                    local_query_type = result.search_type
+                    local_query_type = route_query(query_text).search_type
                 else:
                     local_query_type = SearchType.HYBRID_COMPLETION
 
