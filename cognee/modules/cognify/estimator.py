@@ -227,8 +227,12 @@ def estimate_chunks(
     skipped_items: int = 0,
     skipped_dlt_chunks: int = 0,
     skipped_code_items: int = 0,
+    temporal_cognify: bool = False,
 ) -> DryRunEstimate:
     """Estimate the per-chunk LLM stages of the default cognify pipeline.
+
+    ``temporal_cognify`` adds the temporal event-extraction lane (one more call per
+    chunk, ``generate_event_graph_prompt.txt`` + the EventList schema).
 
     DLT and code items never reach this function's chunk list: the cognify
     estimate routes them out (same policy as execution — cognify_route_for)
@@ -279,6 +283,28 @@ def estimate_chunks(
             cost_usd=estimate_cost_usd(model, summary_input, summary_output),
         ),
     ]
+
+    if temporal_cognify:
+        from cognee.tasks.temporal_graph.models import EventList
+
+        event_overhead = _count_tokens(
+            read_query_prompt(get_llm_config().temporal_graph_prompt_path) or "", tokenizer
+        ) + _schema_tokens(EventList, tokenizer)
+        event_input = sum(tokens + event_overhead for tokens in chunk_token_counts)
+        # Events are extracted at roughly the density of graph nodes/edges.
+        event_output = output_multiplier * sum(
+            max(MIN_GRAPH_OUTPUT_TOKENS_PER_CHUNK, int(tokens * GRAPH_OUTPUT_TOKEN_RATIO))
+            for tokens in chunk_token_counts
+        )
+        stages.append(
+            DryRunStageEstimate(
+                name="temporal_event_extraction",
+                calls=len(llm_chunks),
+                input_tokens=event_input,
+                output_tokens=event_output,
+                cost_usd=estimate_cost_usd(model, event_input, event_output),
+            )
+        )
 
     warnings = []
     if skipped_items:
@@ -554,6 +580,7 @@ async def estimate_cognify_dry_run(
     chunk_size: int,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     custom_prompt: Optional[str] = None,
+    temporal_cognify: bool = False,
 ) -> DryRunEstimate:
     """Estimate ``cognify(datasets)`` over all data in the authorized datasets.
 
@@ -595,4 +622,5 @@ async def estimate_cognify_dry_run(
         skipped_items=skipped,
         skipped_dlt_chunks=skipped_dlt,
         skipped_code_items=skipped_code,
+        temporal_cognify=temporal_cognify,
     )

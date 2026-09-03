@@ -1,5 +1,4 @@
-from typing import List
-from cognee.modules.chunking.models import DocumentChunk
+from typing import Any, List
 from cognee.modules.engine.models import Event
 from cognee.tasks.temporal_graph.enrich_events import enrich_events
 from cognee.tasks.temporal_graph.add_entities_to_event import add_entities_to_event
@@ -10,8 +9,8 @@ from cognee.modules.pipelines.tasks.task import task_summary
 
 @task_summary("Built graph from {n} event(s)")
 async def extract_knowledge_graph_from_events(
-    data_chunks: List[DocumentChunk],
-) -> List[DocumentChunk]:
+    data_chunks: List[Any],
+) -> List[Any]:
     """
     Extracts events from document chunks and enriches them with entities to form a knowledge graph.
 
@@ -20,17 +19,21 @@ async def extract_knowledge_graph_from_events(
     with these enriched attributes.
 
     Args:
-        data_chunks (List[DocumentChunk]): A list of document chunks containing extracted events.
+        data_chunks: Document chunks (or TextSummary items wrapping them) containing
+            extracted events.
 
     Returns:
-        List[DocumentChunk]: The same list of document chunks, with their events enriched by entities.
+        The same list, with the events enriched by entities.
     """
-    # Extract events from chunks
+    # Extract events from chunks. In the layered pipeline this task runs after
+    # extract_graph_and_summarize and receives TextSummary items, which wrap their
+    # source chunk in ``made_from``; bare chunks are accepted too.
     all_events = []
-    for chunk in data_chunks:
-        for item in chunk.contains:
-            if isinstance(item, Event):
-                all_events.append(item)
+    for item in data_chunks:
+        chunk = getattr(item, "made_from", None) or item
+        for entry in getattr(chunk, "contains", None) or []:
+            if isinstance(entry, Event):
+                all_events.append(entry)
 
     if not all_events:
         return data_chunks

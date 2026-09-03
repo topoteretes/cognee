@@ -121,6 +121,15 @@ async def main():
         f"Expected multiple 'is_a' edge, but found {edge_type_counts.get('is_a', 0)}"
     )
 
+    # temporal_cognify layers the timeline on the standard pipeline (SDK-80): the
+    # chunk summaries are still produced and the events point at the entities.
+    assert type_counts.get("TextSummary", 0) == 2, (
+        f"Expected one TextSummary per chunk, but found {type_counts.get('TextSummary', 0)}"
+    )
+    assert edge_type_counts.get("involves", 0) >= 1, (
+        f"Expected events linked to entities via 'involves', found {edge_type_counts.get('involves', 0)}"
+    )
+
     retriever = TemporalRetriever()
 
     result_between = await retriever.extract_time_from_query("What happened between 1890 and 1900?")

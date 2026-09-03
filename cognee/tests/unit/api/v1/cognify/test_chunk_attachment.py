@@ -66,10 +66,6 @@ def _no_pipeline_work():
             "requires a custom DataPoint",
         ),
         ({"graph_model": _PlainModel, "chunk_attachment": "all"}, "requires a custom DataPoint"),
-        (
-            {"graph_model": _Directory, "chunk_attachment": "all", "temporal_cognify": True},
-            "not supported with temporal_cognify",
-        ),
     ],
 )
 async def test_invalid_combinations_raise_before_any_pipeline_work(kwargs, message):
