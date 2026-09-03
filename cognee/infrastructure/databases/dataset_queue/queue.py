@@ -4,6 +4,11 @@ Each distinct dataset a task touches via :func:`set_database_global_context_vari
 (which calls :meth:`DatasetQueue.ensure_slot` under the hood) takes its own
 slot against the shared budget.
 
+LOCK ORDERING (SDK-483): when a per-dataset lock is also needed, acquire it
+BEFORE the slot (dataset lock -> queue slot) and never wait on a lock while
+holding a slot — slot-holding lock-waiters exhaust the semaphore and deadlock
+the process. ``get_dataset_lock`` enforces this order at acquisition time.
+
 Ref-counting model (per (task, dataset)):
 
 Repeated :meth:`DatasetQueue.ensure_slot` calls for the same ``(task, dataset)``
@@ -171,6 +176,24 @@ class DatasetQueue:
                 if slot_key.startswith("ds:") and slot_key != "ds:<none>":
                     active.add(slot_key[3:])
         return active
+
+    def current_task_slot_dataset_ids(self) -> set:
+        """Dataset ids (as strings) whose slots the CURRENT asyncio task holds.
+
+        Lock-ordering guard input: a task holding a slot must never wait on a
+        per-dataset lock (canonical order is dataset lock -> queue slot), so
+        ``get_dataset_lock`` consults this before handing out a lock.
+        """
+        if not self._enabled:
+            return set()
+        task = asyncio.current_task()
+        if task is None:
+            return set()
+        held = set()
+        for slot_key in list(self._task_slots.get(id(task), {})):
+            if slot_key.startswith("ds:") and slot_key != "ds:<none>":
+                held.add(slot_key[3:])
+        return held
 
     # ---------------------------------------------------- task cleanup setup
     def _ensure_task_cleanup_registered(self, task: asyncio.Task, task_id: int) -> None:

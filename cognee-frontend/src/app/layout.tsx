@@ -7,6 +7,7 @@ import "@mantine/notifications/styles.css";
 import { mantineHtmlProps, MantineProvider } from "@mantine/core";
 import theme from "@/ui/theme/theme";
 import { Notifications } from "@mantine/notifications";
+import { OsPreferenceProvider } from "@/ui/layout/OsPreferenceContext";
 import QueryProvider from "@/modules/query/QueryProvider";
 import RuntimeConfigScript from "@/modules/config/RuntimeConfigScript";
 
@@ -46,7 +47,9 @@ export default function RootLayout({
         <QueryProvider>
           <MantineProvider theme={theme}>
             <Notifications position="top-right" zIndex={10001} />
-            {children}
+            <OsPreferenceProvider>
+              {children}
+            </OsPreferenceProvider>
           </MantineProvider>
         </QueryProvider>
       </body>

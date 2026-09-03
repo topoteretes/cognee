@@ -24,41 +24,24 @@ if TYPE_CHECKING:
 
 logger = get_logger("code_graph")
 
-_NODE_PACKAGE_JSON = '{"name": "staged", "version": "0.0.0"}\n'
 _TSCONFIG_JSON = '{"compilerOptions": {}}\n'
 
-# enola detects PROJECTS, not lone files: for these languages (of the code
-# loader's SUPPORTED_CODE_EXTENSIONS) a bare source file produces zero facts
-# until a project manifest sits next to it. Staging fabricates the minimal
-# marker that turns detection on — each entry verified against enola v0.3.13
-# (java/c/c++/c#/vb/f#/ruby/php/scala/dart/terraform/proto need none). The
-# markers carry no content of their own, so they add no facts beyond the
-# staged file's.
+# enola detects PROJECTS, not lone files. Since enola 0.4.5 language detection
+# is membership over the walked file list, so a bare source file of nearly
+# every supported language produces facts on its own — verified per extension
+# of the code loader's SUPPORTED_CODE_EXTENSIONS against enola v0.4.12. The
+# exception is plain JavaScript: .js/.jsx are only claimed once a
+# tsconfig.json sits next to them. Staging fabricates exactly that marker and
+# nothing else. Earlier releases needed a manifest (requirements.txt, go.mod,
+# Cargo.toml, package.json, ...) for more languages; those markers are gone on
+# purpose, because since enola 0.4.8 the manifests extractor turns a
+# manifest's declared dependencies into facts — a fabricated package.json
+# declaring vue would add a pkg:npm/vue dependency the user's file never had.
+# Also observed at 0.4.12: a lone .kts script or C .h header yields zero facts
+# (the route then stores an empty repository, which is harmless).
 _DETECTION_MARKERS: dict = {
-    "py": {"requirements.txt": ""},
-    "go": {"go.mod": "module staged\n\ngo 1.21\n"},
-    "rs": {"Cargo.toml": '[package]\nname = "staged"\nversion = "0.0.0"\n'},
-    "js": {"package.json": _NODE_PACKAGE_JSON, "tsconfig.json": _TSCONFIG_JSON},
-    "jsx": {"package.json": _NODE_PACKAGE_JSON, "tsconfig.json": _TSCONFIG_JSON},
-    "ts": {"package.json": _NODE_PACKAGE_JSON, "tsconfig.json": _TSCONFIG_JSON},
-    "tsx": {"package.json": _NODE_PACKAGE_JSON, "tsconfig.json": _TSCONFIG_JSON},
-    "kt": {"build.gradle.kts": 'plugins { kotlin("jvm") }\n'},
-    "kts": {"build.gradle.kts": 'plugins { kotlin("jvm") }\n'},
-    "swift": {
-        "Package.swift": (
-            "// swift-tools-version:5.5\n"
-            "import PackageDescription\n"
-            'let package = Package(name: "staged")\n'
-        )
-    },
-    "vue": {
-        "package.json": '{"name": "staged", "version": "0.0.0", "dependencies": {"vue": "*"}}\n'
-    },
-    "svelte": {
-        "package.json": (
-            '{"name": "staged", "version": "0.0.0", "dependencies": {"svelte": "*"}}\n'
-        )
-    },
+    "js": {"tsconfig.json": _TSCONFIG_JSON},
+    "jsx": {"tsconfig.json": _TSCONFIG_JSON},
 }
 
 
@@ -100,8 +83,8 @@ def _stage_code_file(data_item, staging_root, content: str) -> Path:
     (repo_dir / file_name).write_text(content, encoding="utf-8")
     extension = os.path.splitext(file_name)[1].lstrip(".").lower()
     for marker_name, marker_content in _DETECTION_MARKERS.get(extension, {}).items():
-        # A staged file may BE its own marker (a user-added Package.swift or
-        # build.gradle.kts); never overwrite it.
+        # Never overwrite the staged file itself, should a marker ever share
+        # its name (a user's own tsconfig.json, say).
         if marker_name != file_name:
             (repo_dir / marker_name).write_text(marker_content, encoding="utf-8")
     return repo_dir

@@ -160,6 +160,7 @@ def _convert_extracted_nodes_to_data_points(
 
 
 def _add_extracted_edges(
+    data_chunk: DocumentChunk,
     extracted_graph: KnowledgeGraph,
     entities_by_extracted_node_id: dict[str, Entity],
     edges_by_identity: dict[EdgeIdentity, Edge],
@@ -171,16 +172,32 @@ def _add_extracted_edges(
             continue
 
         relationship_name = generate_edge_name(extracted_edge.relationship_name)
+        edge_text = _strip_nonblank_text(extracted_edge.description)
         edge_identity = EdgeIdentity(
             source_id=str(source_entity.id),
             target_id=str(target_entity.id),
             relationship_name=relationship_name,
         )
+
+        # Capture after entity resolution but before deduplication and the
+        # existing-edge filter. Thus every chunk keeps its exact support link
+        # even when the graph assertion was written by an earlier source.
+        # PrivateAttr storage keeps this transient tuple out of graph/vector
+        # payloads.
+        data_chunk._provenance_edges.append(
+            (
+                edge_identity.source_id,
+                edge_identity.target_id,
+                relationship_name,
+                {"edge_text": edge_text},
+            )
+        )
+
         edges_by_identity.setdefault(
             edge_identity,
             Edge(
                 relationship_type=relationship_name,
-                edge_text=_strip_nonblank_text(extracted_edge.description),
+                edge_text=edge_text,
             ),
         )
 
@@ -203,6 +220,7 @@ def construct_data_points_and_edges(
             data_points_by_id,
         )
         _add_extracted_edges(
+            data_chunk,
             extracted_graph,
             entities_by_extracted_node_id,
             edges_by_identity,

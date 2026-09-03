@@ -7,13 +7,9 @@ import createApiKey from "@/modules/apiKeys/createAPIKey";
 
 
 export default function CreateApiKeyButton({ isDisabled, children, className }: { isDisabled: boolean; children: React.ReactNode, className: string }) {
-  async function handleApiKeyCreate() {
-    try {
-      await createApiKey();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
-      return error.message;
-    }
+  async function handleApiKeyCreate(): Promise<string | null> {
+    const result = await createApiKey();
+    return result.ok ? null : result.error;
   }
 
   const [errorMessage, createApiKeyAction, isLoading] = useActionState(handleApiKeyCreate, null);
