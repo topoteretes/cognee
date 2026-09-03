@@ -248,6 +248,10 @@ def get_cognify_router() -> APIRouter:
                 chunk_size=payload.chunk_size,
                 chunks_per_batch=payload.chunks_per_batch,
                 data_per_batch=payload.data_per_batch,
+                # HTTP contract: clients poll run status from the returned run
+                # info (and /datasets/status); an errored run is a valid
+                # response body here, not an exception.
+                raise_on_error=False,
             )
 
             # If any cognify run errored return JSONResponse with proper error status code

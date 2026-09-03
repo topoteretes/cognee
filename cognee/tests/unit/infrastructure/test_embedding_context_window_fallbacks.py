@@ -222,3 +222,46 @@ async def test_litellm_embedding_splits_batch_on_vertex_instance_limit_error():
 
     assert result == [[1.0, 1.0]] * 4
     assert embed_mock.await_count > 1
+
+
+@pytest.mark.asyncio
+async def test_litellm_embedding_splits_batch_on_vertex_model_batch_limit_error():
+    import litellm
+
+    with patch(
+        "cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine."
+        "LiteLLMEmbeddingEngine.get_tokenizer",
+        return_value=Mock(),
+    ):
+        from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
+            LiteLLMEmbeddingEngine,
+        )
+
+        engine = LiteLLMEmbeddingEngine(model="test-model", dimensions=2)
+
+    # Verbatim phrasing of Vertex's per-model batch cap (distinct from the
+    # per-prediction instance cap covered above): once a request is under the
+    # 2048-instance prediction limit, Vertex enforces a much smaller
+    # per-model batchSize cap (e.g. 250 for gemini-embedding-001).
+    batch_limit_error = litellm.exceptions.BadRequestError(
+        message=(
+            "Unable to submit request because it included too many instances. "
+            "Reduce the number of instances and try again. "
+            "Unable to submit request because it has a batchSize value of 1234 "
+            "but the supported range is from 1 (inclusive) to 251 (exclusive). "
+            "Update the value and try again."
+        ),
+        model="test-model",
+        llm_provider="vertex_ai",
+    )
+
+    async def fake_aembedding(**kwargs):
+        if len(kwargs["input"]) > 2:
+            raise batch_limit_error
+        return Mock(data=[{"embedding": [1.0, 1.0]} for _ in kwargs["input"]])
+
+    with patch("litellm.aembedding", AsyncMock(side_effect=fake_aembedding)) as embed_mock:
+        result = await engine.embed_text(["a", "b", "c", "d"])
+
+    assert result == [[1.0, 1.0]] * 4
+    assert embed_mock.await_count > 1

@@ -68,6 +68,26 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_cognee_server_start.py
 
+  run-migration-model-lockstep-guard:
+    name: Migration/Model Lockstep Guard
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Standalone lockstep guard: the Alembic chain and the ORM models must
+      # describe the same schema (see the test's docstring). Deliberately its
+      # own check so a break is visible by name, and deliberately secret-free:
+      # it replays migrations onto a local SQLite database only.
+      - name: Run Migration/Model Lockstep Guard
+        run: uv run pytest cognee/tests/e2e/migrations/test_migration_model_lockstep.py -v
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04
@@ -794,7 +814,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -857,7 +877,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -883,7 +903,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -908,7 +928,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -933,7 +953,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1364,7 +1384,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -1478,7 +1498,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Check out
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -2142,7 +2162,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089  # master
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

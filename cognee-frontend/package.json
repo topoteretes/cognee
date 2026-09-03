@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 next start",
+    "test": "jest",
     "lint": "eslint .",
     "check:tracking-plan": "node scripts/check-tracking-plan.js"
   },
@@ -17,8 +18,10 @@
     "@mantine/modals": "^8.3.13",
     "@mantine/notifications": "^8.3.14",
     "@tanstack/react-query": "^5.101.2",
+    "@types/d3": "^7.4.3",
     "classnames": "^2.5.1",
     "culori": "^4.0.2",
+    "d3": "^7.9.0",
     "d3-force-3d": "^3.0.6",
     "embla-carousel-autoplay": "^8.6.0",
     "embla-carousel-fade": "^8.6.0",
@@ -31,6 +34,7 @@
     "react-error-boundary": "^6.0.0",
     "react-force-graph-2d": "^1.29.0",
     "react-markdown": "^10.1.0",
+    "server-only": "^0.0.1",
     "uuid": "^11.1.0",
     "valibot": "^1.2.0"
   },

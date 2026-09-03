@@ -7,9 +7,10 @@ retrieved before the LLM was called:
   payloads, keeping only chunks that share significant terms with the answer
   (the ``RAG_COMPLETION`` / chunk path, where candidates are the chunks the
   LLM actually read).
-- ``build_answer_grounded_chunk_references`` runs the answer text as a vector
-  query against the chunk index and formats the results (the graph completion
-  path, where the LLM context is not chunk-shaped).
+- ``build_answer_grounded_chunk_references`` is retained as a compatibility
+  helper for callers that explicitly request a post-hoc similarity lookup. The
+  graph completion path no longer uses it; graph provenance comes directly from
+  the graph objects included in the LLM context.
 - ``append_chunk_evidence`` / ``append_answer_grounded_evidence`` apply the
   above to a list of completions, one Evidence block per string completion.
 

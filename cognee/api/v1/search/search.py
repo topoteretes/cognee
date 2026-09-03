@@ -192,7 +192,13 @@ async def search(
         retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
         code_query: Structured deterministic CODE operation and arguments. Supported
                     operations are query_facts, explore, traverse, find_path,
-                    impact_analysis, and delta (what the last ingestion changed).
+                    impact_analysis, insights (enola explainer findings with their
+                    evidence facts, filterable by source/min_confidence), architecture
+                    (module-level overview with symbol edges rolled up to modules), and
+                    delta (what the last ingestion changed, plus the snapshot receipt).
+                    Add ``"diagram": "mermaid"`` (or ``"dot"``) to any operation to get
+                    the result rendered as diagram source under ``result["diagram"]``;
+                    architecture includes a Mermaid diagram unless ``"diagram": False``.
         skills: Explicit skill names or Skill objects to load into the agentic retriever.
         tools: Optional whitelist of tool names available to the agentic retriever.
         max_iter: Maximum number of agentic tool-call iterations before forcing a final answer.
@@ -348,14 +354,19 @@ async def search(
             ):
                 operation_context.set_dataset(target_dataset_ids[0])
 
-            if query_type is SearchType.AGENTIC_COMPLETION:
+            if query_type in (SearchType.AGENTIC_COMPLETION, SearchType.SKILLS):
                 active_dataset_refs = dataset_ids if dataset_ids else datasets
                 if isinstance(active_dataset_refs, UUID):
                     active_dataset_refs = [active_dataset_refs]
                 if not active_dataset_refs or len(active_dataset_refs) != 1:
+                    if query_type is SearchType.AGENTIC_COMPLETION:
+                        raise CogneeValidationError(
+                            message="Agentic skill search requires exactly one explicit dataset.",
+                            name="InvalidAgenticDatasetScope",
+                        )
                     raise CogneeValidationError(
-                        message="Agentic skill search requires exactly one explicit dataset.",
-                        name="InvalidAgenticDatasetScope",
+                        message="SKILLS search requires exactly one explicit dataset.",
+                        name="InvalidSkillsDatasetScope",
                     )
 
             if any(v is not None for v in agentic_overrides.values()):

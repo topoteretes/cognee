@@ -1,0 +1,105 @@
+name: build test | UI Docker image
+
+# The UI image is only ever exercised by `npm run dev` elsewhere, so without
+# this job a broken production build (a type error, a lockfile drift, a missing
+# file in the build context) reaches Docker Hub instead of a pull request.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build_ui_docker:
+    name: Build Cognee UI Docker Image
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out Cognee code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the published UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./cognee-frontend
+          # Single platform: this guards the build itself, and the release
+          # workflow is what produces the multi-arch manifest.
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: cognee-ui:ci
+
+      - name: Serve a page from the built image
+        # Proves more than "it compiled": the standalone server boots, and the
+        # backend URL reaching the browser is the one this container was
+        # started with rather than a value frozen in at build time.
+        run: |
+          set -euo pipefail
+          docker run -d --name cognee-ui-ci -p 3000:3000 \
+            -e COGNEE_BACKEND_URL=http://backend.test:8000 cognee-ui:ci
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/local-login -o /tmp/page.html; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::UI container never served a page"
+              docker logs cognee-ui-ci
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # The JSON the layout renders into <head> is the contract the client
+          # reads; assert on it rather than on the diagnostics route, which the
+          # app itself does not use.
+          grep -q '"backendUrl":"http://backend.test:8000"' /tmp/page.html || {
+            echo "::error::page did not carry COGNEE_BACKEND_URL to the browser"
+            grep -o 'id="cognee-runtime-config"[^<]*' /tmp/page.html || echo "(no config element at all)"
+            exit 1
+          }
+
+          curl -fsS http://localhost:3000/api/runtime-config
+
+      - name: Reject a misconfigured backend URL
+        # The container must refuse to start and name the variable, instead of
+        # booting and failing every request for a reason the operator cannot
+        # see, or worse, quietly falling back to localhost.
+        run: |
+          set -euo pipefail
+          # Bounded foreground run: if the guard ever regresses the container
+          # starts a server and never exits, and an unbounded run would hang the
+          # job for the full 360 minutes rather than failing it.
+          status=0
+          timeout 60 docker run --name cognee-ui-bad \
+            -e COGNEE_BACKEND_URL=cognee:8000 \
+            cognee-ui:ci > /tmp/bad.log 2>&1 || status=$?
+
+          cat /tmp/bad.log
+
+          case "$status" in
+            0)
+              echo "::error::a malformed COGNEE_BACKEND_URL was accepted"
+              exit 1
+              ;;
+            124)
+              echo "::error::container kept running on a malformed COGNEE_BACKEND_URL"
+              exit 1
+              ;;
+          esac
+
+          grep -q "COGNEE_BACKEND_URL" /tmp/bad.log || {
+            echo "::error::startup failure does not name the misconfigured variable"
+            exit 1
+          }
+
+      - name: Report image size
+        if: always()
+        run: docker image ls cognee-ui:ci --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f cognee-ui-ci cognee-ui-bad 2>/dev/null || true

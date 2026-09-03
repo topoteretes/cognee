@@ -205,6 +205,20 @@ class CloudClient:
         except Exception:
             return False
 
+    async def _auth_check(self) -> Optional[int]:
+        """Status of an authenticated probe, or None when unreachable.
+
+        ``/health`` is unauthenticated, so it cannot tell a working API key
+        from a rejected one. Probing an authenticated endpoint lets serve()
+        fail at connect time instead of on the first real operation.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
+                return resp.status
+        except Exception:
+            return None
+
     # ----- request plumbing -----
 
     def _resolve_timeout(

@@ -718,6 +718,7 @@ async def remember(
     self_improvement: bool = True,
     session_ids: Optional[List[str]] = None,
     dry_run: bool = False,
+    raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
 ) -> Union["RememberResult", "DryRunEstimate"]:
     """Store data in memory.
@@ -941,6 +942,7 @@ async def remember(
             self_improvement=self_improvement,
             session_ids=session_ids,
             span=span,
+            raise_on_error=raise_on_error,
             **kwargs,
         )
 
@@ -996,6 +998,7 @@ async def _remember_inner(
     self_improvement,
     session_ids,
     span,
+    raise_on_error: bool = True,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client, warn_unsupported_remote_params
@@ -1463,6 +1466,14 @@ async def _remember_inner(
                 chunk_size=chunk_size,
                 custom_prompt=custom_prompt,
                 run_in_background=False,
+                # Loud-by-default: a failed build raises CognifyFailedError
+                # (typed, classified, with a remedy) out of blocking remember()
+                # instead of returning a silently "errored" result nobody
+                # inspects. In background remember() a raise has nowhere to go
+                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                # raw_result — so take the errored-run-info path there and let
+                # _resolve() record the failure on the result.
+                raise_on_error=raise_on_error and not run_in_background,
                 **shared_kwargs,
                 **cognify_kwargs,
             )
