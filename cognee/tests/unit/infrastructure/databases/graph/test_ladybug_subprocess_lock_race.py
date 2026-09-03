@@ -23,6 +23,15 @@ import pytest
 
 import sys
 
+
+pytest.importorskip("ladybug")
+
+from cognee.infrastructure.databases.graph.get_graph_engine import (
+    acreate_graph_engine,
+    create_graph_engine,
+    graph_engine_cache,
+)
+
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
 # spawning. On Windows the spawned child intermittently deadlocks at
@@ -34,15 +43,6 @@ import sys
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
     reason="explicit worker spawn deadlocks intermittently on Windows (SDK-540)",
-)
-
-
-pytest.importorskip("ladybug")
-
-from cognee.infrastructure.databases.graph.get_graph_engine import (
-    acreate_graph_engine,
-    create_graph_engine,
-    graph_engine_cache,
 )
 
 
