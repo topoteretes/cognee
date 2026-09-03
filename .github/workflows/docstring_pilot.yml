@@ -1,8 +1,12 @@
 name: automation | Docstring Pilot
 
-# Runs the evidence-led docstring skill on one of the ten files selected in
-# .claude/skills/docstring-author/pilot_files.md and opens a draft PR against dev
-# for review (RES-28).
+# Runs the evidence-led docstring pilot on the files selected in
+# .claude/skills/docstring-author/pilot_files.md — one file, or all ten as a
+# matrix (`path: all`) — and opens one draft PR per changed file against dev
+# for review (RES-28). A prepare job validates once and emits the target list;
+# each matrix job then runs the full author -> critic -> guards chain for its
+# file, so every file gets its own ledger, its own summary section, and (in a
+# real run) its own docstring-only draft PR.
 #
 # This is a proof of concept, and the shape is the thing being tested: docstrings
 # written against the code, then independently verified, with a claim ledger in
@@ -64,7 +68,7 @@ on:
   workflow_dispatch:
     inputs:
       path:
-        description: "Pilot file to work on, e.g. cognee/api/v1/search/search.py"
+        description: "Pilot file to work on (e.g. cognee/api/v1/search/search.py), or `all` for the full ten-file matrix"
         required: true
       dry_run:
         description: "Show the diff and ledger in the run summary instead of opening a PR."
@@ -74,11 +78,12 @@ on:
   # TEMPORARY (RES-28 testing) — REMOVE BEFORE MERGE.
   # Lets the pilot be exercised from PR #4878 itself, without waiting for the
   # default-branch registration that workflow_dispatch needs. A pull_request
-  # event carries no inputs, so the "Resolve run mode" step below pins the
-  # target to the weak-file candidate and FORCES a dry run — a PR-triggered
-  # run can never push a branch or open a PR. That hard gate is the lesson of
-  # #4668, where exactly this trigger, added for exactly this reason, pushed a
-  # bot PR against dev from unmerged code.
+  # event carries no inputs, so the prepare job below fans out to ALL TEN
+  # files and FORCES a dry run — a PR-triggered run can never push a branch or
+  # open a PR. That hard gate is the lesson of #4668, where exactly this
+  # trigger, added for exactly this reason, pushed a bot PR against dev from
+  # unmerged code. Cost note: a full ten-file sweep is on the order of $40-80
+  # of API spend, and it fires on EVERY push to a PR touching this file.
   pull_request:
     paths:
       - ".github/workflows/docstring_pilot.yml"
@@ -95,18 +100,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  docstring-pilot:
-    name: Draft docstring improvements for one pilot file
+  # Validates once, fans out once: machinery presence, shared-rules parity, and
+  # the mode/target decision all live here so ten matrix jobs cannot disagree
+  # about them — and a bad dispatch fails in seconds on one runner, not ten.
+  prepare:
+    name: Validate and resolve targets
     # Fork PRs never run this: they have no secrets, and an agent workflow
     # driven by untrusted YAML is not a check we owe forks.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+      dry_run: ${{ steps.mode.outputs.dry_run }}
 
     steps:
-      # Credentials are never persisted into either checkout: an agent with Edit
-      # access runs against this workspace, and nothing there should be able to
-      # read a token off disk. The push and PR steps receive the PAT explicitly.
       - name: Check out dev
         uses: actions/checkout@v6
         with:
@@ -181,22 +189,77 @@ jobs:
 
       # inputs.* is empty on pull_request events, and `!inputs.dry_run` would
       # evaluate TRUE there — every downstream step therefore reads the mode
-      # from this step, never from inputs directly. PR events are pinned to
-      # the weak-file candidate and always dry.
-      - name: Resolve run mode and target
+      # from this job's outputs, never from inputs directly. PR events fan out
+      # to all ten files and are always dry.
+      - name: Resolve run mode and target spec
         id: mode
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "dry_run=true" >> "$GITHUB_OUTPUT"
-            echo "path=cognee/api/v1/search/search.py" >> "$GITHUB_OUTPUT"
-            echo "Pull request event — forced dry run on cognee/api/v1/search/search.py."
+            echo "spec=all" >> "$GITHUB_OUTPUT"
+            echo "Pull request event — forced dry run across all ten pilot files."
           else
             echo "dry_run=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
-            echo "path=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
+            echo "spec=${{ inputs.path }}" >> "$GITHUB_OUTPUT"
           fi
 
       # A rejected path must produce zero pull requests, and the reason has to be
       # readable in the run summary — a bad `path` is a human typo, not a bug.
+      # `all` resolves to the ten files parsed from the same allowlist the author
+      # skill reads, so the matrix cannot drift from the selection.
+      - name: Resolve the target list
+        id: targets
+        run: |
+          if [ "${TARGET_SPEC}" = "all" ]; then
+            python3 automation-src/tools/check_docstring_pilot_path.py \
+              --print-list \
+              --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+              --repo-root .
+          else
+            python3 automation-src/tools/check_docstring_pilot_path.py \
+              --path "${TARGET_SPEC}" \
+              --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
+              --repo-root .
+            # `target` was written by the guard; wrap it as a one-element matrix.
+            echo "targets=[\"$(sed -n 's/^target=//p' "$GITHUB_OUTPUT" | tail -1)\"]" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          TARGET_SPEC: ${{ steps.mode.outputs.spec }}
+
+  # One matrix job per target file: the full author -> critic -> guards chain.
+  # fail-fast is off so one file's failure never cancels the other nine, and
+  # max-parallel keeps the burst against the Anthropic API bounded.
+  docstring-pilot:
+    name: ${{ matrix.path }}
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        path: ${{ fromJSON(needs.prepare.outputs.targets) }}
+
+    steps:
+      # Credentials are never persisted into either checkout: an agent with Edit
+      # access runs against this workspace, and nothing there should be able to
+      # read a token off disk. The push and PR steps receive the PAT explicitly.
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Check out pilot machinery from the triggering ref
+        uses: actions/checkout@v6
+        with:
+          path: automation-src
+          persist-credentials: false
+
+      # Defense in depth: prepare already validated the list, but each matrix
+      # job re-checks its own file so a job can never act on a target the
+      # guard has not passed. Also emits the normalized `target` output the
+      # rest of this job keys on.
       - name: Check the path is one of the ten selected files
         id: target
         run: |
@@ -205,7 +268,7 @@ jobs:
             --allowlist automation-src/.claude/skills/docstring-author/pilot_files.md \
             --repo-root .
         env:
-          TARGET_PATH: ${{ steps.mode.outputs.path }}
+          TARGET_PATH: ${{ matrix.path }}
 
       - name: Record the tree being edited
         id: base
@@ -330,6 +393,8 @@ jobs:
             --ignore automation-src/ \
             --ignore docstring_pilot_diff.patch
 
+      # tee, not >>: step summaries are not retrievable through any API, so the
+      # ledger goes to the job log as well, where automation can read it back.
       - name: Publish the ledger to the run summary
         run: |
           {
@@ -339,7 +404,7 @@ jobs:
             echo "- Docstrings changed: \`${{ steps.diff.outputs.changed }}\`"
             echo
             cat docstring_pilot_ledger.md
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # A pilot file whose docstrings were already good is expected to land here.
       # The ledger above carries the critic pass's reasoning, which is the actual
@@ -357,7 +422,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show the diff without pushing
-        if: ${{ steps.diff.outputs.changed == 'true' && steps.mode.outputs.dry_run == 'true' }}
+        if: ${{ steps.diff.outputs.changed == 'true' && needs.prepare.outputs.dry_run == 'true' }}
         run: |
           {
             echo
@@ -366,11 +431,11 @@ jobs:
             echo '```diff'
             git --no-pager diff -- "${{ steps.target.outputs.target }}"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Commit and push the docstring branch
         id: commit
-        if: ${{ steps.diff.outputs.changed == 'true' && steps.mode.outputs.dry_run == 'false' }}
+        if: ${{ steps.diff.outputs.changed == 'true' && needs.prepare.outputs.dry_run == 'false' }}
         env:
           PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
           BRANCH_NAME: ${{ steps.base.outputs.branch }}

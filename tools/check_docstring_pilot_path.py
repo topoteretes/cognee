@@ -16,12 +16,18 @@ Rejection is reported to stdout and, when running under Actions, appended to the
 step summary, because a dispatch with a bad ``path`` is a human typo and the
 reason has to be visible without opening the job log.
 
+With ``--print-list`` the checker instead emits the full selection as a JSON
+array (stdout and, under Actions, a ``targets`` output) for the workflow's
+matrix fan-out — same validation, so a malformed allowlist fails a ten-file
+run exactly as it fails a one-file run.
+
 Exit codes: 0 = path is selected, 1 = path is rejected, 2 = allowlist unreadable.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -76,7 +82,12 @@ def normalize(path: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--path", required=True, help="Candidate file path from the dispatch input")
+    parser.add_argument("--path", help="Candidate file path from the dispatch input")
+    parser.add_argument(
+        "--print-list",
+        action="store_true",
+        help="Validate the allowlist and emit all ten selected files as a JSON array",
+    )
     parser.add_argument(
         "--allowlist",
         default=DEFAULT_ALLOWLIST,
@@ -88,6 +99,8 @@ def main() -> int:
         help="Directory the path is resolved against when checking the file exists",
     )
     args = parser.parse_args()
+    if bool(args.path) == args.print_list:
+        parser.error("pass exactly one of --path or --print-list")
 
     selected = read_allowlist(args.allowlist)
     if len(selected) != 10:
@@ -99,6 +112,19 @@ def main() -> int:
             f"ten the pilot is defined as. Parsed: {selected or 'nothing'}.",
             selected,
         )
+
+    if args.print_list:
+        missing = [p for p in selected if not os.path.isfile(os.path.join(args.repo_root, p))]
+        if missing:
+            return reject(
+                "Selected files missing from the tree being edited (moved or renamed on "
+                f"that branch; update the allowlist): {', '.join(missing)}",
+                selected,
+            )
+        payload = json.dumps(selected)
+        print(payload)
+        write_output("targets", payload)
+        return 0
 
     candidate = normalize(args.path)
     if not candidate:
