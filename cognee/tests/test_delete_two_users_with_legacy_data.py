@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
@@ -73,9 +75,13 @@ async def main(mock_create_structured_output: AsyncMock):
     marie = await create_user(email="marie@example.com", password="marie_password")
 
     # Johns's context
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", john)).id, john.id
-    )
+    johns_dataset = await create_authorized_dataset("main_dataset", john)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(johns_dataset.id))
+    await set_database_global_context_variables(johns_dataset.id, john.id)
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
@@ -100,9 +106,11 @@ async def main(mock_create_structured_output: AsyncMock):
     johns_dataset_id = list(johns_cognify_result.keys())[0]
 
     # Maries's context
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", marie)).id, marie.id
-    )
+    maries_dataset = await create_authorized_dataset("main_dataset", marie)
+    # Marie's dataset is distinct from John's; hold its lock too (the guard
+    # only warns for John's cross-dataset slot, but the order stays canonical).
+    await _lock_stack.enter_async_context(dataset_lock(maries_dataset.id))
+    await set_database_global_context_variables(maries_dataset.id, marie.id)
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
