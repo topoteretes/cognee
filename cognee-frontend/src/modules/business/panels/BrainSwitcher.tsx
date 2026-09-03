@@ -46,7 +46,7 @@ export default function BrainSwitcher({ brains, index, activeDatasetId, onSelect
   const team = datasets.filter((d) => holderCount(index, d.id) > 1);
   const personal = datasets.filter((d) => holderCount(index, d.id) <= 1);
   const activeDataset = datasets.find((d) => d.id === activeDatasetId);
-  const activeName = activeDataset ? String(activeDataset.name || "brain") : "select a brain";
+  const activeName = activeDataset ? String(activeDataset.name || "dataset") : "select a dataset";
 
   const row = (datasetId: string, name: string, isTeam: boolean) => {
     const dimmed = reachable ? !reachable.has(datasetId) : false;
@@ -89,13 +89,13 @@ export default function BrainSwitcher({ brains, index, activeDatasetId, onSelect
         {team.length > 0 && (
           <>
             <Menu.Label style={{ color: "#7E8CA6", fontSize: 9, letterSpacing: "0.05em" }}>team</Menu.Label>
-            {team.map((d) => row(d.id, String(d.name || "brain"), true))}
+            {team.map((d) => row(d.id, String(d.name || "dataset"), true))}
           </>
         )}
         {personal.length > 0 && (
           <>
             <Menu.Label style={{ color: "#7E8CA6", fontSize: 9, letterSpacing: "0.05em" }}>personal</Menu.Label>
-            {personal.map((d) => row(d.id, String(d.name || "brain"), false))}
+            {personal.map((d) => row(d.id, String(d.name || "dataset"), false))}
           </>
         )}
       </Menu.Dropdown>

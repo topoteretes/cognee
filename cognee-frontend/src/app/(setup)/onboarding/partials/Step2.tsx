@@ -6,7 +6,7 @@ import createDataset from "@/modules/datasets/createDataset";
 import rememberData from "@/modules/ingestion/rememberData";
 import pollDatasetStatus from "@/modules/datasets/pollDatasetStatus";
 import { setAwaitingDataset, clearAwaitingDataset } from "@/utils/browserStorage";
-import { StepBadge, StepDots, SkipLink } from "./Shared";
+import { StepBadge, StepDots, OnboardingFooter } from "./Shared";
 import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
 
 interface ProcessingStep {
@@ -15,10 +15,18 @@ interface ProcessingStep {
   status: "pending" | "active" | "done" | "error";
 }
 
-export function Step2({ files, datasetId, onNext, cogniInstance }: {
+export function Step2({ files, datasetId, onNext, onBack, onDatasetCreated, ingestedKey, onIngested, cogniInstance }: {
   files: File[];
   datasetId: string | null;
   onNext: (dsId: string) => void;
+  onBack: () => void;
+  /** Reports the dataset the moment it exists, not when the run finishes, so a
+   *  remount reuses it instead of creating a second one. */
+  onDatasetCreated: (dsId: string) => void;
+  /** Signature of the file set already sent, held by the parent so it survives
+   *  this component unmounting on Back. */
+  ingestedKey: string | null;
+  onIngested: (key: string) => void;
   // May be null while the freshly-created tenant is still provisioning — Step 2
   // shows its loading bars until both the instance and the pod are ready.
   cogniInstance: ReturnType<typeof useCogniInstance>["cogniInstance"];
@@ -32,6 +40,18 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
   ]);
   const [error, setError] = useState<string | null>(null);
   const [dsId, setDsId] = useState<string | null>(datasetId);
+  // Back from here goes to Step 1, whose Continue remounts this component
+  // (files live in the parent, so it stays enabled) — and a second run would
+  // pay for a second upload + cognify of the same files.
+  //
+  // Keyed on the file set rather than on "a dataset exists": the two diverge the
+  // moment the user adds or removes a file in Step 1, and keying on the dataset
+  // would silently drop the new selection while the bars filled as if it had
+  // been sent. It also keeps the only retry path — the signature is recorded
+  // after rememberData resolves, so a failed upload is retried rather than
+  // skipped.
+  const filesKey = files.map((f) => `${f.name}:${f.size}:${f.lastModified}`).join("|");
+  const alreadyIngested = useRef(ingestedKey !== null && ingestedKey === filesKey);
   const cancelledRef = useRef(false);
   const tickerIds = useRef<ReturnType<typeof setInterval>[]>([]);
 
@@ -121,9 +141,13 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
       let currentDsId = dsId;
       if (!currentDsId) {
         const ds = await createDataset({ name: "default_dataset" }, cogniInstance);
-        if (cancelled()) return;
         currentDsId = ds.id;
-        setDsId(currentDsId);
+        // Reported before the cancellation check on purpose: if the user
+        // navigated away mid-create the dataset still exists, and the parent
+        // needs its id so a remount reuses it rather than creating another.
+        setDsId(ds.id);
+        onDatasetCreated(ds.id);
+        if (cancelled()) return;
       }
 
       // ── Uploading files (bar 1): one remember call uploads + kicks off processing ──
@@ -135,12 +159,20 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
       // we just assigned it from createDataset above. TypeScript can't narrow it
       // through the conditional assignment, so we guard explicitly.
       if (!currentDsId) return;
-      await rememberData({ id: currentDsId, name: "default_dataset" }, files, cogniInstance, { runInBackground: true });
-      if (cancelled()) return;
-      // Hand off to the dashboard: if the user skips before processing finishes,
-      // the dashboard keeps its skeleton until this dataset reaches a terminal
-      // status. Cleared below when the poll completes (full-onboarding path).
-      setAwaitingDataset(currentDsId);
+      // Skipped on a remount: these files were already sent on the first run,
+      // and rememberData is not idempotent — it would ingest and cognify a
+      // duplicate copy. The poll below still runs, so the bars finish and the
+      // step advances exactly as it would have the first time round.
+      if (!alreadyIngested.current) {
+        await rememberData({ id: currentDsId, name: "default_dataset" }, files, cogniInstance, { runInBackground: true });
+        onIngested(filesKey);
+        if (cancelled()) return;
+        // Hand off to the dashboard: if the user skips before processing
+        // finishes, the dashboard keeps its skeleton until this dataset reaches
+        // a terminal status. Cleared below when the poll completes
+        // (full-onboarding path).
+        setAwaitingDataset(currentDsId);
+      }
       stopUpload();
       updateStep(1, { progress: 100, status: "done" });
 
@@ -211,14 +243,14 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
       <div style={{
         position: "absolute", inset: -20, zIndex: 0,
         backgroundImage: "linear-gradient(rgba(244,244,244,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(244,244,244,0.10) 1px, transparent 1px)",
-        backgroundSize: "33px 33px",
+        backgroundSize: "24px 24px",
         pointerEvents: "none",
       }} />
       <div className="flex flex-col items-center justify-center gap-6" style={{
         position: "relative", zIndex: 1,
         background: "#2a2a2e",
         border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: 16,
+        borderRadius: 0,
         padding: "48px 64px",
         boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
         maxWidth: 560, width: "100%", boxSizing: "border-box",
@@ -229,7 +261,7 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
         Cognee is extracting entities, building relationships, and generating embeddings.
       </p>
 
-      <div style={{ width: 480, maxWidth: "100%", background: "#2a2a2e", border: "1px solid rgba(188,155,255,0.20)", borderRadius: 12, padding: 24 }}>
+      <div style={{ width: 480, maxWidth: "100%", background: "#2a2a2e", border: "1px solid rgba(188,155,255,0.20)", borderRadius: 0, padding: 24 }}>
         <div className="flex flex-col gap-5">
           {steps.map((step, i) => (
             <div key={i} className="flex items-center gap-3">
@@ -267,7 +299,7 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
       </div>
 
       {error && (
-        <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 16px", fontSize: 13, color: "#FCA5A5", maxWidth: 480 }}>
+        <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 0, padding: "10px 16px", fontSize: 13, color: "#FCA5A5", maxWidth: 480 }}>
           {error}
         </div>
       )}
@@ -281,7 +313,14 @@ export function Step2({ files, datasetId, onNext, cogniInstance }: {
 
       <StepDots current={2} total={3} />
 
-      <SkipLink />
+      {/* Continue is a manual fallback: the step auto-advances 800ms after the
+          pipeline finishes, so in practice this only fires if that timer is
+          missed. It stays disabled until there is actually a dataset to open. */}
+      <OnboardingFooter
+        onBack={onBack}
+        onContinue={() => { if (dsId) onNext(dsId); }}
+        continueDisabled={!allDone || !dsId}
+      />
       </div>
     </div>
   );

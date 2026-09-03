@@ -392,7 +392,7 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
           lands at exactly 10+15+4 = 29px — SearchBar (top-[29px]) and
           OperatorsRail's workspace card align to that same line. */}
       <div className="absolute left-2.5 top-2.5 z-10">
-        <div className="mb-1 px-1 text-[10px] leading-[15px] uppercase tracking-widest text-[#7E8CA6]">brain</div>
+        <div className="mb-1 px-1 text-[10px] leading-[15px] uppercase tracking-widest text-[#7E8CA6]">dataset</div>
         <BrainSwitcher
           brains={brainsQuery.data ?? null}
           index={governanceIndex}
@@ -565,10 +565,10 @@ export default function BusinessView({ cogniInstance }: BusinessViewProps) {
           auto-focus runs in a post-paint effect — for one paint after
           governance resolves activeDatasetId is still null. */}
       {!scene.isLoading && !scene.activeDatasetId && governanceIndex.datasets.length === 0 && !governanceFailed && (
-        <BusinessEmptyState label="no dataset selected — create a brain and upload documents to see your business model" />
+        <BusinessEmptyState label="no dataset selected — create a dataset and upload documents to see your business model" />
       )}
       {!scene.isLoading && !scene.activeDatasetId && governanceFailed && (
-        <BusinessEmptyState label="couldn't load this workspace's brains — check your connection and reload" />
+        <BusinessEmptyState label="couldn't load this workspace's datasets — check your connection and reload" />
       )}
       {/* A failed graph fetch must never masquerade as "this dataset is
           empty" — without this branch a /visualize/json 500 rendered the

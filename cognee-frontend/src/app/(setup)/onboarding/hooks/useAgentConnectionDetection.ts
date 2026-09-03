@@ -12,6 +12,8 @@ import { listSessions, SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessi
 //   • a NEW session  → recall / session-scoped calls (carry a session_id)
 //   • NEW data docs  → graph-direct uploads (no session_id, so no session)
 // Both are baselined when the step opens so only activity AFTER that counts.
+const MAX_POLLS = 85; // ~10 min at 7s
+
 export function useAgentConnectionDetection(
   cogniInstance: CogneeInstance | null,
   active: boolean,
@@ -64,7 +66,15 @@ export function useAgentConnectionDetection(
     }
 
     check();
-    const id = setInterval(check, 7000);
+    // Bounded: the hook stops itself once it detects a connection, but a user
+    // who never runs the commands would otherwise poll two endpoints every 7s
+    // for as long as the tab stays open. ~10 minutes is past the point where a
+    // late connection is still attributable to onboarding.
+    let polls = 0;
+    const id = setInterval(() => {
+      if (++polls > MAX_POLLS) { clearInterval(id); return; }
+      check();
+    }, 7000);
     return () => { cancelled = true; clearInterval(id); };
   }, [active, cogniInstance, connectVerified]);
 

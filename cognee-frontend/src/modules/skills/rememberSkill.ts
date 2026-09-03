@@ -64,7 +64,7 @@ export function slugifySkillName(name: string): string {
 /**
  * Reconstruct a SKILL.md (YAML frontmatter + procedure body) from an existing
  * skill, so it can be re-ingested into another dataset. Used by the share /
- * "add to brains" action — the cognee parser round-trips these field aliases.
+ * "add to datasets" action — the cognee parser round-trips these field aliases.
  * Values are JSON-encoded, which is valid YAML for scalars and flow sequences.
  */
 export function skillToMarkdown(skill: Skill): string {

@@ -28,7 +28,7 @@ import { mapProcessingStatus, type DatasetRaw, type FileEntry, type DisplayStatu
 
 export type { FileEntry, DisplayStatus, Dataset, UseBrainsDataResult } from "./brainsTypes";
 
-// Owns all data and interaction state for the brains (datasets) finder:
+// Owns all data and interaction state for the datasets finder:
 // loading the dataset list + per-dataset doc counts, live status polling,
 // selection, upload/paste/delete flows, and the create/delete/share modal
 // state. The page component is a pure view over what this returns.
@@ -92,11 +92,11 @@ export function useBrainsData(): UseBrainsDataResult {
         // Fall back to FilterContext's list (which can itself be empty or
         // stale) rather than leaving the page with nothing — but flag the
         // failure so the caller can distinguish this from a dataset-free
-        // account instead of rendering a false "no brains yet" empty state.
+        // account instead of rendering a false "no datasets yet" empty state.
         list = contextDatasetsRef.current as DatasetRaw[];
         setDatasetsError(true);
         notifications.show({
-          title: list.length > 0 ? "Couldn't refresh your brains" : "Couldn't load your brains",
+          title: list.length > 0 ? "Couldn't refresh your datasets" : "Couldn't load your datasets",
           message: list.length > 0
             ? "Showing the last known list — it may be out of date."
             : "This can happen while a large upload is still processing. Try refreshing in a moment.",
@@ -155,7 +155,7 @@ export function useBrainsData(): UseBrainsDataResult {
         if (!detail) return d;
         const newStatus = mapProcessingStatus(detail.status, d.documents, detail.reason);
         if (newStatus === d.status) return d;
-        // When the selected brain finishes, schedule a file list refresh
+        // When the selected dataset finishes, schedule a file list refresh
         if (d.id === selectedId && (d.status === "pending" || d.status === "running") && newStatus === "completed") {
           completedSelectedId = d.id;
         }
@@ -212,7 +212,7 @@ export function useBrainsData(): UseBrainsDataResult {
       return;
     }
     if (!selectedId) {
-      setUploadError("Select a brain before uploading files.");
+      setUploadError("Select a dataset before uploading files.");
       return;
     }
     const ds = datasets.find((d) => d.id === selectedId);
@@ -376,7 +376,7 @@ export function useBrainsData(): UseBrainsDataResult {
     refreshFilterDatasets();
     trackEvent({ pageName: "Brains", eventName: "dataset_deleted", additionalProperties: { dataset_id: ds.id, dataset_name: ds.name } });
     deleteDataset(ds.id, cogniInstance).catch((err) => {
-      console.error("Failed to delete brain:", err);
+      console.error("Failed to delete dataset:", err);
     });
   }
 
@@ -393,7 +393,7 @@ export function useBrainsData(): UseBrainsDataResult {
     // snake_case, matching the naming convention datasets are stored under.
     const backendName = trimmed.toLowerCase().replace(/[\s-]+/g, "_");
     if (datasets.some((d) => d.name.toLowerCase().replace(/[\s-]+/g, "_") === backendName)) {
-      setCreateError("A brain with this name already exists.");
+      setCreateError("A dataset with this name already exists.");
       return;
     }
     setCreating(true);
@@ -407,12 +407,12 @@ export function useBrainsData(): UseBrainsDataResult {
       refreshFilterDatasets();
       if (templateKey) {
         applyCreateBrainTemplate(cogniInstance, ds.id, templateKey).catch((err) => {
-          console.error("Failed to apply brain template:", err);
+          console.error("Failed to apply dataset template:", err);
         });
       }
     } catch (err) {
       console.error("Failed to create dataset:", err);
-      setCreateError("Failed to create brain. Please try again.");
+      setCreateError("Failed to create dataset. Please try again.");
     } finally {
       setCreating(false);
     }

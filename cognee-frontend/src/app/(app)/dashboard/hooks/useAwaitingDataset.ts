@@ -57,15 +57,15 @@ export function useAwaitingDataset(): boolean {
       .finally(() => queryClient.invalidateQueries({ queryKey: datasetStatusQueryKey(tenant?.tenant_id) }))
       .then(clear, (err: unknown) => {
         // The dashboard must unblock either way, but a failed pipeline is not
-        // a silent event — the user was told their brain is being prepared.
+        // a silent event — the user was told their dataset is being prepared.
         if (!cancelled && !gaveUpEarly) {
           notifications.show({
             color: "red",
-            title: "Brain processing failed",
+            title: "Dataset processing failed",
             message:
               err instanceof DatasetProcessingError
-                ? "Your brain could not be processed. Try uploading it again."
-                : "We could not confirm your brain finished processing. Check the Brain page for its status.",
+                ? "Your dataset could not be processed. Try uploading it again."
+                : "We could not confirm your dataset finished processing. Check the Datasets page for its status.",
           });
         }
         clear();

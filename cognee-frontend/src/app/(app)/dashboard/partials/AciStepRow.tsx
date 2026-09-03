@@ -3,6 +3,7 @@
 import React, { useCallback } from "react";
 import { trackEvent } from "@/modules/analytics";
 import { InlineCodeBlock } from "@/ui/elements/InlineCodeBlock";
+import { TerminalBlock } from "@/ui/elements/AgentSetupBlocks";
 import type { AciStepDef, AciAgentKey } from "./agentConnectionSteps";
 import { SkillCopyBlock } from "./SkillCopyBlock";
 
@@ -100,6 +101,15 @@ export function AciStepRow({
                 {step.description}
               </p>
             )}
+            {step.lines && (
+              <TerminalBlock
+                lines={step.lines}
+                loading={step.loading}
+                placeholder="Preparing your credentials…"
+                copyLabel={step.copyLabel}
+                onCopied={trackCopy(step.title)}
+              />
+            )}
             {step.code && (
               <InlineCodeBlock code={step.code} toCopy={step.codeToCopy} loading={step.loading} onCopy={trackCopy(step.title)} />
             )}
@@ -120,6 +130,7 @@ export function AciStepRow({
             {step.skillPath && step.skillContent && (
               <SkillCopyBlock path={step.skillPath} content={step.skillContent} card={card} />
             )}
+            {step.content}
             {index < total - 1 ? (
               <p style={{ margin: "10px 0 0", fontSize: 12, color: "rgba(237,236,234,0.65)" }}>
                 Click step {index + 2} when ready ↓

@@ -66,7 +66,7 @@ export default function SkillUploadModal({ isOpen, onClose, datasets, instance, 
     if (!instance) return;
     if (!skillName.trim()) { setError("Give the skill a name."); return; }
     if (!file && !body.trim()) { setError("Upload a SKILL.md file or paste the skill content."); return; }
-    if (selected.size === 0) { setError("Select at least one brain to attach the skill to."); return; }
+    if (selected.size === 0) { setError("Select at least one dataset to attach the skill to."); return; }
 
     setSubmitting(true);
     setError(null);
@@ -113,7 +113,7 @@ export default function SkillUploadModal({ isOpen, onClose, datasets, instance, 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <span style={{ fontSize: 16, fontWeight: 600, color: TEXT }}>Add a skill</span>
-            <span style={{ fontSize: 12, color: "rgba(237,236,234,0.5)" }}>Name it, provide the SKILL.md content, and attach to one or more brains.</span>
+            <span style={{ fontSize: 12, color: "rgba(237,236,234,0.5)" }}>Name it, provide the SKILL.md content, and attach to one or more datasets.</span>
           </div>
           <button onClick={handleClose} aria-label="Close" disabled={submitting}
             style={{ background: "none", border: "none", color: "rgba(237,236,234,0.6)", cursor: submitting ? "not-allowed" : "pointer", padding: 4 }}>
@@ -196,10 +196,10 @@ export default function SkillUploadModal({ isOpen, onClose, datasets, instance, 
           {/* Dataset multi-select */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(237,236,234,0.5)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-              Attach to brains{selected.size > 0 ? ` · ${selected.size} selected` : ""}
+              Attach to datasets{selected.size > 0 ? ` · ${selected.size} selected` : ""}
             </span>
             {datasets.length === 0 ? (
-              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.4)" }}>No brains available.</span>
+              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.4)" }}>No datasets available.</span>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", maxHeight: 200, overflowY: "auto", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10 }}>
                 {datasets.map((d, i) => {
@@ -221,7 +221,7 @@ export default function SkillUploadModal({ isOpen, onClose, datasets, instance, 
               </div>
             )}
             <span style={{ fontSize: 11, color: "rgba(237,236,234,0.4)" }}>
-              A separate ingestion runs per selected brain — skills are dataset-scoped.
+              A separate ingestion runs per selected dataset — skills are dataset-scoped.
             </span>
           </div>
 
@@ -255,7 +255,7 @@ export default function SkillUploadModal({ isOpen, onClose, datasets, instance, 
               color: canSubmit ? "#fff" : "rgba(237,236,234,0.4)", cursor: canSubmit ? "pointer" : "not-allowed",
             }}>
             {submitting && <span style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff", animation: "spin 0.7s linear infinite" }} />}
-            {submitting ? "Ingesting…" : selected.size > 1 ? `Add to ${selected.size} brains` : "Add skill"}
+            {submitting ? "Ingesting…" : selected.size > 1 ? `Add to ${selected.size} datasets` : "Add skill"}
           </button>
         </div>
       </div>

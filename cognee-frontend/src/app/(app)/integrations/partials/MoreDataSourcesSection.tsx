@@ -94,7 +94,7 @@ function ComingSoonModal({
           ) : (
             <>
               <p style={{ margin: "0 0 16px", fontSize: 14, color: "rgba(237,236,234,0.6)", lineHeight: 1.6 }}>
-                We can let you know once the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live to upgrade your Company Brain.
+                We can let you know once the <strong style={{ color: "#EDECEA" }}>{source.name}</strong> integration is live to upgrade your Company Dataset.
               </p>
               <button onClick={requestNotify} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#6510F4", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600, color: "#fff", cursor: "pointer", fontFamily: "inherit" }}>
                 Get notified once live

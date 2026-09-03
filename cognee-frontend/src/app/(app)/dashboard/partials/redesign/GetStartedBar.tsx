@@ -13,7 +13,7 @@ interface GetStartedBarProps {
 
 /**
  * The collapsed "Get started" strip from WO-0 — a single terminal row that
- * expands to reveal the existing agent/brain connection cards. Collapsed by
+ * expands to reveal the existing agent/dataset connection cards. Collapsed by
  * default so returning users land straight on the Overview; the connector count
  * keeps the affordance discoverable.
  */

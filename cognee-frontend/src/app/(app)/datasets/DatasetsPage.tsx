@@ -66,7 +66,7 @@ export default function DatasetsPage() {
 
   if (isLoading) {
     return (
-      <><TrackPageView page="Brains" /><PageLoading name="Brain" /></>
+      <><TrackPageView page="Brains" /><PageLoading name="Datasets" /></>
     );
   }
 
@@ -113,14 +113,14 @@ export default function DatasetsPage() {
 
       {deleteTarget && (
         <DeleteConfirmModal
-          title="Delete brain"
+          title="Delete dataset"
           message={<>Are you sure you want to delete <strong>{deleteTarget.name}</strong>? This will permanently remove the dataset and all its files.</>}
           onConfirm={() => handleDelete(deleteTarget)}
           onCancel={() => setDeleteTarget(null)}
         />
       )}
 
-      {/* ── Share brain modal ── */}
+      {/* ── Share dataset modal ── */}
       {shareTarget && (
         <ShareDatasetModal
           datasetId={shareTarget.id}
@@ -133,7 +133,7 @@ export default function DatasetsPage() {
       {/* ── Header ── */}
       <div style={{ padding: "24px 32px 16px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif' }}>Brain</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 300, color: "#EDECEA", margin: 0, fontFamily: '"TWKLausanne", sans-serif' }}>Datasets</h1>
           <p style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", margin: 0 }}>Upload documents to build searchable knowledge graphs.</p>
         </div>
         <button onClick={handleRefresh} disabled={refreshing}
@@ -184,12 +184,12 @@ export default function DatasetsPage() {
 
         </div>
       ) : datasetsError ? (
-        /* ── Load-error state — never render "no brains" for a failed fetch ── */
+        /* ── Load-error state — never render "no datasets" for a failed fetch ── */
         <div style={{ flex: 1, display: "flex", flexDirection: "column", paddingInline: 32, paddingBottom: 32 }}>
           <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 48 }}>
-            <span style={{ fontSize: 16, fontWeight: 700, color: "#F87171" }}>Couldn&rsquo;t load your brains</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: "#F87171" }}>Couldn&rsquo;t load your datasets</span>
             <p style={{ fontSize: 14, color: "rgba(237,236,234,0.35)", margin: 0, maxWidth: 340, textAlign: "center" }}>
-              Your brains are safe — we just couldn&rsquo;t reach the server. This can happen while a large upload is still processing.
+              Your datasets are safe — we just couldn&rsquo;t reach the server. This can happen while a large upload is still processing.
             </p>
             <button onClick={handleRefresh} disabled={refreshing}
               className="cursor-pointer hover:bg-white/10"
@@ -205,14 +205,14 @@ export default function DatasetsPage() {
             <div style={{ width: 56, height: 56, background: "rgba(188,155,255,0.20)", border: "1px solid rgba(188,155,255,0.35)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <EmptyDocIcon />
             </div>
-            <span style={{ fontSize: 16, fontWeight: 700, color: "#EDECEA" }}>No brains yet</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: "#EDECEA" }}>No datasets yet</span>
             <p style={{ fontSize: 14, color: "rgba(237,236,234,0.35)", margin: 0, maxWidth: 340, textAlign: "center" }}>
-              A brain turns the documents you upload into a searchable knowledge graph — Cognee extracts entities and relationships so you can query them later. Create your first one to get started.
+              A dataset turns the documents you upload into a searchable knowledge graph — Cognee extracts entities and relationships so you can query them later. Create your first one to get started.
             </p>
             <button onClick={() => { trackEvent({ pageName: "Brains", eventName: "dataset_create_modal_opened" }); setShowCreate(true); }}
               className="hover:bg-[#5A0ED6] cursor-pointer"
               style={{ background: "#6510F4", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, marginTop: 12 }}>
-              <PlusIcon /> Create brain
+              <PlusIcon /> Create dataset
             </button>
           </div>
         </div>
