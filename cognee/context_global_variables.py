@@ -234,19 +234,19 @@ class DatabaseContextManager:
         # root all live under the owner (#4829). Resolve the owner from the
         # dataset itself so a caller identity can never redirect them.
         owner_id = await _get_dataset_owner_id(dataset)
-        user = await get_user(owner_id)
+        owner = await get_user(owner_id)
 
         # To ensure permissions are enforced properly all datasets will have their own databases
-        dataset_database = await get_or_create_dataset_database(dataset, user)
+        dataset_database = await get_or_create_dataset_database(dataset, owner)
         # Ensure that all connection info is resolved properly
         dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
         base_config = get_base_config()
         data_root_directory = os.path.join(
-            base_config.data_root_directory, str(user.tenant_id or user.id)
+            base_config.data_root_directory, str(owner.tenant_id or owner.id)
         )
         databases_directory_path = os.path.join(
-            base_config.system_root_directory, "databases", str(user.id)
+            base_config.system_root_directory, "databases", str(owner.id)
         )
 
         # Set vector and graph database configuration based on dataset database information
