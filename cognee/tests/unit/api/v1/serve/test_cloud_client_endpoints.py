@@ -16,16 +16,20 @@ from cognee.api.v1.serve.exceptions import CogneeClientRequestError
 
 
 class FakeResponse:
-    def __init__(self, status=200, json_body=None, text_body=""):
+    def __init__(self, status=200, json_body=None, text_body="", raw_body=b""):
         self.status = status
         self._json = json_body if json_body is not None else {}
         self._text = text_body
+        self._raw = raw_body
 
     async def json(self):
         return self._json
 
     async def text(self):
         return self._text
+
+    async def read(self):
+        return self._raw
 
     async def __aenter__(self):
         return self
@@ -276,3 +280,61 @@ def test_no_retry_without_refresh_hook():
 
     with pytest.raises(CogneeAuthError):
         asyncio.run(client.datasets_list())
+
+
+# ----- sessions -----
+
+
+def test_sessions_get_hits_session_route():
+    client, session = make_client(FakeResponse(json_body={"session_id": "claude-code-1718"}))
+    result = asyncio.run(client.sessions_get("claude-code-1718"))
+    call = session.calls[0]
+    assert call["method"] == "GET"
+    assert call["url"] == "http://cloud.example/api/v1/sessions/claude-code-1718"
+    assert result == {"session_id": "claude-code-1718"}
+
+
+def test_sessions_get_percent_encodes_the_id():
+    # Client-side naming schemes can put anything in a session id; it must
+    # never be able to alter the request path.
+    client, session = make_client(FakeResponse(json_body={}))
+    asyncio.run(client.sessions_get("agent/run 1?x=y"))
+    assert session.calls[0]["url"] == (
+        "http://cloud.example/api/v1/sessions/agent%2Frun%201%3Fx%3Dy"
+    )
+
+
+def test_sessions_get_404_raises_typed_error():
+    client, _ = make_client(FakeResponse(status=404, text_body="session not found"))
+    with pytest.raises(CogneeClientRequestError):
+        asyncio.run(client.sessions_get("missing"))
+
+
+# ----- raw data content -----
+
+
+def test_datasets_data_raw_returns_bytes():
+    raw = b"%PDF-1.4 not json"
+    client, session = make_client(FakeResponse(raw_body=raw))
+    result = asyncio.run(
+        client.datasets_data_raw(
+            UUID("00000000-0000-0000-0000-00000000000a"),
+            UUID("00000000-0000-0000-0000-00000000000b"),
+        )
+    )
+    assert result == raw
+    assert session.calls[0]["url"] == (
+        "http://cloud.example/api/v1/datasets/00000000-0000-0000-0000-00000000000a"
+        "/data/00000000-0000-0000-0000-00000000000b/raw"
+    )
+
+
+def test_datasets_data_raw_404_raises_typed_error():
+    client, _ = make_client(FakeResponse(status=404, json_body={"message": "not found"}))
+    with pytest.raises(CogneeClientRequestError):
+        asyncio.run(
+            client.datasets_data_raw(
+                UUID("00000000-0000-0000-0000-00000000000a"),
+                UUID("00000000-0000-0000-0000-00000000000b"),
+            )
+        )

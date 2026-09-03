@@ -5,7 +5,7 @@ import io
 import json as json_module
 from pathlib import Path
 from typing import Any, Optional, Union
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import url2pathname
 from uuid import UUID
 
@@ -227,6 +227,7 @@ class CloudClient:
         params: Any = None,
         timeout: Optional[float] = None,
         default_timeout: Optional[aiohttp.ClientTimeout] = None,
+        raw: bool = False,
         _retried_auth: bool = False,
     ) -> Any:
         """Send a request to the instance, mapping failures to typed errors."""
@@ -268,11 +269,14 @@ class CloudClient:
                                 params=params,
                                 timeout=timeout,
                                 default_timeout=default_timeout,
+                                raw=raw,
                                 _retried_auth=True,
                             )
                     raise http_error_for_status(resp.status, body, operation=operation)
                 if resp.status == 204:
                     return None
+                if raw:
+                    return await resp.read()
                 try:
                     return await resp.json()
                 except Exception:
@@ -666,6 +670,22 @@ class CloudClient:
             "GET", "datasets_data", f"/api/v1/datasets/{dataset_id}/data", timeout=timeout
         )
 
+    async def datasets_data_raw(
+        self, dataset_id, data_id, timeout: Optional[float] = None
+    ) -> bytes:
+        """GET /api/v1/datasets/{id}/data/{data_id}/raw — the original file bytes.
+
+        The integrations' forget flow shows this to the user before deleting
+        the item. Decoding is the caller's job — the item may be binary.
+        """
+        return await self._request(
+            "GET",
+            "datasets_data_raw",
+            f"/api/v1/datasets/{dataset_id}/data/{data_id}/raw",
+            timeout=timeout,
+            raw=True,
+        )
+
     async def datasets_delete(self, dataset_id, timeout: Optional[float] = None) -> None:
         """DELETE /api/v1/datasets/{id} — delete one dataset."""
         return await self._request(
@@ -676,6 +696,23 @@ class CloudClient:
         """DELETE /api/v1/datasets — delete all of the caller's datasets."""
         return await self._request(
             "DELETE", "datasets_delete_all", "/api/v1/datasets", timeout=timeout
+        )
+
+    # ----- Sessions -----
+
+    async def sessions_get(self, session_id: str, timeout: Optional[float] = None) -> dict:
+        """GET /api/v1/sessions/{id} — session row plus recent QA/trace entries.
+
+        What the integrations' verify-before-replay reads. The id is the
+        client-supplied value passed as ``session_id`` to remember; it is
+        percent-encoded here, so any client-side naming scheme is safe.
+        A missing session raises ``CogneeClientRequestError`` (404).
+        """
+        return await self._request(
+            "GET",
+            "sessions_get",
+            f"/api/v1/sessions/{quote(str(session_id), safe='')}",
+            timeout=timeout,
         )
 
     # ----- Agent connections -----
