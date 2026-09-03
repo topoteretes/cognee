@@ -31,6 +31,7 @@ from cognee_db_workers.lancedb_protocol import (
     OP_TABLE_NAMES,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
+    OP_TABLE_SCHEMA,
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
@@ -261,6 +262,18 @@ class RemoteLanceDBTable:
         # until GC and accumulates across repeated calls.
         with pa.ipc.open_stream(pa.py_buffer(buf)) as reader:
             return reader.read_all()
+
+    async def schema(self) -> pa.Schema:
+        """The stored table's Arrow schema.
+
+        Present because callers building an Arrow table for ``merge_insert``
+        must construct it against the table's OWN schema — inferring types
+        from plain dicts chokes on the fixed-size-list vector column. Without
+        this, any such caller worked in local mode and raised AttributeError
+        in subprocess mode, which is the default.
+        """
+        resp = await self._session.call_async(Request(op=OP_TABLE_SCHEMA, handle_id=self.handle_id))
+        return pa.ipc.read_schema(pa.py_buffer(resp.result))
 
     async def add(self, records: list) -> None:
         await self._session.call_async(

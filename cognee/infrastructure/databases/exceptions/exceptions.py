@@ -27,6 +27,18 @@ class DatabaseNotCreatedError(CogneeSystemError):
         super().__init__(message, name, status_code, log=log, log_level=log_level)
 
 
+class UnsupportedGraphOperation(CogneeApiError):
+    """Raised when a graph adapter does not implement a narrow optional operation."""
+
+    def __init__(
+        self,
+        message: str = "This graph backend does not support this operation.",
+        name: str = "UnsupportedGraphOperation",
+        status_code: int = status.HTTP_501_NOT_IMPLEMENTED,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class UnsupportedProvenanceCapability(CogneeApiError):
     """Raised when an adapter does not implement graph provenance operations."""
 
@@ -131,6 +143,28 @@ class EmbeddingContextWindowTooSmallError(EmbeddingException):
         self,
         message: str = "Text is too short to split further but exceeds context window.",
         name: str = "EmbeddingContextWindowTooSmallError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class EmbeddingCredentialsError(EmbeddingException):
+    """
+    Raised when the embedding endpoint rejects the request's credentials.
+
+    Covers both directions: credentials the server does not accept (401) and
+    credentials it accepts but does not permit for this model or organization
+    (403). Neither can clear inside a retry window, so engines raise this
+    instead of the provider's own class: keeping the failure inside the
+    ``CogneeApiError`` family is what lets the API return an actionable 422
+    rather than a 500, while listing it as terminal is what stops the backoff
+    ladder. The provider's own message is carried through as *message*.
+    """
+
+    def __init__(
+        self,
+        message: str = "Embedding endpoint rejected the credentials.",
+        name: str = "EmbeddingCredentialsError",
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

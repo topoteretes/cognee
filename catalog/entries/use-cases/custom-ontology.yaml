@@ -7,8 +7,8 @@ tags:
   - owl
   - domain-vocabulary
   - entity-extraction
-summary: Constrain cognee's entity extraction to a domain ontology (OWL or similar) so the graph reflects your vocabulary, not the LLM's guesses.
-what_youll_build: A cognify run configured with a custom ontology file where entity types and relationships come from the ontology, and recall answers respect the domain's terminology.
+summary: Ground extracted entities in a domain ontology (OWL or similar) — matched entities are canonicalized and enriched with its class hierarchy; unmatched ones are kept, or dropped by ONTOLOGY_MODE=strict (graph-only; chunks stay searchable).
+what_youll_build: A cognify run configured with a custom ontology file where matched entity names and types are canonicalized to the ontology's terms and enriched with its class hierarchy, and recall answers use the domain's terminology.
 quickstart: |
   git clone https://github.com/topoteretes/cognee.git
   cd cognee

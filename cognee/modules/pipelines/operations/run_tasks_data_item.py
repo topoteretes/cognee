@@ -31,6 +31,7 @@ from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_with_telemetry import run_tasks_with_telemetry
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from ..tasks.task import Task
+from cognee.modules.provenance.edge_evidence.persistence import flush_context_provenance
 
 logger = get_logger("run_tasks_data_item")
 
@@ -254,13 +255,22 @@ async def run_tasks_data_item_incremental(
         logger.error(
             f"Exception caught while processing data: {error}.\n Data processing failed for data item: {data_item}."
         )
+        from cognee.modules.operations import scrub_error_message
+
         yield {
             "run_info": PipelineRunErrored(
                 pipeline_run_id=pipeline_run_id,
                 payload=repr(error),
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
+                error_class=type(error).__name__,
+                error_message=scrub_error_message(error),
             ),
+            # In-memory handle to the root cause, so run_tasks can record and
+            # surface WHAT failed even on the non-raising path — otherwise the
+            # run ends as a generic "Pipeline run failed. Data item could not
+            # be processed." with a NULL error column.
+            "error": error,
             "data_id": data_id,
         }
 
@@ -382,4 +392,20 @@ async def run_tasks_data_item(
             user=user,
         )
 
-    return await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+    try:
+        result = await _drain_item_events(events, ctx, tasks, pipeline_run_id, progress_state)
+    except Exception:
+        # Preserve the original pipeline exception if flushing already-written
+        # edge evidence also fails; rollback still has graph-native run refs.
+        try:
+            await flush_context_provenance(ctx)
+        except Exception as provenance_error:
+            logger.error(
+                "Failed to persist provenance for an errored data item: %s",
+                provenance_error,
+                exc_info=True,
+            )
+        raise
+
+    await flush_context_provenance(ctx)
+    return result

@@ -5,11 +5,15 @@ from pydantic import BaseModel
 
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import get_configured_ontology_resolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     construct_data_points_and_edges_with_ontology,
 )
+from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
@@ -87,6 +91,8 @@ async def integrate_chunk_graphs(
     chunk_attachment: Optional[Literal["direct", "all"]] = None,
     pipeline_name: str = None,
     task_name: str = None,
+    ontology_mode: Optional[str] = None,
+    ctx=None,
     **kwargs,
 ) -> List[DocumentChunk]:
     """Convert extracted graphs into linked data points for later storage.
@@ -103,6 +109,8 @@ async def integrate_chunk_graphs(
         chunk_attachment: How widely each chunk links into its extracted graph.
             ``"all"`` links it to every stored node; omitted and ``"direct"``
             keep the single-root linkage. Custom DataPoint models only.
+        ontology_mode: Per-call ontology mode ("annotate" or "strict"); None
+            falls back to the ONTOLOGY_MODE environment value.
 
     Returns:
         The input chunks, updated with their extracted entities
@@ -147,9 +155,23 @@ async def integrate_chunk_graphs(
             data_chunks,
             chunk_graphs,
             ontology_resolver,
+            ontology_mode=ontology_mode,
         )
 
-    existing_edge_identities = await find_existing_edge_identities(edges_by_identity.keys())
+    # What each chunk's own extraction yielded, recorded during construction —
+    # the same record chunk ownership is derived from. These relationships get
+    # chunk-scoped refs from add_data_points, so the document-scoped attach
+    # below must skip them or they gain an owner no chunk deletion can retire.
+    chunk_owned_identities = {
+        EdgeIdentity(*identity)
+        for chunk in data_chunks
+        for identity in getattr(chunk, "_produced_edge_identities", ())
+    }
+    existing_edge_identities = await find_existing_edge_identities(
+        edges_by_identity.keys(),
+        ctx=ctx,
+        chunk_owned=chunk_owned_identities,
+    )
     attach_new_edges_to_data_points(
         data_points_by_id,
         edges_by_identity,
@@ -214,6 +236,7 @@ async def extract_graph_from_data(
             await callback_result
 
     ontology_resolver = get_configured_ontology_resolver(config)
+    ontology_mode = get_configured_ontology_mode(config)
 
     task_name = "extract_graph_from_data"
 
@@ -225,6 +248,8 @@ async def extract_graph_from_data(
         chunk_attachment=chunk_attachment,
         pipeline_name=pipeline_name,
         task_name=task_name,
+        ontology_mode=ontology_mode,
+        ctx=ctx,
         **kwargs,
     )
 

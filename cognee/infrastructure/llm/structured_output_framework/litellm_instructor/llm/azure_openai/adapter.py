@@ -96,6 +96,12 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             )
 
         self.use_managed_identity = use_managed_identity
+        # Instance-level, not a class attribute: the two auth modes reach
+        # different code. Key-based Azure delegates to OpenAIAdapter and so
+        # reaches the shared streaming path; the managed-identity branch below
+        # answers on the native OpenAI client, which has no plain-text
+        # streaming door. One class attribute could not say both.
+        self.supports_answer_streaming = not use_managed_identity
 
     def _init_managed_identity(
         self,

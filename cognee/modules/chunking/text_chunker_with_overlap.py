@@ -10,6 +10,8 @@ logger = get_logger()
 
 
 class TextChunkerWithOverlap(Chunker):
+    chunker_id = "text_chunker_overlap_v1"
+
     def __init__(
         self,
         document,
@@ -71,6 +73,7 @@ class TextChunkerWithOverlap(Chunker):
         """Create a DocumentChunk with standard metadata."""
         try:
             return DocumentChunk(
+                chunker_id=self.chunker_id,
                 id=chunk_id or uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"),
                 text=text,
                 chunk_size=size,

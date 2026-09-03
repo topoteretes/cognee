@@ -1,0 +1,151 @@
+name: Nightly Scheduler
+
+# The nightly job graph lives in nightly_tests.yml. `schedule:` only ever fires
+# against the default branch's copy of a workflow file, and every one of that
+# workflow's 16 `uses: ./...` calls resolves at the same commit — so a cron
+# there tests *released* code and has never once exercised dev.
+#
+# This shim keeps the cron on main and hands the work to nightly_tests.yml at
+# the ref we actually want tested:
+#   * daily  18:00 UTC     -> main  (released code, exercised during peak US
+#     hours: 18:00 UTC = 19:00 CET / 20:00 CEST, inside the 17:00-22:00 CET
+#     window either side of the DST switch, so the cloud perf arms measure
+#     the platform under real peak load)
+#   * weekly Sun 06:00 UTC -> dev   (in-development code keeps the perf
+#     arms' coverage, which only run here)
+#
+# It works because workflow_dispatch is one of only two events GITHUB_TOKEN may
+# raise that still creates a workflow run:
+#   "events triggered by the GITHUB_TOKEN will not create a new workflow run,
+#    with the following exceptions: workflow_dispatch and repository_dispatch
+#    events always create workflow runs."
+#   https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow
+
+on:
+  schedule:
+    - cron: '0 18 * * *'   # daily  -> main, peak US hours (see header)
+    - cron: '0 6 * * 0'    # Sunday -> dev (a free slot among the repo's crons)
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Ref to run Nightly Tests against.'
+        required: false
+        default: dev
+        type: string
+
+# Least-privilege (OSSF Scorecard: Token-Permissions). Top level read-only;
+# only the dispatch job gets actions: write.
+permissions:
+  contents: read
+
+# Deliberately NO concurrency block: this job is one API call and the two crons
+# are three hours apart on different days, so there is nothing to serialise —
+# and any group keyed on github.workflow/github.ref would be byte-identical for
+# both (they both fire on main), which with cancel-in-progress could only hurt.
+
+jobs:
+  dispatch:
+    name: Dispatch Nightly Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # POST /repos/{owner}/{repo}/actions/workflows/{id}/dispatches, and the
+      # `gh run list` read used to confirm the run actually appeared.
+      actions: write
+    steps:
+      - name: Pick target ref
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_REF: ${{ inputs.target_ref }}
+        run: |
+          set -euo pipefail
+          # github.event.schedule is the literal cron string that fired, which
+          # is how one workflow file serves two cadences.
+          case "${SCHEDULE:-}" in
+            '0 18 * * *') ref=main;               cadence=daily  ;;
+            '0 6 * * 0')  ref=dev;                cadence=weekly ;;
+            '')          ref="${INPUT_REF:-dev}"; cadence=manual ;;
+            *) echo "::error::unmapped cron '${SCHEDULE}' — add it to the case"; exit 1 ;;
+          esac
+          # Refuse anything that is not a plain ref name: this string is handed
+          # to the dispatch API and echoed into Slack.
+          case "$ref" in *[!A-Za-z0-9._/-]*|'') echo "::error::bad ref '$ref'"; exit 1 ;; esac
+          echo "ref=$ref"         >> "$GITHUB_OUTPUT"
+          echo "cadence=$cadence" >> "$GITHUB_OUTPUT"
+          echo "Nightly Tests -> ref=$ref cadence=$cadence"
+
+      - name: Note the newest existing Nightly Tests run
+        id: baseline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ steps.pick.outputs.ref }}
+        run: |
+          set -euo pipefail
+          # Captured BEFORE dispatching. Without this baseline the confirm step
+          # below matches LAST night's run and passes unconditionally — which is
+          # exactly how a guard against silent failure becomes silent failure.
+          id="$(gh run list --workflow nightly_tests.yml --branch "$REF" \
+                  --event workflow_dispatch --limit 1 \
+                  --json databaseId --jq '.[0].databaseId // 0')"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "baseline run id: $id"
+
+      - name: Dispatch nightly_tests.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ steps.pick.outputs.ref }}
+          CADENCE: ${{ steps.pick.outputs.cadence }}
+        run: |
+          set -euo pipefail
+          # The documented endpoint, called directly. `gh workflow run` would
+          # first resolve the workflow id off the DEFAULT branch's workflow list
+          # — an indirection with no benefit here.
+          # `inputs.cadence` must be declared by nightly_tests.yml ON THE TARGET
+          # REF, else the API answers 422 "Unexpected inputs provided". Both
+          # edits ship together, and this shim only exists on main after the
+          # release merge that also carries the input.
+          jq -nc --arg ref "$REF" --arg cadence "$CADENCE" \
+             '{ref: $ref, inputs: {cadence: $cadence}}' \
+          | gh api -X POST \
+              "repos/$GH_REPO/actions/workflows/nightly_tests.yml/dispatches" \
+              --input -
+
+      - name: Confirm a NEW run was created
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ steps.pick.outputs.ref }}
+          BASELINE: ${{ steps.baseline.outputs.id }}
+        run: |
+          set -euo pipefail
+          # The dispatch endpoint returns 204 with no body, so a lost dispatch
+          # looks like success — and a nightly that never starts posts nothing
+          # to Slack. Poll until a run NEWER than the baseline appears.
+          for _ in $(seq 1 12); do
+            read -r id url <<<"$(gh run list --workflow nightly_tests.yml \
+                  --branch "$REF" --event workflow_dispatch --limit 1 \
+                  --json databaseId,url --jq '.[0] | "\(.databaseId) \(.url)"' \
+                  2>/dev/null || echo "0 -")"
+            if [ "${id:-0}" != "0" ] && [ "${id}" != "${BASELINE}" ]; then
+              echo "dispatched: $url"
+              echo "Nightly Tests dispatched at \`$REF\`: $url" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::no NEW Nightly Tests run appeared for ref $REF within 60s"
+          exit 1
+
+      - name: Alert Slack if the dispatch failed
+        if: ${{ failure() }}
+        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
+          payload: |
+            channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
+            text: "Nightly Scheduler failed to dispatch Nightly Tests at `${{ steps.pick.outputs.ref }}` — tonight's nightly will not run and will post nothing. ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

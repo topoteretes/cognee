@@ -18,6 +18,7 @@ from cognee.modules.user_preferences import (
     load_preference_weights,
     personal_factor,
 )
+from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
 
 logger = get_logger("CompletionRetriever")
 
@@ -162,6 +163,10 @@ class CompletionRetriever(BaseRetriever):
         if isinstance(retrieved_objects, list) and retrieved_objects:
             return extract_from_scored_results(retrieved_objects)
         return None
+
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        """Return the exact chunks concatenated into this RAG completion's context."""
+        return chunk_context_evidence(retrieved_objects, dataset_id=dataset_id)
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """

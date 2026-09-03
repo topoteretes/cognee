@@ -49,4 +49,9 @@ def test_response_search_tool_advertises_all_code_operations():
         "traverse",
         "find_path",
         "impact_analysis",
+        "insights",
+        "architecture",
+        "delta",
     ]
+    code_query_properties = search_tool["parameters"]["properties"]["code_query"]["properties"]
+    assert code_query_properties["diagram"]["enum"] == ["mermaid", "dot"]
