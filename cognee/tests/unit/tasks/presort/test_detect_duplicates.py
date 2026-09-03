@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 
 from cognee.tasks.presort.detect_duplicates import detect_duplicates, hash_files
@@ -13,7 +14,7 @@ async def test_exact_duplicates_clustered(messy_folder):
 
     assert len(clusters) == 1
     cluster = clusters[0]
-    names = [path.rsplit("/", 1)[-1] for path in cluster.paths]
+    names = [Path(path).name for path in cluster.paths]
     assert set(names) == {"report.pdf", "report (1).pdf"}
     assert names[0] == "report.pdf"  # shortest path kept first
     assert cluster.wasted_bytes == cluster.size_bytes

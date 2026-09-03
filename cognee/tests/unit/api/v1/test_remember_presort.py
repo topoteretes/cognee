@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -6,6 +7,15 @@ from cognee.api.v1.remember.remember import _maybe_presort_report, remember
 from cognee.tasks.presort.models import PresortReport
 
 PRESORT_MODULE = "cognee.modules.presort"
+
+# Patch module OBJECTS, not dotted names. These packages re-export a function
+# named like its module (``cognee.modules.presort.run_presort``,
+# ``cognee.api.v1.add.add``, ``cognee.api.v1.remember.remember``); on Python
+# 3.10 ``mock.patch`` resolves a dotted target attribute by attribute and lands
+# on the function instead of the module.
+add_module = importlib.import_module("cognee.api.v1.add.add")
+remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+run_presort_module = importlib.import_module("cognee.modules.presort.run_presort")
 
 
 @pytest.fixture
@@ -131,8 +141,8 @@ async def test_explicit_destination_skips_auto_presort(tmp_path, remember_kwargs
     (tmp_path / "a.txt").write_text("hello")
     with (
         patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock()) as run_mock,
-        patch(
-            "cognee.api.v1.remember.remember._remember_inner", new=AsyncMock(return_value="inner")
+        patch.object(
+            remember_module, "_remember_inner", new=AsyncMock(return_value="inner")
         ) as inner_mock,
     ):
         result = await remember(str(tmp_path), **remember_kwargs)
@@ -148,9 +158,7 @@ async def test_auto_presort_env_kill_switch(tmp_path, monkeypatch):
     monkeypatch.setenv("PRESORT_FOLDERS_ENABLED", "false")
     with (
         patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock()) as run_mock,
-        patch(
-            "cognee.api.v1.remember.remember._remember_inner", new=AsyncMock(return_value="inner")
-        ),
+        patch.object(remember_module, "_remember_inner", new=AsyncMock(return_value="inner")),
     ):
         await remember(str(tmp_path))
 
@@ -163,9 +171,7 @@ async def test_code_project_folder_keeps_repo_route(tmp_path):
     (tmp_path / "main.py").write_text("print('x')")
     with (
         patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock()) as run_mock,
-        patch(
-            "cognee.api.v1.remember.remember._remember_inner", new=AsyncMock(return_value="inner")
-        ),
+        patch.object(remember_module, "_remember_inner", new=AsyncMock(return_value="inner")),
     ):
         await remember(str(tmp_path))
 
@@ -176,9 +182,7 @@ async def test_code_project_folder_keeps_repo_route(tmp_path):
 async def test_plain_text_not_auto_presorted():
     with (
         patch(f"{PRESORT_MODULE}.run_presort", new=AsyncMock()) as run_mock,
-        patch(
-            "cognee.api.v1.remember.remember._remember_inner", new=AsyncMock(return_value="inner")
-        ),
+        patch.object(remember_module, "_remember_inner", new=AsyncMock(return_value="inner")),
     ):
         await remember("Einstein was born in Ulm.")
 
@@ -191,8 +195,8 @@ async def test_run_presort_downgrades_use_llm_without_key(tmp_path):
     from cognee.modules.presort.run_presort import run_presort
 
     with (
-        patch("cognee.modules.presort.run_presort.llm_is_configured", return_value=False),
-        patch("cognee.modules.presort.run_presort._report_destination", return_value=None),
+        patch.object(run_presort_module, "llm_is_configured", return_value=False),
+        patch.object(run_presort_module, "_report_destination", return_value=None),
     ):
         report = await run_presort(str(tmp_path), use_llm=True, check_existing=False)
 
@@ -212,8 +216,8 @@ async def test_apply_without_llm_stages_with_add(sample_report):
 
     with (
         patch("cognee.modules.presort.llm_availability.llm_is_configured", return_value=False),
-        patch("cognee.api.v1.add.add.add", new=AsyncMock(return_value="add-result")) as add_mock,
-        patch("cognee.api.v1.remember.remember.remember", new=AsyncMock()) as remember_mock,
+        patch.object(add_module, "add", new=AsyncMock(return_value="add-result")) as add_mock,
+        patch.object(remember_module, "remember", new=AsyncMock()) as remember_mock,
         patch(
             "cognee.tasks.presort.graph_apply.apply_presort_graph", new=AsyncMock()
         ) as graph_mock,
@@ -261,7 +265,7 @@ async def test_presort_end_to_end_deterministic(tmp_path):
     docs.mkdir()
     (docs / "cv_ada.txt").write_text("resume, contact ada@example.com")
 
-    with patch(f"{PRESORT_MODULE}.run_presort._report_destination", return_value=None):
+    with patch.object(run_presort_module, "_report_destination", return_value=None):
         report = await remember(str(tmp_path), dry_run="presort", check_existing=False)
 
     assert isinstance(report, PresortReport)

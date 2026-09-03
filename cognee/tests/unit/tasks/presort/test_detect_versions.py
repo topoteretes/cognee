@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 
 from cognee.tasks.presort.detect_versions import detect_versions, normalize_stem
@@ -25,7 +26,7 @@ def test_normalize_stem(stem, expected):
 
 
 def _record(path: str, content_hash: str) -> FileRecord:
-    name = path.rsplit("/", 1)[-1]
+    name = Path(path).name
     extension = name.rsplit(".", 1)[-1] if "." in name else ""
     return FileRecord(path=path, name=name, extension=extension, content_hash=content_hash)
 

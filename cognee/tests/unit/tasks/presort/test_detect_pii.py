@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.tasks.presort.detect_pii import (
     PiiAssessment,
     PiiCategoryAssessment,
@@ -13,8 +14,6 @@ from cognee.tasks.presort.detect_pii import (
     scan_filename,
 )
 from cognee.tasks.presort.models import FileRecord
-
-MODULE = "cognee.tasks.presort.detect_pii"
 
 
 def _text_record(tmp_path, name: str, text: str) -> FileRecord:
@@ -98,8 +97,9 @@ async def test_detect_pii_llm_layer(tmp_path):
             )
         ],
     )
-    with patch(
-        f"{MODULE}.LLMGateway.acreate_structured_output",
+    with patch.object(
+        LLMGateway,
+        "acreate_structured_output",
         new=AsyncMock(return_value=assessment),
     ) as llm_mock:
         findings = await detect_pii([record], use_llm=True)
@@ -113,7 +113,7 @@ async def test_detect_pii_llm_layer(tmp_path):
 @pytest.mark.asyncio
 async def test_llm_not_called_without_flag_or_findings(tmp_path):
     clean = _text_record(tmp_path, "clean.txt", "nothing personal here")
-    with patch(f"{MODULE}.LLMGateway.acreate_structured_output", new=AsyncMock()) as llm_mock:
+    with patch.object(LLMGateway, "acreate_structured_output", new=AsyncMock()) as llm_mock:
         await detect_pii([clean], use_llm=True)  # no deterministic findings -> no LLM call
         await detect_pii([clean], use_llm=False)
     llm_mock.assert_not_awaited()
@@ -122,8 +122,9 @@ async def test_llm_not_called_without_flag_or_findings(tmp_path):
 @pytest.mark.asyncio
 async def test_llm_failure_is_swallowed(tmp_path):
     record = _text_record(tmp_path, "cv.txt", "resume of Ada, ada@example.com")
-    with patch(
-        f"{MODULE}.LLMGateway.acreate_structured_output",
+    with patch.object(
+        LLMGateway,
+        "acreate_structured_output",
         new=AsyncMock(side_effect=RuntimeError("no llm")),
     ):
         findings = await detect_pii([record], use_llm=True)

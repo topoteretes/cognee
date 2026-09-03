@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 
 from cognee.tasks.presort.scan_folder import scan_folder
@@ -13,7 +14,7 @@ async def test_scan_keeps_real_files_and_flags_junk(messy_folder):
     assert "invoice_march.pdf" in kept_names
     assert "main.py" in kept_names
 
-    junk_by_name = {j.path.rsplit("/", 1)[-1]: j.reason for j in junk}
+    junk_by_name = {Path(j.path).name: j.reason for j in junk}
     assert "junk" in junk_by_name[".DS_Store"]
     assert "junk extension" in junk_by_name["partial.crdownload"]
     assert junk_by_name["empty.log"] == "empty file"

@@ -1,3 +1,4 @@
+import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,6 +9,12 @@ from cognee.tasks.presort.graph_apply import apply_presort_graph, build_graph_in
 from cognee.tasks.presort.models import FileRecord, PresortReport, RelationInstance
 
 MODULE = "cognee.tasks.presort.graph_apply"
+
+# The package re-exports a function named like its module, so patch the module
+# object (a dotted target resolves to the function on Python 3.10).
+run_custom_pipeline_module = importlib.import_module(
+    "cognee.modules.run_custom_pipeline.run_custom_pipeline"
+)
 
 
 def _default_report():
@@ -147,8 +154,9 @@ def test_unresolvable_relation_endpoints_skipped():
 @pytest.mark.asyncio
 async def test_apply_presort_graph_runs_custom_pipeline():
     report = _default_report()
-    with patch(
-        "cognee.modules.run_custom_pipeline.run_custom_pipeline.run_custom_pipeline",
+    with patch.object(
+        run_custom_pipeline_module,
+        "run_custom_pipeline",
         new=AsyncMock(return_value="pipeline-info"),
     ) as pipeline_mock:
         result = await apply_presort_graph(report)
