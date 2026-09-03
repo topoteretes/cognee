@@ -127,7 +127,19 @@ async def main():
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 2 and len(edges) == 1, "Nodes and edges are not deleted properly."
 
-    await datasets.delete_data(dataset.id, data2.id, user2)
+    # Regression for #4829: the dataset_database row is keyed by dataset_id alone,
+    # so an ACL-granted non-owner must get the owner's existing row back instead
+    # of a false negative that crashes on a duplicate INSERT.
+    from cognee.infrastructure.databases.utils import get_or_create_dataset_database
+
+    dataset_database = await get_or_create_dataset_database(dataset.id, user2)
+    assert dataset_database.owner_id == user1.id, (
+        "get_or_create_dataset_database must return the owner's existing row for a grantee."
+    )
+
+    # Regression for #4829: forget() as an ACL-granted non-owner must work end-to-end
+    # (it used to crash provisioning a duplicate dataset_database row on context entry).
+    await cognee.forget(data_id=data2.id, dataset_id=dataset.id, user=user2)
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."
