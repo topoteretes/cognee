@@ -332,6 +332,9 @@ class RedisAdapter(CacheDBInterface):
         SQL/FS adapters and the declared return type; the last_n=1 fast path must
         not leak None).
         """
+        if last_n <= 0:
+            return []
+
         session_key = self._session_key(user_id, session_id)
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
@@ -578,6 +581,8 @@ class RedisAdapter(CacheDBInterface):
         """Retrieve stored trace steps for the given session."""
         trace_key = self._agent_trace_key(user_id, session_id)
         if last_n is not None:
+            if last_n <= 0:
+                return []
             return [
                 SessionAgentTraceEntry(**entry)
                 for entry in await self._load_entries(trace_key, -last_n, -1)
