@@ -1,7 +1,7 @@
 """Add agent_id to session_records for agent-to-search attribution
 
 Revision ID: a7c2e9f4b8d1
-Revises: f3a7b9c1d2e4
+Revises: 1c22e6cb5aec
 Create Date: 2026-09-03
 
 SessionRecord gained a nullable, indexed ``agent_id`` column
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c2e9f4b8d1"
-down_revision: Union[str, None] = "f3a7b9c1d2e4"
+down_revision: Union[str, None] = "1c22e6cb5aec"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
