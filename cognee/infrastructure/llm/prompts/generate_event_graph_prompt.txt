@@ -1,28 +1,32 @@
-For the purposes of building event-based knowledge graphs, you are tasked with extracting highly granular stream events from a text. The events are defined as follows:
-## Event Definition
-- Anything with a date or a timestamp is an event
-- Anything that took place in time (even if the time is unknown) is an event
-- Anything that lasted over a period of time, or happened in an instant is an event: from historical milestones (wars, presidencies, olympiads) to personal milestones (birth, death, employment, etc.), to mundane actions (a walk, a conversation, etc.)
-- **ANY action or verb represents an event** - this is the most important rule
-- Every single verb in the text corresponds to an event that must be extracted
-- This includes: thinking, feeling, seeing, hearing, moving, speaking, writing, reading, eating, sleeping, working, playing, studying, traveling, meeting, calling, texting, buying, selling, creating, destroying, building, breaking, starting, stopping, beginning, ending, etc.
-- Even the most mundane or obvious actions are events: "he walked", "she sat", "they talked", "I thought", "we waited"
+You are building the timeline layer of a knowledge graph. Extract the events from the text: things that happened, with when they happened whenever the text says so.
+
+## What counts as an event
+- Anything the text dates or places in time: a birth, a death, an appointment, a move, a release, a war, a match, a publication, an award, a merger.
+- Anything that lasted over a period: an employment, a presidency, a marriage, an imprisonment, a membership, a project phase. Use time_from and time_to for these.
+- Undated events only when they matter to the story (a decisive action, a turning point). Skip filler actions such as "he walked", "she said", "they waited" unless the text gives them a time.
+
 ## Requirements
-- **Be extremely thorough** - extract EVERY event mentioned, no matter how small or obvious
-- **Timestamped first" - every time stamp, or date should have atleast one event
-- **Verbs/actions  = one event** - After you are done with timestamped events -- every verb that is an action should have a corresponding event.
-- We expect long streams of events from any piece of text, easily reaching a hundred events
-- Granularity and richness of the stream is key to our success and is of utmost importance
-- Not all events will have timestamps, add timestamps only to known events
-- For events that were instantaneous, just attach the time_from or time_to property don't create both
-- **Do not skip any events** - if you're unsure whether something is an event, extract it anyway
-- **Quantity over filtering** - it's better to extract too many events than to miss any
-- **Descriptions** - Always include the event description together with entities (Who did what, what happened? What is the event?). If you can include the corresponding part from the text.
-## Output Format
-Your reply should be a JSON: list of dictionaries with the following structure:
+- **Dated first.** Every date, year or period in the text must appear on at least one event. Do not drop a date because the sentence is mundane.
+- **One event per occurrence.** "He coached A in 2001 and B in 2006" is two events.
+- **Instants use one bound.** For something that happened at a moment, set only time_from. Use both bounds only for something that lasted.
+- **Never invent precision.** If the text gives only a year, set year and leave month/day at their defaults and set precision to "year". "March 1996" is precision "month"; "5 March 1996" is precision "day". Do not guess a month or day.
+- **Descriptions carry the facts.** Say who did what, to whom, where, and quote the relevant fragment of the text when it helps. Name the people and organizations involved in the description, using the names as the text writes them, so the event can be linked to them.
+- **No duplicates.** If the same occurrence is described twice, extract it once.
+
+## Output format
+Your reply is a JSON object with an `events` list; each event has this structure:
 ```python
+class Timestamp(BaseModel):
+    year: int                      # always required
+    month: int = 1                 # default when unknown
+    day: int = 1                   # default when unknown
+    hour: int = 0
+    minute: int = 0
+    second: int = 0
+    precision: Optional[str] = None  # "year" | "month" | "day" | "hour" | "minute" | "second"
+
 class Event(BaseModel):
-    name: str [concise]
+    name: str                      # concise, specific: "Attaphol joins Buriram United as coach"
     description: Optional[str] = None
     time_from: Optional[Timestamp] = None
     time_to: Optional[Timestamp] = None

@@ -36,7 +36,6 @@ from cognee.tasks.provenance import record_provenance
 from cognee.tasks.graph.resolve_temporal_contradictions import resolve_temporal_contradictions
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
@@ -190,6 +189,13 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
+        temporal_cognify: If True, add a timeline to the graph: alongside entity extraction
+                      and summarization, an LLM extracts dated Events (with Timestamp /
+                      Interval nodes) from every chunk and each event is linked to the
+                      entities of its chunk that it mentions. Everything the standard
+                      pipeline does — summaries, ontology grounding, contradiction
+                      detection, provenance — still runs. Costs one extra LLM call per
+                      chunk. Query the timeline with SearchType.TEMPORAL.
         functional_relationships: Relationship names that hold a single target per source
                       (e.g. {"ceo_of"}). Once the graph is written, conflicting assertions
                       of those relationships are resolved by recency: the most recent one
@@ -210,8 +216,8 @@ async def cognify(
                  Applies to standard-routed items only, exactly like graph_model - DLT-source
                  manifests and code files run their own task lists and ignore both.
                  Orthogonal to metadata["transparent"], which is a property of the model.
-                 SDK-only: not exposed over the REST API. Raises with temporal_cognify=True
-                 or while connected to a remote instance; permitted with dry_run=True.
+                 SDK-only: not exposed over the REST API. Raises while connected to a
+                 remote instance; permitted with dry_run=True and temporal_cognify=True.
                  Cost of "all": index_graph_edges embeds one EdgeType per distinct edge text,
                  and contains edge text is "<chunk label> contains <node label>." - so a model
                  yielding N nodes per chunk means roughly N extra embedded rows per chunk.
@@ -303,11 +309,6 @@ async def cognify(
                 "chunk_attachment requires a custom DataPoint graph_model; "
                 f"{getattr(graph_model, '__name__', graph_model)!r} is not a DataPoint subclass."
             )
-        if temporal_cognify:
-            raise ValueError(
-                "chunk_attachment is not supported with temporal_cognify=True; the temporal "
-                "pipeline does not attach extracted graphs to chunks."
-            )
 
     # Route to remote instance if connected via serve()
     from cognee.api.v1.serve.state import get_remote_client
@@ -357,8 +358,6 @@ async def cognify(
         }
 
         if dry_run:
-            if temporal_cognify:
-                raise ValueError("dry_run is supported for the default cognify pipeline only.")
             from cognee.modules.cognify.estimator import estimate_cognify_dry_run
 
             return await estimate_cognify_dry_run(
@@ -368,28 +367,22 @@ async def cognify(
                 chunker=chunker,
                 chunk_size=chunk_size or await get_max_chunk_tokens(),
                 custom_prompt=custom_prompt,
+                temporal_cognify=temporal_cognify,
             )
 
-        if temporal_cognify:
-            tasks = await get_temporal_tasks(
-                user=user,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                chunks_per_batch=chunks_per_batch,
-            )
-        else:
-            tasks = await get_default_tasks(
-                user=user,
-                graph_model=graph_model,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                config=config,
-                custom_prompt=custom_prompt,
-                chunks_per_batch=chunks_per_batch,
-                functional_relationships=functional_relationships,
-                chunk_attachment=chunk_attachment,
-                **kwargs,
-            )
+        tasks = await get_default_tasks(
+            user=user,
+            graph_model=graph_model,
+            chunker=chunker,
+            chunk_size=chunk_size,
+            config=config,
+            custom_prompt=custom_prompt,
+            chunks_per_batch=chunks_per_batch,
+            functional_relationships=functional_relationships,
+            chunk_attachment=chunk_attachment,
+            temporal_cognify=temporal_cognify,
+            **kwargs,
+        )
 
         # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -397,7 +390,7 @@ async def cognify(
         # Per-item routing: each data item resolves to the task list its kind
         # requires — DLT-source manifests run the deterministic DLT list, code
         # files run the enola code graph list, everything else runs the
-        # standard (or temporal) list. The lists are built once up front and
+        # standard list (with the temporal lane when temporal_cognify is set). The lists are built once up front and
         # the resolver is a sync closure over them (the distributed runner
         # materializes per-item task columns, so it needs concrete lists, not
         # an async factory). One run_pipeline call, one cognify_pipeline run
@@ -483,12 +476,14 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int = None,
     functional_relationships: Optional[Collection[str]] = None,
     chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    temporal_cognify: bool = False,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
     check_contradictions = cognify_config.contradiction_detection
     track_provenance = cognify_config.provenance_tracking
+    llm_event_entities = temporal_cognify and cognify_config.temporal_llm_event_entities
 
     if chunks_per_batch is None:
         chunks_per_batch = (
@@ -506,14 +501,30 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         ),
         # COGNIFY: LLM-extract entities and relationships into a knowledge graph
         # COGNIFY: LLM-summarize each chunk for retrieval
+        # COGNIFY (temporal_cognify): LLM-extract dated events in a third concurrent
+        # lane and link them to the chunk's entities — a timeline layered on the
+        # graph, not a replacement for it.
         Task(
             extract_graph_and_summarize,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
             chunk_attachment=chunk_attachment,
+            extract_events=temporal_cognify,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
+        ),
+        # COGNIFY (opt-in, temporal only): one more LLM pass naming the entities each
+        # event involves and their roles. Default OFF (TEMPORAL_LLM_EVENT_ENTITIES).
+        *(
+            [
+                Task(
+                    extract_knowledge_graph_from_events,
+                    task_config={"batch_size": chunks_per_batch},
+                )
+            ]
+            if llm_event_entities
+            else []
         ),
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
@@ -601,49 +612,3 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
         # source), so these Task objects are safe to share across datasets.
         Task(extract_dlt_source_edges),
     ]
-
-
-async def get_temporal_tasks(
-    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = None
-) -> list[Task]:
-    """
-    Builds and returns a list of temporal processing tasks to be executed in sequence.
-
-    The pipeline includes:
-    1. Document classification.
-    2. Document chunking with a specified or default chunk size.
-    3. Event and timestamp extraction from chunks.
-    4. Knowledge graph extraction from events.
-    5. Batched insertion of data points.
-
-    Args:
-        user (User, optional): The user requesting task execution.
-        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
-        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
-        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
-
-    Returns:
-        list[Task]: A list of Task objects representing the temporal processing pipeline.
-    """
-    if chunks_per_batch is None:
-        configured = get_cognify_config().chunks_per_batch
-        chunks_per_batch = configured if configured is not None else 10
-
-    temporal_tasks = [
-        # EXTRACT: classify raw Data items into typed Document objects
-        Task(classify_documents),
-        # EXTRACT: split Documents into semantic text chunks
-        Task(
-            extract_chunks_from_documents,
-            max_chunk_size=chunk_size or await get_max_chunk_tokens(),
-            chunker=chunker,
-        ),
-        # COGNIFY: extract temporal events and timestamps from chunks
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
-        # COGNIFY: build knowledge graph from extracted events
-        Task(extract_knowledge_graph_from_events),
-        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
-    ]
-
-    return temporal_tasks

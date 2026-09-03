@@ -1,5 +1,6 @@
 from cognee.modules.engine.models import Interval, Event
 from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_timestamp_datapoint
+from cognee.tasks.temporal_graph.time_precision import expand_to_period_end
 
 
 def generate_event_datapoint(event) -> Event:
@@ -26,9 +27,16 @@ def generate_event_datapoint(event) -> Event:
         "location": event.location,
     }
 
-    # Create timestamps if they exist
+    # Create timestamps if they exist. An interval's end is widened to the end of the
+    # unit the text stated ("1994 to 1996" lasts through 1996-12-31, not until its
+    # first second); a lone timestamp keeps the instant the text gave.
     time_from = generate_timestamp_datapoint(event.time_from) if event.time_from else None
-    time_to = generate_timestamp_datapoint(event.time_to) if event.time_to else None
+    if event.time_from and event.time_to:
+        time_to = generate_timestamp_datapoint(expand_to_period_end(event.time_to))
+    elif event.time_to:
+        time_to = generate_timestamp_datapoint(event.time_to)
+    else:
+        time_to = None
 
     # Add temporal information
     if time_from and time_to:

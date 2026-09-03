@@ -169,21 +169,24 @@ class TestCognifyMakesOneCall:
                 resolver(_text_item())
 
     @pytest.mark.asyncio
-    async def test_temporal_swaps_standard_route_only(self):
-        """temporal_cognify replaces the fallback list; manifests still route DLT."""
+    async def test_temporal_is_a_flag_on_the_standard_route(self):
+        """temporal_cognify layers onto the standard list (SDK-80); manifests still route DLT."""
         calls = []
+        default_task_kwargs = {}
 
         async def _fake_executor(**kwargs):
             calls.append(kwargs)
             return {}
 
+        async def _fake_default_tasks(**kwargs):
+            default_task_kwargs.update(kwargs)
+            return "STANDARD_TASKS"
+
         with (
             patch.object(
                 cognify_module, "get_pipeline_executor", lambda run_in_background: _fake_executor
             ),
-            patch.object(
-                cognify_module, "get_temporal_tasks", new=AsyncMock(return_value="TEMPORAL_TASKS")
-            ),
+            patch.object(cognify_module, "get_default_tasks", new=_fake_default_tasks),
             patch.object(cognify_module, "get_dlt_tasks", new=AsyncMock(return_value="DLT_TASKS")),
             patch.object(
                 cognify_module, "get_code_file_tasks", new=MagicMock(return_value="CODE_TASKS")
@@ -201,7 +204,8 @@ class TestCognifyMakesOneCall:
 
         (call,) = calls
         resolver = call["tasks"]
-        assert resolver(_text_item()) == "TEMPORAL_TASKS"
+        assert default_task_kwargs["temporal_cognify"] is True
+        assert resolver(_text_item()) == "STANDARD_TASKS"
         assert resolver(_manifest_item()) == "DLT_TASKS"
         assert resolver(_code_item()) == "CODE_TASKS"
 

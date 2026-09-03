@@ -1,5 +1,4 @@
 import os
-import calendar
 from typing import Any, Dict, List, Optional, Tuple, Type
 from datetime import datetime, timezone
 
@@ -11,62 +10,12 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
 
-from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
+from cognee.tasks.temporal_graph.models import QueryInterval
+from cognee.tasks.temporal_graph.time_precision import expand_to_period_end
 
 logger = get_logger()
 
-# Precision ladder used to widen an upper bound to the end of the unit the user gave.
-_PRECISION_ORDER = ("year", "month", "day", "hour", "minute", "second")
-
-
-def _infer_precision(ts: Timestamp) -> str:
-    """Return the explicit ``precision`` or infer it from the default-valued fields.
-
-    The extraction model defaults month/day to 1 and the clock to 0, so a bare year
-    arrives as Jan 1 00:00:00. Without an explicit ``precision`` that is the only
-    signal we have; a genuine "January 1st" query is treated as a year, which widens
-    the window rather than narrowing it.
-    """
-    if ts.precision:
-        return ts.precision
-    if ts.second:
-        return "second"
-    if ts.minute:
-        return "minute"
-    if ts.hour:
-        return "hour"
-    if ts.day != 1:
-        return "day"
-    if ts.month != 1:
-        return "month"
-    return "year"
-
-
-def expand_to_period_end(ts: Optional[Timestamp]) -> Optional[Timestamp]:
-    """Widen an upper bound to the last second of the unit it was stated in.
-
-    "before 1996" / "between 1994 and 1996" / "in 1996" all end at 1996-12-31 23:59:59
-    instead of 1996-01-01 00:00:00, so events later in that year are not excluded.
-    """
-    if ts is None:
-        return None
-
-    precision = _infer_precision(ts)
-    values = ts.model_dump()
-    values["precision"] = precision
-
-    if precision == "year":
-        values.update(month=12, day=31, hour=23, minute=59, second=59)
-    elif precision == "month":
-        values.update(day=calendar.monthrange(ts.year, ts.month)[1], hour=23, minute=59, second=59)
-    elif precision == "day":
-        values.update(hour=23, minute=59, second=59)
-    elif precision == "hour":
-        values.update(minute=59, second=59)
-    elif precision == "minute":
-        values.update(second=59)
-
-    return Timestamp(**values)
+__all__ = ["TemporalRetriever", "expand_to_period_end"]
 
 
 def _event_time_key(event: Dict[str, Any]) -> Tuple[int, int]:

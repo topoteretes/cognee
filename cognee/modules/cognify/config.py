@@ -18,6 +18,11 @@ class CognifyConfig(BaseSettings):
     # Opt-in audit-grade provenance ledger (env: PROVENANCE_TRACKING). Default
     # OFF so the standard cognify pipeline is unchanged.
     provenance_tracking: bool = False
+    # Opt-in LLM pass that names the entities each temporal event involves and how
+    # (env: TEMPORAL_LLM_EVENT_ENTITIES). Default OFF: with temporal_cognify=True the
+    # events are linked deterministically to the entities the standard extraction
+    # already produced; this adds one more LLM call per batch for richer roles.
+    temporal_llm_event_entities: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
@@ -30,6 +35,7 @@ class CognifyConfig(BaseSettings):
             "contradiction_confidence_threshold": self.contradiction_confidence_threshold,
             "contradiction_max_facts": self.contradiction_max_facts,
             "provenance_tracking": self.provenance_tracking,
+            "temporal_llm_event_entities": self.temporal_llm_event_entities,
         }
 
 

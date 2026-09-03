@@ -397,3 +397,38 @@ async def test_estimate_remember_dry_run_uses_chunker_without_llm_calls(offline_
     assert estimate.chunks == 1
     assert estimate.input_tokens > 0
     assert estimate.total_tokens == estimate.input_tokens + estimate.output_tokens
+
+
+def test_estimate_chunks_adds_temporal_stage_when_requested(offline_estimator, monkeypatch):
+    """temporal_cognify costs one extra LLM call per chunk; the estimate must show it (SDK-80)."""
+    monkeypatch.setattr(
+        estimator,
+        "get_llm_config",
+        lambda: SimpleNamespace(
+            llm_model="gpt-4o-mini",
+            graph_prompt_path="unused.txt",
+            temporal_graph_prompt_path="generate_event_graph_prompt.txt",
+        ),
+    )
+    monkeypatch.setattr(
+        estimator,
+        "estimate_cost_usd",
+        lambda model, tokens_in, tokens_out: (tokens_in + tokens_out) / 1_000_000,
+    )
+    chunks = [SimpleNamespace(text="alpha beta gamma"), SimpleNamespace(text="delta epsilon")]
+
+    plain = estimator.estimate_chunks(chunks, operation="cognify", graph_model=_TinyGraph)
+    temporal = estimator.estimate_chunks(
+        chunks, operation="cognify", graph_model=_TinyGraph, temporal_cognify=True
+    )
+
+    assert [stage["name"] for stage in temporal.to_dict()["stages"]] == [
+        "structured_graph_extraction",
+        "chunk_summarization",
+        "temporal_event_extraction",
+    ]
+    event_stage = temporal.to_dict()["stages"][-1]
+    assert event_stage["calls"] == 2
+    assert event_stage["input_tokens"] > plain.to_dict()["chunk_tokens"]
+    assert temporal.to_dict()["estimated_cost_usd"] > plain.to_dict()["estimated_cost_usd"]
+    assert len(plain.to_dict()["stages"]) == 2
