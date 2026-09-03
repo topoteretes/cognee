@@ -545,7 +545,12 @@ async def incremental_update(
         raise IncrementalUpdateNotPossible(
             f"data {data_id} is not part of dataset {dataset_id}", RefusalReason.NO_BASELINE
         )
-    old_data = await get_data(user.id, data_id, dataset.id)  # raises on foreign data
+    # Dataset membership above is the access rule, not Data.owner_id: a
+    # collaborator holding the dataset's write+delete ACL may update a row the
+    # dataset owner ingested. datasets.delete_data authorizes exactly that way,
+    # and the full fallback reaches this same row through it — checking row
+    # ownership here would deny on the fast branch what the slow branch allows.
+    old_data = await get_data(user.id, data_id, dataset.id, verify_owner=False)
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible(
             "no stored processed text for this data item", RefusalReason.NO_BASELINE
@@ -557,7 +562,11 @@ async def incremental_update(
     # database context — with backend access control on, graph/vector engines
     # resolve per user+dataset, and a fresh API request arrives without it.
     async with dataset_lock(dataset.id):
-        async with set_database_global_context_variables(dataset.id, user.id):
+        # Resolve the dataset's databases as the DATASET OWNER, matching
+        # run_tasks and datasets.delete_data. Passing the caller would send a
+        # collaborator's update to a different per-user store than the one
+        # cognify and delete use for this dataset.
+        async with set_database_global_context_variables(dataset.id, dataset.owner_id):
             graph_engine = await get_graph_engine()
             vector_engine = await get_vector_engine_async()
             if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
@@ -693,7 +702,7 @@ async def _stage_and_plan(
     # Re-fetch the row INSIDE the lock: a concurrent update that just finished
     # has moved raw_data_location to a new processed file, and diffing against
     # the pre-lock snapshot would use a stale baseline.
-    old_data = await get_data(user.id, data_id, dataset_id)
+    old_data = await get_data(user.id, data_id, dataset_id, verify_owner=False)
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible(
             "data row disappeared before the update ran", RefusalReason.NO_BASELINE

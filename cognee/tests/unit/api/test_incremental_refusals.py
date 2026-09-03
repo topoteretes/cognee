@@ -254,7 +254,7 @@ async def test_unmarked_graph_refuses_before_incremental_work(monkeypatch):
         return _Adapter()
 
     async def _authorize(_user, _dataset_id, _permission):
-        return SimpleNamespace(id=dataset_id)
+        return SimpleNamespace(id=dataset_id, owner_id=uuid4())
 
     monkeypatch.setattr(incremental, "get_graph_engine", _get_graph_engine)
     monkeypatch.setattr(incremental, "get_vector_engine_async", AsyncMock(return_value=_Vector()))
@@ -465,6 +465,73 @@ async def test_write_without_delete_permission_is_denied(monkeypatch):
         await incremental_update(uuid4(), "text", uuid4(), user=SimpleNamespace(id=uuid4()))
 
     assert "delete" in granted, "the delete permission was never checked"
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_collaborator_may_update_a_row_they_do_not_own(monkeypatch):
+    """Dataset permissions authorize this path, not Data.owner_id.
+
+    datasets.delete_data lets a collaborator holding the dataset ACL delete a
+    row the dataset owner ingested, and the full fallback reaches the row
+    through it. Rejecting the same caller here made the permission update()
+    demanded depend on which branch it took — and the incremental branch, the
+    default one, was the stricter.
+    """
+    import cognee.api.v1.update.incremental as incremental
+
+    data_id, dataset_id, owner_id = uuid4(), uuid4(), uuid4()
+    collaborator = SimpleNamespace(id=uuid4())
+
+    class _Context:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class _Adapter:
+        supports_incremental_chunk_updates = True
+
+    class _Vector:
+        supports_payload_update = True
+
+    seen_owner = {}
+
+    def _context(_dataset_id, user_id):
+        seen_owner["user_id"] = user_id
+        return _Context()
+
+    monkeypatch.setattr(incremental, "get_graph_engine", AsyncMock(return_value=_Adapter()))
+    monkeypatch.setattr(incremental, "get_vector_engine_async", AsyncMock(return_value=_Vector()))
+    monkeypatch.setattr(
+        incremental,
+        "get_authorized_dataset",
+        AsyncMock(return_value=SimpleNamespace(id=dataset_id, owner_id=owner_id)),
+    )
+    monkeypatch.setattr(
+        incremental, "get_dataset_data", AsyncMock(return_value=[SimpleNamespace(id=data_id)])
+    )
+    # The row belongs to the dataset owner, not the caller.
+    get_data = AsyncMock(
+        return_value=SimpleNamespace(id=data_id, owner_id=owner_id, raw_data_location="old.txt")
+    )
+    monkeypatch.setattr(incremental, "get_data", get_data)
+    monkeypatch.setattr(incremental, "dataset_lock", lambda _dataset_id: _Context())
+    monkeypatch.setattr(incremental, "set_database_global_context_variables", _context)
+    monkeypatch.setattr(incremental, "stores_provenance_in_graph", AsyncMock(return_value=True))
+    run_incremental = AsyncMock(return_value={"status": "updated"})
+    monkeypatch.setattr(incremental, "_run_incremental_update", run_incremental)
+
+    result = await incremental_update(data_id, "replacement", dataset_id, user=collaborator)
+
+    assert result == {"status": "updated"}
+    run_incremental.assert_awaited()
+    assert get_data.await_args.kwargs["verify_owner"] is False, (
+        "row ownership must not gate a caller the dataset ACL already authorized"
+    )
+    assert seen_owner["user_id"] == owner_id, (
+        "the dataset's databases resolve by dataset owner, as in run_tasks and delete_data"
+    )
 
 
 @pytest.mark.asyncio
