@@ -134,13 +134,19 @@ def fresh_enabled_queue():
 
 
 @pytest.mark.asyncio
-async def test_lock_after_slot_on_same_dataset_raises(fresh_enabled_queue):
-    """Slot -> lock on the same dataset is the SDK-483 deadlock; it must raise."""
+async def test_lock_after_slot_on_same_dataset_logs_and_proceeds(fresh_enabled_queue, caplog):
+    """Slot -> lock on the same dataset is the SDK-483 shape: logged, never raised.
+
+    The deprecated `await set_database_global_context_variables(...)` form holds
+    a task-lifetime slot by design, so this path must keep working for it.
+    """
     dataset_id = uuid4()
     await fresh_enabled_queue.ensure_slot(dataset_id)
     try:
-        with pytest.raises(RuntimeError, match="Lock-order inversion"):
-            await get_dataset_lock(dataset_id)
+        with caplog.at_level("ERROR", logger="dataset_lock"):
+            lock = await get_dataset_lock(dataset_id)
+        assert isinstance(lock, asyncio.Lock)
+        assert any("Lock-order inversion" in record.getMessage() for record in caplog.records)
     finally:
         await fresh_enabled_queue.release_slot_for(dataset_id)
 
