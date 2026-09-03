@@ -9,9 +9,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import importlib
+
 from cognee.modules.migration.cogx import COGXEntity, COGXFact, COGXRawNode
 from cognee.modules.migration.loader import store_imported_graph, stream_graph_from_source
 from cognee.modules.migration.sources.base import MemorySource
+
+# Bind the module object itself: the storage package's __init__ re-exports the
+# add_data_points *function* under the same name, shadowing the module as a
+# package attribute. Both mock.patch string targets (getattr walk on Python
+# 3.10) and ``import ... as`` (parent-attribute binding) resolve to that
+# function, so use importlib, which always returns the module from sys.modules.
+add_data_points_module = importlib.import_module("cognee.tasks.storage.add_data_points")
 
 
 class _StubSource(MemorySource):
@@ -46,7 +55,7 @@ async def test_stream_graph_from_source_threads_graph_only(graph_only):
     add_mock = AsyncMock(return_value=[])
     stats = {"graph_nodes": 0, "graph_edges": 0, "skipped_facts": 0, "deduped_edges": 0}
 
-    with patch("cognee.tasks.storage.add_data_points.add_data_points", add_mock):
+    with patch.object(add_data_points_module, "add_data_points", add_mock):
         await stream_graph_from_source(_StubSource(_sample_records()), stats, graph_only=graph_only)
 
     assert add_mock.await_count >= 1
@@ -63,7 +72,7 @@ async def test_store_imported_graph_threads_graph_only(graph_only):
     add_mock = AsyncMock(return_value=[])
     batch = {"nodes": [], "edges": []}
 
-    with patch("cognee.tasks.storage.add_data_points.add_data_points", add_mock):
+    with patch.object(add_data_points_module, "add_data_points", add_mock):
         await store_imported_graph([batch], graph_only=graph_only)
 
     assert add_mock.await_count == 1
