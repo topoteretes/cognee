@@ -9,6 +9,37 @@ from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
 from cognee.infrastructure.llm import LLMGateway
 
 
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls():
+    """Keep every test in this file off the network.
+
+    ``extract_time_from_query`` asks the gateway for a ``QueryInterval``.
+    Several tests here only patch the final ``generate_completion`` and let
+    that call escape to the real provider. In the full suite an earlier test
+    happened to leave a patched gateway behind; once the suite was sharded
+    the call went out for real, hit the provider's error, and was retried
+    under the 240-second floor until pytest-timeout killed it (300s per test,
+    on macOS and Windows where the accidental polluter is skipped). Patched
+    by object, not by dotted string: the LLMGateway class shadows its module,
+    so a string target lands on the class on Python 3.10.
+    """
+
+    async def _structured(text_input, system_prompt, response_model=str, **_):
+        # Honour the requested model: str prompts get a string, pydantic
+        # models get an unvalidated instance so isinstance checks hold.
+        if response_model is str or response_model is None:
+            return QueryInterval()
+        try:
+            return response_model.model_construct()
+        except Exception:
+            return QueryInterval()
+
+    with patch.object(
+        LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=_structured)
+    ):
+        yield
+
+
 # Test TemporalRetriever initialization defaults and overrides
 def test_init_defaults_and_overrides():
     tr = TemporalRetriever()
@@ -442,11 +473,24 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
 
 
 @pytest.mark.asyncio
-async def test_get_completion_with_provided_context():
+async def test_get_completion_with_provided_context(mock_graph_engine, mock_vector_engine):
     """Test get_completion uses provided context."""
     retriever = TemporalRetriever()
+    # The retrieval calls before get_completion_from_context are incidental
+    # to this test; without these two patches they ran a real vector search
+    # (a real embedding call) once nothing earlier in the process had
+    # patched the engine for them.
+    mock_vector_engine.search.return_value = []
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
 
     with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
             new_callable=AsyncMock,
