@@ -13,6 +13,7 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     construct_data_points_and_edges_with_ontology,
 )
+from cognee.infrastructure.databases.provenance import EdgeIdentity
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
@@ -157,9 +158,19 @@ async def integrate_chunk_graphs(
             ontology_mode=ontology_mode,
         )
 
+    # What each chunk's own extraction yielded, recorded during construction —
+    # the same record chunk ownership is derived from. These relationships get
+    # chunk-scoped refs from add_data_points, so the document-scoped attach
+    # below must skip them or they gain an owner no chunk deletion can retire.
+    chunk_owned_identities = {
+        EdgeIdentity(*identity)
+        for chunk in data_chunks
+        for identity in getattr(chunk, "_produced_edge_identities", ())
+    }
     existing_edge_identities = await find_existing_edge_identities(
         edges_by_identity.keys(),
         ctx=ctx,
+        chunk_owned=chunk_owned_identities,
     )
     attach_new_edges_to_data_points(
         data_points_by_id,
