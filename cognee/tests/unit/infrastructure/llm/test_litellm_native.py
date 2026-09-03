@@ -586,3 +586,90 @@ class TestStripJsonFence:
 
         raw = '```json\n{"summary": "a summary", "description": ""}\n```'
         assert SummarizedContent.model_validate_json(self._strip(raw)).summary == "a summary"
+
+
+# ---- max_completion_tokens actually reaching litellm (SDK-538) ----
+
+
+def _call_kwargs(mock_acompletion):
+    return mock_acompletion.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_stored_cap_reaches_litellm_on_schema_path():
+    """The constructor-stored cap must be sent — unsent, a reasoning model
+    bills unbounded reasoning output (the CLO-679 COGS gap)."""
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="openai/gpt-5-mini", max_completion_tokens=4096
+    )
+    mock = AsyncMock(return_value=_make_mock_response(json.dumps({"name": "A", "age": 1})))
+    with patch("litellm.acompletion", mock):
+        await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=PersonModel
+        )
+    assert _call_kwargs(mock)["max_completion_tokens"] == 4096
+
+
+@pytest.mark.asyncio
+async def test_stored_cap_reaches_litellm_on_plain_str_path():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="openai/gpt-5-mini", max_completion_tokens=4096
+    )
+    mock = AsyncMock(return_value=_make_mock_response("plain text"))
+    with patch("litellm.acompletion", mock):
+        await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=str
+        )
+    assert _call_kwargs(mock)["max_completion_tokens"] == 4096
+
+
+@pytest.mark.asyncio
+async def test_no_injection_when_llm_args_cap_via_max_tokens():
+    """Cloud charts cap via LLM_ARGS max_tokens; sending both aliases is an API
+    error on some providers, so the stored cap must stand down."""
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",
+        max_completion_tokens=4096,
+        llm_args={"max_tokens": 24000},
+    )
+    mock = AsyncMock(return_value=_make_mock_response(json.dumps({"name": "A", "age": 1})))
+    with patch("litellm.acompletion", mock):
+        await adapter.acreate_structured_output(
+            text_input="x", system_prompt="y", response_model=PersonModel
+        )
+    kwargs = _call_kwargs(mock)
+    assert "max_completion_tokens" not in kwargs
+    assert kwargs["max_tokens"] == 24000
+
+
+@pytest.mark.asyncio
+async def test_explicit_call_kwarg_beats_stored_cap():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    adapter = NativeLiteLLMAdapter(
+        api_key="test-key", model="openai/gpt-5-mini", max_completion_tokens=4096
+    )
+    mock = AsyncMock(return_value=_make_mock_response(json.dumps({"name": "A", "age": 1})))
+    with patch("litellm.acompletion", mock):
+        await adapter.acreate_structured_output(
+            text_input="x",
+            system_prompt="y",
+            response_model=PersonModel,
+            max_completion_tokens=99,
+        )
+    assert _call_kwargs(mock)["max_completion_tokens"] == 99
