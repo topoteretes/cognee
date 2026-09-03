@@ -1347,9 +1347,6 @@ gmail = [
     { name = "google-auth-oauthlib" },
     { name = "pandas" },
 ]
-graphiti = [
-    { name = "graphiti-core" },
-]
 groq = [
     { name = "groq" },
 ]
@@ -1471,7 +1468,6 @@ requires-dist = [
     { name = "google-api-python-client", marker = "extra == 'gmail'", specifier = ">=2.100.0,<3" },
     { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.23.0,<3" },
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'", specifier = ">=1.1.0,<2" },
-    { name = "graphiti-core", marker = "extra == 'graphiti'", specifier = ">=0.28.0" },
     { name = "groq", marker = "extra == 'groq'", specifier = ">=0.8.0,<1.0.0" },
     { name = "gunicorn", specifier = ">=20.1.0,<24" },
     { name = "instructor", specifier = ">=1.9.1,<1.15.3" },
@@ -1565,7 +1561,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "gmail", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "rapidocr"]
+provides-extras = ["api", "scraping", "fastembed", "neo4j", "neptune", "postgres", "postgres-binary", "turso", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "azure", "deepeval", "posthog", "groq", "llama-cpp", "docs", "codegraph", "evals", "aws", "dlt", "gmail", "baml", "dev", "debug", "redis", "tracing", "docling", "docling-full", "rapidocr"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3425,25 +3421,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b5/c8/f439cffde755cffa462bfbb156278fa6f9d09119719af9814b858fd4f81f/googleapis_common_protos-1.75.0.tar.gz", hash = "sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd", size = 151035, upload-time = "2026-05-07T08:04:49.423Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/c8/e2645aa8ed02fd4c7a2f59d68783b65b1f3cbdfe39a6308e156509d1fee8/googleapis_common_protos-1.75.0-py3-none-any.whl", hash = "sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed", size = 300631, upload-time = "2026-05-07T08:03:30.345Z" },
-]
-
-[[package]]
-name = "graphiti-core"
-version = "0.29.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "neo4j" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "openai" },
-    { name = "posthog" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "tenacity" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/3a/a59990224ec20d054f1597050298a112982c638b755c9b77a7cdb2b572fc/graphiti_core-0.29.2.tar.gz", hash = "sha256:dd746a2546abfe5ff9025f088f4793a027bce949e044762cb2ea3ec8f1db8e63", size = 6944531, upload-time = "2026-06-08T14:26:07.717Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/c0/cc379ce0e6c54c2224886962ff78b3de9983a3f66dd27708f840d2681847/graphiti_core-0.29.2-py3-none-any.whl", hash = "sha256:536780d1dd5d2e16f50fcc75b29bc1c2f2a53e5d651fb49482c43b7d8c2841d5", size = 357991, upload-time = "2026-06-08T14:26:05.532Z" },
 ]
 
 [[package]]
