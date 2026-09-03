@@ -129,6 +129,13 @@ def fresh_enabled_queue():
     with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
         mock_settings.return_value.enabled = True
         mock_settings.return_value.max_concurrent = 2
+        # An unset MagicMock attribute floats to 1.0, which would give the queue
+        # a 1-second idle TTL — release_slot_for below would then start a REAL
+        # reaper daemon that force-closes every subprocess engine idle >1s for
+        # the rest of the pytest process (the "LanceDBAdapter is closed" flake
+        # in unrelated tests). 0 keeps the release path reaper-free, same as
+        # TestReleaseSlotFor.
+        mock_settings.return_value.idle_ttl_seconds = 0
         yield dataset_queue()
     dataset_queue._instance = None
 
