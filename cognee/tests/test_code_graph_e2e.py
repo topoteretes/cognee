@@ -51,7 +51,10 @@ REMEMBER_DATASET = "code_graph_e2e_remember"
 COGNIFY_DATASET = "code_graph_e2e_cognify"
 
 # --- Known answers, pinned to the fixture + ENOLA_PINNED_VERSION ------------
-# If enola is bumped and these change, update them deliberately.
+# If enola is bumped and these change, update them deliberately. Last
+# re-verified against enola 0.4.12 (which additionally emits the README as
+# document/section symbols, an `extraction` coverage fact, and the
+# pyproject's declared package as `pkg:pypi/requests`).
 
 EXPECTED_MODULES = {".", "inventory"}
 
@@ -163,6 +166,15 @@ def _assert_typed_code_graph(nodes: dict, edges: list, repo_name: str) -> None:
     )
     assert repository.get("last_snapshot_id"), (
         "CodeRepository.last_snapshot_id was not stamped — add_code_graph_edges did not complete"
+    )
+    receipt = repository.get("last_receipt")
+    if isinstance(receipt, str):
+        receipt = json.loads(receipt)
+    assert isinstance(receipt, dict) and receipt.get("format_version") == 1, (
+        f"CodeRepository.last_receipt should carry the snapshot's receipt projection, got {receipt!r}"
+    )
+    assert receipt.get("enola_version") == ENOLA_PINNED_VERSION, (
+        f"Graph was built by enola {receipt.get('enola_version')!r}, pinned {ENOLA_PINNED_VERSION!r}"
     )
 
     # 3. Known modules, symbols (with symbol_kind), files, dependencies.

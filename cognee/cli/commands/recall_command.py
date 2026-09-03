@@ -11,6 +11,12 @@ from cognee.cli.config import (
     SEARCH_TYPE_CHOICES,
 )
 import cognee.cli.echo as fmt
+from cognee.cli.code_search import (
+    add_code_arguments,
+    build_code_query,
+    handle_diagram_out,
+    print_code_results,
+)
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall_empty
 
@@ -25,6 +31,9 @@ Recall information from the knowledge graph or session memory.
 When --session-id is provided without --datasets or --query-type,
 searches the session cache directly by keyword matching.
 Otherwise, this is a memory-oriented alias for `cognee search`.
+
+With --query-type CODE, --code-query selects the code-graph operation and
+--diagram / --diagram-out draw the result (Mermaid or Graphviz).
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -70,11 +79,14 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
             default="pretty",
             help="Output format (default: pretty)",
         )
+        add_code_arguments(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
             import cognee
             from cognee.modules.search.types import SearchType
+
+            code_query = build_code_query(args, args.query_type)
 
             # Session-only mode: -s without -d and without explicit -t
             session_only = (
@@ -117,6 +129,11 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                             ),
                             **session_kwargs,
                         }
+                        if code_query is not None:
+                            # recall() runs code_query in its dedicated "code"
+                            # lane, which the auto scope never implies.
+                            recall_kwargs["code_query"] = code_query
+                            recall_kwargs["scope"] = ["code"]
                         results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
@@ -170,10 +187,14 @@ Otherwise, this is a memory-oriented alias for `cognee search`.
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
                             fmt.echo()
+                    elif effective_query_type == "CODE" and print_code_results(results):
+                        pass
                     else:
                         for i, result in enumerate(results, 1):
                             fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
                             fmt.echo()
+
+            handle_diagram_out(results, args)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

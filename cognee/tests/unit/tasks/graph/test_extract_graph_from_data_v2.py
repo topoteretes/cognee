@@ -25,6 +25,7 @@ async def test_extract_graph_from_data_passes_ontology_resolver(
 ):
     chunk = MagicMock(text="chunk text")
     ontology_resolver = MagicMock()
+    ctx = MagicMock()
 
     mock_extract_nodes.return_value = ["node"]
     mock_extract_content_nodes_and_relationship_names.return_value = (
@@ -35,7 +36,7 @@ async def test_extract_graph_from_data_passes_ontology_resolver(
     mock_integrate_chunk_graphs.return_value = [chunk]
 
     result = await cascade_module.extract_graph_from_data(
-        [chunk], ontology_resolver=ontology_resolver
+        [chunk], ontology_resolver=ontology_resolver, ctx=ctx
     )
 
     assert result == [chunk]
@@ -44,4 +45,5 @@ async def test_extract_graph_from_data_passes_ontology_resolver(
         chunk_graphs=[mock_extract_edge_triplets.return_value],
         graph_model=KnowledgeGraph,
         ontology_resolver=ontology_resolver,
+        ctx=ctx,
     )
