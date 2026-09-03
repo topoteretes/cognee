@@ -13,6 +13,11 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
 from cognee.modules.user_preferences.weights import personal_factor
 from cognee.base_config import get_base_config
+from cognee.modules.graph.utils.fact_validity import (
+    STALE_DISTANCE_FACTOR,
+    is_current,
+    now_ms,
+)
 import heapq
 
 logger = get_logger("CogneeGraph")
@@ -42,6 +47,10 @@ class CogneeGraph(CogneeAbstractGraph):
         self.triplet_distance_penalty = 6.5
         self.feedback_influence = get_base_config().default_feedback_influence
         self.personal_influence = get_base_config().personalization_influence
+        # Reference time (ms epoch) for fact validity when ranking; None means now.
+        # A temporal query sets it to the start of its window so facts that were
+        # still current then are not penalised as stale.
+        self.as_of_ms: Optional[int] = None
 
     def add_node(self, node: Node) -> None:
         if node.id in self.nodes:
@@ -425,6 +434,7 @@ class CogneeGraph(CogneeAbstractGraph):
             self.feedback_influence if feedback_influence is None else feedback_influence
         )
         active_personal_influence = self.personal_influence
+        reference_ms = now_ms() if self.as_of_ms is None else self.as_of_ms
 
         def _effective_distance(distance: float, feedback_weight: Any) -> float:
             if active_feedback_influence <= 0.0:
@@ -500,7 +510,16 @@ class CogneeGraph(CogneeAbstractGraph):
                 blended = _effective_distance(distance, feedback_weight)
                 importances.append(_personal_distance(distance, blended, element))
 
-            return sum(importances)
+            total = sum(importances)
+            # A superseded edge, or one whose endpoint was closed before the
+            # reference time, is history: keep it reachable but below an equally
+            # relevant current fact.
+            if not all(
+                is_current(element.attributes, reference_ms) for element, _label in elements
+            ):
+                total *= STALE_DISTANCE_FACTOR
+
+            return total
 
         return heapq.nsmallest(k, self.edges, key=score)
 

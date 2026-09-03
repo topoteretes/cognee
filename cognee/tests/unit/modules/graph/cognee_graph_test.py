@@ -1313,3 +1313,60 @@ def test_normalize_query_distance_lists_empty_list(setup_graph):
     result = graph._normalize_query_distance_lists([], query_list_length=None, name="test")
 
     assert result == []
+
+
+# --------------------------------------------------------------------------- #
+# SDK-90: superseded / closed facts rank below equally relevant current ones.
+# --------------------------------------------------------------------------- #
+
+
+def _two_equal_triplets(graph):
+    """Two disjoint triplets with identical distances; only validity can separate them."""
+    nodes = [Node(str(i)) for i in range(1, 5)]
+    for node in nodes:
+        node.add_attribute("vector_distance", [0.5])
+        graph.add_node(node)
+    current = Edge(nodes[0], nodes[1])
+    stale = Edge(nodes[2], nodes[3])
+    for edge in (current, stale):
+        edge.add_attribute("vector_distance", [0.5])
+        graph.add_edge(edge)
+    return current, stale
+
+
+@pytest.mark.asyncio
+async def test_superseded_edge_ranks_below_current_edge(setup_graph):
+    graph = setup_graph
+    current, stale = _two_equal_triplets(graph)
+    stale.add_attribute("superseded", True)
+
+    top = await graph.calculate_top_triplet_importances(k=2)
+
+    assert top == [current, stale]
+
+
+@pytest.mark.asyncio
+async def test_closed_node_demotes_its_triplet_as_of_now(setup_graph):
+    graph = setup_graph
+    current, stale = _two_equal_triplets(graph)
+    stale.node2.add_attribute("valid_to", 1_577_836_800_000)  # closed 2020-01-01
+
+    top = await graph.calculate_top_triplet_importances(k=2)
+
+    assert top == [current, stale]
+
+
+@pytest.mark.asyncio
+async def test_as_of_before_closure_keeps_the_fact_current(setup_graph):
+    graph = setup_graph
+    current, stale = _two_equal_triplets(graph)
+    stale.add_attribute("valid_to", 1_577_836_800_000)  # closed 2020-01-01
+    graph.as_of_ms = 1_546_300_800_000  # asking about 2019-01-01
+
+    top = await graph.calculate_top_triplet_importances(k=2)
+
+    # Equal scores: insertion order decides, i.e. no demotion happened.
+    assert top == [current, stale]
+    graph.as_of_ms = None
+    graph.edges.reverse()  # put the closed one first; it must still lose as of now
+    assert await graph.calculate_top_triplet_importances(k=2) == [current, stale]

@@ -81,3 +81,52 @@ async def test_falls_back_to_relationship_name_then_edge_text():
 
     assert "Alice --[works_for]--> Acme" in output_name
     assert "Bob --[Bob works at Globex.]--> Globex" in output_text
+
+
+# --------------------------------------------------------------------------- #
+# SDK-90: stale facts stay in the context but are flagged.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_superseded_edge_is_flagged_not_dropped():
+    edge = _make_edge(
+        "Acme",
+        "Alice",
+        {
+            "relationship_type": "ceo_of",
+            "superseded": True,
+            "valid_to": "2021-03-04 05:06:07",
+        },
+    )
+
+    output = await resolve_edges_to_text([edge])
+
+    assert (
+        "Acme --[ceo_of]--> Alice  [valid until 2021-03-04; superseded by a newer assertion]"
+        in output
+    )
+
+
+@pytest.mark.asyncio
+async def test_current_edge_has_no_marker():
+    edge = _make_edge("Acme", "Bob", {"relationship_type": "ceo_of", "valid_to": None})
+
+    output = await resolve_edges_to_text([edge])
+
+    assert "Acme --[ceo_of]--> Bob\n" in output or output.endswith("Acme --[ceo_of]--> Bob")
+    assert "valid until" not in output
+
+
+@pytest.mark.asyncio
+async def test_closed_node_content_carries_marker():
+    source = Node(
+        node_id="Alice",
+        attributes={"name": "Alice", "description": "Former CEO", "valid_to": 1_577_836_800_000},
+    )
+    target = Node(node_id="Acme", attributes={"name": "Acme"})
+    edge = Edge(source, target, attributes={"relationship_type": "ceo_of"})
+
+    output = await resolve_edges_to_text([edge])
+
+    assert "Former CEO\n[valid until 2020-01-01]" in output

@@ -3,6 +3,7 @@ from typing import List
 from collections import Counter
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils.fact_validity import validity_marker
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
@@ -53,6 +54,12 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
                 name = node.attributes.get("name", "Unnamed Node")
                 content = node.attributes.get("description", name)
 
+            # A closed node (close_node / valid_to) is history, and the prompt
+            # must say so instead of presenting it as present truth.
+            marker = validity_marker(node.attributes)
+            if marker:
+                content = f"{content}\n[{marker}]"
+
             nodes[node.id] = {"node": node, "name": name, "content": content}
 
     return nodes
@@ -91,6 +98,13 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         description = edge.attributes.get("edge_text")
         if description and description != edge_label:
             line += f"  ({description})"
+
+        # Superseded / closed edges stay in the context (a question about the
+        # past needs them) but are flagged so the answer does not treat them as
+        # current.
+        marker = validity_marker(edge.attributes)
+        if marker:
+            line += f"  [{marker}]"
 
         connections.append(line)
 
