@@ -175,7 +175,7 @@ jobs:
     with:
       # The interpreter edges only. Every version-specific fix on dev since
       # 2025-06 was 3.10 (5) or 3.14 (1); none was 3.11/3.12/3.13-only. Those
-      # three run nightly instead. The unit suite is byte-identical across the
+      # three run in release_test.yml instead. The unit suite is byte-identical across the
       # legs, so this cuts three of eight copies with no change in what a
       # passing run proves.
       python-versions: '["3.10.x", "3.14.x"]'
@@ -265,7 +265,7 @@ jobs:
       # job labelled "Python 3.13" logged "Python 3.11.14". So those were the
       # same run four times. The Python dimension is the unit matrix's job;
       # this workflow's value is the four backend combos, which all stay.
-      # The full version sweep for the two bare Neo4j jobs runs nightly.
+      # The full version sweep for the two bare Neo4j jobs runs in release_test.yml.
       python-versions: '["3.11"]'
     secrets: inherit
 

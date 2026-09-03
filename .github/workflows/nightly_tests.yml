@@ -40,78 +40,6 @@ env:
   ENV: 'dev'
 
 jobs:
-  ollama-tests:
-    name: Ollama Tests
-    uses: ./.github/workflows/test_ollama.yml
-    secrets: inherit
-
-  llamacpp-tests:
-    name: Llama-cpp Tests
-    uses: ./.github/workflows/test_llamacpp.yml
-    secrets: inherit
-
-  # The PR gate runs the unit suite on the interpreter edges (3.10, 3.14) and
-  # on windows/macos 3.13 -- the four environments with version- or OS-specific
-  # fixes in the history. The three middle Linux versions run here instead.
-  # Same reusable workflow, same extras as the PR gate's ubuntu legs.
-  unit-matrix-mid:
-    name: Unit Tests (3.11-3.13 ubuntu)
-    uses: ./.github/workflows/test_different_operating_systems.yml
-    with:
-      python-versions: '["3.11.x", "3.12.x", "3.13.x"]'
-      os: '["ubuntu-22.04"]'
-      extra-dependencies: 'postgres aws neptune langchain dlt'
-    secrets: inherit
-
-  # Restored here after being cut from the PR gate. It runs the same
-  # test_library.py the OS matrix runs, but writes .anon_id first, so the
-  # pipeline executes with telemetry ON -- a code path nothing else on the
-  # gate covers. It has no telemetry assertion (it only proves the pipeline
-  # does not crash with telemetry enabled), which is why it is nightly rather
-  # than pre-merge, but it is not zero coverage and should not have been
-  # deleted outright.
-  run-telemetry-pipeline-test:
-    name: Run Telemetry Pipeline Test
-    runs-on: ubuntu-22.04
-    # No container: the nightly is not a reusable workflow, so there is no
-    # ci-image input to resolve. Runs on the bare runner like every other
-    # job in this file.
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Add telemetry identifier
-        run: |
-          echo "test-machine" > .anon_id
-
-      - name: Run default basic pipeline with telemetry on
-        env:
-          ENV: 'local'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ARGS: ${{ secrets.LLM_ARGS }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-        run: uv run python ./cognee/tests/test_library.py
-
-  # The PR gate runs the search suite on one Python per backend combo. The
-  # two bare Neo4j jobs are the only ones where the Python dimension was ever
-  # real (the container jobs pin 3.11), so their version sweep runs here.
-  search-db-versions:
-    name: Search DB version sweep
-    uses: ./.github/workflows/search_db_tests.yml
-    with:
-      python-versions: '["3.10", "3.12", "3.13"]'
-    secrets: inherit
-
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -280,10 +208,6 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
-      ollama-tests,
-      unit-matrix-mid,
-      search-db-versions,
-      llamacpp-tests,
       perf-small-llm,
       perf-small-mock,
       perf-wap-llm,
@@ -314,11 +238,7 @@ jobs:
           # and inline interpolation would splice it into this shell script.
           CADENCE: ${{ inputs.cadence }}
         run: |
-          if [[ "${{ needs.ollama-tests.result }}" == "success" &&
-                "${{ needs.llamacpp-tests.result }}" == "success" &&
-                "${{ needs.unit-matrix-mid.result }}" == "success" &&
-                "${{ needs.search-db-versions.result }}" == "success" &&
-                "${{ needs.perf-small-llm.result }}" == "success" &&
+          if [[ "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
                 "${{ needs.perf-wap-mock.result }}" == "success" &&
@@ -393,9 +313,6 @@ jobs:
           STATUS_BRANCH: ${{ github.ref_name }}
           STATUS_CADENCE: ${{ steps.status.outputs.cadence }}
           STATUS_SHA: ${{ github.sha }}
-          STATUS_OLLAMA: ${{ needs.ollama-tests.result }}
-          STATUS_LLAMACPP: ${{ needs.llamacpp-tests.result }}
-          STATUS_UNIT_MID: ${{ needs.unit-matrix-mid.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.

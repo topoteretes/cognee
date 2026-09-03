@@ -11,9 +11,8 @@ name: Nightly Scheduler
 #     hours: 18:00 UTC = 19:00 CET / 20:00 CEST, inside the 17:00-22:00 CET
 #     window either side of the DST switch, so the cloud perf arms measure
 #     the platform under real peak load)
-#   * weekly Sun 06:00 UTC -> dev   (in-development code keeps nightly-only
-#     coverage: the 3.11-3.13 unit matrix, the search-DB version sweep, and
-#     anything else that runs only here)
+#   * weekly Sun 06:00 UTC -> dev   (in-development code keeps the perf
+#     arms' coverage, which only run here)
 #
 # It works because workflow_dispatch is one of only two events GITHUB_TOKEN may
 # raise that still creates a workflow run:
