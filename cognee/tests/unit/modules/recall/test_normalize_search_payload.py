@@ -4,6 +4,7 @@ from cognee.modules.recall.methods.normalize_search_payload import normalize_sea
 from cognee.modules.search.types import ContextFormat
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types import SearchType
 
 
@@ -56,6 +57,28 @@ def test_completion_result_has_no_provenance_metadata():
     items = normalize_search_payload(payload)
 
     assert items[0].metadata == {}
+
+
+def test_completion_result_preserves_structured_evidence_metadata():
+    payload = SearchResultPayload(
+        completion=["Alice works at Acme."],
+        evidence=[
+            EvidenceReference(
+                kind="segment",
+                artifact_id="chunk-1",
+                role="supports_assertion",
+                assertion_id="edge-1",
+                data_id="data-1",
+                chunk_id="chunk-1",
+            )
+        ],
+        search_type=SearchType.GRAPH_COMPLETION,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert items[0].metadata["evidence"][0]["role"] == "supports_assertion"
+    assert items[0].metadata["evidence"][0]["assertion_id"] == "edge-1"
 
 
 def test_code_result_preserves_structured_operation_payload():
