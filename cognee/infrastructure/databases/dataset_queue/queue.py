@@ -23,10 +23,9 @@ the response path.  This makes nested
 inner exit never steals an outer holder's slot.
 
 Task-end cleanup is a safety net: when the current task finishes, every entry
-still in ``_task_slots`` is force-released regardless of depth, so a scope
-that never exits (crash, cancellation) cannot leak its slot. (The deprecated
-``await`` context form takes no slot at all — only the ``async with`` form
-participates in the queue.)
+still in ``_task_slots`` is force-released regardless of depth. This covers
+``await``-style callers that never decrement, so long-lived task slots still
+clean up correctly.
 
 Re-entrancy rules:
 
