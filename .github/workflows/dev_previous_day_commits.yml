@@ -217,7 +217,7 @@ jobs:
 
             - **Prepared documentation edit scope** (`./${{ steps.branch_paths.outputs.docs_edit_scope_markdown }}`): Curated source files, docs candidates, assessment summary, and out-of-scope files.
             - **Prepared documentation edit scope JSON** (`./${{ steps.branch_paths.outputs.docs_edit_scope_json }}`): Machine-readable copy of the prepared scope.
-          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 35"
+          claude_args: "--allowed-tools Read,Write,Glob,Grep --max-turns 50"
 
       # The action fails a step whose reported turn count overshoots the cap even
       # when the agent finished cleanly, which throws away completed work. So judge
