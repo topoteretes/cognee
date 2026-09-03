@@ -1,6 +1,11 @@
+import json
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional, Union
 from uuid import UUID
+
+from sqlalchemy import select
+
 from cognee.modules.users.models.User import User
 
 from cognee.modules.visualization.cognee_network_visualization import (
@@ -10,6 +15,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
     build_semantic_payload,
     build_brain_summary_payload,
 )
+from cognee.modules.visualization.preprocessor import build_node_set_colors
 from cognee.modules.visualization.session_events import collect_session_events
 from cognee.modules.visualization.subgraph_data import (
     DEFAULT_MAX_NODES,
@@ -18,7 +24,9 @@ from cognee.modules.visualization.subgraph_data import (
     fetch_visualization_graph_data,
 )
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.methods import get_authorized_existing_datasets, get_datasets_graph_counts
+from cognee.modules.data.models import Data
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
 from cognee.modules.users.methods import get_default_user
@@ -85,9 +93,24 @@ async def fetch_visualization_data(
 
     search_events = None
     if include_session_events:
-        from cognee.modules.visualization.session_events import collect_session_events
-
-        search_events = await collect_session_events(user=user, session_ids=session_ids)
+        if dataset and resolved_dataset is None:
+            # A named dataset that did not resolve: missing, or the caller
+            # cannot read it. get_authorized_existing_datasets reports that by
+            # returning [] rather than raising, so falling through here would
+            # collect with dataset_id=None and widen the listing to every
+            # dataset the caller has queried. Failing a scope check must scope
+            # to nothing, not to everything.
+            search_events = []
+        else:
+            # Scope to the dataset authorized above, so this page's timeline
+            # shows this dataset's activity rather than every dataset the
+            # caller has queried. No dataset asked for at all leaves the
+            # listing unscoped, which is all a datasetless render can show.
+            search_events = await collect_session_events(
+                user=user,
+                session_ids=session_ids,
+                dataset_id=resolved_dataset.id if resolved_dataset else None,
+            )
 
     return graph_data, search_events
 
@@ -162,8 +185,9 @@ async def visualize_graph(
             spotlights, rated answers as reinforcement (improve) events.
             Collection never fails the render; an unavailable session layer
             simply yields no events.
-        session_ids: Restrict event collection to these sessions. Defaults to
-            the user's most recently active sessions.
+        session_ids: Restrict event collection to these sessions. An explicit
+            list is used as given and is not narrowed to ``dataset``. Defaults
+            to the user's most recently active sessions *for* ``dataset``.
         user: User whose sessions are read. Defaults to the default user.
         dataset: Dataset to render, given by name or UUID. Wrapped into a
             single-element list for get_authorized_existing_datasets; the
@@ -326,6 +350,137 @@ async def build_brains_payload(
     return payload
 
 
+def _parse_node_set(raw: Any) -> List[str]:
+    """The node set names on one ``Data`` row, defensively.
+
+    ``Data.node_set`` is written by ingestion as ``json.dumps(list)`` — a JSON
+    string inside a JSON column — so the value read back is normally a string
+    holding a list. A row written or migrated by anything else could hold the
+    list itself, a bare name, or something unusable; none of those may break an
+    overview of every dataset a user can read, so each degrades to what it can
+    contribute instead of raising.
+
+    Order is preserved: it is the order ``classify_documents`` joins the names
+    in to build the graph's ``source_node_set`` value, which is what the node
+    set color map is keyed by.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return [raw.strip()] if raw.strip() else []
+
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+
+    if not isinstance(raw, (list, tuple)):
+        return []
+
+    return [name.strip() for name in raw if isinstance(name, str) and name.strip()]
+
+
+async def _fetch_dataset_node_sets(dataset_ids: List[UUID]) -> Dict[UUID, List[List[str]]]:
+    """Every dataset's node sets, one entry per ingested document, in one query.
+
+    Reads the two columns it needs for every dataset at once — the point of the
+    summary endpoint is that describing N datasets costs one relational query,
+    not N of anything.
+
+    Each document's names stay their own list rather than being flattened per
+    dataset: a document carrying several node sets contributes the comma-joined
+    form as a single color key (that is what the graph stores in
+    ``source_node_set``) while contributing each name separately to
+    ``source_names``.
+    """
+    if not dataset_ids:
+        return {}
+
+    db_engine = get_relational_engine()
+
+    async with db_engine.get_async_session() as session:
+        rows = (
+            await session.execute(
+                select(Data.dataset_id, Data.node_set).where(
+                    Data.dataset_id.in_(dataset_ids),
+                    Data.node_set.isnot(None),
+                )
+            )
+        ).all()
+
+    node_sets: Dict[UUID, List[List[str]]] = defaultdict(list)
+    for dataset_id, raw in rows:
+        names = _parse_node_set(raw)
+        if names:
+            node_sets[dataset_id].append(names)
+
+    return node_sets
+
+
+async def build_brains_summary_payload(user: Optional[User] = None) -> dict:
+    """Every dataset the caller may read, described from relational metadata.
+
+    ``{dataset_id: {"name", "source_names", "node_count", "node_set_colors"}}``
+    — the overview data ``build_brains_payload`` produces as a side effect of
+    fetching each dataset's graph, produced instead from relational metadata
+    plus the per-cognify-run count cache. That is the point: ``/brains`` costs
+    one bounded graph read per readable dataset on every call, which is what
+    makes it unfit for a switcher that only needs names, sources and a size.
+    This costs one count query per cognify run whose count is not cached yet
+    (see ``get_datasets_graph_counts``) — so a cold cache does open the graph
+    engine once per such dataset, and every call after that opens none.
+
+    Same authorization as ``build_brains_payload`` — the group-aware union in
+    ``get_all_user_permission_datasets`` — so both list the same datasets.
+
+    Returns:
+        dict: keyed by dataset id (as a string), each value holding
+
+        - ``name``: the dataset's name.
+        - ``source_names``: distinct node set names across the dataset's
+          ingested data, sorted; empty for data ingested without node sets.
+        - ``node_count``: nodes in the dataset's graph as of its latest cognify
+          run (see ``get_datasets_graph_counts``) — the whole graph, not only
+          entity nodes, and 0 for a dataset never cognified.
+        - ``node_set_colors``: node set colors from the same
+          ``build_node_set_colors`` rule ``/brains`` uses. Same rule and same
+          input node sets give the same colors, but the two endpoints do not
+          always have the same input: the rule assigns hues by position in the
+          sorted set of names, ``/brains`` takes that set from the nodes its
+          bounded graph fetch returned, and this takes it from every ``Data``
+          row of the dataset. Where those sets differ — notably a node set that
+          exists only in the graph, such as the memory sets ``improve()``
+          writes, which has no relational row here at all — the colors from the
+          divergence onward differ too.
+    """
+    if not user:
+        user = await get_default_user()
+
+    datasets = await get_all_user_permission_datasets(user, "read")
+    if not datasets:
+        return {}
+
+    # Independent reads against different stores; run them together so the
+    # payload costs the slower one rather than their sum.
+    node_sets, counts = await asyncio.gather(
+        _fetch_dataset_node_sets([dataset.id for dataset in datasets]),
+        get_datasets_graph_counts(datasets),
+    )
+
+    payload: dict = {}
+    for dataset in datasets:
+        dataset_node_sets = node_sets.get(dataset.id, [])
+        payload[str(dataset.id)] = {
+            "name": dataset.name,
+            "source_names": sorted({name for names in dataset_node_sets for name in names}),
+            "node_count": counts[dataset.id].num_nodes,
+            "node_set_colors": build_node_set_colors(
+                ", ".join(names) for names in dataset_node_sets
+            ),
+        }
+
+    return payload
+
+
 def _as_naive_utc(value: datetime) -> datetime:
     """Normalize to match the write side.
 
@@ -358,18 +513,26 @@ async def get_live_events(
     """Delta of search/improve events since a cursor, for the Memory tab's
     live timeline.
 
-    ``dataset_id`` gates who may call this — the same read-permission check
-    every other visualize endpoint runs (``get_authorized_existing_datasets``)
-    — not which events come back. Session events are collected per *user*,
-    not per dataset, matching how ``visualize_graph``'s own
-    ``include_session_events`` already embeds the same events into whichever
-    dataset's page happens to be open. Scoping the event *content* to one
-    dataset would mean checking each event's referenced node/edge ids against
-    that dataset's graph membership — real extra cost that this endpoint's
-    one job (avoid recomputing the whole graph payload every ~1.5s just to
-    refresh a timeline) does not need, and it would make this endpoint
-    disagree with the very same events already shown in ``search_events`` on
-    ``/visualize/json`` for that dataset.
+    ``dataset_id`` both gates and scopes. It gates as on every other visualize
+    endpoint (``get_authorized_existing_datasets``, read permission), and it
+    scopes the events: only sessions attributed to that dataset contribute.
+    Attribution is one SQL predicate on the session listing — the row's
+    ``dataset_id``, or the per-dataset default session's
+    ``{default_session_id}_{dataset_id}`` suffix — not a graph-membership
+    check per event, so scoping costs nothing this endpoint's one job (avoid
+    recomputing the whole graph payload every ~1.5s just to refresh a
+    timeline) cannot afford. ``visualize_graph``'s ``include_session_events``
+    scopes the same way, so ``/visualize/json``'s ``search_events`` and this
+    endpoint agree for a given dataset.
+
+    A session attributed to no dataset contributes to neither. It could belong
+    to any dataset the caller has queried, so surfacing it under all of them
+    would reopen exactly the over-disclosure this scoping closes.
+
+    Attribution is per session, not per answered turn, and that is the limit
+    of this guarantee: a session id reused across datasets keeps the first one
+    it touched, so its later turns show on that dataset's timeline instead of
+    the one they came from. ``_list_recent_session_ids`` has the detail.
 
     ``since=None`` returns every available event — the first call, before a
     client has a cursor of its own.
@@ -392,7 +555,7 @@ async def get_live_events(
     if not authorized:
         raise PermissionDeniedError(message="Not authorized to read this dataset")
 
-    events = await collect_session_events(user=user)
+    events = await collect_session_events(user=user, dataset_id=dataset_id)
 
     if since is not None:
         cutoff = _as_naive_utc(since)

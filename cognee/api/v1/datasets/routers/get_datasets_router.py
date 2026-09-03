@@ -17,6 +17,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import get_datasets_by_name
+from cognee.modules.data.methods import get_datasets_graph_counts
 from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.exceptions import DataNotFoundError
@@ -33,6 +34,46 @@ logger = get_logger()
 
 class ErrorResponseDTO(BaseModel):
     message: str
+
+
+# Shared by GET /status and GET /status/progress — both accept the same
+# dataset/pipeline selection, so the query param definitions (alias,
+# description, examples) live here once instead of twice.
+StatusDatasetIdsQuery = Annotated[
+    List[UUID],
+    Query(
+        alias="dataset",
+        description=(
+            "Dataset UUIDs to check (from GET /api/v1/datasets)."
+            " Omit to get status for all datasets you can read."
+        ),
+        examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
+    ),
+]
+
+StatusPipelineNamesQuery = Annotated[
+    List[str],
+    Query(
+        alias="pipeline",
+        description=(
+            "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
+            " 'code_graph_pipeline' (code ingestion via remember"
+            " content_type='code'). Omit to default to cognify_pipeline."
+        ),
+        examples=[["cognify_pipeline"]],
+    ),
+]
+
+
+class PipelineRunStatusWithProgress(BaseModel):
+    status: PipelineRunStatus
+    # Present only once a run has emitted at least one progress tick (see
+    # log_pipeline_run_progress); None before that or for terminal runs that
+    # predate this field.
+    progress: Optional[Dict[str, Any]] = Field(
+        default=None,
+        examples=[{"completed_items": 3, "total_items": 10, "current_stage": "extract_graph"}],
+    )
 
 
 class DatasetDTO(OutDTO):
@@ -417,29 +458,8 @@ def get_datasets_router() -> APIRouter:
         response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
     )
     async def get_dataset_status(
-        datasets: Annotated[
-            List[UUID],
-            Query(
-                alias="dataset",
-                description=(
-                    "Dataset UUIDs to check (from GET /api/v1/datasets)."
-                    " Omit to get status for all datasets you can read."
-                ),
-                examples=[["b8a7c3de-4f5a-4b6c-8d9e-0f1a2b3c4d5e"]],
-            ),
-        ] = [],
-        pipelines: Annotated[
-            List[str],
-            Query(
-                alias="pipeline",
-                description=(
-                    "Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or"
-                    " 'code_graph_pipeline' (code ingestion via remember"
-                    " content_type='code'). Omit to default to cognify_pipeline."
-                ),
-                examples=[["cognify_pipeline"]],
-            ),
-        ] = [],
+        datasets: StatusDatasetIdsQuery = [],
+        pipelines: StatusPipelineNamesQuery = [],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -471,6 +491,11 @@ def get_datasets_router() -> APIRouter:
         - **running**: Dataset is currently being processed
         - **completed**: Dataset processing completed successfully
         - **failed**: Dataset processing encountered an error
+
+        For in-flight progress (files completed / total, current stage), see
+        **GET /v1/datasets/status/progress** — a separate endpoint with its own
+        fixed response shape, rather than a flag here that would change what
+        this endpoint returns depending on how it's called.
 
         ## Error Codes
         - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
@@ -506,6 +531,76 @@ def get_datasets_router() -> APIRouter:
                 content={"error": "Unable to retrieve dataset statuses."},
             )
 
+    @router.get(
+        "/status/progress",
+        response_model=Union[
+            dict[str, PipelineRunStatusWithProgress],
+            dict[str, dict[str, PipelineRunStatusWithProgress]],
+        ],
+    )
+    async def get_dataset_progress(
+        datasets: StatusDatasetIdsQuery = [],
+        pipelines: StatusPipelineNamesQuery = [],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Get the processing status of datasets, together with in-flight progress.
+
+        Same dataset/pipeline selection as **GET /v1/datasets/status**, but each
+        status value is always an object {status, progress} instead of a bare
+        status — a dedicated endpoint rather than a flag on /status, so neither
+        endpoint's response shape ever depends on how it was called.
+
+        ## Query Parameters
+        - **dataset** (List[UUID]): Dataset UUIDs to check (from GET /api/v1/datasets). Omit to get
+          status for all datasets you can read.
+        - **pipeline** (List[str]): Pipeline names to check: 'add_pipeline', 'cognify_pipeline', or
+          'code_graph_pipeline' (code ingestion via remember content_type='code'). Omit to default
+          to cognify_pipeline.
+
+        ## Response
+        - Single pipeline (default): {dataset_id: {status, progress}}
+        - Multiple pipelines: {dataset_id: {pipeline_name: {status, progress}}}
+
+        **progress** is `null` until the first in-flight progress tick, then an
+        object with `completed_items`, `total_items`, and `current_stage` —
+        present only while the pipeline is running; terminal runs (completed/
+        errored) do not carry a progress snapshot.
+
+        ## Error Codes
+        - **409 Conflict**: Error retrieving status (e.g. requesting a dataset you don't have
+          read permission for)
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/status/progress",
+                "datasets": [str(dataset_id) for dataset_id in datasets],
+                "pipelines": pipelines,
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
+
+        try:
+            # Verify user has permission to read dataset
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+
+            datasets_progress = await cognee_datasets.get_progress(
+                [dataset.id for dataset in authorized_datasets],
+                pipeline_names=pipelines or None,
+            )
+
+            return datasets_progress
+        except Exception as error:
+            logger.error("Error retrieving dataset progress: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset progress."},
+            )
+
     @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
     async def get_datasets_graph_summary(
         dataset_ids: Annotated[
@@ -538,8 +633,16 @@ def get_datasets_router() -> APIRouter:
         - **pipelineRunId**: The dataset's latest cognify run, or null if it
           has never been cognified
         - **numNodes** / **numEdges**: Graph size for that run
-        - **computedAt**: When the count was cached, or null if the last
-          attempt degraded (graph store unavailable) and wasn't cached
+        - **computedAt**: When the count was cached, or null when it wasn't —
+          either the last attempt degraded (graph store unavailable, counts
+          are 0 and retried on the next poll) or a concurrent caller cached
+          the same run first (counts are exact)
+
+        ## Error Codes
+        - **409 Conflict**: The summary could not be built (generic message;
+          the detail is server-logged rather than returned). A single
+          unreadable graph store does not cause this — that dataset comes back
+          with zero counts — so this means the relational read itself failed.
         """
         send_telemetry(
             "Datasets API Endpoint Invoked",
@@ -551,116 +654,38 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from datetime import timezone
-        from sqlalchemy import select, func
-        from sqlalchemy.orm import aliased
-        from cognee.context_global_variables import set_database_global_context_variables
-        from cognee.infrastructure.databases.graph import get_graph_engine
-        from cognee.modules.data.models import GraphMetrics
-        from cognee.modules.pipelines.models import PipelineRun
+        try:
+            authorized_datasets = await get_authorized_existing_datasets(dataset_ids, "read", user)
 
-        authorized_datasets = await get_authorized_existing_datasets(dataset_ids, "read", user)
+            if not authorized_datasets:
+                return []
 
-        if not authorized_datasets:
-            return []
-
-        db_engine = get_relational_engine()
-
-        async with db_engine.get_async_session() as session:
-            ranked_runs = (
-                select(
-                    PipelineRun,
-                    func.row_number()
-                    .over(
-                        partition_by=PipelineRun.dataset_id,
-                        order_by=PipelineRun.created_at.desc(),
-                    )
-                    .label("rn"),
-                )
-                .filter(PipelineRun.dataset_id.in_([dataset.id for dataset in authorized_datasets]))
-                .filter(PipelineRun.pipeline_name == "cognify_pipeline")
-                .subquery()
+            counts = await get_datasets_graph_counts(authorized_datasets)
+        except Exception as error:
+            # Same posture as GET /statuses above and the sibling
+            # GET /visualize/brains-summary: a poll that fails transiently is a
+            # 409 with a generic message, not an unhandled 500 carrying
+            # internals to the client. Scoped to the two relational reads
+            # this route makes; the DTO construction below is pure Python
+            # over an already-validated shape, so a bug there still surfaces
+            # as a real 500 instead of being misreported as this endpoint's
+            # documented transient-failure case.
+            logger.error("Error retrieving dataset graph summary: %s", error)
+            return JSONResponse(
+                status_code=409,
+                content={"error": "Unable to retrieve dataset graph summary."},
             )
-            aliased_run = aliased(PipelineRun, ranked_runs)
-            latest_runs = (
-                (await session.execute(select(aliased_run).filter(ranked_runs.c.rn == 1)))
-                .scalars()
-                .all()
+
+        return [
+            DatasetGraphSummaryDTO(
+                dataset_id=dataset.id,
+                pipeline_run_id=counts[dataset.id].pipeline_run_id,
+                num_nodes=counts[dataset.id].num_nodes,
+                num_edges=counts[dataset.id].num_edges,
+                computed_at=counts[dataset.id].computed_at,
             )
-            latest_run_by_dataset = {run.dataset_id: run for run in latest_runs}
-
-        summaries = []
-        for dataset in authorized_datasets:
-            latest_run = latest_run_by_dataset.get(dataset.id)
-            if latest_run is None:
-                summaries.append(
-                    DatasetGraphSummaryDTO(dataset_id=dataset.id, num_nodes=0, num_edges=0)
-                )
-                continue
-
-            async with db_engine.get_async_session() as session:
-                cached = (
-                    (
-                        await session.execute(
-                            select(GraphMetrics).where(
-                                GraphMetrics.id == latest_run.pipeline_run_id
-                            )
-                        )
-                    )
-                    .scalars()
-                    .first()
-                )
-
-            if cached is not None:
-                summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id,
-                        pipeline_run_id=latest_run.pipeline_run_id,
-                        num_nodes=cached.num_nodes or 0,
-                        num_edges=cached.num_edges or 0,
-                        computed_at=cached.created_at,
-                    )
-                )
-                continue
-
-            try:
-                async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                    graph_engine = await get_graph_engine()
-                    graph_metrics = await graph_engine.get_graph_metrics(include_optional=False)
-
-                async with db_engine.get_async_session() as session:
-                    session.add(
-                        GraphMetrics(
-                            id=latest_run.pipeline_run_id,
-                            num_nodes=graph_metrics.get("num_nodes"),
-                            num_edges=graph_metrics.get("num_edges"),
-                        )
-                    )
-                    await session.commit()
-
-                summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id,
-                        pipeline_run_id=latest_run.pipeline_run_id,
-                        num_nodes=graph_metrics.get("num_nodes") or 0,
-                        num_edges=graph_metrics.get("num_edges") or 0,
-                        computed_at=datetime.now(timezone.utc),
-                    )
-                )
-            except Exception as error:
-                logger.warning(
-                    "Failed to compute graph metrics for dataset %s: %s", dataset.id, error
-                )
-                summaries.append(
-                    DatasetGraphSummaryDTO(
-                        dataset_id=dataset.id,
-                        pipeline_run_id=latest_run.pipeline_run_id,
-                        num_nodes=0,
-                        num_edges=0,
-                    )
-                )
-
-        return summaries
+            for dataset in authorized_datasets
+        ]
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
@@ -782,7 +807,11 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/schema", response_model=dict)
     async def get_dataset_schema(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        """Return the stored graph schema and custom prompt for a dataset."""
+        """Return the stored graph schema and custom prompt for a dataset.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+        """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 
@@ -808,7 +837,17 @@ def get_datasets_router() -> APIRouter:
         payload: DatasetSchemaPayloadDTO,
         user: User = Depends(get_authenticated_user),
     ):
-        """Store or update the graph schema and custom prompt for a dataset."""
+        """Store or update the graph schema and custom prompt for a dataset.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
+
+        ## Request Parameters
+        - **customPrompt** (Optional[str]): Custom extraction prompt to store for the
+          dataset; omitting it leaves any existing prompt unchanged.
+        - **graphSchema** (Optional[Dict[str, Any]]): JSON graph schema to store for the
+          dataset; omitting it leaves any existing schema unchanged.
+        """
         from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
 

@@ -254,6 +254,82 @@ async def test_invalidate_sessions_for_deleted_data_spans_sessions(session_manag
 
 
 @pytest.mark.asyncio
+async def test_invalidate_sessions_for_deleted_data_scans_unattributed_user_sessions(
+    session_manager,
+):
+    """Sessions with no dataset attribution are scanned for every user.
+    Overlap with the dataset-attributed list is deduplicated."""
+    dataset_id = uuid4()
+    other_user = uuid4()
+    unattributed_session = "default_session"
+    await _seed_qa(session_manager, "qa_attributed", used_node_ids=["node_deleted"])
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        unattributed_session,
+        question="q",
+        context="c",
+        answer="a",
+        qa_id="qa_unattributed",
+        used_graph_element_ids={"node_ids": ["node_deleted"]},
+    )
+
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[(USER_ID, SESSION_ID)]),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_unattributed_sessions",
+            new=AsyncMock(
+                return_value=[
+                    (USER_ID, unattributed_session),
+                    (USER_ID, SESSION_ID),
+                    (other_user, unattributed_session),
+                ]
+            ),
+        ) as list_unattributed_mock,
+    ):
+        result = await invalidate_sessions_for_deleted_data(
+            dataset_id, {"node_deleted"}, set(), user_id=uuid4()
+        )
+
+    list_unattributed_mock.assert_awaited_once_with()
+    assert result["sessions_considered"] == 3
+    assert result["qa_entries_deleted"] == 2
+    assert await session_manager.get_session(user_id=USER_ID, session_id=SESSION_ID) == []
+    assert await session_manager.get_session(user_id=USER_ID, session_id=unattributed_session) == []
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sessions_for_deleted_data_lists_unattributed_without_user(
+    session_manager,
+):
+    """Unattributed sessions are listed even when user_id is omitted."""
+    with (
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.list_unattributed_sessions",
+            new=AsyncMock(return_value=[]),
+        ) as list_unattributed_mock,
+    ):
+        result = await invalidate_sessions_for_deleted_data(uuid4(), {"node_x"}, set())
+
+    list_unattributed_mock.assert_awaited_once_with()
+    assert result["sessions_considered"] == 0
+
+
+@pytest.mark.asyncio
 async def test_invalidate_sessions_for_deleted_data_noops_on_empty_ids(session_manager):
     with patch(
         "cognee.modules.session_lifecycle.invalidate_sessions.list_sessions_for_dataset",
@@ -285,3 +361,158 @@ async def test_session_delete_failure_is_nonfatal(session_manager):
         result = await invalidate_sessions_for_dataset(dataset_id)
 
     assert result == {"sessions_considered": 1, "sessions_deleted": 0}
+
+
+@pytest.mark.asyncio
+async def test_data_delete_purges_unattributed_default_session_end_to_end(session_manager):
+    """The COG-6292 leak, wired through the real listing queries: an unscoped
+    search's turns live in the plain ``default_session`` row (``dataset_id``
+    NULL, no dataset suffix), which dataset-scoped listing can never find. A
+    data-level delete must discover that row via the real ``dataset_id IS
+    NULL`` query — no listing helpers mocked — and remove the turns that used
+    the deleted elements, so the session read path that feeds recall/search
+    history has nothing left to replay."""
+    from datetime import datetime, timezone
+    from uuid import UUID
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.session_lifecycle.models import SessionRecord
+
+    dataset_id = uuid4()
+    user_uuid = UUID(USER_ID)
+    unattributed_session = "default_session"
+
+    # Session-cache state: one turn contaminated by the deleted node, one clean.
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        unattributed_session,
+        question="What does the deleted note say?",
+        context="deleted note context",
+        answer="answer derived from the deleted note",
+        qa_id="qa_deleted_fact",
+        used_graph_element_ids={"node_ids": ["node_deleted"]},
+    )
+    await session_manager._cache.create_qa_entry(
+        USER_ID,
+        unattributed_session,
+        question="Unrelated question",
+        context="c",
+        answer="unrelated answer",
+        qa_id="qa_clean",
+        used_graph_element_ids={"node_ids": ["node_other"]},
+    )
+
+    # Relational state: the suffix-less default-session row with no attribution.
+    now = datetime.now(timezone.utc)
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+    async with engine.get_async_session() as session:
+        session.add(
+            SessionRecord(
+                session_id=unattributed_session,
+                user_id=user_uuid,
+                dataset_id=None,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        await session.commit()
+
+    try:
+        with patch(
+            "cognee.modules.session_lifecycle.invalidate_sessions.get_session_manager",
+            return_value=session_manager,
+        ):
+            result = await invalidate_sessions_for_deleted_data(
+                dataset_id, {"node_deleted"}, set(), user_id=user_uuid
+            )
+
+        # The unattributed session was found through the real query and only
+        # the contaminated turn was removed.
+        assert result["sessions_considered"] >= 1
+        assert result["qa_entries_deleted"] == 1
+        surviving = await session_manager.get_session(
+            user_id=USER_ID, session_id=unattributed_session
+        )
+        assert [entry.qa_id for entry in surviving] == ["qa_clean"]
+    finally:
+        async with engine.get_async_session() as session:
+            row = await session.get(SessionRecord, (unattributed_session, user_uuid))
+            if row:
+                await session.delete(row)
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_list_unattributed_sessions_returns_null_dataset_id_rows():
+    """The listing query is dataset_id IS NULL, with no user filter."""
+    from datetime import datetime, timezone
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.session_lifecycle.metrics import list_unattributed_sessions
+    from cognee.modules.session_lifecycle.models import SessionRecord
+
+    now = datetime.now(timezone.utc)
+    user_a = uuid4()
+    user_b = uuid4()
+    dataset_id = uuid4()
+    unattributed_a = f"default_session_unattr_{user_a}"
+    unattributed_b = f"default_session_unattr_{user_b}"
+    attributed = f"default_session_{dataset_id}"
+
+    engine = get_relational_engine()
+    async with engine.engine.begin() as conn:
+        await conn.run_sync(SessionRecord.metadata.create_all)
+
+    async with engine.get_async_session() as session:
+        session.add(
+            SessionRecord(
+                session_id=unattributed_a,
+                user_id=user_a,
+                dataset_id=None,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        session.add(
+            SessionRecord(
+                session_id=unattributed_b,
+                user_id=user_b,
+                dataset_id=None,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        session.add(
+            SessionRecord(
+                session_id=attributed,
+                user_id=user_a,
+                dataset_id=dataset_id,
+                status="running",
+                started_at=now,
+                last_activity_at=now,
+            )
+        )
+        await session.commit()
+
+    try:
+        listed = await list_unattributed_sessions()
+        listed_pairs = {(row[0], row[1]) for row in listed}
+        assert (user_a, unattributed_a) in listed_pairs
+        assert (user_b, unattributed_b) in listed_pairs
+        assert (user_a, attributed) not in listed_pairs
+    finally:
+        async with engine.get_async_session() as session:
+            for session_id, user_id in (
+                (unattributed_a, user_a),
+                (unattributed_b, user_b),
+                (attributed, user_a),
+            ):
+                row = await session.get(SessionRecord, (session_id, user_id))
+                if row:
+                    await session.delete(row)
+            await session.commit()

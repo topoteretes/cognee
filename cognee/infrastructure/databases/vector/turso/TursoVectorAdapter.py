@@ -262,6 +262,42 @@ class TursoVectorAdapter(VectorDBInterface):
     # ------------------------------------------------------------------ #
     # Reads
     # ------------------------------------------------------------------ #
+    supports_payload_update = True
+
+    async def update_payload(self, collection_name: str, payload_updates: dict) -> None:
+        """Update payload fields on existing rows WITHOUT re-embedding.
+
+        Read-modify-write on the JSON payload text column only — the vector
+        blob is never touched, so no embedding call happens. Missing ids skip.
+        """
+        if not payload_updates:
+            return
+        if not await self.has_collection(collection_name):
+            return
+        for data_point_id, fields in payload_updates.items():
+            rows = await self._execute(
+                f'SELECT payload FROM "{collection_name}" WHERE id = ?',
+                [str(data_point_id)],
+                fetch=True,
+            )
+            if not rows:
+                continue
+            payload = json.loads(rows[0][0]) if rows[0][0] else {}
+            # Caller contract: the fields already exist in the payload (see
+            # PGVectorAdapter.update_payload).
+            unknown_fields = set(fields) - set(payload)
+            if unknown_fields:
+                raise ValueError(
+                    f"update_payload: fields {sorted(unknown_fields)} do not exist in the "
+                    f"payload of {collection_name!r} row {data_point_id}"
+                )
+            payload.update(fields)
+            await self._execute(
+                f'UPDATE "{collection_name}" SET payload = ? WHERE id = ?',
+                [json.dumps(payload), str(data_point_id)],
+                commit=True,
+            )
+
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         """Return rows from ``collection_name`` matching any of ``data_point_ids``."""
         if not await self.has_collection(collection_name):

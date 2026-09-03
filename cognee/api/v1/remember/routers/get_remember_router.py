@@ -330,6 +330,14 @@ def get_remember_router() -> APIRouter:
           calls otherwise).
 
         Either datasetName or datasetId must be provided.
+        - **import_mode** (Optional[str]): COGX archive imports only: 'preserve' (default),
+          'hybrid', or 're-derive'.
+        - **skill_name** (Optional[str]): content_type='skills' + skills_text only: name/slug for
+          the inline skill (defaults to 'skill').
+        - **skills_text** (Optional[str]): content_type='skills' only: inline SKILL.md markdown to
+          ingest without a file upload (no-code path). When set and no files are uploaded, it is
+          written to a temporary SKILL.md and ingested via the normal skills pipeline. Pair with
+          skill_name to control the resulting skill name.
 
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
@@ -535,6 +543,9 @@ def get_remember_router() -> APIRouter:
                 **({"index_vectors": bool(index_vectors)} if content_type == "code" else {}),
                 **({"config": config_to_use} if config_to_use else {}),
                 **({"graph_model": graph_model_parsed} if graph_model_parsed else {}),
+                # HTTP contract: an errored blocking run is reported as the 409
+                # body below, not as an exception.
+                raise_on_error=False,
             )
 
             # A blocking run that ended errored must not look like a success
@@ -602,6 +613,17 @@ def get_remember_router() -> APIRouter:
         ``FeedbackEntry``, or ``SkillRunEntry`` and dispatches to the
         matching ``remember`` path. Session-backed entries require
         ``session_id``; ``SkillRunEntry`` can persist with or without one.
+
+        ## Request Parameters
+        - **dataset_id** (Optional[UUID]): UUID of an existing writable dataset. Takes precedence
+          over dataset_name and is required to target a shared dataset by ID.
+        - **dataset_name** (str): Name of the target dataset. Defaults to 'main_dataset'.
+        - **entry** (Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]): Typed memory
+          entry (qa, trace, feedback, or skill_run) to store, dispatched by its type field.
+        - **session_id** (Optional[str]): Required for qa/trace/feedback entries; optional for
+          skill_run entries.
+        - **skill_improvement** (Optional[dict]): Skill improvement details forwarded to
+          remember when recording a skill run.
 
         ## Response
         The returned ``RememberResult`` includes ``entry_type`` and

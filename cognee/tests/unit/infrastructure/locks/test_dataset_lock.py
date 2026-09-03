@@ -8,6 +8,7 @@ different datasets proceed in parallel.
 
 import asyncio
 from uuid import uuid4
+from unittest.mock import patch
 
 import pytest
 
@@ -107,3 +108,73 @@ async def test_delete_waits_for_pipeline_holding_the_lock():
     pipeline_lock.release()
     await asyncio.wait_for(delete_task, timeout=1)
     assert delete_ran.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Lock-ordering guard (SDK-483): canonical order is dataset lock -> queue slot.
+# A task already holding a DatasetQueue slot must not acquire a dataset lock.
+# ---------------------------------------------------------------------------
+
+GET_DATASET_QUEUE_SETTINGS = (
+    "cognee.infrastructure.databases.dataset_queue.queue.get_dataset_queue_settings"
+)
+
+
+@pytest.fixture
+def fresh_enabled_queue():
+    """A fresh enabled DatasetQueue singleton, torn down after the test."""
+    from cognee.infrastructure.databases.dataset_queue import dataset_queue
+
+    dataset_queue._instance = None
+    with patch(GET_DATASET_QUEUE_SETTINGS) as mock_settings:
+        mock_settings.return_value.enabled = True
+        mock_settings.return_value.max_concurrent = 2
+        # An unset MagicMock attribute floats to 1.0, which would give the queue
+        # a 1-second idle TTL — release_slot_for below would then start a REAL
+        # reaper daemon that force-closes every subprocess engine idle >1s for
+        # the rest of the pytest process (the "LanceDBAdapter is closed" flake
+        # in unrelated tests). 0 keeps the release path reaper-free, same as
+        # TestReleaseSlotFor.
+        mock_settings.return_value.idle_ttl_seconds = 0
+        yield dataset_queue()
+    dataset_queue._instance = None
+
+
+@pytest.mark.asyncio
+async def test_lock_after_slot_on_same_dataset_raises(fresh_enabled_queue):
+    """Slot -> lock on the same dataset is the SDK-483 deadlock; it must raise."""
+    dataset_id = uuid4()
+    await fresh_enabled_queue.ensure_slot(dataset_id)
+    try:
+        with pytest.raises(RuntimeError, match="Lock-order inversion"):
+            await get_dataset_lock(dataset_id)
+    finally:
+        await fresh_enabled_queue.release_slot_for(dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_lock_after_slot_on_other_dataset_warns_but_proceeds(fresh_enabled_queue):
+    """A slot for another dataset is a cross-dataset risk: warn, don't raise."""
+    slot_dataset_id, lock_dataset_id = uuid4(), uuid4()
+    await fresh_enabled_queue.ensure_slot(slot_dataset_id)
+    try:
+        lock = await get_dataset_lock(lock_dataset_id)
+        assert isinstance(lock, asyncio.Lock)
+    finally:
+        await fresh_enabled_queue.release_slot_for(slot_dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_canonical_order_lock_then_slot_is_allowed(fresh_enabled_queue):
+    """The canonical order (lock first, then slot) must stay unrestricted."""
+    dataset_id = uuid4()
+    async with dataset_lock(dataset_id):
+        await fresh_enabled_queue.ensure_slot(dataset_id)
+        await fresh_enabled_queue.release_slot_for(dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_lock_without_any_slot_is_unaffected(fresh_enabled_queue):
+    """The guard is inert for tasks holding no slot."""
+    lock = await get_dataset_lock(uuid4())
+    assert isinstance(lock, asyncio.Lock)

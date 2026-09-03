@@ -49,11 +49,24 @@ jobs:
 
           echo "Tag to create: ${TAG}"
 
+          # Resolve the previous release tag BEFORE creating the new one, so the
+          # release notes describe prev-release..this-release instead of comparing
+          # the new tag against itself (issue #4661). Stable releases (main) are
+          # compared against the previous stable tag — dev canaries version-sort
+          # above their stable release, so they must be filtered out here.
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            PREV_TAG="$(git tag --sort=-version:refname --list 'v*' | grep -vE '\.(dev|rc|a|b|alpha|beta)[0-9]*$' | grep -vx "${TAG}" | head -n 1 || true)"
+          else
+            PREV_TAG="$(git tag --sort=-version:refname --list 'v*' | grep -vx "${TAG}" | head -n 1 || true)"
+          fi
+          echo "Previous release tag: ${PREV_TAG:-<none>}"
+
           git config user.name "Cognee Team"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "prev_tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
 
           git tag "${TAG}"
           git push origin "${TAG}"
@@ -68,10 +81,13 @@ jobs:
           # Set PYTHONPATH to include project root
           export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
 
-          # Generate release notes
-          # Compares current branch against the latest release tag automatically
+          # Generate release notes comparing the previous release tag to the new
+          # one. --base may be empty on a first-ever release; the script then
+          # auto-detects a base (excluding the tag being released).
           uv run python tools/generate_release_notes.py \
             --version "${{ steps.create_tag.outputs.version }}" \
+            --base "${{ steps.create_tag.outputs.prev_tag }}" \
+            --target "${{ steps.create_tag.outputs.tag }}" \
             --github-output
 
       - name: Create GitHub Release with AI-generated notes
@@ -183,6 +199,40 @@ jobs:
             flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
+
+      - name: Build and push Dev UI Docker Image
+        if: ${{ github.ref_name == 'dev' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: ./cognee-frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: cognee/cognee-ui:${{ needs.release-github.outputs.version }}
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-ui:buildcache
+          cache-to: type=registry,ref=cognee/cognee-ui:buildcache,mode=max
+
+      - name: Build and push Main UI Docker Image
+        if: ${{ github.ref_name == 'main' }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: ./cognee-frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: |
+            cognee/cognee-ui:${{ needs.release-github.outputs.version }}
+            cognee/cognee-ui:latest
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ github.ref_name }}
+          cache-from: type=registry,ref=cognee/cognee-ui:buildcache
+          cache-to: type=registry,ref=cognee/cognee-ui:buildcache,mode=max
 
   bump-mcp-lock:
     needs: [release-github, release-pypi-package]

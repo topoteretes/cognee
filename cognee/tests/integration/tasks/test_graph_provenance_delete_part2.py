@@ -22,7 +22,9 @@ import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import (
@@ -112,9 +114,13 @@ async def _setup(tmp_path):
     await cognee.prune.prune_system(metadata=True)
     await setup_cognee()
     user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(authorized_dataset.id))
+    await set_database_global_context_variables(authorized_dataset.id, user.id)
     return user
 
 

@@ -21,13 +21,16 @@ from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.processing.document_types.TextDocument import TextDocument
 from cognee.modules.engine.models import Entity
@@ -152,9 +155,13 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     mock_create_structured_output.side_effect = mock_llm_output
 
     user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(authorized_dataset.id))
+    await set_database_global_context_variables(authorized_dataset.id, user.id)
 
     # Add and cognify first document (BMW)
     bmw_text = "BMW is a german car manufacturer"
@@ -178,7 +185,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         external_metadata="",
     )
     bmw_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(bmw_data_id)}-0"),
+        id=content_chunk_id(str(bmw_data_id), chunk_content_hash(bmw_text), 0),
         text=bmw_text,
         chunk_size=14,
         chunk_index=0,
@@ -194,7 +201,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         external_metadata="",
     )
     netherlands_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(netherlands_data_id)}-0"),
+        id=content_chunk_id(str(netherlands_data_id), chunk_content_hash(netherlands_text), 0),
         text=netherlands_text,
         chunk_size=14,
         chunk_index=0,

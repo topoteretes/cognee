@@ -31,7 +31,9 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: |
           # List ALL your Linear team prefixes — verify against Linear ▸ Settings ▸ Teams.
-          KEYS='COG|SDK|CLO|COM|ENG'
+          # Teams that do not ship code to this repo are omitted on purpose (Sales,
+          # Growth, Growth-Seo-Geo, Admin&Finance); add their prefix here if that changes.
+          KEYS='COG|SDK|CLO|COM|ENG|RES'
           if echo "$PR_TITLE $HEAD_REF" | grep -Eiq "\b(${KEYS})-[0-9]+\b"; then
             echo "Linear issue reference found."
           # Automated release-pipeline PRs (release.yml's bump-mcp-lock sync PR)
@@ -40,6 +42,6 @@ jobs:
           elif echo "$PR_TITLE" | grep -q "\[release\]" && echo "$HEAD_REF" | grep -q "^release/"; then
             echo "Automated release PR; Linear reference not required."
           else
-            echo "::error::PR title or branch must reference a Linear issue, e.g. COG-123."
+            echo "::error::PR title or branch must reference a Linear issue, e.g. COG-123. Accepted prefixes: ${KEYS//|/, }."
             exit 1
           fi

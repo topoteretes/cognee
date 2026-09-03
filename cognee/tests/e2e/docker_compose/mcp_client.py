@@ -22,7 +22,7 @@ class McpToolCall:
     structured: Any
 
 
-async def _call_list_datasets(sse_url: str) -> McpToolCall:
+async def _call_cognify_status(sse_url: str) -> McpToolCall:
     # Imported lazily so the rest of the suite still collects if `mcp` (the
     # client library) is not installed in the runner's environment.
     from mcp import ClientSession
@@ -44,9 +44,6 @@ async def _call_list_datasets(sse_url: str) -> McpToolCall:
                 f"exposes: {sorted(tool_names)}"
             )
 
-            # The server registers exactly four tools (remember/recall/forget/
-            # cognify_status); cognify_status is the LLM-free, side-effect-free
-            # one, so it is the round-trip probe.
             call = await session.call_tool("cognify_status", arguments={})
             assert not getattr(call, "isError", False), f"tool call errored: {call}"
 
@@ -57,4 +54,4 @@ async def _call_list_datasets(sse_url: str) -> McpToolCall:
 
 def call_mcp_tool(sse_url: str | None = None) -> McpToolCall:
     """Synchronously drive one real MCP tool call over SSE."""
-    return asyncio.run(_call_list_datasets(sse_url or CONFIG.mcp_sse_url))
+    return asyncio.run(_call_cognify_status(sse_url or CONFIG.mcp_sse_url))

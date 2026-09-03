@@ -34,7 +34,7 @@ from cognee.modules.migration.cogx import (
     COGXTurn,
     parse_timestamp,
 )
-from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.migration.sources.base import MemorySource, read_export_file
 
 
 def _first_list(container: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
@@ -63,7 +63,7 @@ class ZepSource(MemorySource):
     def _load_raw(self) -> Dict[str, Any]:
         data = self._data
         if isinstance(data, (str, Path)):
-            data = json.loads(Path(data).read_text(encoding="utf-8"))
+            data = json.loads(read_export_file(data))
         if not isinstance(data, dict):
             raise ValueError("Unrecognized Zep/Graphiti export: expected a JSON object.")
         return data

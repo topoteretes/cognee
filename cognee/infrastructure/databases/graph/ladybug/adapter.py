@@ -3,6 +3,7 @@
 import os
 import json
 import asyncio
+from contextlib import nullcontext
 import threading
 import tempfile
 from uuid import UUID, uuid5, NAMESPACE_OID
@@ -82,7 +83,7 @@ PROVENANCE_COLUMNS = (
 )
 
 
-def _provenance_fold_clause(alias: str) -> str:
+def _provenance_fold_clause(alias: str, row: Optional[str] = None) -> str:
     """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
 
     Appended to the ``MERGE`` in ``add_nodes`` / ``add_edges`` so a node/edge is
@@ -94,29 +95,33 @@ def _provenance_fold_clause(alias: str) -> str:
     the pre-SET row, so it sees ownership as it was before this write.
 
     ``alias`` is the bound variable for the artifact (``n`` for nodes, ``r`` for
-    edges). The provenance ``$``-params are scalars shared across the UNWIND
-    batch because a single source ref key is attached per call.
+    edges). With ``row=None`` the provenance inputs are scalar ``$``-params
+    shared across the UNWIND batch (one source ref key per call). With ``row``
+    set to the UNWIND variable, each row carries its OWN provenance fields —
+    chunk-scoped ownership stamps every artifact with its owning chunk's ref in
+    a single statement instead of one call per owner group.
     """
+    src = f"{row}." if row else "$"
     return f"""
             SET {alias}.source_run_refs = CASE
-                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS {src}sr_token
                     THEN coalesce({alias}.source_run_refs, '|')
-                    ELSE concat(coalesce({alias}.source_run_refs, '|'), $run_ref_tail)
+                    ELSE concat(coalesce({alias}.source_run_refs, '|'), {src}run_ref_tail)
                 END,
                 {alias}.source_run_ids = CASE
-                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS {src}sr_token
                     THEN coalesce({alias}.source_run_ids, '|')
-                    ELSE concat(coalesce({alias}.source_run_ids, '|'), $run_id_tail)
+                    ELSE concat(coalesce({alias}.source_run_ids, '|'), {src}run_id_tail)
                 END,
                 {alias}.source_ref_keys = CASE
-                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS $sr_token
+                    WHEN coalesce({alias}.source_ref_keys, '|') CONTAINS {src}sr_token
                     THEN coalesce({alias}.source_ref_keys, '|')
-                    ELSE concat(coalesce({alias}.source_ref_keys, '|'), $sr_tail)
+                    ELSE concat(coalesce({alias}.source_ref_keys, '|'), {src}sr_tail)
                 END,
                 {alias}.source_dataset_ids = CASE
-                    WHEN coalesce({alias}.source_dataset_ids, '|') CONTAINS $ds_token
+                    WHEN coalesce({alias}.source_dataset_ids, '|') CONTAINS {src}ds_token
                     THEN coalesce({alias}.source_dataset_ids, '|')
-                    ELSE concat(coalesce({alias}.source_dataset_ids, '|'), $ds_tail)
+                    ELSE concat(coalesce({alias}.source_dataset_ids, '|'), {src}ds_tail)
                 END
             """
 
@@ -136,6 +141,24 @@ def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str])
 
 def _provenance_token(value: str) -> str:
     return f"|{value}|"
+
+
+def _per_row_fold_fields(pipeline_run_id: Optional[str]):
+    """Per-unique-key cache of fold fields for per-row provenance stamping.
+
+    Grouped chunk-ownership writes share few unique ref keys across many rows;
+    computing the six fold fields once per key keeps payload prep linear.
+    """
+    cache: Dict[str, dict] = {}
+
+    def fields_for(source_ref_key: str) -> dict:
+        fields = cache.get(source_ref_key)
+        if fields is None:
+            fields = _provenance_fold_params(source_ref_key, pipeline_run_id)
+            cache[source_ref_key] = fields
+        return fields
+
+    return fields_for
 
 
 def _encode_refs(items: List[str]) -> str:
@@ -189,6 +212,13 @@ class LadybugAdapter(GraphDBInterface):
     management. It contains methods for querying, adding, and deleting nodes and edges as
     well as for graph metrics and data extraction.
     """
+
+    # add_nodes/add_edges accept a per-row source-ref mapping, so chunk-scoped
+    # ownership stamps in ONE statement instead of one call per owner group.
+    supports_per_row_source_refs = True
+
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
 
     @classmethod
     def create_subprocess(
@@ -1103,7 +1133,7 @@ class LadybugAdapter(GraphDBInterface):
     async def add_nodes(
         self,
         nodes: List[DataPoint],
-        source_ref_key: Optional[str] = None,
+        source_ref_key: Optional[Union[str, Dict[str, str]]] = None,
         pipeline_run_id: Optional[str] = None,
     ) -> None:
         """
@@ -1118,9 +1148,12 @@ class LadybugAdapter(GraphDBInterface):
 
             - nodes (List[DataPoint]): A list of nodes to be added to the graph, each
               represented as a DataPoint.
-            - source_ref_key (Optional[str]): When set, graph provenance for this
-              source ref is stamped atomically in the same statement that writes the nodes
-              (no separate attach pass). Omit for non-graph-provenance writes.
+            - source_ref_key (Optional[Union[str, Dict[str, str]]]): When set, graph
+              provenance is stamped atomically in the same statement that writes the nodes
+              (no separate attach pass). A str stamps every node with that one ref; a dict
+              maps node id -> ref key so each row carries its own (chunk-scoped) ref, still
+              in a single statement. Every node must have an entry. Omit for
+              non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
@@ -1129,6 +1162,8 @@ class LadybugAdapter(GraphDBInterface):
 
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            per_row_refs = isinstance(source_ref_key, dict)
+            fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
             # Prepare all nodes data
             node_params = []
@@ -1155,6 +1190,15 @@ class LadybugAdapter(GraphDBInterface):
                         "properties": json.dumps(properties, cls=JSONEncoder),
                         "created_at": now,
                         "updated_at": now,
+                        # KeyError on a missing id is deliberate: a partial
+                        # mapping means the caller's ownership bookkeeping is
+                        # broken, and silently unstamped rows would leak on
+                        # deletion.
+                        **(
+                            fold_fields(source_ref_key[core_properties["id"]])
+                            if per_row_refs
+                            else {}
+                        ),
                     }
                 )
 
@@ -1176,16 +1220,32 @@ class LadybugAdapter(GraphDBInterface):
                     n.updated_at = TIMESTAMP(node.updated_at)
                 """
                 extra_params = {}
-                if source_ref_key is not None:
+                if per_row_refs:
+                    merge_query += _provenance_fold_clause("n", row="node")
+                elif source_ref_key is not None:
                     merge_query += _provenance_fold_clause("n")
                     extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
                 total = len(node_params)
-                for start in range(0, total, _WRITE_CHUNK_SIZE):
-                    chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
-                    await self.query(merge_query, {"nodes": chunk, **extra_params})
-                    if total > _WRITE_CHUNK_SIZE:
-                        logger.info("Merged nodes %d/%d", start + len(chunk), total)
+                # A folded write appends the row's owner key in one statement,
+                # but attach/remove are a read-then-write pair under
+                # _source_ref_change_lock. A fold landing between that read
+                # and write is overwritten (lost update) — seen when two
+                # documents of one cognify run wrote a shared entity
+                # concurrently. Folds take the same lock; query() takes the
+                # engine lock inside it, the same order attach/remove use.
+                folds_provenance = per_row_refs or source_ref_key is not None
+                async with self._source_ref_change_lock if folds_provenance else nullcontext():
+                    for start in range(0, total, _WRITE_CHUNK_SIZE):
+                        chunk = node_params[start : start + _WRITE_CHUNK_SIZE]
+                        await self.query(merge_query, {"nodes": chunk, **extra_params})
+                        if total > _WRITE_CHUNK_SIZE:
+                            logger.info("Merged nodes %d/%d", start + len(chunk), total)
+                # Outside the lock: the race it guards is between this fold's
+                # read-modify-write of source_ref_keys and attach/remove's, and
+                # a checkpoint is durability, not provenance. Holding the lock
+                # across it made every concurrently scheduled data item queue
+                # behind every other item's checkpoint for nothing.
                 await self.checkpoint()
                 logger.debug(f"Processed {total} nodes in batch")
 
@@ -1346,7 +1406,9 @@ class LadybugAdapter(GraphDBInterface):
 
         The lock serializes this two-query sequence within one adapter instance
         so concurrent explicit attach/remove calls do not overwrite each other's
-        provenance updates.
+        provenance updates. Folded writes (``add_nodes``/``add_edges`` with a
+        source ref) take the same lock: a fold landing between this read and
+        write would otherwise be lost.
         """
         if not artifacts:
             return
@@ -1718,6 +1780,44 @@ class LadybugAdapter(GraphDBInterface):
             await self.checkpoint()
         return None
 
+    async def update_chunk_index(self, chunk_indexes: Dict[str, int]) -> None:
+        """Patch ONLY chunk_index inside the stored properties blobs.
+
+        The stored blob is the source of truth: every other key is carried
+        verbatim, so nothing a model forgets to declare can be erased (the
+        failure mode of rewriting nodes from rehydrated models).
+        """
+        if not chunk_indexes:
+            return
+        rows = await self.query(
+            """
+            MATCH (n:Node) WHERE n.id IN $ids
+            RETURN n.id, n.properties
+            """,
+            {"ids": list(chunk_indexes.keys())},
+        )
+        updates = []
+        for row in rows:
+            raw_props = row[1]
+            if not raw_props:
+                continue
+            try:
+                properties = json.loads(raw_props)
+            except json.JSONDecodeError:
+                continue
+            properties["chunk_index"] = chunk_indexes[str(row[0])]
+            updates.append({"id": row[0], "properties": json.dumps(properties, cls=JSONEncoder)})
+        if updates:
+            await self.query(
+                """
+                UNWIND $rows AS row
+                MATCH (n:Node) WHERE n.id = row.id
+                SET n.properties = row.properties
+                """,
+                {"rows": updates},
+            )
+            await self.checkpoint()
+
     async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
         Extract a node by its ID.
@@ -1925,7 +2025,7 @@ class LadybugAdapter(GraphDBInterface):
     async def add_edges(
         self,
         edges: List[Tuple[str, str, str, Dict[str, Any]]],
-        source_ref_key: Optional[str] = None,
+        source_ref_key: Optional[Union[str, Dict[Tuple[str, str, str], str]]] = None,
         pipeline_run_id: Optional[str] = None,
     ) -> None:
         """
@@ -1940,9 +2040,12 @@ class LadybugAdapter(GraphDBInterface):
 
             - edges (List[Tuple[str, str, str, Dict[str, Any]]]): A list of edges represented as
               tuples of (from_node, to_node, relationship_name, edge_properties).
-            - source_ref_key (Optional[str]): When set, graph provenance for this
-              source ref is stamped atomically in the same statement that writes the edges
-              (no separate attach pass). Omit for non-graph-provenance writes.
+            - source_ref_key (Optional[Union[str, Dict[Tuple[str, str, str], str]]]): When
+              set, graph provenance is stamped atomically in the same statement that writes
+              the edges (no separate attach pass). A str stamps every edge with that one ref;
+              a dict maps (source_id, target_id, relationship_name) -> ref key so each row
+              carries its own (chunk-scoped) ref, still in a single statement. Every edge
+              must have an entry. Omit for non-graph-provenance writes.
             - pipeline_run_id (Optional[str]): Run id recorded alongside the provenance
               stamp, so the write is rollbackable by run. Ignored when source_ref_key is None.
         """
@@ -1951,6 +2054,8 @@ class LadybugAdapter(GraphDBInterface):
 
         try:
             now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+            per_row_refs = isinstance(source_ref_key, dict)
+            fold_fields = _per_row_fold_fields(pipeline_run_id) if per_row_refs else None
 
             edge_params = [
                 {
@@ -1960,6 +2065,14 @@ class LadybugAdapter(GraphDBInterface):
                     "properties": json.dumps(properties, cls=JSONEncoder),
                     "created_at": now,
                     "updated_at": now,
+                    # KeyError on a missing identity is deliberate — see add_nodes.
+                    **(
+                        fold_fields(
+                            source_ref_key[(str(from_node), str(to_node), str(relationship_name))]
+                        )
+                        if per_row_refs
+                        else {}
+                    ),
                 }
                 for from_node, to_node, relationship_name, properties in edges
             ]
@@ -1991,16 +2104,23 @@ class LadybugAdapter(GraphDBInterface):
                 r.properties = edge.properties
             """
             extra_params = {}
-            if source_ref_key is not None:
+            if per_row_refs:
+                query += _provenance_fold_clause("r", row="edge")
+            elif source_ref_key is not None:
                 query += _provenance_fold_clause("r")
                 extra_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
 
             total = len(edge_params)
-            for start in range(0, total, _WRITE_CHUNK_SIZE):
-                chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
-                await self.query(query, {"edges": chunk, **extra_params})
-                if total > _WRITE_CHUNK_SIZE:
-                    logger.info("Merged edges %d/%d", start + len(chunk), total)
+            # Same lost-update guard as add_nodes: folded edge writes and the
+            # attach/remove read-then-write pair share one lock.
+            folds_provenance = per_row_refs or source_ref_key is not None
+            async with self._source_ref_change_lock if folds_provenance else nullcontext():
+                for start in range(0, total, _WRITE_CHUNK_SIZE):
+                    chunk = edge_params[start : start + _WRITE_CHUNK_SIZE]
+                    await self.query(query, {"edges": chunk, **extra_params})
+                    if total > _WRITE_CHUNK_SIZE:
+                        logger.info("Merged edges %d/%d", start + len(chunk), total)
+            # Outside the lock, same reasoning as add_nodes.
             await self.checkpoint()
 
         except Exception as e:
@@ -2531,18 +2651,28 @@ class LadybugAdapter(GraphDBInterface):
                 query_str = """
                 MATCH (n)<-[r:EDGE]-(m)
                 WHERE n.id = $id AND r.relationship_name = $edge_label
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id), "edge_label": edge_label}
             else:
                 query_str = """
                 MATCH (n)<-[r:EDGE]-(m)
                 WHERE n.id = $id
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
-            return [row[0] for row in result] if result else []
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get predecessors for node {node_id}: {e}")
             return []
@@ -2575,18 +2705,28 @@ class LadybugAdapter(GraphDBInterface):
                 query_str = """
                 MATCH (n)-[r:EDGE]->(m)
                 WHERE n.id = $id AND r.relationship_name = $edge_label
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id), "edge_label": edge_label}
             else:
                 query_str = """
                 MATCH (n)-[r:EDGE]->(m)
                 WHERE n.id = $id
-                RETURN properties(m)
+                RETURN {
+                    id: m.id,
+                    name: m.name,
+                    type: m.type,
+                    properties: m.properties
+                }
                 """
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
-            return [row[0] for row in result] if result else []
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
         except Exception as e:
             logger.error(f"Failed to get successors for node {node_id}: {e}")
             return []
@@ -2868,8 +3008,9 @@ class LadybugAdapter(GraphDBInterface):
 
             # Fetch all nodes
             nodes_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)
-            WHERE n.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, {
                 name: n.name,
                 type: n.type,
@@ -2897,16 +3038,24 @@ class LadybugAdapter(GraphDBInterface):
 
             # Fetch all edges between the collected nodes
             edges_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)-[r]->(m:Node)
-            WHERE n.id IN $ids AND m.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, m.id, r.relationship_name, r.properties
             """
             edge_rows = await self.query(edges_query, {"ids": all_ids})
+            # The far endpoint is filtered here rather than with a second
+            # ``m.id IN $ids`` predicate: that predicate cannot use the primary
+            # key index and costs a table scan per id, which is the whole reason
+            # this query drives off UNWIND in the first place.
+            kept_ids = set(all_ids)
             formatted_edges = []
             for e in edge_rows:
                 if e and len(e) >= 3:
                     source_id = str(e[0])
                     target_id = str(e[1])
+                    if target_id not in kept_ids:
+                        continue
                     rel_type = str(e[2])
                     props = {}
                     if len(e) > 3 and e[3]:
@@ -2986,8 +3135,9 @@ class LadybugAdapter(GraphDBInterface):
         all_ids = list({*primary_ids, *neighbor_ids})
 
         nodes_query = """
+            UNWIND $ids AS wanted
             MATCH (n:Node)
-            WHERE n.id IN $ids
+            WHERE n.id = wanted
             RETURN n.id, n.name, n.type, n.properties
         """
         node_rows = await self.query(nodes_query, {"ids": all_ids})
@@ -3002,13 +3152,19 @@ class LadybugAdapter(GraphDBInterface):
             nodes.append((node_id, data))
 
         edges_query = """
+            UNWIND $ids AS wanted
             MATCH (a:Node)-[r:EDGE]-(b:Node)
-            WHERE a.id IN $ids AND b.id IN $ids
+            WHERE a.id = wanted
             RETURN a.id, b.id, r.relationship_name, r.properties
         """
         edge_rows = await self.query(edges_query, {"ids": all_ids})
+        # See get_neighborhood: the far endpoint is filtered in Python because
+        # a second ``b.id IN $ids`` predicate would reintroduce the per-id scan.
+        kept_ids = set(all_ids)
         edges: List[Tuple[str, str, str, dict]] = []
         for from_id, to_id, rel_type, props in edge_rows:
+            if to_id not in kept_ids:
+                continue
             data = {}
             if props:
                 try:
@@ -3350,7 +3506,7 @@ class LadybugAdapter(GraphDBInterface):
         """
         query_str = """
         MATCH (n:Node)
-        WHERE NOT EXISTS((n)-[]-())
+        WHERE NOT (n)-[:EDGE]-()
         RETURN n.id
         """
         result = await self.query(query_str)

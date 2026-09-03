@@ -15,6 +15,9 @@ from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.modules.users.authentication.redact_websocket_query_secrets import (
+    install_websocket_query_param_redaction,
+)
 from cognee.api.v1.cloud.routers import get_checks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
@@ -54,11 +57,25 @@ from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
 from cognee.api.v1.integrations.routers import get_integrations_router
+
+# Registers the GitHub and Linear integrations with the integrations registry
+# as import side effects. Slack registers via its router imports above; GitHub
+# and Linear mount no routers of their own (webhooks arrive on the generic
+# /api/v1/integrations/{provider}/events routes), so the registration imports
+# are explicit here.
+import cognee.modules.integrations.github  # noqa: F401,E402
+import cognee.modules.integrations.linear  # noqa: F401,E402
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 # Ensure application logging is configured for container stdout/stderr
 setup_logging()
 logger = get_logger()
+
+# Keeps the WebSocket ?token= auth fallback out of uvicorn's own access/error
+# logs, regardless of how uvicorn was launched (this module is imported
+# either way). See redact_websocket_query_secrets.py for why this can't be
+# left to proxy-side redaction alone.
+install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
 
@@ -104,6 +121,12 @@ async def lifespan(app: FastAPI):
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
+
+    # Flush in-flight telemetry and close its shared aiohttp session on the
+    # loop that owns them, instead of leaving it to the atexit fallback.
+    from cognee.shared.utils import close_telemetry_session
+
+    await close_telemetry_session()
 
 
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)

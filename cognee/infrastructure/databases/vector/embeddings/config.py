@@ -1,5 +1,6 @@
 from typing import Optional
 from functools import lru_cache
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.shared.logging_utils import get_logger
@@ -75,7 +76,15 @@ class EmbeddingConfig(BaseSettings):
     # embedder by causing a Vector(3072) / 384-dim (etc.) mismatch on first
     # write into the vector store.
     embedding_dimensions: Optional[int] = None
-    embedding_endpoint: Optional[str] = None
+    # Also accepted as EMBEDDING_API_BASE — the name the litellm/OpenAI
+    # ecosystem uses (issue #4871: with only EMBEDDING_ENDPOINT recognized and
+    # extra="allow" swallowing unknowns, a custom base set via API_BASE was
+    # silently ignored and requests 404'd against api.openai.com).
+    # EMBEDDING_ENDPOINT wins when both are set.
+    embedding_endpoint: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("EMBEDDING_ENDPOINT", "EMBEDDING_API_BASE"),
+    )
     embedding_api_key: Optional[str] = None
     embedding_api_version: Optional[str] = None
     embedding_max_completion_tokens: Optional[int] = 8191
@@ -96,7 +105,7 @@ class EmbeddingConfig(BaseSettings):
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     def model_post_init(self, __context) -> None:
         if self.embedding_dimensions is None:

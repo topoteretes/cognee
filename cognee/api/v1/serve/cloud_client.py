@@ -7,6 +7,7 @@ from uuid import UUID
 
 import aiohttp
 
+from cognee.modules.search.types import ContextFormat
 from cognee.modules.ingestion.data_types.TextData import create_text_data
 from cognee.shared.logging_utils import get_logger
 
@@ -68,6 +69,20 @@ class CloudClient:
                 return resp.status == 200
         except Exception:
             return False
+
+    async def _auth_check(self) -> Optional[int]:
+        """Status of an authenticated probe, or None when unreachable.
+
+        ``/health`` is unauthenticated, so it cannot tell a working API key
+        from a rejected one. Probing an authenticated endpoint lets serve()
+        fail at connect time instead of on the first real operation.
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
+                return resp.status
+        except Exception:
+            return None
 
     # ----- V2 Operations -----
 
@@ -218,6 +233,10 @@ class CloudClient:
             payload["node_name"] = kwargs["node_name"]
         if kwargs.get("only_context"):
             payload["only_context"] = kwargs["only_context"]
+        # Only the non-default shape is worth sending: an older instance ignores the
+        # field, and omitting it keeps the request identical to what it always was.
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["context_format"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose"):
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("session_id"):
@@ -357,6 +376,8 @@ class CloudClient:
             payload["nodeName"] = kwargs["node_name"]
         if kwargs.get("only_context") is not None:
             payload["onlyContext"] = kwargs["only_context"]
+        if ContextFormat.parse(kwargs.get("context_format")) is ContextFormat.PROMPT:
+            payload["contextFormat"] = ContextFormat.PROMPT.value
         if kwargs.get("verbose") is not None:
             payload["verbose"] = kwargs["verbose"]
         if kwargs.get("skills") is not None:
