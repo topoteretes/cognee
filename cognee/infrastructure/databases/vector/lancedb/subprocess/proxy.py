@@ -31,6 +31,7 @@ from cognee_db_workers.lancedb_protocol import (
     OP_TABLE_NAMES,
     OP_TABLE_QUERY_EXECUTE,
     OP_TABLE_RELEASE,
+    OP_TABLE_SCHEMA,
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
@@ -249,6 +250,10 @@ class RemoteLanceDBTable:
             Request(op=OP_TABLE_COUNT_ROWS, handle_id=self.handle_id)
         )
         return int(resp.result)
+
+    async def schema(self) -> pa.Schema:
+        resp = await self._session.call_async(Request(op=OP_TABLE_SCHEMA, handle_id=self.handle_id))
+        return pa.ipc.read_schema(pa.py_buffer(resp.result))
 
     async def to_arrow(self) -> pa.Table:
         resp = await self._session.call_async(

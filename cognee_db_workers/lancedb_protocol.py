@@ -27,6 +27,7 @@ OP_TABLE_ADD = 122
 OP_TABLE_DELETE = 123  # handle_id; args: (where: str)
 OP_TABLE_RELEASE = 124  # handle_id; release the table handle (no-op if already gone)
 OP_TABLE_OPTIMIZE = 125  # handle_id; compact the table (lancedb AsyncTable.optimize)
+OP_TABLE_SCHEMA = 126  # handle_id; returns pa.Schema serialized as Arrow IPC bytes
 
 # Builder ops. args: (root_args, chain_steps, terminal_name, terminal_args,
 # terminal_kwargs) where root_args is the tuple passed to the root call
