@@ -1241,7 +1241,12 @@ class LadybugAdapter(GraphDBInterface):
                         await self.query(merge_query, {"nodes": chunk, **extra_params})
                         if total > _WRITE_CHUNK_SIZE:
                             logger.info("Merged nodes %d/%d", start + len(chunk), total)
-                    await self.checkpoint()
+                # Outside the lock: the race it guards is between this fold's
+                # read-modify-write of source_ref_keys and attach/remove's, and
+                # a checkpoint is durability, not provenance. Holding the lock
+                # across it made every concurrently scheduled data item queue
+                # behind every other item's checkpoint for nothing.
+                await self.checkpoint()
                 logger.debug(f"Processed {total} nodes in batch")
 
         except Exception as e:
@@ -2115,7 +2120,8 @@ class LadybugAdapter(GraphDBInterface):
                     await self.query(query, {"edges": chunk, **extra_params})
                     if total > _WRITE_CHUNK_SIZE:
                         logger.info("Merged edges %d/%d", start + len(chunk), total)
-                await self.checkpoint()
+            # Outside the lock, same reasoning as add_nodes.
+            await self.checkpoint()
 
         except Exception as e:
             logger.error(f"Failed to add edges in batch: {e}")
