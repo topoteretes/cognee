@@ -1,0 +1,45 @@
+{
+  "_comment": "Docs-facing extras applied by tools/sync_release_docs.py:enhance_spec(). FastAPI does not emit any of this; Mintlify reads all of it from the published spec. tag_descriptions and request_examples are maintained automatically by the spec extras sync workflow (tools/fix_spec_extras.py) - edit them here, not in the Python source. request_examples is keyed by \"METHOD /path\" rather than FastAPI's operationId: the operationId embeds the handler function name, so renaming a handler silently orphaned its example.",
+  "servers": [
+    {
+      "url": "https://api.cognee.ai",
+      "description": "Production server (full functionality)"
+    },
+    {
+      "url": "http://localhost:8000",
+      "description": "Local development server (requires local setup)"
+    }
+  ],
+  "tag_descriptions": {
+    "add": "Data ingestion endpoints for adding text, files, and structured data.",
+    "auth": "Authentication endpoints for user registration, login, and token management.",
+    "cognify": "Knowledge processing endpoints to transform raw data into knowledge graphs.",
+    "datasets": "Dataset management endpoints for listing, creating, and deleting datasets.",
+    "delete": "Data deletion endpoints (deprecated \u2014 use datasets endpoints instead).",
+    "permissions": "Permission management for multi-user access control.",
+    "responses": "Response generation endpoints using the knowledge graph.",
+    "search": "Search endpoints for querying the knowledge graph.",
+    "settings": "Configuration endpoints for managing Cognee settings.",
+    "users": "User management endpoints.",
+    "visualize": "Graph visualization endpoints."
+  },
+  "request_examples": {
+    "POST /api/v1/add": {
+      "data": "Cognee is a knowledge graph platform for AI applications."
+    },
+    "POST /api/v1/cognify": {
+      "datasets": [
+        "main_dataset"
+      ]
+    },
+    "POST /api/v1/datasets": {
+      "name": "my_dataset",
+      "description": "A test dataset"
+    },
+    "POST /api/v1/search": {
+      "search_type": "GRAPH_COMPLETION",
+      "query": "What is Cognee?",
+      "top_k": 10
+    }
+  }
+}

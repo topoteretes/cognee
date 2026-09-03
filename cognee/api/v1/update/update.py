@@ -157,6 +157,9 @@ async def update(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         data_cache=data_cache,
+        # update() returns the run info for the caller to inspect — an errored
+        # run is a valid return value here, not an exception.
+        raise_on_error=False,
     )
 
     return cognify_run

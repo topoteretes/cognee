@@ -39,7 +39,7 @@ async def resolve_skills(
             logger.warning("Skill entries must be Skill or str; got %s", type(item).__name__)
 
         if skill is None:
-            logger.warning("Skill %r not found in dataset %s; skipping", item, dataset_id)
+            logger.warning("Requested skill not found in dataset %s; skipping", dataset_id)
             continue
         if not _skill_in_dataset_scope(skill, dataset_id):
             logger.warning("Skill %r is outside dataset scope; skipping", skill.name)

@@ -59,17 +59,23 @@ def create_dlt_source_from_connection_string(
 
     if query:
         table_name, where_clause = _parse_sql_query(query)
+        schema_name, bare_table_name = _split_schema_and_table(table_name)
 
         def query_adapter_callback(q, table):
-            if table.name == table_name:
+            # sqlalchemy Table.name is never schema-qualified
+            if table.name == bare_table_name:
                 return q.where(sqlalchemy.text(where_clause))
             return q
 
-        source = sql_database(
-            credentials=connection_string,
-            table_names=[table_name],
-            query_adapter_callback=query_adapter_callback,
-        )
+        source_kwargs = {
+            "credentials": connection_string,
+            "table_names": [bare_table_name],
+            "query_adapter_callback": query_adapter_callback,
+        }
+        if schema_name:
+            source_kwargs["schema"] = schema_name
+
+        source = sql_database(**source_kwargs)
     else:
         source = sql_database(credentials=connection_string)
 
@@ -102,16 +108,72 @@ def create_dlt_source_from_csv(csv_path: str, source_name: Optional[str] = None)
     return source.with_name(source_name or csv_source_name(filename))
 
 
+def _split_schema_and_table(qualified_name: str) -> tuple:
+    """Split a possibly schema-qualified table ref into (schema, table).
+
+    ``public.users`` -> (``public``, ``users``). A bare name has no schema.
+    """
+    if "." not in qualified_name:
+        return None, qualified_name
+    schema, table = qualified_name.rsplit(".", 1)
+    return schema, table
+
+
 def _parse_sql_query(query: str) -> tuple:
     """Extract table name and WHERE clause from a SELECT query.
-    Returns (table_name, where_clause) or raises ValueError."""
+    Returns (table_name, where_clause) or raises ValueError.
+
+    Table names may be schema-qualified (``public.users``). ``\\w+`` alone
+    stops at the first dot, which used to drop both the schema and the WHERE
+    clause.
+
+    A table alias (``users u`` / ``users AS u``) is allowed as long as the
+    WHERE clause qualifies columns with the table name, not the alias: dlt's
+    select is built on the bare table, so an alias reference (``u.age``)
+    cannot be replayed and raises instead of silently ingesting the whole
+    table. JOIN queries raise for the same reason — their WHERE spans tables
+    the single-table source cannot express.
+    """
+    # Words that can follow a table name without being an alias.
+    _RESERVED_AFTER_TABLE = (
+        "WHERE",
+        "JOIN",
+        "INNER",
+        "LEFT",
+        "RIGHT",
+        "FULL",
+        "CROSS",
+        "ORDER",
+        "GROUP",
+        "LIMIT",
+        "UNION",
+        "OFFSET",
+        "HAVING",
+    )
+    alias_pattern = "|".join(_RESERVED_AFTER_TABLE)
     match = re.match(
-        r"SELECT\s+.+?\s+FROM\s+(\w+)(?:\s+WHERE\s+(.+))?",
+        r"SELECT\s+.+?\s+FROM\s+"
+        r"(?P<table>\w+(?:\.\w+)*)"
+        rf"(?:\s+(?:AS\s+)?(?!(?:{alias_pattern})\b)(?P<alias>\w+))?"
+        rf"(?P<join>\s+(?:(?:INNER|LEFT|RIGHT|FULL|CROSS)\s+)?JOIN\b)?"
+        r"(?:\s+WHERE\s+(?P<where>.+))?",
         query.strip(),
         re.IGNORECASE | re.DOTALL,
     )
     if not match:
         raise ValueError(f"Cannot parse SQL query: {query}")
-    table_name = match.group(1)
-    where_clause = match.group(2) or "1=1"
+    if match.group("join"):
+        raise ValueError(
+            "JOIN queries are not supported for filtered ingestion (the WHERE clause spans "
+            f"tables this source cannot express): {query}. Ingest the table without a filter, "
+            "or create a view and ingest that."
+        )
+    table_name = match.group("table")
+    where_clause = match.group("where") or "1=1"
+    alias = match.group("alias")
+    if alias and re.search(rf"\b{re.escape(alias)}\.\w+", where_clause, re.IGNORECASE):
+        raise ValueError(
+            f"WHERE clause references the table alias '{alias}', but the filter is replayed against "
+            f"the bare table '{table_name}'. Qualify columns with the table name instead: {query}"
+        )
     return table_name, where_clause

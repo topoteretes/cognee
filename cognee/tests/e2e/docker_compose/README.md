@@ -11,7 +11,7 @@ and service log hygiene.
 | Test | Asserts |
 | --- | --- |
 | `test_golden_flow_api` | `health → login → add → datasets → data` against the API on `:8000` (cognify + search when an LLM key is provided). |
-| `test_mcp_health_and_tool_call` | `cognee-mcp` `/health` on `:8001` **and** one real MCP tool call (`list_datasets_json`) over SSE. |
+| `test_mcp_health_and_tool_call` | `cognee-mcp` `/health` on `:8001` **and** one real MCP tool call (`cognify_status`) over SSE. |
 | `test_service_logs_are_traceback_free` | No service emitted an unhandled Python traceback (runs before the Postgres recreate, which legitimately logs connection errors). |
 | `test_postgres_persistence_across_recreate` | Data added via the API survives a Postgres container **force-recreate** — proving the `postgres_data` volume is required. |
 

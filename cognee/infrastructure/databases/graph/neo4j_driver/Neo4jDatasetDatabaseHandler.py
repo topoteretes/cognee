@@ -4,7 +4,10 @@ from time import monotonic
 from typing import Optional
 from uuid import UUID
 
-from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
+from cognee.infrastructure.databases.exceptions import (
+    DatabaseCredentialsError,
+    Neo4jMultiDatabaseSupportError,
+)
 from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
@@ -21,6 +24,25 @@ NEO4J_SYSTEM_DATABASE = "system"
 NEO4J_DATASET_DATABASE_PREFIX = "cognee"
 NEO4J_DATABASE_ONLINE_STATUS = "online"
 NEO4J_DATABASE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]{2,62}$")
+NEO4J_ENTERPRISE_EDITION = "enterprise"
+NEO4J_EDITION_QUERY = "CALL dbms.components() YIELD edition RETURN edition"
+
+# Multi-database management is Enterprise/Aura only, so this handler cannot run
+# against Community edition; these are the ways out we can point users to.
+NEO4J_MULTI_DATABASE_OPTIONS = (
+    "Per-dataset graph isolation on Neo4j requires multi-database support "
+    "(CREATE DATABASE), which is available on Neo4j Enterprise and AuraDB only. "
+    "Options: "
+    "(1) connect to a Neo4j Enterprise or AuraDB deployment; "
+    "(2) keep this server and set GRAPH_DATASET_DATABASE_HANDLER=neo4j_community "
+    "to isolate each dataset in its own Docker container (requires a reachable "
+    "Docker daemon); "
+    "(3) switch to a graph database with built-in multi-tenant support, e.g. the "
+    "default ladybug/kuzu backend; "
+    "(4) set ENABLE_BACKEND_ACCESS_CONTROL=false to run without per-dataset "
+    "databases — all datasets then share a single graph database and per-dataset "
+    "isolation is lost."
+)
 
 
 class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -127,6 +149,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         driver = cls._create_neo4j_driver(**connection_info)
         try:
+            await cls._ensure_multi_database_support(driver)
             await cls._run_system_query(
                 driver,
                 f"CREATE DATABASE {graph_db_name} IF NOT EXISTS",
@@ -134,6 +157,30 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             await cls._wait_for_database_online(driver, graph_db_name)
         finally:
             await cls._close_driver(driver)
+
+    @classmethod
+    async def _ensure_multi_database_support(cls, driver) -> None:
+        """Fail before CREATE DATABASE on editions that cannot host per-dataset databases.
+
+        The edition probe is best-effort: if the server restricts
+        ``dbms.components()`` the probe is skipped, and the error translation in
+        ``_run_system_query`` catches the CREATE DATABASE failure instead.
+        """
+        try:
+            records = await cls._run_system_query(driver, NEO4J_EDITION_QUERY)
+        except Exception:
+            return
+
+        edition = records[0].get("edition", "") if records else ""
+        if edition and edition.lower() != NEO4J_ENTERPRISE_EDITION:
+            raise cls._multi_database_support_error(
+                f"The configured Neo4j server reports the '{edition}' edition, "
+                "which supports only a single database."
+            )
+
+    @classmethod
+    def _multi_database_support_error(cls, detail: str) -> Neo4jMultiDatabaseSupportError:
+        return Neo4jMultiDatabaseSupportError(message=f"{detail} {NEO4J_MULTI_DATABASE_OPTIONS}")
 
     @classmethod
     async def _drop_neo4j_database(cls, graph_db_name: str) -> None:
@@ -248,11 +295,41 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 return await result.data()
         except Exception as error:
             if cls._is_neo4j_error(error):
-                raise EnvironmentError(
-                    "Local Neo4j multi-user mode requires a Neo4j deployment that supports "
-                    "CREATE/DROP DATABASE and credentials with database-management privileges."
-                ) from error
+                raise cls._translate_neo4j_admin_error(error) from error
             raise
+
+    @classmethod
+    def _translate_neo4j_admin_error(cls, error: Exception) -> Exception:
+        """Map a raw Neo4jError from a system-database command to an actionable error.
+
+        Community edition rejects CREATE/DROP DATABASE with
+        ``Neo.ClientError.Statement.UnsupportedAdministrationCommand``; security
+        codes mean the credentials lack database-management privileges.
+        """
+        code = getattr(error, "code", None) or ""
+
+        if "UnsupportedAdministrationCommand" in code:
+            return cls._multi_database_support_error(
+                "The configured Neo4j server rejected the database-management "
+                f"command as unsupported ({code}), which typically means it runs "
+                "the Community edition."
+            )
+
+        if ".Security." in code:
+            return DatabaseCredentialsError(
+                message=(
+                    f"Neo4j rejected the database-management command ({code}). "
+                    "Local Neo4j multi-user mode requires credentials with "
+                    "database-management privileges (e.g. the admin role). Update "
+                    "GRAPH_DATABASE_USERNAME/GRAPH_DATABASE_PASSWORD to a user "
+                    "that can run CREATE/DROP DATABASE."
+                ),
+            )
+
+        return EnvironmentError(
+            "Local Neo4j multi-user mode requires a Neo4j deployment that supports "
+            "CREATE/DROP DATABASE and credentials with database-management privileges."
+        )
 
     @classmethod
     async def _wait_for_database_online(

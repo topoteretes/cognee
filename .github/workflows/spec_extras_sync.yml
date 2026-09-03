@@ -1,0 +1,355 @@
+name: automation | OpenAPI Spec Extras Sync
+
+# Keeps tools/spec_extras.json in sync with the live FastAPI app. Those extras —
+# servers, tag blurbs, request examples — are everything the published API
+# reference needs that FastAPI does not emit, and since RES-14 made
+# tools/sync_release_docs.py the single generator of cognee_openapi_spec.json,
+# they are the last part of the published spec nothing watches. The router
+# docstring sync does not cover them: it only ever stages `cognee`, and a tag
+# blurb cannot be derived from a docstring or Pydantic metadata.
+#
+# Same shape as router_docstring_sync.yml: detect drift, fix it, open a PR
+# against dev for review. tools/fix_spec_extras.py deletes blurbs for tags no
+# route uses, adds a placeholder for every tag missing one, and then asks Claude
+# to write those blurbs from the endpoints carrying each tag. What it cannot
+# derive — an example pinned to a route that no longer exists, a malformed
+# server URL — it reports in the PR body instead of guessing.
+#
+# Three things here are deliberately different from router_docstring_sync,
+# because each one produced a real bug there (see RES-14, PRs #4668/#4672/#4688):
+#
+#   1. A freshness re-check after dependency install. That job checked out dev,
+#      spent ~5 minutes installing, and pushed a fix built from a tree that had
+#      moved on — landing a PR that would have reverted merged work. This one
+#      re-reads origin/dev after installing and bails if it moved.
+#   2. The existing-PR lookup uses --state all, not --state open. Closing the
+#      bot's PR without deleting its branch made the next run open a second one.
+#      A closed-but-unmerged PR is reopened and updated instead.
+#   3. The content hash covers only the file the fixer writes. Hashing the whole
+#      cognee/ subtree meant any unrelated commit invalidated it, so the skip
+#      path never fired and every run force-pushed.
+#
+# There is deliberately no pull_request trigger. Adding one temporarily to test
+# router_docstring_sync from its own PR is what opened #4668 against dev before
+# that workflow had even merged. To test this workflow before it is merged,
+# dispatch it with `ref` set to the feature branch: a non-dev ref is always
+# forced to a dry run, so it can never push a bot branch or open a PR.
+#
+# The job operates on a single tree — the scripts and the data file they rewrite
+# come from the same checkout. That is why `ref` selects both, and why a run
+# against a ref that does not carry the scripts fails immediately rather than
+# after the multi-minute dependency install.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to run against (default: dev). Any non-dev ref is forced to a dry run."
+        required: false
+        default: "dev"
+      dry_run:
+        description: "Run the checker and fixer, then show the diff instead of pushing or opening a PR."
+        required: false
+        type: boolean
+        default: false
+  # Weekly, Wednesday 06:00 UTC — an hour after router_docstring_sync.yml, so
+  # the two land their PRs in one review session and this run gets the uv cache
+  # that one leaves warm (a cold install here is ~6 minutes, a warm one ~45
+  # seconds). Wednesday puts both PRs in front of a release with a working day
+  # to review them: 35 of the last 50 stable releases went out Thursday through
+  # Sunday. It is also the slot the docs repo's deleted generate-api-docs.yml
+  # cron used, for the same reason.
+  #
+  # Second, not first, because the data flows that way: the docstring sync
+  # rewrites handler docstrings, which become the endpoint descriptions this
+  # job feeds to Claude when writing tag blurbs. The benefit only lands once
+  # that job's PR is merged, so in practice it is a week behind — but the
+  # ordering costs nothing and is the right direction.
+  #
+  # There is no push trigger. It would have fired on 205 of the last 791
+  # commits to dev, about 7 runs a day, while a new route tag appears roughly
+  # 2-3 times a month — and pyproject.toml/uv.lock were pure noise, 92 commits
+  # in 90 days of which only 4 touched a router at all. A missing tag blurb
+  # renders a bare sidebar group; it is never incorrect, so it does not warrant
+  # watching every commit. Dispatch manually if a release is imminent.
+  schedule:
+    - cron: "0 6 * * 3"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  # `inputs` is empty outside workflow_dispatch, so the weekly schedule always
+  # gets dev.
+  TARGET_REF: ${{ inputs.ref || 'dev' }}
+
+# Queue rather than cancel: a run cancelled between the push and the PR update
+# would leave the fix PR half-refreshed.
+concurrency:
+  group: spec-extras-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-spec-extras:
+    name: Detect and fix spec extras drift
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      # Credentials are never persisted into the checkout: this job imports the
+      # full cognee app and its dependency tree, and nothing that runs there
+      # should be able to read a token off disk. The push and PR steps get the
+      # PAT explicitly.
+      - name: Check out the target ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the tree being fixed
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Before the install, not after: `uv sync --all-extras` prepares ~490
+      # packages and takes minutes on a cold cache, and a run pointed at a ref
+      # without the machinery is doomed from the start. Failing here turns a
+      # seven-minute mystery into a fifteen-second message that names the cause.
+      - name: Check the sync machinery is present on this ref
+        run: |
+          missing=""
+          for path in \
+            tools/check_spec_extras.py \
+            tools/fix_spec_extras.py \
+            tools/sync_release_docs.py \
+            tools/spec_extras.json; do
+            [ -f "${path}" ] || missing="${missing} ${path}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::Missing on ${TARGET_REF}:${missing}"
+            echo "This workflow rewrites the tree it checks out, so the scripts must"
+            echo "live on that ref. If they are still on a feature branch, dispatch"
+            echo "this workflow with 'ref' set to that branch (which forces a dry run)."
+            exit 1
+          fi
+          echo "All four files present on ${TARGET_REF}."
+
+      # A tree that is not dev must never produce a push or a PR: the fix would
+      # be built from code that is not what dev runs. Gating on the tree rather
+      # than on the trigger means this holds even if someone later adds a
+      # pull_request trigger — which is the mistake that produced #4668.
+      - name: Decide whether this run may push
+        id: mode
+        run: |
+          if [ "${TARGET_REF}" != "dev" ]; then
+            echo "Target is ${TARGET_REF}, not dev — forcing a dry run."
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "Dry run requested."
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      # The install above takes minutes. If dev moved in the meantime, anything
+      # built from this checkout is already stale, and pushing it would revert
+      # whatever landed — that is how #4688 happened.
+      #
+      # This used to say the push that moved dev would have its own queued run,
+      # so bailing cost nothing. With the push trigger gone that is no longer
+      # true: the next scheduled run is a week away. dev takes ~26 commits a
+      # day, so a ~6 minute cold install has order-of-10% odds of losing the
+      # race. Bailing is still right — a stale fix must never be pushed — but it
+      # is now a real skipped week, so say so loudly enough that someone can
+      # dispatch it manually.
+      - name: Re-check dev is still where we started
+        id: freshness
+        if: ${{ steps.mode.outputs.dry_run == 'false' }}
+        run: |
+          git fetch --quiet origin dev
+          CURRENT="$(git rev-parse FETCH_HEAD)"
+          if [ "${CURRENT}" != "${{ steps.base.outputs.sha }}" ]; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            MESSAGE="dev moved from ${{ steps.base.outputs.sha }} to ${CURRENT} during setup, so this run was built from a stale tree and stopped without pushing. Re-run this workflow to pick up the new dev."
+            echo "::warning::${MESSAGE}"
+            {
+              echo
+              echo "### Skipped — dev moved during setup"
+              echo
+              echo "${MESSAGE}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `stale` is empty on a dry run because the freshness step is skipped, so
+      # test for the failing value rather than the passing one.
+      - name: Detect spec extras drift
+        id: check
+        if: ${{ steps.freshness.outputs.stale != 'true' }}
+        run: |
+          set +e
+          uv run python tools/check_spec_extras.py > spec_extras_report.txt
+          code=$?
+          set -e
+          cat spec_extras_report.txt
+          cat spec_extras_report.txt >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -eq 2 ]; then
+            echo "::error::The checker could not import the cognee app." >&2
+            exit 2
+          fi
+          echo "drift=$([ "$code" -eq 1 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # Exit 1 from the fixer means drift it deliberately does not guess at (an
+      # example pinned to a missing route, a bad server URL). That is a report,
+      # not a failure — the PR body carries it for a human. Only the app import
+      # failing (exit 2) stops the run.
+      - name: Fix spec extras
+        if: ${{ steps.check.outputs.drift == 'true' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          # anthropic is pinned at invocation rather than taken from the lock:
+          # the fixer uses beta API surface that the `anthropic` extra's
+          # >=0.27 floor does not guarantee.
+          uv run --with 'anthropic>=0.75,<1' \
+            python tools/fix_spec_extras.py --describe > spec_extras_fixes.txt
+          code=$?
+          set -e
+          cat spec_extras_fixes.txt
+          if [ "$code" -eq 2 ]; then
+            echo "Fixer failed to import the app" >&2
+            exit 2
+          fi
+          {
+            echo
+            echo '### Fixes applied'
+            echo '```'
+            cat spec_extras_fixes.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show the fix without pushing
+        if: ${{ steps.check.outputs.drift == 'true' && steps.mode.outputs.dry_run == 'true' }}
+        run: |
+          {
+            echo
+            echo '### Dry run — nothing pushed'
+            echo
+            echo "Ran against \`${TARGET_REF}\`. Diff the fixer produced:"
+            echo '```diff'
+            git --no-pager diff -- tools/spec_extras.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          git --no-pager diff --stat -- tools/spec_extras.json
+
+      - name: Commit and push fix branch
+        id: commit
+        if: ${{ steps.check.outputs.drift == 'true' && steps.mode.outputs.dry_run == 'false' }}
+        env:
+          PUSH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+        run: |
+          BRANCH_NAME="automation/fix-spec-extras"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Recreated from the dev we verified above, every run. No long-lived
+          # branch accumulating merges, so the branch is never behind dev.
+          git checkout -B "${BRANCH_NAME}"
+          git add tools/spec_extras.json
+          if git diff --cached --quiet; then
+            echo "Nothing staged — drift was report-only."
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Skip the push when the branch already carries exactly this content.
+          # The hash is of the one file the fixer writes, so an unrelated commit
+          # to cognee/ cannot invalidate it — and a rerun that produces the same
+          # blurbs costs nothing instead of force-pushing over the review.
+          CONTENT_HASH="$(git rev-parse ":tools/spec_extras.json")"
+          PREVIOUS_HASH=""
+          if git fetch origin "${BRANCH_NAME}"; then
+            PREVIOUS_HASH="$(git rev-parse "FETCH_HEAD:tools/spec_extras.json" 2>/dev/null || true)"
+          fi
+          if [ -n "${PREVIOUS_HASH}" ] && [ "${CONTENT_HASH}" = "${PREVIOUS_HASH}" ]; then
+            echo "Fix branch already carries this content (${CONTENT_HASH}) — skipping push."
+            echo "changes_made=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git commit -m "docs: Sync OpenAPI spec extras with the app (RES-21)"
+          git push --force \
+            "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "${BRANCH_NAME}"
+          echo "changes_made=true" >> "$GITHUB_OUTPUT"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update fix PR
+        if: ${{ steps.commit.outputs.changes_made == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
+          HEAD_BRANCH: ${{ steps.commit.outputs.branch_name }}
+        run: |
+          PR_TITLE="docs: Sync OpenAPI spec extras with the app (RES-21)"
+          {
+            echo "Automated sync of \`tools/spec_extras.json\` against the FastAPI app."
+            echo
+            echo "Tag blurbs are written by Claude from the endpoints carrying each tag."
+            echo "**Review the wording before merging** — it is published on"
+            echo "docs.cognee.ai as the API reference's sidebar descriptions."
+            echo
+            echo "### Drift detected"
+            echo '```'
+            cat spec_extras_report.txt
+            echo '```'
+            echo "### Changes made"
+            echo '```'
+            cat spec_extras_fixes.txt
+            echo '```'
+          } > pr_body.md
+
+          # --state all, not --state open: a closed-but-unmerged PR on this head
+          # is reopened rather than duplicated. Looking only at open PRs is what
+          # produced a second and third identical PR in RES-14.
+          EXISTING="$(gh pr list \
+            --head "${HEAD_BRANCH}" \
+            --base dev \
+            --state all \
+            --json number,state \
+            --jq 'map(select(.state != "MERGED")) | .[0] | "\(.number) \(.state)"' \
+            2>/dev/null || true)"
+          PR_NUMBER="${EXISTING%% *}"
+          PR_STATE="${EXISTING##* }"
+
+          if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
+            if [ "${PR_STATE}" = "CLOSED" ]; then
+              echo "Reopening #${PR_NUMBER} rather than opening a duplicate."
+              gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+                --method PATCH --field state=open
+            fi
+            # REST instead of 'gh pr edit': the edit command needs read:org for
+            # its GraphQL query, which this repo-scoped PAT does not have.
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+              --method PATCH \
+              --field title="${PR_TITLE}" \
+              --field body="$(cat pr_body.md)"
+            echo "Updated #${PR_NUMBER}."
+          else
+            gh pr create \
+              --base dev \
+              --head "${HEAD_BRANCH}" \
+              --title "${PR_TITLE}" \
+              --body-file pr_body.md
+          fi

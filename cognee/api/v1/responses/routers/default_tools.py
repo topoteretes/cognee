@@ -16,6 +16,7 @@ DEFAULT_TOOLS = [
                     "enum": [
                         "CODE",
                         "GRAPH_COMPLETION",
+                        "HYBRID_COMPLETION",
                         "NATURAL_LANGUAGE",
                     ],
                 },
@@ -41,7 +42,26 @@ DEFAULT_TOOLS = [
                                 "traverse",
                                 "find_path",
                                 "impact_analysis",
+                                "insights",
+                                "architecture",
+                                "delta",
                             ],
+                        },
+                        "diagram": {
+                            "type": "string",
+                            "enum": ["mermaid", "dot"],
+                            "description": (
+                                "Also render the result as diagram source (returned under "
+                                "'diagram'); architecture draws Mermaid by default"
+                            ),
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "insights: explainer name (cycles, hotspots, ...)",
+                        },
+                        "min_confidence": {
+                            "type": "number",
+                            "description": "insights: keep findings scored at or above this (0-1)",
                         },
                         "direction": {
                             "type": "string",

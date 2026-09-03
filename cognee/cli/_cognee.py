@@ -115,6 +115,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.push_command", "PushCommand"),
         ("cognee.cli.commands.report_command", "ReportCommand"),
         ("cognee.cli.commands.demo_command", "DemoCommand"),
+        ("cognee.cli.commands.doctor_command", "DoctorCommand"),
     ]
 
     for module_path, class_name in command_modules:

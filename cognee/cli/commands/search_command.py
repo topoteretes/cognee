@@ -5,8 +5,19 @@ from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import SEARCH_TYPE_CHOICES, OUTPUT_FORMAT_CHOICES
+from cognee.cli.config import (
+    COMPLETION_SEARCH_TYPES,
+    DEFAULT_SEARCH_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 import cognee.cli.echo as fmt
+from cognee.cli.code_search import (
+    add_code_arguments,
+    build_code_query,
+    handle_diagram_out,
+    print_code_results,
+)
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
@@ -23,7 +34,11 @@ use cases - from simple fact retrieval to complex reasoning and code analysis.
 
 Search Types & Use Cases:
 
-**GRAPH_COMPLETION** (Default - Recommended):
+**HYBRID_COMPLETION** (Default - Recommended):
+    Passages plus entity neighbourhoods, then an LLM answer.
+    Best for: Ordinary questions over mixed document-and-graph memory.
+
+**GRAPH_COMPLETION**:
     Natural language Q&A using full graph context and LLM reasoning.
     Best for: Complex questions, analysis, summaries, insights.
 
@@ -42,6 +57,10 @@ Search Types & Use Cases:
 **CODE**:
     Deterministic name resolution and graph exploration over an indexed code graph.
     Best for: Inspecting a function, class, route, module, or dependency without an LLM.
+    Pass the operation with --code-query (JSON) and add --diagram / --diagram-out to
+    get the result drawn as a Mermaid or Graphviz diagram, e.g.
+      cognee-cli search "" -t CODE --code-query '{"operation": "architecture"}' \\
+          --diagram-out architecture.html
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -50,8 +69,8 @@ Search Types & Use Cases:
             "--query-type",
             "-t",
             choices=SEARCH_TYPE_CHOICES,
-            default="GRAPH_COMPLETION",
-            help="Search mode (default: GRAPH_COMPLETION for conversational AI responses)",
+            default=DEFAULT_SEARCH_TYPE,
+            help="Search mode (default: HYBRID_COMPLETION for conversational AI responses)",
         )
         parser.add_argument(
             "--datasets",
@@ -77,6 +96,7 @@ Search Types & Use Cases:
             default="pretty",
             help="Output format (default: pretty)",
         )
+        add_code_arguments(parser)
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -86,6 +106,8 @@ Search Types & Use Cases:
 
             # Convert string to SearchType enum
             query_type = SearchType[args.query_type]
+            code_query = build_code_query(args, args.query_type)
+            code_kwargs = {"code_query": code_query} if code_query is not None else {}
 
             datasets_msg = (
                 f" in datasets {args.datasets}" if args.datasets else " across all datasets"
@@ -110,6 +132,7 @@ Search Types & Use Cases:
                         system_prompt_path=args.system_prompt or "answer_simple_question.txt",
                         top_k=args.top_k,
                         session_id=None,
+                        **code_kwargs,
                     )
                     return results
                 except Exception as e:
@@ -131,7 +154,7 @@ Search Types & Use Cases:
                 fmt.echo(f"\nFound {len(results)} result(s) using {args.query_type}:")
                 fmt.echo("=" * 60)
 
-                if args.query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
+                if args.query_type in COMPLETION_SEARCH_TYPES:
                     # These return conversational responses
                     for i, result in enumerate(results, 1):
                         fmt.echo(f"{fmt.bold('Response:')} {result}")
@@ -142,11 +165,16 @@ Search Types & Use Cases:
                     for i, result in enumerate(results, 1):
                         fmt.echo(f"{fmt.bold(f'Chunk {i}:')} {result}")
                         fmt.echo()
+                elif args.query_type == "CODE" and print_code_results(results):
+                    # Structured code-graph payload plus a fenced diagram.
+                    pass
                 else:
                     # Generic formatting for other types
                     for i, result in enumerate(results, 1):
                         fmt.echo(f"{fmt.bold(f'Result {i}:')} {result}")
                         fmt.echo()
+
+            handle_diagram_out(results, args)
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

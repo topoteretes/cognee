@@ -1,10 +1,11 @@
 """Unit tests for the include_references wiring in the completion retrievers.
 
-These verify the contracted append rules without any LLM or network:
+These verify the contracted reference rules without any LLM or network:
 - include_references=False preserves the old answer text exactly (no Evidence).
-- include_references=True appends an answer-grounded Evidence block to str answers.
+- RAG include_references=True appends an answer-grounded Evidence block to str answers.
+- Graph references never perform a second answer-to-chunk vector search.
 - Non-str response_model outputs are never corrupted.
-- Evidence degrades to no-op when the backend fails or nothing overlaps the answer.
+- RAG evidence degrades to no-op when nothing overlaps the answer.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,6 +14,8 @@ import pytest
 
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
+from cognee.modules.search.types import SearchType
 
 
 MOCK_ANSWER = "Revenue grew 12 percent."
@@ -184,7 +187,7 @@ async def test_completion_references_skipped_for_non_str_response_model():
 
 
 # ---------------------------------------------------------------------------
-# GraphCompletionRetriever (answer-grounded chunk evidence)
+# GraphCompletionRetriever (structured context evidence is wired centrally)
 # ---------------------------------------------------------------------------
 
 
@@ -209,67 +212,31 @@ async def test_graph_references_disabled_preserves_answer():
 
 
 @pytest.mark.asyncio
-async def test_graph_references_enabled_appends_answer_grounded_evidence():
-    """include_references=True -> the answer is vector-queried against the chunk index."""
+async def test_graph_references_enabled_makes_no_extra_vector_call():
+    """Graph references preserve the answer and never query chunks after generation."""
     retriever = GraphCompletionRetriever(include_references=True)
-
     engine = AsyncMock()
-    engine.search.return_value = [
-        MagicMock(
-            id="chunk-1",
-            payload={
-                "document_name": "report.pdf",
-                "chunk_index": 2,
-                "text": "Revenue grew 12 percent year over year.",
-            },
+
+    with (
+        _patch_vector_engine(engine) as vector_factory,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value=MOCK_ANSWER,
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig",
+            return_value=_cache_disabled(),
+        ),
+    ):
+        completion = await retriever.get_completion_from_context(
+            query="q",
+            retrieved_objects=[],
+            context="graph context",
         )
-    ]
-
-    with _patch_vector_engine(engine):
-        completion = await retriever._append_graph_evidence([MOCK_ANSWER])
-
-    assert len(completion) == 1
-    assert completion[0].startswith(f"{MOCK_ANSWER}\n\nEvidence:\n")
-    assert "- chunk 3 of document report.pdf (chunk_id: chunk-1):" in completion[0]
-    # The answer text itself is the vector query.
-    assert engine.search.await_args.args[1] == MOCK_ANSWER
-
-
-@pytest.mark.asyncio
-async def test_graph_references_degrade_on_backend_failure():
-    """A failing chunk-index search -> Evidence omitted, no raise."""
-    retriever = GraphCompletionRetriever(include_references=True)
-
-    engine = AsyncMock()
-    engine.search.side_effect = RuntimeError("collection not found")
-
-    with _patch_vector_engine(engine):
-        completion = await retriever._append_graph_evidence(["Graph answer"])
-
-    assert completion == ["Graph answer"]
-
-
-@pytest.mark.asyncio
-async def test_graph_references_omitted_when_nothing_overlaps_answer():
-    """Vector hits unrelated to the answer are not presented as provenance."""
-    retriever = GraphCompletionRetriever(include_references=True)
-
-    engine = AsyncMock()
-    engine.search.return_value = [
-        MagicMock(
-            id="chunk-1",
-            payload={
-                "document_name": "report.pdf",
-                "chunk_index": 0,
-                "text": "Penguins live in Antarctica.",
-            },
-        )
-    ]
-
-    with _patch_vector_engine(engine):
-        completion = await retriever._append_graph_evidence([MOCK_ANSWER])
 
     assert completion == [MOCK_ANSWER]
+    vector_factory.assert_not_awaited()
+    engine.search.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -284,3 +251,52 @@ async def test_graph_references_skip_non_str_completions():
 
     assert completion == [structured]
     engine.search.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# HybridRetriever (chunk-lane evidence, factory wiring)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_factory_passes_include_references():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as factory
+
+    retriever = await factory.get_search_type_retriever_instance(
+        SearchType.HYBRID_COMPLETION,
+        query_text="q",
+        include_references=True,
+    )
+
+    assert isinstance(retriever, HybridRetriever)
+    assert retriever.include_references is True
+
+
+@pytest.mark.asyncio
+async def test_hybrid_references_skipped_for_non_str_response_model():
+    from pydantic import BaseModel
+
+    class Answer(BaseModel):
+        answer: str
+
+    retriever = HybridRetriever(include_references=True, response_model=Answer)
+    model_obj = Answer(answer="structured")
+
+    with (
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.generate_completion",
+            new_callable=AsyncMock,
+            return_value=model_obj,
+        ),
+        patch(
+            "cognee.modules.retrieval.hybrid_retriever.CacheConfig",
+            return_value=_cache_disabled(),
+        ),
+    ):
+        completion = await retriever.get_completion_from_context(
+            query="q",
+            retrieved_objects={"chunks": [_chunk_scored()]},
+            context="ctx",
+        )
+
+    assert completion == [model_obj]

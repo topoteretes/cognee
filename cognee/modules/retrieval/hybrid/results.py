@@ -23,13 +23,8 @@ def result_id(result: Any) -> Optional[str]:
     return display_value(result_payload.get("id")) or display_value(getattr(result, "id", None))
 
 
-def scored_payload(item: Any) -> tuple[Any, float]:
-    if not isinstance(item, (list, tuple)) or len(item) != 2:
-        return item, 0.0
-    item_payload, score = item
-    if not isinstance(score, (int, float)):
-        return item_payload, 0.0
-    return item_payload, float(score)
+def empty_hybrid_result() -> dict:
+    return {"chunks": [], "chunk_summaries": {}, "entities": [], "facts": []}
 
 
 def payload_matches_node_filter(

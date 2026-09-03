@@ -1,16 +1,47 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tenant } from "./types";
 import { TenantContext, localInstance } from "./TenantContext";
 import { tokens } from "@/ui/theme/tokens";
+import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
+import { UserContext, type AvailableTenant } from "@/modules/users/UserContext";
 
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+// Single-user local mode: the only user is always the owner of the only
+// workspace. `useTenant()` derives isOwner by looking the active tenant up in
+// UserContext's availableTenants, and the cloud UserProvider that would fill
+// that list is not mounted here — so without this, isOwner is permanently
+// false and every owner-gated surface (the Connect buttons on the Data
+// Sources cards, for one) renders inert.
+const LOCAL_TENANT_ID = "local";
+const LOCAL_AVAILABLE_TENANTS: AvailableTenant[] = [
+  { id: LOCAL_TENANT_ID, name: LOCAL_TENANT_ID, isOwner: true, ownerHasSubscription: false },
+];
 
 export function LocalProvider({ children }: { children: React.ReactNode }) {
+  const localApiUrl = getLocalApiUrl();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Memoized: consumers key effects off availableTenants, so a fresh array on
+  // every render would re-fire them on unrelated re-renders.
+  const userContextValue = useMemo(
+    () => ({
+      userMe: null,
+      isLoading: false,
+      isUserMeError: false,
+      markWelcomeSeen: async () => {},
+      markOnboardingComplete: async () => {},
+      dismissFeatureAnnouncement: async () => {},
+      availableTenants: LOCAL_AVAILABLE_TENANTS,
+      isLoadingTenants: false,
+      isTenantsError: false,
+      refetchTenants: () => {},
+      setAvailableTenantsOptimistic: () => {},
+    }),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +72,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
 
         // Authenticated — set up the local instance
-        setTenant({ tenant_id: "local", tenant_name: "local" });
+        setTenant({ tenant_id: LOCAL_TENANT_ID, tenant_name: LOCAL_TENANT_ID });
       } catch (err) {
         if (cancelled) return;
 
@@ -73,29 +104,32 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <TenantContext.Provider value={{
-      tenant,
-      cogniInstance: localInstance,
-      localInstance,
-      serviceUrl: localApiUrl,
-      apiKey: "",
-      isInitializing,
-      tenantReady: true,
-      podUnreachable: false,
-      error,
-      statusMessage: null,
-      availableTenants: [],
-      switchTenant: () => {},
-      planType: null,
-      hasAccess: true,
-      requestCreateWorkspace: () => {},
-      // Single-user local mode: the only user is always the owner.
-      isOwner: true,
-      nameModalOpen: false,
-      releaseLoader: () => {},
-    }}>
-      {children}
-    </TenantContext.Provider>
+    // UserContext sits above TenantContext because useTenant() reads
+    // availableTenants out of it to derive isOwner/isPersonal. The tenant list
+    // is the only field carrying real information here; the rest stay inert,
+    // since local mode has no cloud user service to load them from.
+    <UserContext.Provider value={userContextValue}>
+      <TenantContext.Provider value={{
+        tenant,
+        cogniInstance: localInstance,
+        localInstance,
+        serviceUrl: localApiUrl,
+        apiKey: "",
+        isInitializing,
+        tenantReady: true,
+        podUnreachable: false,
+        error,
+        statusMessage: null,
+        switchTenant: () => {},
+        planType: null,
+        hasAccess: true,
+        requestCreateWorkspace: () => {},
+        nameModalOpen: false,
+        releaseLoader: () => {},
+      }}>
+        {children}
+      </TenantContext.Provider>
+    </UserContext.Provider>
   );
 }
 

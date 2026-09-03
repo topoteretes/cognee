@@ -60,6 +60,9 @@ export default function BrainSelector({ allowAll = true, align = "left", directi
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
+        // Stable hook for e2e: the label is whichever brain is active, so the
+        // control cannot be found by its text.
+        data-testid="brain-selector"
         onClick={toggle}
         className="cursor-pointer"
         style={{
