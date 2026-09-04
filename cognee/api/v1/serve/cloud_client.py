@@ -326,6 +326,74 @@ class CloudClient:
                 raise RuntimeError(f"Remote add failed ({resp.status}): {body}")
             return await resp.json()
 
+    async def update(
+        self,
+        data_id: UUID,
+        data: Any,
+        dataset_id: UUID,
+        node_set: Optional[list] = None,
+        chunk_level_diff: bool = True,
+    ) -> dict:
+        """PATCH /api/v1/update — replace one document in place on the remote.
+
+        Mirrors the route: ``data_id``, ``dataset_id`` and ``chunk_level_diff``
+        travel as query params, the new content as the multipart ``data`` file,
+        ``node_set`` as repeated form fields. The server keeps the document's
+        id across the update, so this is a real replace.
+        """
+        # update() replaces exactly one document; the local implementation
+        # unwraps single-item lists and DataItem wrappers the same way.
+        if isinstance(data, list):
+            if len(data) != 1:
+                raise ValueError(f"update() replaces exactly one document; got {len(data)} items.")
+            data = data[0]
+        if hasattr(data, "data") and hasattr(data, "data_id") and not hasattr(data, "read"):
+            data = data.data
+
+        session = await self._get_session()
+
+        form = aiohttp.FormData()
+        if isinstance(data, str):
+            form.add_field(
+                "data",
+                io.BytesIO(data.encode("utf-8")),
+                filename=_text_upload_filename(data),
+                content_type="text/plain",
+            )
+        elif hasattr(data, "read"):
+            name = getattr(data, "name", "upload")
+            form.add_field("data", data, filename=Path(name).name or "upload")
+        else:
+            raise TypeError(
+                f"update() over serve() accepts text or a file object; got {type(data)}"
+            )
+        for tag in node_set or []:
+            if tag:
+                form.add_field("node_set", str(tag))
+
+        params = {
+            "data_id": str(data_id),
+            "dataset_id": str(dataset_id),
+            "chunk_level_diff": "true" if chunk_level_diff else "false",
+        }
+        async with session.patch(
+            f"{self.service_url}/api/v1/update", params=params, data=form
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def list_data(self, dataset_id: UUID) -> list:
+        """GET /api/v1/datasets/{dataset_id}/data — the documents in a dataset."""
+        session = await self._get_session()
+
+        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
+            return await resp.json()
+
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:
         """POST /api/v1/cognify — build the knowledge graph."""
         session = await self._get_session()

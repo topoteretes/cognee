@@ -1,7 +1,11 @@
 import asyncio
+from datetime import datetime
 from uuid import UUID
 from typing import Optional
 
+from pydantic import ConfigDict
+
+from cognee.api.DTO import OutDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.users.models import User
@@ -27,6 +31,28 @@ from cognee.modules.pipelines.operations.get_pipeline_status import (
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+
+class RemoteDataRow(OutDTO):
+    """One document as GET /api/v1/datasets/{id}/data returns it, typed like a
+    local ``Data`` row so ``list_data()`` callers read the same attributes
+    (``row.id`` is a UUID, ``row.mime_type`` not ``mimeType``) in both modes.
+    Mirrors the server's ``DataDTO``; fields the server adds later are kept."""
+
+    model_config = ConfigDict(
+        alias_generator=OutDTO.model_config["alias_generator"], populate_by_name=True, extra="allow"
+    )
+
+    id: UUID
+    name: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    extension: str
+    mime_type: str
+    raw_data_location: str
+    dataset_id: UUID
+    label: Optional[str] = None
+    external_metadata: Optional[dict] = None
 
 
 async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: Optional[list[str]], fetch):
@@ -129,6 +155,14 @@ class datasets:
     @staticmethod
     async def list_data(dataset_id: UUID, user: Optional[User] = None):
         from cognee.modules.data.methods import get_dataset_data
+
+        # Route to the remote instance when connected via serve(): the dataset
+        # lives on the server, so the local store would report it missing.
+        from cognee.api.v1.serve.state import get_remote_client
+
+        client = get_remote_client()
+        if client is not None:
+            return [RemoteDataRow.model_validate(row) for row in await client.list_data(dataset_id)]
 
         if not user:
             user = await get_default_user()
