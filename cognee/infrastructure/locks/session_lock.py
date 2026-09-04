@@ -11,7 +11,7 @@ Three primitives:
   that serializes whole session turns for one cache identity, so two
   quick turns cannot read the same state and overwrite each other.
 
-* ``try_acquire_improve_lock(session_id)`` /
+* ``try_acquire_improve_lock(session_id)`` / ``try_acquire_improve_lock_many(keys)`` /
   ``release_improve_lock(session_id)`` — non-blocking claim for
   long-running ``improve()`` calls. The claim is atomic: a
   registry-wide ``asyncio.Lock`` protects a set of held keys, and
@@ -26,7 +26,7 @@ are factored so that's a local change.
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Iterable, Optional, Tuple
 
 from cognee.shared.logging_utils import get_logger
 
@@ -135,3 +135,43 @@ async def release_improve_lock(session_id: str) -> None:
         return
     async with _improve_registry_lock:
         _improving_sessions.discard(session_id)
+
+
+async def try_acquire_improve_lock_many(keys: Iterable[str]) -> bool:
+    """Atomically claim the improve-lock for every key in ``keys``, or none.
+
+    One claim per ``improve()`` run, keyed by what the run touches: every
+    session id it was given, or ``f"dataset:{dataset_id}"`` when it was given
+    none. Same held-set, same registry lock as the single-key claim; the
+    all-or-nothing check-and-add happens inside one critical section, so two
+    overlapping runs that share any key cannot both win. Returns ``True`` iff
+    every key was claimed — the caller MUST then call
+    ``release_improve_lock_many`` with the same keys (use try/finally).
+    Empty or all-falsy ``keys`` need no exclusion and return ``True``.
+    """
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return True
+
+    async with _improve_registry_lock:
+        if any(key in _improving_sessions for key in wanted):
+            return False
+        _improving_sessions.update(wanted)
+        return True
+
+
+async def release_improve_lock_many(keys: Iterable[str]) -> None:
+    """Release every key claimed by ``try_acquire_improve_lock_many``. Idempotent."""
+    wanted = [key for key in keys if key]
+    if not wanted:
+        return
+    async with _improve_registry_lock:
+        _improving_sessions.difference_update(wanted)
+
+
+def improve_lock_keys(session_ids: Optional[Iterable[str]], dataset_id: Any) -> Tuple[str, ...]:
+    """The claim keys for one improve run: its session ids, else its dataset id."""
+    sessions = tuple(session_id for session_id in (session_ids or ()) if session_id)
+    if sessions:
+        return sessions
+    return (f"dataset:{dataset_id}",)

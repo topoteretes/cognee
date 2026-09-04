@@ -156,13 +156,11 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         when the layer is disabled, so it can never block chain-of-thought reasoning.
         """
         try:
-            from cognee.infrastructure.databases.cache.config import CacheConfig
             from cognee.infrastructure.session.session_context_builder import (
                 build_active_context_block,
             )
 
-            cache_config = CacheConfig()
-            if not (cache_config.caching and cache_config.auto_feedback):
+            if not sm.is_auto_feedback_enabled():
                 return ""
 
             block, _served_ids = await build_active_context_block(

@@ -12,15 +12,14 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from cognee.infrastructure.session.session_context_models import (
-    MIN_GATE_CONFIDENCE as MIN_GATE_CONFIDENCE,
-)
+from cognee.modules.improve.constants import GATE_CONFIDENCE
 
 # -- Tunables ----------------------------------------------------------------
 
 # Gate: a context entry is distillable only when it passes the shared usability
-# check (never rated harmful, confidence clears MIN_GATE_CONFIDENCE). The
-# threshold lives next to the session-context models; re-exported above.
+# check (never rated harmful, confidence clears the threshold). The threshold
+# is the loop-wide GATE_CONFIDENCE; the local name is kept for its importers.
+MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 
 # Batching: pack capped timeline blocks into coarse batches. Six worst-case QA
 # blocks plus separators stays below the budget, so the batching logic can stay simple.
@@ -29,6 +28,7 @@ CURATOR_BLOCKS_PER_BATCH = 6
 MAX_QA_QUESTION_CHARS = 1_200
 MAX_QA_ANSWER_CHARS = 1_200
 MAX_CANDIDATE_CHARS = 280
+MAX_QA_FEEDBACK_CHARS = 200  # explicit feedback text appended to a QA block
 
 # Bounded concurrency for the two parallel fan-outs.
 CURATOR_CONCURRENCY = 5
@@ -96,6 +96,7 @@ class DistillationResult(BaseModel):
     status: Literal[
         "completed",
         "no_gated_entries",
+        "no_new_entries",
         "no_proposed_lessons",
         "no_accepted_lessons",
     ]

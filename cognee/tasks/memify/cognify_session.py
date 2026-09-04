@@ -10,6 +10,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     save_persisted_qa_count,
 )
+from cognee.modules.improve.constants import USER_SESSIONS_NODE_SET
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 
@@ -27,7 +28,7 @@ async def cognify_session(
     Receives one ``SessionPersistWindow`` (or a batch of them — the pipeline
     runner delivers generator output in batches) from ``extract_user_sessions``.
     For each window: adds its text to cognee with the
-    "user_sessions_from_cache" node set, triggers cognify, and — only after
+    ``USER_SESSIONS_NODE_SET`` node set, triggers cognify, and — only after
     both succeed — advances that session's persist watermark to the entry
     count captured at extraction time. On failure the watermark stays put, so
     the same window is re-extracted and retried on the next improve()
@@ -63,10 +64,10 @@ async def cognify_session(
             await cognee.add(
                 window.text,
                 dataset_id=dataset_id,
-                node_set=["user_sessions_from_cache"],
+                node_set=[USER_SESSIONS_NODE_SET],
                 user=user,
             )
-            logger.debug("Session data added to cognee with node_set: user_sessions")
+            logger.debug("Session data added to cognee with node_set: %s", USER_SESSIONS_NODE_SET)
             # raise_on_error=False: one window's failed build must not kill the
             # whole memify run — inspect the run info instead, keep this
             # window's watermark put (so it is re-extracted and retried on the

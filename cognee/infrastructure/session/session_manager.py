@@ -4,7 +4,7 @@ from typing import Any
 from cognee.context_global_variables import current_dataset_id, session_user
 from cognee.infrastructure.databases.cache import SessionAgentTraceEntry, SessionQAEntry
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.session.session_agent_trace import (
@@ -214,6 +214,12 @@ class SessionManager:
         """
         Append one agent trace step to the session trace payload.
 
+        ``generate_feedback_with_llm`` asks for a one-line LLM summary of the step's
+        return value as its ``session_feedback``. That call is made only when automatic
+        feedback analysis is enabled (``CACHING`` and ``AUTO_FEEDBACK`` both on); with it
+        off, the step gets the deterministic success/failure line instead. The batch
+        pass in ``improve()`` reads the stored return value directly, so nothing is lost.
+
         Returns trace_id, or None if cache unavailable.
         """
         session_id = self.resolve_session_id(session_id)
@@ -223,7 +229,7 @@ class SessionManager:
             return None
 
         trace_id = str(uuid.uuid4())
-        if generate_feedback_with_llm:
+        if generate_feedback_with_llm and self.is_auto_feedback_enabled():
             session_feedback = await generate_agent_trace_feedback(
                 origin_function=origin_function,
                 status=status,
@@ -306,12 +312,16 @@ class SessionManager:
         """Return True if session (history + save) is available for completion."""
         if not user_id or not self.is_available:
             return False
-        cache_config = CacheConfig()
-        return bool(cache_config.caching)
+        return bool(get_cache_config().caching)
 
     def is_auto_feedback_enabled(self) -> bool:
-        """Return True if caching and automatic turn-feedback analysis are both enabled."""
-        cache_config = CacheConfig()
+        """Return True if caching and automatic turn-feedback analysis are both enabled.
+
+        The one predicate for the session layer's auto-feedback gate: retrievers,
+        turn handling and the improve stages all ask here rather than re-reading
+        the cache config themselves.
+        """
+        cache_config = get_cache_config()
         return bool(cache_config.caching and cache_config.auto_feedback)
 
     async def prepare_session_turn(
