@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 from typing import Optional
@@ -82,6 +83,33 @@ def create_dlt_source_from_connection_string(
     return source
 
 
+CSV_DELIMITER_CANDIDATES = (",", ";", "\t", "|")
+
+
+def detect_csv_delimiter(csv_path: str, sample_lines: int = 20) -> str:
+    """Pick the delimiter that splits the first lines into a consistent number
+    of columns. Candidates are tried in order, so a comma wins ties.
+
+    ``csv.Sniffer`` is not used: it counts characters, so a comma-heavy text
+    column (JSON lists, prose) makes it pick "," for a semicolon-delimited
+    file. Parsing with ``csv.reader`` respects quoting, and a wrong delimiter
+    shows up as a ragged column count. Falls back to "," when nothing fits.
+    """
+    with open(csv_path, newline="", encoding="utf-8", errors="replace") as handle:
+        lines = [line for _, line in zip(range(sample_lines), handle) if line.strip()]
+    if not lines:
+        return ","
+
+    for delimiter in CSV_DELIMITER_CANDIDATES:
+        try:
+            counts = {len(row) for row in csv.reader(lines, delimiter=delimiter)}
+        except csv.Error:
+            continue
+        if len(counts) == 1 and counts.pop() > 1:
+            return delimiter
+    return ","
+
+
 def create_dlt_source_from_csv(csv_path: str, source_name: Optional[str] = None):
     """Auto-generate a dlt resource from a CSV file path.
 
@@ -89,19 +117,20 @@ def create_dlt_source_from_csv(csv_path: str, source_name: Optional[str] = None)
     reading from a localized copy (temp download, stored upload) pass the
     name derived from the ORIGINAL file so the manifest identity is stable
     across runs regardless of where the bytes were staged.
+
+    The delimiter is detected from the file (see :func:`detect_csv_delimiter`)
+    and forwarded to pandas through dlt's ``read_csv`` — semicolon, tab, and
+    pipe files load as tables instead of failing on a ragged comma split.
     """
     from dlt.sources.filesystem import filesystem, read_csv
 
     parent_dir = os.path.dirname(os.path.abspath(csv_path))
     filename = os.path.basename(csv_path)
 
-    source = (
-        filesystem(
-            bucket_url=f"file://{parent_dir}",
-            file_glob=filename,
-        )
-        | read_csv()
-    )
+    source = filesystem(
+        bucket_url=f"file://{parent_dir}",
+        file_glob=filename,
+    ) | read_csv(sep=detect_csv_delimiter(csv_path))
     # A piped read_csv resource is otherwise always named "_read_csv", and the
     # manifest identity is seeded from (dataset, source name) — every CSV in a
     # dataset would collapse into one identity. Name per file instead.

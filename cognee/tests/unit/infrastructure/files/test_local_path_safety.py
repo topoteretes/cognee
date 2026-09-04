@@ -10,6 +10,27 @@ from cognee.infrastructure.files.utils.local_path_safety import (
 )
 
 
+def test_resolve_local_path_is_unrestricted_when_allowlist_unset(monkeypatch, tmp_path: Path):
+    """The allowlist is opt-in: without COGNEE_ALLOWED_LOCAL_FILE_ROOTS any local
+    path resolves, which is what lets a local server ingest a repository from
+    wherever it lives on the machine."""
+    monkeypatch.delenv(ALLOWED_LOCAL_FILE_ROOTS_ENV, raising=False)
+    anywhere = tmp_path / "some" / "project"
+    anywhere.mkdir(parents=True)
+
+    assert resolve_local_path(anywhere, must_exist=True) == Path(os.path.realpath(anywhere))
+    with pytest.raises(FileNotFoundError):
+        resolve_local_path(tmp_path / "missing", must_exist=True)
+
+
+def test_empty_allowlist_value_means_unrestricted(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv(ALLOWED_LOCAL_FILE_ROOTS_ENV, "")
+    target = tmp_path / "file.txt"
+    target.write_text("x", encoding="utf-8")
+
+    assert resolve_local_path(target, must_exist=True) == Path(os.path.realpath(target))
+
+
 def test_resolve_local_path_rejects_outside_allowed_roots(monkeypatch, tmp_path: Path):
     allowed_root = tmp_path / "allowed"
     outside_root = tmp_path / "outside"

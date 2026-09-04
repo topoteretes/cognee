@@ -234,9 +234,9 @@ async def resolve_repo_source(
         from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
         # Repo specs can arrive from outside the SDK (CLI arguments, API
-        # callers), so local paths take the same allowlist containment check
-        # as ingestion's local-file reads instead of dereferencing an
-        # arbitrary path.
+        # callers), so local paths take the same containment check as
+        # ingestion's local-file reads (enforced only when
+        # COGNEE_ALLOWED_LOCAL_FILE_ROOTS is set).
         try:
             path = resolve_local_path(spec)
         except ValueError:

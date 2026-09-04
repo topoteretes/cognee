@@ -1,5 +1,4 @@
 import os
-import tempfile
 from pathlib import Path
 
 from cognee.base_config import get_base_config
@@ -8,12 +7,21 @@ from cognee.base_config import get_base_config
 ALLOWED_LOCAL_FILE_ROOTS_ENV = "COGNEE_ALLOWED_LOCAL_FILE_ROOTS"
 
 
-def get_allowed_local_file_roots() -> tuple[Path, ...]:
+def get_allowed_local_file_roots() -> tuple[Path, ...] | None:
+    """Roots that local file paths must live under, or ``None`` for no restriction.
+
+    The allowlist is opt-in: it is enforced only when
+    ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` is set (``os.pathsep``-separated
+    directories). Unset — the default — any local path is readable, subject to
+    ``ACCEPT_LOCAL_FILE_PATH``; this is what lets a local server ingest a
+    repository or document tree from wherever it lives on the machine.
+    Deployments that expose the API to untrusted callers should set it.
+    """
     configured_roots = os.getenv(ALLOWED_LOCAL_FILE_ROOTS_ENV)
-    if configured_roots:
-        root_values = [root for root in configured_roots.split(os.pathsep) if root]
-    else:
-        root_values = [str(Path.cwd()), tempfile.gettempdir()]
+    if not configured_roots:
+        return None
+
+    root_values = [root for root in configured_roots.split(os.pathsep) if root]
 
     # Cognee's own storage directories are always allowed: internal reads of
     # stored data (open_data_file) go through the same allowlist, and a
@@ -44,7 +52,15 @@ def resolve_local_path(path: str | Path, *, must_exist: bool = False) -> Path:
     # path). The realpath + startswith containment check below is the idiom static
     # analyzers (CodeQL py/path-injection) recognize as a path sanitizer.
     resolved = os.path.realpath(os.path.expanduser(os.fspath(path)))
-    for root in get_allowed_local_file_roots():
+    allowed_roots = get_allowed_local_file_roots()
+
+    if allowed_roots is None:
+        resolved_path = Path(resolved)
+        if must_exist and not resolved_path.exists():
+            raise FileNotFoundError(path)
+        return resolved_path
+
+    for root in allowed_roots:
         root_str = os.fspath(root)
         if resolved == root_str:
             resolved_path = Path(root_str)
