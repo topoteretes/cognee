@@ -667,3 +667,38 @@ async def test_undecodable_stored_text_is_a_refusal_not_a_crash(tmp_path):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _text_baseline(name):
+    return SimpleNamespace(
+        name=name,
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+
+
+def test_content_hash_named_text_upload_is_direct_text_not_a_rename():
+    """Raw text over HTTP arrives as an upload named ``text_<md5>.txt`` by the
+    cloud client (mirroring TextData). Its name changes with its content by
+    construction, so it must not trip the rename refusal — otherwise every
+    remote text update takes the full-rebuild path."""
+    old_hash, new_hash = "a" * 32, "b" * 32
+    old = _text_baseline(f"text_{old_hash}")
+    staged = SimpleNamespace(**vars(old))
+    staged.name = f"text_{new_hash}"
+
+    upload = SimpleNamespace(filename=f"text_{new_hash}.txt")
+    assert _changed_staged_metadata(upload, old, staged) == []
+    assert _changed_staged_metadata(DataItem(data=upload), old, staged) == []
+
+
+def test_user_file_that_merely_starts_with_text_is_still_a_rename():
+    old = _text_baseline("text_notes")
+    staged = SimpleNamespace(**vars(old))
+    staged.name = "text_notes_v2"
+
+    upload = SimpleNamespace(filename="text_notes_v2.txt")
+    assert _changed_staged_metadata(upload, old, staged) == ["name"]

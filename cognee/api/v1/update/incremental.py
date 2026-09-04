@@ -37,6 +37,7 @@ update instead, and can tell a permanent misconfiguration from a first
 ingestion in the logs. Permission errors are NOT refusals: they propagate.
 """
 
+import re
 import json
 from enum import Enum
 from pathlib import PureWindowsPath
@@ -120,6 +121,11 @@ PIPELINE_NAME = "cognify_pipeline"  # attribute to the cognify pipeline's status
 RUN_PIPELINE_NAME = "incremental_update_pipeline"
 # Matches cognify's own fallback when chunks_per_batch is unset.
 DEFAULT_CHUNKS_PER_BATCH = 2000
+
+
+# The name ``TextData`` gives raw text (``text_<md5>.txt``); an upload named this
+# way is raw text that traveled over HTTP, not a user-named file.
+_CONTENT_NAMED_TEXT_UPLOAD = re.compile(r"^text_[0-9a-f]{32}(\.txt)?$")
 
 
 class RefusalReason(str, Enum):
@@ -455,8 +461,16 @@ def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> lis
     ]
     # Direct text gets an internal content-derived filename, so its name is
     # expected to change with its text. User-named uploads and streams are not.
+    # Raw text sent over HTTP (the SDK after serve(), the CLI against a server)
+    # arrives as an upload carrying that same content-derived name — see
+    # cloud_client._text_upload_filename — so it is direct text too, not a
+    # renamed document; treating it as one would send every remote text
+    # update down the full-rebuild path.
     source_data = data.data if isinstance(data, DataItem) else data
-    if hasattr(source_data, "filename") or hasattr(source_data, "name"):
+    upload_name = getattr(source_data, "filename", None) or getattr(source_data, "name", None)
+    if (hasattr(source_data, "filename") or hasattr(source_data, "name")) and not (
+        isinstance(upload_name, str) and _CONTENT_NAMED_TEXT_UPLOAD.match(upload_name)
+    ):
         fields.append("name")
     return [
         field for field in fields if getattr(old_data, field, None) != getattr(staged, field, None)
