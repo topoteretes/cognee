@@ -14,6 +14,7 @@ from pathlib import Path
 
 from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.v1.datasets.dto import DataDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import get_datasets_by_name
@@ -82,19 +83,6 @@ class DatasetDTO(OutDTO):
     created_at: datetime
     updated_at: Optional[datetime] = None
     owner_id: UUID
-
-
-class DataDTO(OutDTO):
-    id: UUID
-    name: str
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    extension: str
-    mime_type: str
-    raw_data_location: str
-    dataset_id: UUID
-    label: Optional[str] = None
-    external_metadata: Optional[dict] = None
 
 
 class DatasetGraphSummaryDTO(OutDTO):
