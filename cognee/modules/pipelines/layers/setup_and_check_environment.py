@@ -61,7 +61,18 @@ async def setup_and_check_environment(
                     test_embedding_connection,
                 )
 
-                await test_llm_connection()
+                from cognee.modules.cognify.config import llm_free_extraction_enabled
+
+                if llm_free_extraction_enabled():
+                    # GRAPH_EXTRACTION_BACKEND=gliner: extraction and summaries run
+                    # on a local model, so an LLM key is not required to ingest.
+                    # Embeddings are still probed below.
+                    logger.info(
+                        "Skipping LLM connection test: GRAPH_EXTRACTION_BACKEND=gliner "
+                        "needs no LLM for extraction."
+                    )
+                else:
+                    await test_llm_connection()
                 detected_embedding_dimensions = await test_embedding_connection()
                 await determine_embedding_dimensions(detected_embedding_dimensions)
             _first_run_done = True

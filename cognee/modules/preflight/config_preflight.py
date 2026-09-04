@@ -107,7 +107,10 @@ def check_provider_config(llm_config=None, embedding_config=None) -> List[str]:
         llm_provider == "azure" and getattr(llm_config, "llm_azure_use_managed_identity", False)
     )
 
-    if not embeddings_untouched and llm_requires_key and not llm_key:
+    # GRAPH_EXTRACTION_BACKEND=gliner builds the graph and summaries on a local
+    # model, so ingestion does not need an LLM key; only completion-style
+    # searches would. Do not block remember()/add() on it in that mode.
+    if not embeddings_untouched and llm_requires_key and not llm_key and not _llm_free_extraction():
         problems.append(
             "Embedding settings are configured but LLM_API_KEY is not set "
             f"(LLM_PROVIDER='{llm_provider or 'openai'}' requires one). Entity "
@@ -118,6 +121,12 @@ def check_provider_config(llm_config=None, embedding_config=None) -> List[str]:
         )
 
     return problems
+
+
+def _llm_free_extraction() -> bool:
+    from cognee.modules.cognify.config import llm_free_extraction_enabled
+
+    return llm_free_extraction_enabled()
 
 
 def _skip_preflight() -> bool:

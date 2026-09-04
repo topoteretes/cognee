@@ -13,6 +13,7 @@ import pytest
 
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.graph import gliner as gliner_pkg
 from cognee.tasks.graph.gliner import (
@@ -671,3 +672,132 @@ def test_remember_routes_the_backend_kwarg_to_cognify():
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
     assert "graph_extraction_backend" in remember_module._COGNIFY_ONLY
     assert "graph_extraction_backend" in remember_module.RememberKwargs.__annotations__
+
+
+# --------------------------------------------------------------------------- #
+# LLM-free mode side effects (GRAPH_EXTRACTION_BACKEND=gliner)
+# --------------------------------------------------------------------------- #
+
+
+def _config_with_backend(backend):
+    from cognee.modules.cognify.config import get_cognify_config
+
+    return get_cognify_config().model_copy(update={"graph_extraction_backend": backend})
+
+
+def test_llm_free_extraction_flag_follows_the_backend_setting():
+    config_module = importlib.import_module("cognee.modules.cognify.config")
+    with patch.object(
+        config_module, "get_cognify_config", return_value=_config_with_backend("gliner")
+    ):
+        assert config_module.llm_free_extraction_enabled() is True
+    with patch.object(
+        config_module, "get_cognify_config", return_value=_config_with_backend("llm")
+    ):
+        assert config_module.llm_free_extraction_enabled() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend, llm_probed", [("llm", True), ("gliner", False)])
+async def test_first_run_check_skips_only_the_llm_probe_on_gliner(backend, llm_probed):
+    env_module = importlib.import_module(
+        "cognee.modules.pipelines.layers.setup_and_check_environment"
+    )
+    llm_utils = importlib.import_module("cognee.infrastructure.llm.utils")
+    config_module = importlib.import_module("cognee.modules.cognify.config")
+
+    llm_probe, embedding_probe = AsyncMock(), AsyncMock(return_value=384)
+    with (
+        patch.object(env_module, "_first_run_done", False),
+        patch.object(env_module, "create_relational_db_and_tables", AsyncMock()),
+        patch.object(env_module, "create_pgvector_db_and_tables", AsyncMock()),
+        patch.object(llm_utils, "test_llm_connection", llm_probe),
+        patch.object(llm_utils, "test_embedding_connection", embedding_probe),
+        patch.object(llm_utils, "determine_embedding_dimensions", AsyncMock()),
+        patch.object(
+            config_module, "get_cognify_config", return_value=_config_with_backend(backend)
+        ),
+        patch.dict("os.environ", {"COGNEE_SKIP_CONNECTION_TEST": "false"}),
+    ):
+        await env_module.setup_and_check_environment()
+
+    assert llm_probe.await_count == (1 if llm_probed else 0)
+    embedding_probe.assert_awaited_once()  # embeddings are always probed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "backend, auto_route, expected",
+    [
+        ("gliner", True, SearchType.CHUNKS),
+        ("gliner", False, SearchType.CHUNKS),
+        ("llm", False, SearchType.HYBRID_COMPLETION),
+    ],
+)
+async def test_recall_default_query_type_is_chunks_on_gliner(
+    monkeypatch, backend, auto_route, expected
+):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    recall_module = importlib.import_module("cognee.api.v1.recall.recall")
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    config_module = importlib.import_module("cognee.modules.cognify.config")
+
+    captured = {}
+
+    async def fake_authorized_search(**kwargs):
+        captured["query_type"] = kwargs.get("query_type")
+        return []
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(recall_module, "set_session_user_context_variable", noop)
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
+    config = _config_with_backend(backend)  # resolve before patching the accessor
+    monkeypatch.setattr(config_module, "get_cognify_config", lambda: config)
+
+    await recall_module.recall(
+        query_text="Where was Marie Curie born?",
+        dataset_ids=[uuid4()],
+        auto_route=auto_route,
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+    )
+    assert captured["query_type"] == expected
+
+
+@pytest.mark.asyncio
+async def test_recall_explicit_query_type_wins_on_gliner(monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    recall_module = importlib.import_module("cognee.api.v1.recall.recall")
+    serve_state = importlib.import_module("cognee.api.v1.serve.state")
+    search_methods = importlib.import_module("cognee.modules.search.methods.search")
+    config_module = importlib.import_module("cognee.modules.cognify.config")
+    captured = {}
+
+    async def fake_authorized_search(**kwargs):
+        captured["query_type"] = kwargs.get("query_type")
+        return []
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(recall_module, "set_session_user_context_variable", noop)
+    monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
+    monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
+    config = _config_with_backend("gliner")
+    monkeypatch.setattr(config_module, "get_cognify_config", lambda: config)
+
+    await recall_module.recall(
+        query_text="q",
+        query_type=SearchType.SUMMARIES,
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        user=SimpleNamespace(id=uuid4(), tenant_id=None),
+    )
+    assert captured["query_type"] == SearchType.SUMMARIES

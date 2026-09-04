@@ -2,8 +2,9 @@
 
 Graph and chunk summaries come from the local GLiNER2 model
 (GRAPH_EXTRACTION_BACKEND=gliner), embeddings from fastembed running on CPU.
-Retrieval uses the non-generative search types (SUMMARIES, CHUNKS); anything
-ending in *_COMPLETION needs an LLM to write the answer.
+On this backend recall() defaults to CHUNKS (vector search, no LLM) and the
+first-run environment check skips the LLM connection probe. Anything ending in
+*_COMPLETION still needs an LLM to write the answer.
 
 Requirements::
 
@@ -28,8 +29,6 @@ os.environ.update(
         "EMBEDDING_MODEL": "BAAI/bge-small-en-v1.5",
         "EMBEDDING_DIMENSIONS": "384",
         "EMBEDDING_MAX_TOKENS": "512",
-        # The first-run environment check probes the LLM; there is none.
-        "COGNEE_SKIP_CONNECTION_TEST": "true",
         # Per-turn feedback analysis is an LLM call; without it recall is LLM-free.
         "AUTO_FEEDBACK": "false",
     }
@@ -53,16 +52,22 @@ async def main():
     # embeddings, no LLM — so it is safe to leave self_improvement on.
     await cognee.remember(TEXT, dataset_name="no_llm")
 
-    for query_type in (SearchType.SUMMARIES, SearchType.CHUNKS):
-        results = await cognee.recall(
-            "Where was Marie Curie born?",
-            query_type=query_type,
-            datasets=["no_llm"],
-            top_k=3,
-        )
-        print(f"\n{query_type.name}: {len(results)} result(s)")
-        for item in results:
-            print("  -", item.text.replace("\n", " | "))
+    # No query_type: on the gliner backend this is CHUNKS.
+    results = await cognee.recall("Where was Marie Curie born?", datasets=["no_llm"], top_k=3)
+    print(f"\ndefault ({results[0].search_type}): {len(results)} result(s)")
+    for item in results:
+        print("  -", item.text.replace("\n", " | "))
+
+    # The GLiNER-built summaries are searchable too.
+    results = await cognee.recall(
+        "Where was Marie Curie born?",
+        query_type=SearchType.SUMMARIES,
+        datasets=["no_llm"],
+        top_k=3,
+    )
+    print(f"\nSUMMARIES: {len(results)} result(s)")
+    for item in results:
+        print("  -", item.text.replace("\n", " | "))
 
 
 if __name__ == "__main__":

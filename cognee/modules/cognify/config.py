@@ -42,3 +42,14 @@ class CognifyConfig(BaseSettings):
 @lru_cache
 def get_cognify_config():
     return CognifyConfig()
+
+
+def llm_free_extraction_enabled() -> bool:
+    """True when GRAPH_EXTRACTION_BACKEND selects a backend that needs no LLM.
+
+    Two behaviours key off this: the first-run environment check skips the LLM
+    connection probe (embeddings are still probed), and ``recall()`` without an
+    explicit ``query_type`` defaults to ``CHUNKS`` instead of a completion type,
+    since there may be no LLM to write an answer.
+    """
+    return (get_cognify_config().graph_extraction_backend or "llm").strip().lower() == "gliner"

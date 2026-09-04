@@ -40,6 +40,7 @@ from cognee.modules.recall.types.RecallResponse import (
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
+from cognee.modules.cognify.config import llm_free_extraction_enabled
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 from cognee.modules.users.methods import get_default_user
@@ -638,6 +639,12 @@ async def recall(
                         result = route_query(query_text)
                         routed_type = result.search_type
                         record_override(routed_type, local_query_type)
+                elif llm_free_extraction_enabled():
+                    # GRAPH_EXTRACTION_BACKEND=gliner: the graph and summaries were
+                    # built without an LLM and there may be none to write an answer,
+                    # so the default lookup is the vector search over chunks. An
+                    # explicit query_type still selects any search type.
+                    local_query_type = SearchType.CHUNKS
                 elif auto_route:
                     from cognee.api.v1.recall.query_router import route_query
 
