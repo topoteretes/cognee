@@ -52,6 +52,11 @@ def deadlock_retry(max_retries=10):
                         raise  # Re-raise the original error
 
                     error_str = str(error)
+                    if "MemoryPoolOutOfMemoryError" in error_str:
+                        # Deterministic: retrying the identical query re-allocates
+                        # the same transaction memory and fails the same way, so
+                        # each retry only amplifies the memory pressure.
+                        raise
                     if "DeadlockDetected" in error_str or "Neo.TransientError" in error_str:
                         await wait()
                     else:

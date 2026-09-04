@@ -95,3 +95,23 @@ if __name__ == "__main__":
         await test_database_unavailable_retries_match_neo4j_error()
 
     asyncio.run(main())
+
+
+@pytest.mark.asyncio
+async def test_memory_pool_out_of_memory_is_not_retried():
+    """MemoryPoolOutOfMemoryError arrives as Neo.TransientError.General.*, but it
+    is deterministic: retrying the identical query re-allocates the same
+    transaction memory, so each retry only amplifies the memory pressure."""
+    mock_function = AsyncMock(
+        side_effect=Neo4jError(
+            "Neo.TransientError.General.MemoryPoolOutOfMemoryError: "
+            "dbms.memory.transaction.total.max threshold reached"
+        )
+    )
+
+    wrapped_function = deadlock_retry(max_retries=5)(mock_function)
+
+    with pytest.raises(Neo4jError, match="MemoryPoolOutOfMemoryError"):
+        await wrapped_function(self=None)
+
+    assert mock_function.await_count == 1, "the OOM error must not be retried"
