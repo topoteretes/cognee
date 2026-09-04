@@ -354,6 +354,17 @@ def setup_logging(log_level=None, name=None) -> bool:
     """
     global _is_structlog_configured
 
+    # Logging is process-global state: configure it exactly once. setup_logging
+    # is called from several import-time sites (cognee/__init__, api/client,
+    # embeddings utils) plus server startup; without this guard every call
+    # appended another root-logger file handler (each record written N times to
+    # the same log file) and re-emitted the startup banner — a server start
+    # logged the "Cognee 1.0 changes" warning four times. Later callers just
+    # get a logger; the first caller's handlers, excepthook, and log file stay
+    # authoritative.
+    if _is_structlog_configured:
+        return structlog.get_logger(name if name else __name__)
+
     # Regular detailed logging for non-CLI usage
     log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO").upper()]
 

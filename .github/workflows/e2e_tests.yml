@@ -68,6 +68,31 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python ./cognee/tests/test_cognee_server_start.py
 
+  run-serve-routing-test:
+    name: Serve Routing e2e
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Mocked LLM and embeddings: no secrets. The suite starts a real instance
+      # and drives the proxied SDK surface (add, cognify, list_data, update,
+      # search, recall, remember, improve, forget) through cognee.serve() over
+      # real HTTP, so a client/route contract drift fails here — the proxy's
+      # unit tests use mock sessions and cannot catch it.
+      - name: Run serve() routing suite
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/e2e/serve_routing/
+
   run-migration-model-lockstep-guard:
     name: Migration/Model Lockstep Guard
     runs-on: ubuntu-22.04

@@ -144,6 +144,41 @@ async def update(
             - Processing status and any errors
             - Execution timestamps and metadata
     """
+    # Route to the remote instance when connected via serve(). This must come
+    # before any local work: the paths below resolve the LOCAL default user and
+    # delete/re-add locally, which against a remote dataset id fails with
+    # "Dataset not found" while the remote document stays untouched.
+    from cognee.api.v1.serve.state import get_remote_client
+
+    client = get_remote_client()
+    if client is not None:
+        dropped = [
+            name
+            for name, value, default in (
+                ("vector_db_config", vector_db_config, None),
+                ("graph_db_config", graph_db_config, None),
+                ("preferred_loaders", preferred_loaders, None),
+                ("graph_model", graph_model, KnowledgeGraph),
+                ("custom_prompt", custom_prompt, None),
+                ("chunker", chunker, TextChunker),
+                ("policy", policy, DEFAULT_CHUNK_POLICY),
+            )
+            if value is not default
+        ]
+        if dropped:
+            logger.warning(
+                "update() is proxied to the remote instance; PATCH /api/v1/update has no "
+                "slot for %s — the server applies its own configuration",
+                ", ".join(dropped),
+            )
+        return await client.update(
+            data_id=data_id,
+            data=data,
+            dataset_id=dataset_id,
+            node_set=node_set,
+            chunk_level_diff=chunk_level_diff,
+        )
+
     if not user:
         user = await get_default_user()
 
