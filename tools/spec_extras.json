@@ -22,7 +22,7 @@
     "datasets": "Dataset management endpoints for listing, creating, and deleting datasets.",
     "delete": "Data deletion endpoints (deprecated — use datasets endpoints instead).",
     "forget": "Endpoint for removing data from the knowledge graph.",
-    "health": "Liveness, readiness, and component health checks, plus the service root endpoint.",
+    "health": "Liveness, readiness, and component health checks.",
     "improve": "Endpoint for enriching and improving an existing knowledge graph.",
     "integrations": "Endpoints for connecting, provisioning, and disconnecting OAuth providers and plugins.",
     "llm": "LLM-backed endpoints for inferring graph schemas and generating custom extraction prompts.",
