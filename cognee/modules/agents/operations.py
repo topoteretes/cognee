@@ -189,10 +189,13 @@ async def get_agent_connection_detail(
     agent_id: UUIDType,
     agent_session_name: Optional[str] = None,
 ) -> Optional[AgentDetailResponse]:
+    # A lookup by name must still find a connection that unregister has
+    # deactivated; only the unnamed lookup keeps the active-only default.
     response = await list_agent_connections(
         user=user,
         agent_id=agent_id,
         include_sources=True,
+        active_only=not agent_session_name,
         limit=10000,
         offset=0,
     )
