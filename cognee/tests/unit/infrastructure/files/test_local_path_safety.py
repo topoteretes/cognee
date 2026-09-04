@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -53,3 +54,15 @@ async def test_local_file_storage_blocks_paths_outside_storage_root(monkeypatch,
 
     with pytest.raises(ValueError, match="outside the configured storage root"):
         await storage.file_exists("../secret.txt")
+
+
+def test_repos_root_is_always_allowed(monkeypatch, tmp_path: Path):
+    """A cloned repository's documents are ingested by path, so the clones root
+    must pass the allowlist even when COGNEE_ALLOWED_LOCAL_FILE_ROOTS is set."""
+    from cognee.base_config import get_base_config
+
+    monkeypatch.setenv(ALLOWED_LOCAL_FILE_ROOTS_ENV, str(tmp_path / "allowed"))
+    repos_root = Path(get_base_config().repos_root_directory)
+    readme = repos_root / "github.com-org-repo" / "README.md"
+
+    assert resolve_local_path(readme) == Path(os.path.realpath(readme))

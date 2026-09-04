@@ -16,6 +16,7 @@ from cognee.tasks.ingestion.data_item import (
     parse_external_metadata,
     parse_labels,
 )
+from cognee.tasks.ingestion.folder_uploads import validate_folder_uploads
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
@@ -118,6 +119,22 @@ def get_remember_router() -> APIRouter:
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
         data: List[UploadFile] = File(default=None),
+        raw_data: Optional[List[EmptyExampleStr]] = Form(
+            default=None,
+            examples=[None],
+            description=(
+                "Data given as strings instead of uploads, one entry each: raw text to "
+                "remember, a local file or directory path on the server's filesystem "
+                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
+                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
+                "shallow-cloned and indexed as a code graph. Combined with 'data': "
+                "uploads come first, then these entries; labels and external_metadata "
+                "pair with that combined order. Empty entries are ignored. Normal "
+                "ingestion only (with or without session_id) — rejected with "
+                "content_type; for content_type='code' pass repository URLs via "
+                "'repositories'."
+            ),
+        ),
         labels: Optional[str] = Form(
             default=None,
             examples=[""],
@@ -296,7 +313,18 @@ def get_remember_router() -> APIRouter:
         first, then automatically processed into a structured knowledge graph.
 
         ## Request Parameters
-        - **data** (List[UploadFile]): Files to upload and process.
+        - **data** (List[UploadFile]): Files to upload and process. For normal ingestion a
+          filename may carry a path relative to a folder (proj/src/app.py): such parts are
+          written server-side as one directory per top-level folder and ingested as a
+          directory, so a code project becomes one code-graph item plus its documents.
+          Rejected together with labels/external_metadata. At most 1000 parts per request.
+        - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
+          local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH), a
+          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), or a GitHub/GitLab
+          repository URL, shallow-cloned and indexed as a code graph. Uploads come first,
+          then raw_data entries; labels and external_metadata pair with that combined
+          order. Normal ingestion only — rejected with content_type. At least one of data
+          or raw_data is required for normal ingestion.
         - **labels** (Optional[str]): JSON array of per-file labels, e.g.
           ["finance", "people", ""], paired positionally with the uploaded files (one
           entry per file; an empty entry skips that file). Stored on each file's data
@@ -366,6 +394,37 @@ def get_remember_router() -> APIRouter:
         # Invalid JSON raises a CogneeApiError (400) via the global handler.
         parsed_labels = parse_labels(labels)
         parsed_metadata = parse_external_metadata(external_metadata)
+
+        # Uploads whose filenames carry a relative path are a folder -- normal
+        # ingestion only: the skills path rebuilds its own SKILL.md tree from
+        # such names and archives are single files. The add pipeline writes
+        # and resolves the folder (resolve_data_directories); this rejects bad
+        # names and labels-with-folders up front as a 400.
+        if not content_type:
+            validate_folder_uploads(
+                data,
+                with_attributes=any(parsed_labels or [])
+                or any(entry for entry in (parsed_metadata or [])),
+            )
+
+        # One item list: uploads, then string inputs. Drop empty entries —
+        # Swagger UI submits untouched array items as "". The
+        # skills, code, and archive paths never run string inputs through
+        # add(), so they would be silently dropped there — reject instead.
+        raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
+        if raw_items and content_type:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "raw_data is only supported for normal ingestion — remove content_type "
+                    "to use it. For content_type='code' pass repository paths or git URLs "
+                    "via 'repositories'; 'skills' and 'cogx-archive' take file uploads."
+                ),
+            )
+        # None (not []) when nothing was sent: the skills and archive paths
+        # below distinguish "no uploads" by falsiness either way, and
+        # remember() sees the same value it always did.
+        data = [*(data or []), *raw_items] or None
 
         # Labels and metadata live on the Data records that normal add+cognify
         # ingestion creates. The session-cache, skills, and archive paths never
@@ -472,6 +531,14 @@ def get_remember_router() -> APIRouter:
                         "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
                     ),
                 )
+
+        # After the field-specific checks above, so a misused code-only field
+        # is reported as such rather than as "nothing to ingest".
+        if not content_type and not data:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide at least one file in 'data' or one entry in 'raw_data'.",
+            )
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService

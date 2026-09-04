@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from typing import List, Union, BinaryIO
 
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
+from cognee.tasks.ingestion.folder_uploads import materialize_folder_uploads
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
@@ -30,6 +31,16 @@ async def resolve_data_directories(
     """
     Resolves directories by replacing them with their contained files.
 
+    Uploads whose filenames carry a relative path (``proj/src/app.py``) are a
+    folder: they are written under the dataset's uploads directory first
+    (``folder_uploads.materialize_folder_uploads``) and that directory is then
+    resolved like any local directory below. Needs ``user`` and ``dataset_id``.
+
+    A GitHub/GitLab repository URL (``code_repo_clone_url``) is shallow-cloned
+    and then resolved exactly like a local code project directory, below.
+    Other http(s) URLs pass through untouched and are fetched as web pages by
+    ``save_data_item_to_storage``.
+
     A local directory that IS a code project (see
     ``cognee.tasks.code_graph.code_repo.PROJECT_MARKERS``) is not flattened:
     it resolves to ONE repo-level manifest DataItem (cognify runs a single
@@ -51,6 +62,8 @@ async def resolve_data_directories(
     # Ensure `data` is a list
     if not isinstance(data, list):
         data = [data]
+
+    data = await materialize_folder_uploads(data, user, dataset_id)
 
     resolved_data = []
     s3_config = get_s3_config()
@@ -90,6 +103,22 @@ async def resolve_data_directories(
                     resolved_data.extend(s3_files)
                 else:
                     raise S3FileSystemNotFoundError()
+                continue
+
+            # A GitHub/GitLab repository URL is a code project, not a web page:
+            # clone it and resolve it like the local project directory below --
+            # one code_repo manifest plus the repo's documents. Deferred import:
+            # code_repo reaches back into this package (dlt_utils).
+            from cognee.tasks.code_graph.resolve_repo import code_repo_clone_url
+
+            if code_repo_clone_url(item) is not None:
+                from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
+
+                manifest_item, document_paths, _skipped = await resolve_code_repository_url(
+                    item, user=user, dataset_id=dataset_id
+                )
+                resolved_data.append(manifest_item)
+                resolved_data.extend(str(path) for path in document_paths)
                 continue
 
             local_path = _resolve_existing_local_path(item)

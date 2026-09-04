@@ -13,6 +13,7 @@ from cognee.tasks.ingestion.data_item import (
     parse_external_metadata,
     parse_labels,
 )
+from cognee.tasks.ingestion.folder_uploads import validate_folder_uploads
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -26,6 +27,11 @@ logger = get_logger()
 # NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
 #       Once issue is resolved on Swagger side it can be removed.
 UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
+
+# Swagger UI prefills newly added array items from the ITEM-level example;
+# without one it inserts the literal "string". An empty item example keeps
+# "Add item" runnable (empty entries are filtered out server-side).
+EmptyExampleStr = Annotated[str, WithJsonSchema({"type": "string", "example": ""})]
 
 
 def get_add_router() -> APIRouter:
@@ -44,17 +50,31 @@ def get_add_router() -> APIRouter:
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
+        raw_data: Optional[List[EmptyExampleStr]] = Form(
+            default=None,
+            examples=[None],
+            description=(
+                "Data given as strings instead of uploads, one entry each: raw text to "
+                "ingest, a local file or directory path on the server's filesystem "
+                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
+                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
+                "shallow-cloned and indexed as a code graph by cognify. Combined with "
+                "'data': uploads come first, then these entries; labels and "
+                "external_metadata pair with that combined order. Empty entries are "
+                "ignored."
+            ),
+        ),
         labels: Optional[str] = Form(
             default=None,
             examples=[""],
             description=(
-                'Per-file labels, e.g. ["finance", "people", ""] — the Nth label applies '
-                "to the Nth uploaded file, one entry per file, an empty entry skips that "
-                'file. The comma-separated form "finance,people," is accepted '
-                "equivalently (it is what Swagger UI sends when you type a JSON array "
-                "here), so labels cannot contain commas unless the client sends real "
-                "JSON. Stored on each file's data record and returned when listing "
-                "dataset data."
+                'Per-item labels, e.g. ["finance", "people", ""] — the Nth label applies '
+                "to the Nth data item (uploads first, then raw_data entries), one entry "
+                "per item, an empty entry skips that item. The comma-separated form "
+                '"finance,people," is accepted equivalently (it is what Swagger UI sends '
+                "when you type a JSON array here), so labels cannot contain commas unless "
+                "the client sends real JSON. Stored on each item's data record and "
+                "returned when listing dataset data."
             ),
         ),
         external_metadata: Optional[str] = Form(
@@ -92,23 +112,33 @@ def get_add_router() -> APIRouter:
         """
         Add data to a dataset for processing and knowledge graph construction.
 
-        This endpoint accepts various types of data (files, URLs, GitHub repositories)
-        and adds them to a specified dataset for processing. The data is ingested,
-        analyzed, and integrated into the knowledge graph.
+        This endpoint accepts file uploads and string inputs (text, server-side file
+        paths, web URLs, GitHub/GitLab repository URLs) and adds them to a specified
+        dataset for processing. The data is ingested, analyzed, and integrated into
+        the knowledge graph.
 
         ## Request Parameters
-        - **data** (List[UploadFile]): List of files to upload. Can also include:
-          - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)
-          - GitHub repository URLs (will be cloned and processed)
-          - Regular file uploads
-        - **labels** (Optional[str]): JSON array of per-file labels, e.g.
-                 ["finance", "people", ""], paired positionally with the uploaded files
-                 (one entry per file; an empty entry skips that file). Stored on each
-                 file's data record.
-        - **external_metadata** (Optional[str]): JSON array of per-file metadata objects,
-                 e.g. [{"source": "crm"}, null], paired positionally with the uploaded
-                 files (one entry per file; null or {} skips that file). Merged into each
-                 file's stored external_metadata.
+        - **data** (List[UploadFile]): Files to upload. A filename may carry a path
+          relative to a folder (proj/pyproject.toml, proj/src/app.py): such parts are
+          written server-side as one directory per top-level folder and ingested as a
+          directory, so a code project becomes one code-graph item plus its documents.
+          Parts without a separator are ordinary files. At most 1000 parts per request.
+        - **raw_data** (Optional[List[str]]): String inputs, one entry each:
+          - Raw text to ingest
+          - A local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH)
+          - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS)
+          - A GitHub/GitLab repository URL, shallow-cloned and indexed as a code graph
+          At least one of data or raw_data is required. Uploads come first, then
+          raw_data entries; labels and external_metadata pair with that order and are
+          rejected with folder uploads.
+        - **labels** (Optional[str]): JSON array of per-item labels, e.g.
+                 ["finance", "people", ""], paired positionally with the data items
+                 (one entry per item; an empty entry skips that item). Stored on each
+                 item's data record.
+        - **external_metadata** (Optional[str]): JSON array of per-item metadata objects,
+                 e.g. [{"source": "crm"}, null], paired positionally with the data items
+                 (one entry per item; null or {} skips that item). Merged into each
+                 item's stored external_metadata.
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
         - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
@@ -124,7 +154,8 @@ def get_add_router() -> APIRouter:
         - Any relevant metadata from the ingestion process
 
         ## Error Codes
-        - **400 Bad Request**: Neither datasetId nor datasetName provided
+        - **400 Bad Request**: Neither datasetId nor datasetName provided, or neither
+          data nor raw_data provided
         - **409 Conflict**: Error during add operation
         - **403 Forbidden**: User doesn't have permission to add to dataset
 
@@ -152,12 +183,36 @@ def get_add_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        # Labels and metadata ride on DataItems, which ingestion unwraps to
-        # store them on each file's Data record. Invalid JSON or a count
-        # mismatch raises a CogneeApiError (400), returned by the global handler.
-        data = pair_labels_with_data(
-            data, parse_labels(labels), parse_external_metadata(external_metadata)
+        parsed_labels = parse_labels(labels)
+        parsed_metadata = parse_external_metadata(external_metadata)
+
+        # Uploads whose filenames carry a relative path are a folder. The
+        # pipeline writes and resolves it (resolve_data_directories, after
+        # authorization, keyed by dataset); this only rejects bad names and
+        # labels-with-folders up front as a 400 via the global handler.
+        validate_folder_uploads(
+            data,
+            with_attributes=any(parsed_labels or [])
+            or any(entry for entry in (parsed_metadata or [])),
         )
+
+        # One item list: uploads, then string inputs. Drop empty entries —
+        # Swagger UI submits untouched array items as "".
+        raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
+        data = [*(data or []), *raw_items]
+
+        # Labels and metadata ride on DataItems, which ingestion unwraps to
+        # store them on each item's Data record. Invalid JSON or a count
+        # mismatch raises a CogneeApiError (400), returned by the global handler.
+        data = pair_labels_with_data(data, parsed_labels, parsed_metadata)
+
+        if not data:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(
+                    error="Provide at least one file in 'data' or one entry in 'raw_data'.",
+                ).model_dump(),
+            )
 
         try:
             add_run = await cognee_add(

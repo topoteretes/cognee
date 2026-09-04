@@ -24,6 +24,10 @@ combined content hash), so the stored record is small and re-adding a changed
 repo resets pipeline status through the normal content-change detection. The
 repository itself is read from its original location at cognify time — like
 ``remember(content_type="code")``, the enola run happens in place.
+
+A GitHub/GitLab repository URL passed to ``add()`` takes the same path after a
+shallow clone (``resolve_code_repository_url``): the clone directory is the
+"original location" the manifest points at.
 """
 
 import hashlib
@@ -32,6 +36,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.code_graph.resolve_repo import (
+    code_repo_clone_url,
+    redact_repo_spec,
+    resolve_repo_source,
+)
 from cognee.tasks.ingestion.dlt_utils import metadata_source
 
 if TYPE_CHECKING:
@@ -220,13 +229,17 @@ def build_repo_manifest(directory: Path, covered: List[Path]) -> str:
     )
 
 
-async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
+async def resolve_code_repository(
+    directory: Path, user=None, dataset_id=None, source_url: Optional[str] = None
+):
     """Build the repo-level DataItem (and the document file list) for a project.
 
     Returns (manifest_item, document_paths, skip_count). The data id is pinned
     to the stable identity (user, dataset, repo path) — mirroring DLT source
     manifests — so re-adding the same repo updates one record instead of
     accreting new ones; without a user context the id is left content-derived.
+    ``source_url`` (credential-free) records where a cloned repository came
+    from as ``system_metadata["repo_url"]``.
 
     Without an LLM API key, the project's document files are excluded (logged)
     instead of emitted: their routes need an LLM (images transcribe at add
@@ -258,14 +271,18 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
 
         data_id = await get_unique_data_id(f"code_repo:{directory}", user, dataset_id)
 
+    system_metadata = {
+        "source": "code_repo",
+        "repo_path": str(directory),
+        "file_count": len(covered),
+    }
+    if source_url is not None:
+        system_metadata["repo_url"] = source_url
+
     manifest_item = DataItem(
         data=manifest_text,
         label=f"code_repo:{directory.name}",
-        system_metadata={
-            "source": "code_repo",
-            "repo_path": str(directory),
-            "file_count": len(covered),
-        },
+        system_metadata=system_metadata,
         data_id=data_id,
     )
 
@@ -276,6 +293,29 @@ async def resolve_code_repository(directory: Path, user=None, dataset_id=None):
         len(skipped),
     )
     return manifest_item, documents, len(skipped)
+
+
+async def resolve_code_repository_url(spec: str, user=None, dataset_id=None):
+    """Clone a hosted repository URL and build its repo-level DataItem.
+
+    ``add()``'s implicit counterpart of ``remember(content_type="code")``: a
+    GitHub/GitLab repository URL (see ``resolve_repo.code_repo_clone_url``) is
+    shallow-cloned into the shared clones directory and then partitioned
+    exactly like a local code project -- one ``code_repo`` manifest for the
+    CODE_REPO cognify route plus the repository's documents as individual
+    items. Returns ``(manifest_item, document_paths, skip_count)``; the
+    manifest carries the credential-free URL as ``repo_url``.
+    """
+    clone_url = code_repo_clone_url(spec)
+    if clone_url is None:
+        raise ValueError(
+            f"'{redact_repo_spec(spec)}' is not a repository URL add() can clone; "
+            "expected https://github.com/<owner>/<repo>, a gitlab.com project, or a .git URL."
+        )
+    repo_path = await resolve_repo_source(clone_url)
+    return await resolve_code_repository(
+        repo_path, user=user, dataset_id=dataset_id, source_url=redact_repo_spec(clone_url)
+    )
 
 
 async def extract_code_repo_graph(

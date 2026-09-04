@@ -2,8 +2,11 @@
 
 Used by ``remember(..., content_type="code")`` so callers can pass a GitHub
 URL (or a list of them) and get the enola code-graph pipeline run on a local
-shallow clone. Clones live under ``~/.cognee/repos`` and are reused across
-calls; an existing clone is refreshed with a best-effort ``git pull``.
+shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
+(:func:`code_repo_clone_url`) and clone it the same way. Clones live under
+``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
+reused across calls; an existing clone is refreshed with a best-effort
+``git pull``.
 """
 
 import asyncio
@@ -17,6 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import status
 
+from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeSystemError
 from cognee.shared.logging_utils import get_logger
 
@@ -28,7 +32,58 @@ _FALSEY = {"false", "0", "no", "off"}
 
 _GIT_TIMEOUT_SECONDS = 600
 
-DEFAULT_CLONES_DIR = Path.home() / ".cognee" / "repos"
+# github.com / gitlab.com repository roots are detected by shape; any other
+# host is a repository only when the URL ends in ".git". These are the
+# two-segment forge paths that are site pages, not <owner>/<repo>.
+_GITHUB_RESERVED_OWNERS = frozenset(
+    {
+        "about",
+        "apps",
+        "collections",
+        "enterprise",
+        "explore",
+        "features",
+        "login",
+        "marketplace",
+        "notifications",
+        "organizations",
+        "orgs",
+        "pricing",
+        "search",
+        "security",
+        "settings",
+        "site",
+        "sponsors",
+        "topics",
+        "trending",
+        "users",
+    }
+)
+_GITLAB_RESERVED_GROUPS = frozenset(
+    {
+        "admin",
+        "api",
+        "dashboard",
+        "explore",
+        "groups",
+        "help",
+        "oauth",
+        "profile",
+        "projects",
+        "search",
+        "users",
+    }
+)
+
+
+def default_clones_dir() -> Path:
+    """Where remote repositories are cloned: ``BaseConfig.repos_root_directory``.
+
+    ``COGNEE_REPOS_DIR``, default ``~/.cognee/repos``. Read at call time. The
+    same directory is one of ingestion's always-allowed local roots, so the
+    document files of a clone can be added by path.
+    """
+    return Path(get_base_config().repos_root_directory)
 
 
 class CodeRepositoryError(CogneeSystemError):
@@ -44,6 +99,49 @@ class CodeRepositoryError(CogneeSystemError):
 def is_remote_repo(spec) -> bool:
     """Whether the spec is a remote git URL rather than a local path."""
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
+
+
+def code_repo_clone_url(spec) -> Optional[str]:
+    """The clone URL when an http(s) string names a whole git repository, else None.
+
+    This is what lets ``add()`` treat ``https://github.com/<owner>/<repo>`` as a
+    code project instead of a web page to scrape. Detected: repository roots on
+    github.com (``<owner>/<repo>``) and gitlab.com (``<group>/<repo>``, nested
+    groups included), with an optional ``.git`` suffix, trailing slash, ``www.``
+    prefix, query or fragment -- and any http(s) URL ending in ``.git`` on any
+    host. Deeper forge URLs (``/blob/``, ``/tree/``, ``/issues``, ``/pull/``,
+    GitLab's ``/-/`` pages) and forge site pages (``/topics/x``, ``/explore``)
+    name pages, not repositories, and are left to the web-page path. ``git@``
+    and ``ssh://`` specs are not detected: they have no web-page reading to
+    disambiguate from and stay explicit via ``remember(content_type="code")``.
+
+    The returned URL is normalised for ``git clone``: query and fragment
+    dropped, trailing slash removed, userinfo (a token) kept -- redact it with
+    :func:`redact_repo_spec` before persisting or logging.
+    """
+    if not isinstance(spec, str):
+        return None
+    parts = urlsplit(spec.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    host = parts.hostname.lower()
+    if host.startswith("www."):
+        host = host[len("www.") :]
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if len(segments) < 2:
+        return None
+
+    if segments[-1].endswith(".git"):
+        is_repo = True
+    elif host == "github.com":
+        is_repo = len(segments) == 2 and segments[0] not in _GITHUB_RESERVED_OWNERS
+    elif host == "gitlab.com":
+        is_repo = "-" not in segments and segments[0] not in _GITLAB_RESERVED_GROUPS
+    else:
+        is_repo = False
+    if not is_repo:
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, "/" + "/".join(segments), "", ""))
 
 
 def redact_repo_spec(spec: Union[str, Path]) -> str:
@@ -121,7 +219,7 @@ async def resolve_repo_source(
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
     Local paths are validated and returned as-is. Remote URLs are cloned with
-    ``--depth 1`` into ``clones_dir`` (default ``~/.cognee/repos``); an
+    ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
     Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
 
@@ -202,7 +300,7 @@ async def resolve_repo_source(
 
     auth_env = _credential_env(credentials) if credentials else None
 
-    base = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
+    base = Path(clones_dir) if clones_dir else default_clones_dir()
     target = base / _clone_slug(clean_url)
     # The slug regex already forbids separators and dot-runs; keep an
     # explicit containment check so a clone can never land outside the
