@@ -66,19 +66,6 @@ MIGRATIONS_DIR_NAME = "alembic"
 _alembic_command_lock = threading.Lock()
 
 
-def _quiet_alembic_logging() -> None:
-    """Keep alembic's own INFO chatter out of cognee's output.
-
-    ``alembic.runtime.migration`` ("Context impl SQLiteImpl.", "Will assume
-    non-transactional DDL."), ``alembic.runtime.plugins`` ("setup plugin ...",
-    at import) and our env.py's ``alembic.env`` logger all emit at INFO through
-    the stdlib root handler, bypassing structlog formatting. Cognee logs the
-    outcome itself ("Relational migrations applied"), so alembic only needs to
-    speak up for warnings and errors. Must run BEFORE ``import alembic``.
-    """
-    logging.getLogger("alembic").setLevel(logging.WARNING)
-
-
 class MigrationError(Exception):
     """Raised when migrations fail."""
 
@@ -150,7 +137,6 @@ def _build_alembic_config(script_location: Optional[str] = None, engine=None):
     ``config.attributes``; ``None`` means the globally configured engine. An
     adapter's ``create_database()`` passes itself, so it builds ITS database.
     """
-    _quiet_alembic_logging()
     from alembic.config import Config
 
     package_root = str(pkg_resources.files(MIGRATIONS_PACKAGE))
@@ -187,7 +173,6 @@ async def run_relational_migrations(
     """
 
     def _upgrade():
-        _quiet_alembic_logging()
         from alembic import command
 
         with _alembic_command_lock:
@@ -213,7 +198,6 @@ async def run_relational_downgrade(target: str, script_location: Optional[str] =
     """
 
     def _downgrade():
-        _quiet_alembic_logging()
         from alembic import command
 
         with _alembic_command_lock:
