@@ -13,6 +13,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
+    parse_data_ids,
     parse_external_metadata,
     parse_labels,
 )
@@ -143,6 +144,19 @@ def get_remember_router() -> APIRouter:
                 "the file's stored external_metadata (your keys win over loader-derived "
                 "ones; 'node_set' is reserved). Only supported for normal ingestion — "
                 "rejected when combined with session_id or content_type."
+            ),
+        ),
+        data_ids: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "JSON array of per-file UUIDs to pin as each file's data id, e.g. "
+                '["9c4e4a4b-2b1a-4f6e-9d3a-1c2b3d4e5f6a", null]. Paired positionally '
+                "like labels (null skips that file and the server mints an id). An id "
+                "already present in the dataset updates that document in place; an id "
+                "owned by another dataset is refused. Pin ids to keep a stable handle for "
+                "PATCH /api/v1/update. Only supported for normal ingestion — rejected "
+                "when combined with session_id or content_type."
             ),
         ),
         datasetName: Optional[str] = Form(
@@ -366,26 +380,30 @@ def get_remember_router() -> APIRouter:
         # Invalid JSON raises a CogneeApiError (400) via the global handler.
         parsed_labels = parse_labels(labels)
         parsed_metadata = parse_external_metadata(external_metadata)
+        parsed_data_ids = parse_data_ids(data_ids)
 
-        # Labels and metadata live on the Data records that normal add+cognify
-        # ingestion creates. The session-cache, skills, and archive paths never
-        # create those records, so they would be silently dropped — reject
-        # instead.
-        if (any(parsed_labels or []) or any(entry for entry in (parsed_metadata or []))) and (
-            session_id or content_type
-        ):
+        # Labels, metadata and pinned ids live on the Data records that normal
+        # add+cognify ingestion creates. The session-cache, skills, and archive
+        # paths never create those records, so they would be silently dropped —
+        # reject instead.
+        has_item_attributes = (
+            any(parsed_labels or [])
+            or any(entry for entry in (parsed_metadata or []))
+            or any(parsed_data_ids or [])
+        )
+        if has_item_attributes and (session_id or content_type):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "labels and external_metadata are only supported for normal ingestion — "
-                    "remove session_id and content_type to use them."
+                    "labels, external_metadata and data_ids are only supported for normal "
+                    "ingestion — remove session_id and content_type to use them."
                 ),
             )
 
-        # Labels and metadata ride on DataItems, which ingestion unwraps to
-        # store them on each file's Data record. A count mismatch raises a
-        # CogneeApiError (400), returned by the global handler.
-        data = pair_labels_with_data(data, parsed_labels, parsed_metadata)
+        # Labels, metadata and pinned ids ride on DataItems, which ingestion
+        # unwraps to store them on each file's Data record. A count mismatch
+        # raises a CogneeApiError (400), returned by the global handler.
+        data = pair_labels_with_data(data, parsed_labels, parsed_metadata, parsed_data_ids)
 
         if content_type == "cogx-archive":
             if not data:

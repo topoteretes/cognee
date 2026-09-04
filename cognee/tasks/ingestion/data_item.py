@@ -4,7 +4,9 @@ from typing import Any, List, Optional
 from uuid import UUID
 
 from cognee.tasks.ingestion.exceptions import (
+    DataIdCountMismatchError,
     ExternalMetadataCountMismatchError,
+    InvalidDataIdsError,
     InvalidExternalMetadataError,
     InvalidLabelsError,
     LabelCountMismatchError,
@@ -87,30 +89,73 @@ def parse_external_metadata(
     return parsed
 
 
+def parse_data_ids(data_ids: Optional[str]) -> Optional[List[Optional[UUID]]]:
+    """Parse the ``data_ids`` form field: a JSON array of UUID strings.
+
+    Same wire convention as ``labels``: one JSON-encoded string, paired
+    positionally with the uploaded files, ``null`` (or ``""``) to let the
+    server mint an id for that file. A pinned id becomes the file's
+    ``Data.id`` — ingestion resolves it inside the target dataset (updating
+    the row in place when it exists, creating it under that id otherwise)
+    and refuses ids that belong to another dataset. Sending an id is what
+    lets a remote caller hold a stable handle for a later ``update()``.
+
+    Returns None when the field is absent or blank.
+
+    Raises:
+        InvalidDataIdsError: If the value is not a JSON array, or an entry is
+            neither null nor a valid UUID string.
+    """
+    if data_ids is None or not data_ids.strip():
+        return None
+    try:
+        parsed = json.loads(data_ids)
+    except json.JSONDecodeError as error:
+        raise InvalidDataIdsError(f"data_ids is not valid JSON: {error}")
+    if not isinstance(parsed, list):
+        raise InvalidDataIdsError()
+    result: List[Optional[UUID]] = []
+    for entry in parsed:
+        if entry is None or entry == "":
+            result.append(None)
+            continue
+        if not isinstance(entry, str):
+            raise InvalidDataIdsError()
+        try:
+            result.append(UUID(entry))
+        except ValueError:
+            raise InvalidDataIdsError(f"data_ids entry {entry!r} is not a valid UUID.")
+    return result
+
+
 def pair_labels_with_data(
     data: Optional[list],
     labels: Optional[List[Optional[str]]],
     external_metadata: Optional[List[Optional[dict]]] = None,
+    data_ids: Optional[List[Optional[UUID]]] = None,
 ) -> Optional[list]:
-    """Pair per-item labels and external metadata with data items as DataItems.
+    """Pair per-item labels, external metadata and pinned ids with data items as DataItems.
 
-    Both attribute lists pair positionally: the Nth entry applies to the Nth
-    data item. An empty label (``""``/``None``) or empty metadata entry
-    (``{}``/``None``) leaves that item's attribute unset, and either list may
-    be omitted entirely. With no non-empty entry in either list the data is
-    returned unchanged; otherwise each provided list's length must match the
-    item count — a partial list is ambiguous.
+    All attribute lists pair positionally: the Nth entry applies to the Nth
+    data item. An empty label (``""``/``None``), empty metadata entry
+    (``{}``/``None``) or ``None`` id leaves that item's attribute unset, and
+    any list may be omitted entirely. With no non-empty entry in any list the
+    data is returned unchanged; otherwise each provided list's length must
+    match the item count — a partial list is ambiguous.
 
     Raises:
         LabelCountMismatchError: If any label is provided and the counts differ.
         ExternalMetadataCountMismatchError: If any metadata entry is provided
             and the counts differ.
+        DataIdCountMismatchError: If any id is provided and the counts differ.
     """
     normalized_labels = [(entry or None) for entry in (labels or [])]
     normalized_metadata = [(entry or None) for entry in (external_metadata or [])]
+    normalized_ids = [(entry or None) for entry in (data_ids or [])]
     has_labels = any(normalized_labels)
     has_metadata = any(normalized_metadata)
-    if not has_labels and not has_metadata:
+    has_ids = any(normalized_ids)
+    if not has_labels and not has_metadata and not has_ids:
         return data
 
     item_count = len(data or [])
@@ -124,12 +169,21 @@ def pair_labels_with_data(
             f"Provide one external_metadata entry per uploaded file: got "
             f"{len(normalized_metadata)} entries for {item_count} files."
         )
+    if has_ids and len(normalized_ids) != item_count:
+        raise DataIdCountMismatchError(
+            f"Provide one data_ids entry per uploaded file: got {len(normalized_ids)} "
+            f"ids for {item_count} files."
+        )
 
     if not has_labels:
         normalized_labels = [None] * item_count
     if not has_metadata:
         normalized_metadata = [None] * item_count
+    if not has_ids:
+        normalized_ids = [None] * item_count
     return [
-        DataItem(data=item, label=label, external_metadata=metadata)
-        for item, label, metadata in zip(data, normalized_labels, normalized_metadata)
+        DataItem(data=item, label=label, external_metadata=metadata, data_id=data_id)
+        for item, label, metadata, data_id in zip(
+            data, normalized_labels, normalized_metadata, normalized_ids
+        )
     ]

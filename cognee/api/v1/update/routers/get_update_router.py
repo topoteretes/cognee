@@ -55,10 +55,21 @@ def get_update_router() -> APIRouter:
             ),
             examples=["9c4e4a4b-2b1a-4f6e-9d3a-1c2b3d4e5f6a"],
         ),
-        dataset_id: UUID = Query(
-            ...,
-            description="UUID of the dataset containing the document to update.",
+        dataset_id: Optional[UUID] = Query(
+            default=None,
+            description=(
+                "UUID of the dataset containing the document to update. "
+                "Required unless dataset_name is provided."
+            ),
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+        ),
+        dataset_name: Optional[str] = Query(
+            default=None,
+            description=(
+                "Name of the dataset containing the document to update, resolved among "
+                "the datasets you may write to. Alternative to dataset_id."
+            ),
+            examples=["main_dataset"],
         ),
         data: List[UploadFile] = File(
             ...,
@@ -92,7 +103,10 @@ def get_update_router() -> APIRouter:
 
         ## Request Parameters
         - **data_id** (UUID, required, query): UUID of the existing document to update (returned by GET /api/v1/datasets/{dataset_id}/data)
-        - **dataset_id** (UUID, required, query): UUID of the dataset containing the document to update
+        - **dataset_id** (UUID, query): UUID of the dataset containing the document to update.
+                 Exactly one of dataset_id / dataset_name is required.
+        - **dataset_name** (str, query): Name of the dataset containing the document, resolved
+                 among the datasets the caller may write to. Alternative to dataset_id.
         - **data** (List[UploadFile]): New version of the document that replaces the existing one.
         - **node_set** (Optional[List[str]]): List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
@@ -108,7 +122,8 @@ def get_update_router() -> APIRouter:
         pipeline run information for the delete + re-add + cognify operation.
 
         ## Error Codes
-        - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
+        - **422 Unprocessable Entity**: data_id missing or not a valid UUID, or neither/both of
+                 dataset_id and dataset_name given
         - **403 Forbidden**: User lacks write permission on the dataset
         - **500 Internal Server Error**: Pipeline run errored or an unexpected error occurred during the update
 
@@ -116,12 +131,21 @@ def get_update_router() -> APIRouter:
         - Chunk-level updates keep unaffected chunks, their entities, and their summaries
           untouched; only the edited region is re-extracted.
         """
+        if (dataset_id is None) == (dataset_name is None):
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content=ErrorResponse(
+                    error="Provide exactly one of dataset_id or dataset_name.",
+                ).model_dump(),
+            )
+
         send_telemetry(
             "Update API Endpoint Invoked",
             user,
             additional_properties={
                 "endpoint": "PATCH /v1/update",
                 "dataset_id": str(dataset_id),
+                "dataset_name": dataset_name,
                 "data_id": str(data_id),
                 "node_set": str(node_set),
                 "cognee_version": cognee_version,
@@ -135,6 +159,7 @@ def get_update_router() -> APIRouter:
                 data_id=data_id,
                 data=data,
                 dataset_id=dataset_id,
+                dataset_name=dataset_name,
                 user=user,
                 node_set=node_set if node_set and node_set != [""] else None,
                 chunk_level_diff=chunk_level_diff,

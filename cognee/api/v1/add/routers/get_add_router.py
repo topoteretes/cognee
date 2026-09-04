@@ -10,6 +10,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
+    parse_data_ids,
     parse_external_metadata,
     parse_labels,
 )
@@ -67,6 +68,19 @@ def get_add_router() -> APIRouter:
                 "file), and one entry per file is required when any is given. Merged into "
                 "the file's stored external_metadata (your keys win over loader-derived "
                 "ones; 'node_set' is reserved) and returned when listing dataset data."
+            ),
+        ),
+        data_ids: Optional[str] = Form(
+            default=None,
+            examples=[""],
+            description=(
+                "JSON array of per-file UUIDs to pin as each file's data id, e.g. "
+                '["9c4e4a4b-2b1a-4f6e-9d3a-1c2b3d4e5f6a", null]. Paired positionally '
+                "like labels: the Nth entry applies to the Nth uploaded file (null skips "
+                "that file and the server mints an id), one entry per file when any is "
+                "given. An id already present in the dataset updates that document in "
+                "place; an id owned by another dataset is refused. Pin ids to keep a "
+                "stable handle for PATCH /api/v1/update."
             ),
         ),
         datasetName: Optional[str] = Form(
@@ -156,7 +170,10 @@ def get_add_router() -> APIRouter:
         # store them on each file's Data record. Invalid JSON or a count
         # mismatch raises a CogneeApiError (400), returned by the global handler.
         data = pair_labels_with_data(
-            data, parse_labels(labels), parse_external_metadata(external_metadata)
+            data,
+            parse_labels(labels),
+            parse_external_metadata(external_metadata),
+            parse_data_ids(data_ids),
         )
 
         try:

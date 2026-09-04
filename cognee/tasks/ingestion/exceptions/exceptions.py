@@ -74,6 +74,29 @@ class InvalidExternalMetadataError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class InvalidDataIdsError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = (
+            "data_ids must be a JSON array of UUID strings, e.g. "
+            '["9c4e4a4b-2b1a-4f6e-9d3a-1c2b3d4e5f6a", null].'
+        ),
+        name: str = "InvalidDataIdsError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
+class DataIdCountMismatchError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = "data_ids count does not match data item count.",
+        name: str = "DataIdCountMismatchError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class ExternalMetadataCountMismatchError(CogneeValidationError):
     def __init__(
         self,

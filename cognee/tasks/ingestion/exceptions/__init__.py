@@ -11,4 +11,6 @@ from .exceptions import (
     InvalidLabelsError,
     InvalidExternalMetadataError,
     ExternalMetadataCountMismatchError,
+    InvalidDataIdsError,
+    DataIdCountMismatchError,
 )

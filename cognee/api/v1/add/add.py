@@ -208,7 +208,13 @@ async def add(
 
     client = get_remote_client()
     if client is not None:
-        result = await client.add(data, dataset_name)
+        result = await client.add(
+            data,
+            dataset_name,
+            dataset_id=dataset_id,
+            node_set=node_set,
+            run_in_background=run_in_background,
+        )
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 
