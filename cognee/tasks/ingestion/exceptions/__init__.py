@@ -7,6 +7,7 @@ such as System, Validation, Configuration or TransientErrors
 
 from .exceptions import (
     S3FileSystemNotFoundError,
+    InvalidFolderUploadError,
     LabelCountMismatchError,
     InvalidLabelsError,
     InvalidExternalMetadataError,

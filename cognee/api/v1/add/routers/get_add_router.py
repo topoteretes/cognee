@@ -13,6 +13,7 @@ from cognee.tasks.ingestion.data_item import (
     parse_external_metadata,
     parse_labels,
 )
+from cognee.tasks.ingestion.folder_uploads import materialize_folder_uploads
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
@@ -117,14 +118,19 @@ def get_add_router() -> APIRouter:
         the knowledge graph.
 
         ## Request Parameters
-        - **data** (List[UploadFile]): Files to upload.
+        - **data** (List[UploadFile]): Files to upload. A filename may carry a path
+          relative to a folder (proj/pyproject.toml, proj/src/app.py): such parts are
+          written server-side as one directory per top-level folder and ingested as a
+          directory, so a code project becomes one code-graph item plus its documents.
+          Parts without a separator are ordinary files. At most 1000 parts per request.
         - **raw_data** (Optional[List[str]]): String inputs, one entry each:
           - Raw text to ingest
           - A local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH)
           - A web URL, fetched as a page (requires ALLOW_HTTP_REQUESTS)
           - A GitHub/GitLab repository URL, shallow-cloned and indexed as a code graph
-          At least one of data or raw_data is required. Uploads come first, then
-          raw_data entries; labels and external_metadata pair with that combined order.
+          At least one of data or raw_data is required. Item order is flat uploads,
+          then one item per uploaded folder, then raw_data entries; labels and
+          external_metadata pair with that order and are rejected with folder uploads.
         - **labels** (Optional[str]): JSON array of per-item labels, e.g.
                  ["finance", "people", ""], paired positionally with the data items
                  (one entry per item; an empty entry skips that item). Stored on each
@@ -177,17 +183,37 @@ def get_add_router() -> APIRouter:
                 ).model_dump(),
             )
 
-        # String inputs join the uploads as one item list, uploads first. Drop
+        # Uploads whose filenames carry a relative path are a folder: the tree
+        # is written server-side and the directory is ingested in their place
+        # (folder_uploads.py). An unsafe name raises a CogneeApiError (400).
+        data, folder_paths = await materialize_folder_uploads(data, user)
+
+        # One item list: flat uploads, then folders, then string inputs. Drop
         # empty entries — Swagger UI submits untouched array items as "".
         raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
-        data = [*(data or []), *raw_items]
+        data = [*(data or []), *folder_paths, *raw_items]
+
+        parsed_labels = parse_labels(labels)
+        parsed_metadata = parse_external_metadata(external_metadata)
+        # A folder expands to many records inside the pipeline, so a positional
+        # label for it has nothing to attach to.
+        if folder_paths and (
+            any(parsed_labels or []) or any(entry for entry in (parsed_metadata or []))
+        ):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ErrorResponse(
+                    error=(
+                        "labels and external_metadata are not supported with folder uploads — "
+                        "upload the folder on its own, or send its files as flat uploads."
+                    ),
+                ).model_dump(),
+            )
 
         # Labels and metadata ride on DataItems, which ingestion unwraps to
         # store them on each item's Data record. Invalid JSON or a count
         # mismatch raises a CogneeApiError (400), returned by the global handler.
-        data = pair_labels_with_data(
-            data, parse_labels(labels), parse_external_metadata(external_metadata)
-        )
+        data = pair_labels_with_data(data, parsed_labels, parsed_metadata)
 
         if not data:
             return JSONResponse(

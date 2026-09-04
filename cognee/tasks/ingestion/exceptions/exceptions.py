@@ -42,6 +42,16 @@ class DLTIngestionError(CogneeSystemError):
         super().__init__(message, name, status_code)
 
 
+class InvalidFolderUploadError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = "Invalid folder upload.",
+        name: str = "InvalidFolderUploadError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class LabelCountMismatchError(CogneeValidationError):
     def __init__(
         self,
