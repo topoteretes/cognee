@@ -586,3 +586,118 @@ class TestStripJsonFence:
 
         raw = '```json\n{"summary": "a summary", "description": ""}\n```'
         assert SummarizedContent.model_validate_json(self._strip(raw)).summary == "a summary"
+
+
+# ---- Non-strict demotion + native validation fallback (COG-6271) ----
+
+
+def _schema_400() -> Exception:
+    from litellm.exceptions import BadRequestError
+
+    return BadRequestError(
+        message="Invalid schema for response_format 'PersonModel': 'oneOf' is not permitted.",
+        model="gpt-5-mini",
+        llm_provider="openai",
+    )
+
+
+@pytest.fixture
+def _clean_demotions():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native import (
+        native_adapter,
+    )
+
+    native_adapter.clear_nonstrict_demotions()
+    yield
+    native_adapter.clear_nonstrict_demotions()
+
+
+def _schema_adapter():
+    from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
+        NativeLiteLLMAdapter,
+    )
+
+    return NativeLiteLLMAdapter(
+        api_key="test-key",
+        model="openai/gpt-5-mini",  # supports_response_schema is True
+        max_completion_tokens=4096,
+    )
+
+
+@pytest.mark.asyncio
+async def test_schema_400_demotes_to_nonstrict_and_is_remembered(_clean_demotions):
+    """A strict rejection retries once non-strict; later calls skip the strict attempt."""
+    adapter = _schema_adapter()
+    valid = json.dumps({"name": "Eve", "age": 22})
+
+    mock_acompletion = AsyncMock(
+        side_effect=[_schema_400(), _make_mock_response(valid), _make_mock_response(valid)]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        first = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+        second = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve again",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+
+    assert first.name == "Eve" and second.name == "Eve"
+    # Call 1: strict (Pydantic class). Call 2: non-strict retry of the same
+    # request. Call 3: the next request goes straight to non-strict — the
+    # failed strict request is paid once per process, not per call.
+    assert mock_acompletion.call_count == 3
+    calls = mock_acompletion.call_args_list
+    assert calls[0].kwargs["response_format"] is PersonModel
+    for call in calls[1:]:
+        response_format = call.kwargs["response_format"]
+        assert response_format["type"] == "json_schema"
+        assert response_format["json_schema"]["strict"] is False
+        assert response_format["json_schema"]["name"] == "PersonModel"
+
+
+@pytest.mark.asyncio
+async def test_nonstrict_rejection_falls_back_to_prompted_json(_clean_demotions):
+    """If the non-strict retry is also rejected, the prompted-JSON path still answers."""
+    adapter = _schema_adapter()
+    valid = json.dumps({"name": "Eve", "age": 22})
+
+    mock_acompletion = AsyncMock(
+        side_effect=[_schema_400(), _schema_400(), _make_mock_response(valid)]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        result = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+
+    assert result.name == "Eve"
+    assert mock_acompletion.call_count == 3
+    assert mock_acompletion.call_args_list[2].kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_native_validation_error_routes_to_json_fallback(_clean_demotions):
+    """Invalid native output goes to the self-correcting fallback, not blind tenacity retries."""
+    adapter = _schema_adapter()
+    valid = json.dumps({"name": "Eve", "age": 22})
+
+    mock_acompletion = AsyncMock(
+        side_effect=[_make_mock_response("not json at all"), _make_mock_response(valid)]
+    )
+    with patch("litellm.acompletion", mock_acompletion):
+        result = await adapter.acreate_structured_output(
+            text_input="Tell me about Eve",
+            system_prompt="Extract person info.",
+            response_model=PersonModel,
+        )
+
+    assert result.name == "Eve"
+    # Exactly two calls: the failed native attempt, then the prompted-JSON
+    # fallback — NOT a tenacity re-send of the native request.
+    assert mock_acompletion.call_count == 2
+    assert mock_acompletion.call_args_list[1].kwargs["response_format"] == {"type": "json_object"}
