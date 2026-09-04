@@ -88,6 +88,28 @@ jobs:
       - name: Run Migration/Model Lockstep Guard
         run: uv run pytest cognee/tests/e2e/migrations/test_migration_model_lockstep.py -v
 
+  run-serve-remote-routing-e2e:
+    name: serve() remote routing e2e
+    runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      # Real API server in a subprocess + the SDK after cognee.serve(url=...):
+      # remember → datasets.list_data → update (chunk-level and full paths, by
+      # id and by name) must all land on the server, never the SDK's local
+      # store. Mocked LLM and embeddings: no secrets.
+      - name: Run serve() remote routing suite
+        env:
+          ENV: 'dev'
+        run: uv run pytest cognee/tests/e2e/serve/ -v
+
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04
