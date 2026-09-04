@@ -16,7 +16,7 @@ from cognee.tasks.ingestion.data_item import (
     parse_external_metadata,
     parse_labels,
 )
-from cognee.tasks.ingestion.folder_uploads import materialize_folder_uploads
+from cognee.tasks.ingestion.folder_uploads import validate_folder_uploads
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
@@ -391,16 +391,24 @@ def get_remember_router() -> APIRouter:
                 detail="Either datasetId or datasetName must be provided.",
             )
 
+        # Invalid JSON raises a CogneeApiError (400) via the global handler.
+        parsed_labels = parse_labels(labels)
+        parsed_metadata = parse_external_metadata(external_metadata)
+
         # Uploads whose filenames carry a relative path are a folder -- normal
         # ingestion only: the skills path rebuilds its own SKILL.md tree from
-        # such names and archives are single files. The tree is written
-        # server-side and the directory is ingested in their place.
-        folder_paths: list = []
+        # such names and archives are single files. The add pipeline writes
+        # and resolves the folder (resolve_data_directories); this rejects bad
+        # names and labels-with-folders up front as a 400.
         if not content_type:
-            data, folder_paths = await materialize_folder_uploads(data, user)
+            validate_folder_uploads(
+                data,
+                with_attributes=any(parsed_labels or [])
+                or any(entry for entry in (parsed_metadata or [])),
+            )
 
-        # One item list: flat uploads, then folders, then string inputs. Drop
-        # empty entries — Swagger UI submits untouched array items as "". The
+        # One item list: uploads, then string inputs. Drop empty entries —
+        # Swagger UI submits untouched array items as "". The
         # skills, code, and archive paths never run string inputs through
         # add(), so they would be silently dropped there — reject instead.
         raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
@@ -416,24 +424,7 @@ def get_remember_router() -> APIRouter:
         # None (not []) when nothing was sent: the skills and archive paths
         # below distinguish "no uploads" by falsiness either way, and
         # remember() sees the same value it always did.
-        data = [*(data or []), *folder_paths, *raw_items] or None
-
-        # Invalid JSON raises a CogneeApiError (400) via the global handler.
-        parsed_labels = parse_labels(labels)
-        parsed_metadata = parse_external_metadata(external_metadata)
-
-        # A folder expands to many records inside the pipeline, so a positional
-        # label for it has nothing to attach to.
-        if folder_paths and (
-            any(parsed_labels or []) or any(entry for entry in (parsed_metadata or []))
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "labels and external_metadata are not supported with folder uploads — "
-                    "upload the folder on its own, or send its files as flat uploads."
-                ),
-            )
+        data = [*(data or []), *raw_items] or None
 
         # Labels and metadata live on the Data records that normal add+cognify
         # ingestion creates. The session-cache, skills, and archive paths never

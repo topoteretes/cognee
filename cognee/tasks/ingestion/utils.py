@@ -6,10 +6,19 @@ from typing import Any, Optional
 from cognee.tasks.ingestion.data_item import DataItem
 
 
-def _normalize_filename(filename: Optional[str], index: int) -> str:
+def _normalize_filename(filename: Optional[str], index: int, keep_path: bool = False) -> str:
+    """The buffered item's filename.
+
+    An upload's ``filename`` is kept whole (separators normalised) because a
+    relative path in it means a folder upload, which resolve_data_directories
+    reassembles later in the pipeline. A plain stream's ``name`` is a path on
+    this machine, so only its basename is kept.
+    """
     if not filename:
         return f"upload_{index}.bin"
-    normalized = str(filename).replace("\\", "/").split("/")[-1]
+    normalized = str(filename).replace("\\", "/")
+    if not keep_path:
+        normalized = normalized.split("/")[-1]
     return normalized or f"upload_{index}.bin"
 
 
@@ -67,9 +76,11 @@ async def materialize_stream_for_background(data_item: Any, index: int = 0) -> A
     buffer.write(payload)
     buffer.seek(0)
 
-    filename = _normalize_filename(
-        getattr(data_item, "filename", None) or getattr(stream, "name", None),
-        index=index,
+    upload_name = getattr(data_item, "filename", None)
+    filename = (
+        _normalize_filename(upload_name, index=index, keep_path=True)
+        if upload_name
+        else _normalize_filename(getattr(stream, "name", None), index=index)
     )
 
     # Ingestion path supports objects exposing `.file` and `.filename`.

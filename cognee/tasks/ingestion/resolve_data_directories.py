@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from typing import List, Union, BinaryIO
 
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
+from cognee.tasks.ingestion.folder_uploads import materialize_folder_uploads
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 
@@ -30,6 +31,11 @@ async def resolve_data_directories(
     """
     Resolves directories by replacing them with their contained files.
 
+    Uploads whose filenames carry a relative path (``proj/src/app.py``) are a
+    folder: they are written under the dataset's uploads directory first
+    (``folder_uploads.materialize_folder_uploads``) and that directory is then
+    resolved like any local directory below. Needs ``user`` and ``dataset_id``.
+
     A GitHub/GitLab repository URL (``code_repo_clone_url``) is shallow-cloned
     and then resolved exactly like a local code project directory, below.
     Other http(s) URLs pass through untouched and are fetched as web pages by
@@ -56,6 +62,8 @@ async def resolve_data_directories(
     # Ensure `data` is a list
     if not isinstance(data, list):
         data = [data]
+
+    data = await materialize_folder_uploads(data, user, dataset_id)
 
     resolved_data = []
     s3_config = get_s3_config()

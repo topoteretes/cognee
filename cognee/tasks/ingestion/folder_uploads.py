@@ -6,26 +6,37 @@ as its own ``data`` part and putting the path relative to the folder in the
 filename (``proj/pyproject.toml``, ``proj/src/app.py``); browsers do this from
 ``<input webkitdirectory>`` via ``FormData.append(name, file, relativePath)``.
 
-The server groups such parts by their first path segment, writes each group
-under ``<repos_root_directory>/uploads/<user_id>/<folder>``, and hands the
-directory to ``add()`` in place of the parts. From there it is an ordinary
-directory add: ``resolve_data_directories`` turns a code project into ONE
-``code_repo`` manifest (cognify runs enola over it) plus its documents, and
-flattens a plain folder to its files. Parts without a separator are left
-exactly as they were.
+Two stages, deliberately split:
+
+- ``validate_folder_uploads`` runs at the API boundary. It is pure and cheap,
+  and lets a bad request fail as a 400 instead of as a pipeline error.
+- ``materialize_folder_uploads`` runs inside the add pipeline, from
+  ``resolve_data_directories``, after the dataset is authorized and with the
+  user and dataset in hand. It groups folder parts by their first segment,
+  writes each group under ``<repos_root_directory>/uploads/<user>/<dataset>/
+  <folder>`` and replaces the parts with that directory, which the rest of
+  ``resolve_data_directories`` then treats like any local directory: a code
+  project becomes ONE ``code_repo`` manifest (cognify runs enola over it)
+  plus its documents, a plain folder is flattened to its files. Parts without
+  a separator are untouched, and only objects with a ``filename`` attribute
+  (uploads) count -- a local file handle's ``name`` is a path on this machine,
+  not a relative name.
 
 The folder is not a temp dir: cognify's CODE_REPO route reads the original
 directory when it runs, which may be a later ``/cognify`` call. Re-uploading a
-folder of the same name replaces the copy wholesale, so the manifest keeps
-its identity (keyed on the path) and content-change detection drives the
-re-cognify, exactly like a refreshed git clone.
+folder of the same name into the same dataset replaces the copy wholesale, so
+the manifest keeps its identity (keyed on the path) and content-change
+detection drives the re-cognify, exactly like a refreshed git clone. Scoping
+by dataset keeps two datasets' ``proj/`` folders apart.
 """
 
+import inspect
 import shutil
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from cognee.base_config import get_base_config
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.tasks.ingestion.exceptions import InvalidFolderUploadError
 
 
@@ -64,37 +75,95 @@ def relative_upload_parts(filename: Optional[str]) -> Optional[Tuple[str, ...]]:
     return parts
 
 
-async def materialize_folder_uploads(uploads: Optional[list], user) -> Tuple[list, List[str]]:
-    """Split uploads into flat parts and folder directories, writing the folders.
+def folder_parts_of(item: Any) -> Optional[Tuple[str, ...]]:
+    """``relative_upload_parts`` for an upload-like item, None for anything else."""
+    if isinstance(item, DataItem) or not hasattr(item, "filename"):
+        return None
+    return relative_upload_parts(getattr(item, "filename", None))
 
-    Returns ``(flat_uploads, folder_paths)``: the parts without a separator,
-    unchanged and in their original order, and one directory path per
-    top-level folder name in first-seen order. Every name is validated before
-    anything is written, so a bad part rejects the whole request cleanly.
+
+def validate_folder_uploads(uploads: Optional[list], with_attributes: bool = False) -> bool:
+    """Boundary check for a request's uploads; returns whether any is a folder part.
+
+    Raises ``InvalidFolderUploadError`` (400) for an unsafe name, and when
+    ``with_attributes`` (labels / external_metadata were sent) and a folder
+    part is present: a folder expands to many records inside the pipeline, so
+    a positional label for it has nothing to attach to.
     """
-    flat: list = []
-    folders: dict = {}
-    for upload in uploads or []:
-        parts = relative_upload_parts(getattr(upload, "filename", None))
-        if parts is None:
-            flat.append(upload)
-            continue
-        folders.setdefault(parts[0], []).append((parts[1:], upload))
+    # A list, not a generator: every name must be checked, not just the ones
+    # before the first folder part.
+    is_folder_part = [folder_parts_of(upload) is not None for upload in uploads or []]
+    has_folder = any(is_folder_part)
+    if has_folder and with_attributes:
+        raise InvalidFolderUploadError(
+            message="labels and external_metadata are not supported with folder uploads — "
+            "upload the folder on its own, or send its files as flat uploads."
+        )
+    return has_folder
 
-    if not folders:
-        return flat, []
 
-    user_root = folder_uploads_root() / str(user.id)
-    folder_paths: List[str] = []
-    for folder_name, entries in folders.items():
-        folder = user_root / folder_name
+async def _read_upload(upload: Any) -> bytes:
+    """Bytes of an UploadFile (async read) or a plain file-like (sync read)."""
+    stream = getattr(upload, "file", None)
+    if stream is not None and hasattr(stream, "seek"):
+        stream.seek(0)
+    payload = upload.read() if hasattr(upload, "read") else stream.read()
+    if inspect.isawaitable(payload):
+        payload = await payload
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    return payload or b""
+
+
+async def materialize_folder_uploads(items: list, user, dataset_id) -> list:
+    """Replace folder parts in ``items`` with the directory they were written to.
+
+    Order is preserved: the directory takes the position of its first part and
+    the other parts of that folder are dropped; everything else passes through
+    untouched. Every name is validated before anything is written, so a bad
+    part rejects the whole batch cleanly. A folder part wrapped in a DataItem
+    (a label or metadata was attached) is rejected for the reason given in
+    ``validate_folder_uploads``.
+    """
+    grouped: dict = {}
+    for index, item in enumerate(items):
+        if isinstance(item, DataItem) and folder_parts_of(item.data) is not None:
+            raise InvalidFolderUploadError(
+                message="labels and external_metadata are not supported with folder uploads."
+            )
+        parts = folder_parts_of(item)
+        if parts is not None:
+            grouped.setdefault(parts[0], []).append((index, parts[1:], item))
+
+    if not grouped:
+        return items
+    if user is None or dataset_id is None:
+        raise InvalidFolderUploadError(
+            message="Folder uploads need the ingestion context (user and dataset) to be "
+            "written; add() supplies it when data_cache or incremental_loading is on."
+        )
+
+    dataset_root = folder_uploads_root() / str(user.id) / str(dataset_id)
+    replacements: dict = {}
+    dropped: set = set()
+    for folder_name, entries in grouped.items():
+        folder = dataset_root / folder_name
         # Replace, never merge: the request is the whole folder as the client
         # sees it now, so a file the client deleted must not linger.
         if folder.exists():
             shutil.rmtree(folder)
-        for relative_parts, upload in entries:
+        for position, (index, relative_parts, upload) in enumerate(entries):
             destination = folder.joinpath(*relative_parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(await upload.read())
-        folder_paths.append(str(folder))
-    return flat, folder_paths
+            destination.write_bytes(await _read_upload(upload))
+            if position == 0:
+                replacements[index] = str(folder)
+            else:
+                dropped.add(index)
+
+    resolved: List[Any] = []
+    for index, item in enumerate(items):
+        if index in dropped:
+            continue
+        resolved.append(replacements.get(index, item))
+    return resolved

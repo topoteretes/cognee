@@ -1,10 +1,11 @@
-"""The add and remember endpoints accept a folder as multipart parts whose
-filenames carry paths relative to the folder. The router writes the tree
-server-side and passes the directory to add()/remember() in place of the
-parts, after flat uploads and before raw_data entries. Labels and
-external_metadata are rejected with a folder (a folder expands to many
-records), and remember only does this for normal ingestion — the skills path
-handles relative SKILL.md names itself.
+"""The add and remember routers hand folder uploads to the pipeline untouched.
+
+A folder arrives as multipart parts whose filenames carry paths relative to
+the folder. The router does not materialize anything — resolve_data_directories
+does that inside add(), after authorization and keyed by dataset — but it
+validates the names and rejects labels/external_metadata with a folder so a
+bad request is a 400 rather than a pipeline error. remember only validates for
+normal ingestion; the skills path owns relative SKILL.md names.
 """
 
 import importlib
@@ -16,7 +17,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import cognee.tasks.ingestion.folder_uploads as folder_uploads
 from cognee.api.v1.add.routers.get_add_router import get_add_router
 from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
@@ -26,9 +26,8 @@ from cognee.tasks.ingestion.exceptions import InvalidFolderUploadError
 add_pkg = importlib.import_module("cognee.api.v1.add")
 remember_pkg = importlib.import_module("cognee.api.v1.remember")
 
-USER_ID = str(uuid.uuid4())
 MOCK_USER = SimpleNamespace(
-    id=USER_ID, email="test@example.com", is_active=True, tenant_id=str(uuid.uuid4())
+    id=str(uuid.uuid4()), email="test@example.com", is_active=True, tenant_id=str(uuid.uuid4())
 )
 FOLDER_PARTS = [
     ("data", ("proj/pyproject.toml", b'[project]\nname = "proj"\n', "text/plain")),
@@ -36,13 +35,6 @@ FOLDER_PARTS = [
     ("data", ("proj/README.md", b"# proj\n", "text/markdown")),
 ]
 FLAT_PART = ("data", ("notes.txt", b"plain notes", "text/plain"))
-
-
-@pytest.fixture
-def uploads_root(tmp_path, monkeypatch):
-    root = tmp_path / "uploads"
-    monkeypatch.setattr(folder_uploads, "folder_uploads_root", lambda: root)
-    return root
 
 
 @pytest.fixture
@@ -71,7 +63,7 @@ def remember_completed():
 # ── add ─────────────────────────────────────────────────────────────────────
 
 
-def test_add_materializes_the_folder_and_passes_its_directory(client, uploads_root):
+def test_add_passes_folder_parts_through_with_their_relative_names(client):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         mock_add.return_value = pipeline_run_completed()
 
@@ -83,33 +75,31 @@ def test_add_materializes_the_folder_and_passes_its_directory(client, uploads_ro
 
         assert response.status_code == 200, response.text
         sent = mock_add.call_args.args[0]
-        folder = uploads_root / USER_ID / "proj"
-        # flat uploads, then the folder, then raw_data
-        assert sent[0].filename == "notes.txt"
-        assert sent[1] == str(folder)
-        assert sent[2] == "a note"
-        assert (folder / "pyproject.toml").exists()
-        assert (folder / "src" / "app.py").read_bytes() == b"def main():\n    pass\n"
-        assert (folder / "README.md").read_bytes() == b"# proj\n"
+        assert [getattr(item, "filename", item) for item in sent] == [
+            "notes.txt",
+            "proj/pyproject.toml",
+            "proj/src/app.py",
+            "proj/README.md",
+            "a note",
+        ]
 
 
-def test_add_rejects_labels_with_a_folder_upload(client, uploads_root):
-    with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
-        response = client.post(
-            "/api/v1/add",
-            files=FOLDER_PARTS,
-            data={"datasetName": "test_dataset", "labels": '["code"]'},
-        )
-
-        assert response.status_code == 400
-        assert "folder uploads" in response.json()["error"]
-        mock_add.assert_not_awaited()
-
-
-def test_add_rejects_unsafe_folder_names_and_writes_nothing(client, uploads_root):
+def test_add_rejects_labels_with_a_folder_upload(client):
     with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         # No global CogneeApiError handler on the bare router app: the 400-class
         # error surfaces as the exception itself.
+        with pytest.raises(InvalidFolderUploadError, match="labels"):
+            client.post(
+                "/api/v1/add",
+                files=FOLDER_PARTS,
+                data={"datasetName": "test_dataset", "labels": '["code", "code", "code"]'},
+            )
+
+        mock_add.assert_not_awaited()
+
+
+def test_add_rejects_unsafe_folder_names_before_the_pipeline(client):
+    with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
         with pytest.raises(InvalidFolderUploadError):
             client.post(
                 "/api/v1/add",
@@ -118,13 +108,26 @@ def test_add_rejects_unsafe_folder_names_and_writes_nothing(client, uploads_root
             )
 
         mock_add.assert_not_awaited()
-        assert not uploads_root.exists()
+
+
+def test_add_labels_still_pair_with_flat_uploads(client):
+    with patch.object(add_pkg, "add", new_callable=AsyncMock) as mock_add:
+        mock_add.return_value = pipeline_run_completed()
+
+        response = client.post(
+            "/api/v1/add",
+            files=[FLAT_PART],
+            data={"datasetName": "test_dataset", "labels": '["notes"]'},
+        )
+
+        assert response.status_code == 200, response.text
+        assert mock_add.call_args.args[0][0].label == "notes"
 
 
 # ── remember ────────────────────────────────────────────────────────────────
 
 
-def test_remember_materializes_the_folder_for_normal_ingestion(client, uploads_root):
+def test_remember_passes_folder_parts_through(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -133,11 +136,17 @@ def test_remember_materializes_the_folder_for_normal_ingestion(client, uploads_r
         )
 
         assert response.status_code == 200, response.text
-        assert mock_remember.call_args.args[0] == [str(uploads_root / USER_ID / "proj")]
+        sent = mock_remember.call_args.args[0]
+        assert [item.filename for item in sent] == [
+            "proj/pyproject.toml",
+            "proj/src/app.py",
+            "proj/README.md",
+        ]
 
 
-def test_remember_leaves_skills_uploads_alone(client, uploads_root):
-    """content_type='skills' owns relative SKILL.md names; the folder path must not intercept."""
+def test_remember_does_not_validate_skills_uploads_as_folders(client):
+    """content_type='skills' owns relative SKILL.md names, including ones the folder rules
+    would reject as unsafe."""
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         mock_remember.return_value = remember_completed()
 
@@ -148,19 +157,19 @@ def test_remember_leaves_skills_uploads_alone(client, uploads_root):
         )
 
         assert response.status_code == 200, response.text
-        sent = mock_remember.call_args.args[0]
-        assert sent[0].filename == "my-skill/SKILL.md"
-        assert not uploads_root.exists()
+        assert mock_remember.call_args.args[0][0].filename == "my-skill/SKILL.md"
 
 
-def test_remember_rejects_external_metadata_with_a_folder_upload(client, uploads_root):
+def test_remember_rejects_external_metadata_with_a_folder_upload(client):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
-        response = client.post(
-            "/api/v1/remember",
-            files=FOLDER_PARTS,
-            data={"datasetName": "test_dataset", "external_metadata": '[{"source": "crm"}]'},
-        )
+        with pytest.raises(InvalidFolderUploadError, match="external_metadata"):
+            client.post(
+                "/api/v1/remember",
+                files=FOLDER_PARTS,
+                data={
+                    "datasetName": "test_dataset",
+                    "external_metadata": '[{"source": "crm"}, null, null]',
+                },
+            )
 
-        assert response.status_code == 400
-        assert "folder uploads" in response.json()["detail"]
         mock_remember.assert_not_awaited()
