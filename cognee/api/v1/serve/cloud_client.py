@@ -1,6 +1,7 @@
 """Remote HTTP client that proxies V2 operations to a Cognee Cloud instance."""
 
 import io
+import json
 from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
@@ -24,6 +25,167 @@ def _text_upload_filename(text: str) -> str:
     (FileContentHashingError 409s).
     """
     return create_text_data(text).get_metadata()["name"]
+
+
+def _is_data_item(value: Any) -> bool:
+    """A ``DataItem`` wrapper (duck-typed to avoid importing the tasks package here)."""
+    return (
+        hasattr(value, "data")
+        and hasattr(value, "data_id")
+        and not hasattr(value, "read")
+        and not isinstance(value, (str, Path))
+    )
+
+
+def _local_file_path(value: Any) -> Optional[Path]:
+    """The local file a ``/abs/path`` / ``file://`` / ``Path`` value names, else None."""
+    if isinstance(value, Path):
+        return value.expanduser()
+    if isinstance(value, str) and (value.startswith("file://") or value.startswith("/")):
+        raw = value[len("file://") :] if value.startswith("file://") else value
+        return Path(raw).expanduser()
+    return None
+
+
+def _upload_field(form: "aiohttp.FormData", item: Any, *, strict_paths: bool) -> None:
+    """Add one payload to ``form`` as a multipart ``data`` field.
+
+    File-like objects stream as-is. A local path (``/abs/path``,
+    ``file://...``, ``Path``) is read and its bytes uploaded — the server
+    cannot see the caller's filesystem. With ``strict_paths`` a path that
+    names no file raises; otherwise the string falls back to raw text, which
+    is what add()/remember() always did with strings. Any other string is raw
+    text, named by content hash like local ingestion names it.
+    """
+    if hasattr(item, "read"):
+        name = Path(getattr(item, "name", "upload")).name or "upload"
+        form.add_field("data", item, filename=name)
+        return
+
+    path = _local_file_path(item)
+    if path is not None:
+        if path.is_file():
+            form.add_field("data", path.open("rb"), filename=path.name)
+            return
+        if strict_paths:
+            raise FileNotFoundError(f"Upload source not found: {item}")
+
+    text = str(item)
+    form.add_field(
+        "data",
+        io.BytesIO(text.encode("utf-8")),
+        filename=_text_upload_filename(text),
+        content_type="text/plain",
+    )
+
+
+def _attach_upload(form: "aiohttp.FormData", data: Any) -> None:
+    """Add exactly one document to ``form`` for the update route.
+
+    Accepts what the local ``update()`` accepts: a ``DataItem`` (unwrapped to
+    its payload — its id is pinned by the route's query param and it has no
+    slot for label/external_metadata), a file-like object, a local path, or
+    raw text. A single-item list is unwrapped; anything longer is a caller
+    error, as it is locally.
+    """
+    if isinstance(data, list):
+        if len(data) != 1:
+            raise ValueError(f"update() replaces exactly one document; got {len(data)} items.")
+        data = data[0]
+    if _is_data_item(data):
+        data = data.data
+    _upload_field(form, data, strict_paths=True)
+
+
+def _attach_uploads(form: "aiohttp.FormData", data: Any) -> list:
+    """Add every payload in ``data`` to ``form`` and carry DataItem attributes along.
+
+    ``DataItem`` wrappers are unwrapped for the upload; their ``label``,
+    ``external_metadata`` and ``data_id`` are sent as the positional JSON
+    array fields the add/remember routes accept (one entry per file, null to
+    skip), so a pinned id survives the wire and the server stores the document
+    under it. Returns the pinned ids in upload order (None where unpinned).
+    """
+    items = data if isinstance(data, list) else [data]
+    labels, metadata, data_ids = [], [], []
+    for item in items:
+        if _is_data_item(item):
+            labels.append(item.label)
+            metadata.append(item.external_metadata)
+            data_ids.append(str(item.data_id) if item.data_id is not None else None)
+            item = item.data
+        else:
+            labels.append(None)
+            metadata.append(None)
+            data_ids.append(None)
+        _upload_field(form, item, strict_paths=False)
+
+    if any(labels):
+        form.add_field("labels", json.dumps(labels))
+    if any(metadata):
+        form.add_field("external_metadata", json.dumps(metadata))
+    if any(data_ids):
+        form.add_field("data_ids", json.dumps(data_ids))
+    return data_ids
+
+
+def _returned_data_ids(response: Any) -> set:
+    """Data ids an add/remember response reports, as strings.
+
+    remember() responses list them as ``items[].id``; add() responses (a
+    pipeline run) as ``data_ingestion_info[].data_id``. Empty when the shape
+    carries none (background runs, older servers).
+    """
+    found = set()
+    if not isinstance(response, dict):
+        return found
+    for entry in response.get("items") or []:
+        if isinstance(entry, dict) and entry.get("id") is not None:
+            found.add(str(entry["id"]))
+    for entry in response.get("data_ingestion_info") or []:
+        if isinstance(entry, dict) and entry.get("data_id") is not None:
+            found.add(str(entry["data_id"]))
+    return found
+
+
+def _verify_pinned_ids(response: Any, pinned: list, operation: str) -> None:
+    """Fail loudly if the server minted its own ids instead of honoring the pins.
+
+    An older server without the ``data_ids`` field ignores it silently
+    (FastAPI drops unknown form fields), and the caller would go on to
+    ``update()`` an id that does not exist remotely. When the response
+    reports ids and a pin is missing from them, that is what happened.
+    A response that reports no ids at all cannot be checked; it is logged.
+    """
+    requested = [pin for pin in pinned if pin]
+    if not requested:
+        return
+    returned = _returned_data_ids(response)
+    if not returned:
+        logger.warning(
+            "Remote %s response reports no data ids; cannot confirm the pinned data_id(s) %s "
+            "were honored (background run, or a server without data_ids support)",
+            operation,
+            ", ".join(requested),
+        )
+        return
+    missing = [pin for pin in requested if pin not in returned]
+    if missing:
+        raise RuntimeError(
+            f"Remote {operation} did not honor pinned data_id(s) {', '.join(missing)}: the "
+            f"server stored the document(s) under {', '.join(sorted(returned))}. The remote "
+            "instance is probably older than this SDK and lacks the data_ids field on "
+            f"POST /api/v1/{operation}; upgrade it or use the server-assigned id."
+        )
+
+
+def _node_set_tags(node_set: Any) -> list:
+    """node_set as repeated-form-field values: a str is one tag, a list many."""
+    if not node_set:
+        return []
+    if isinstance(node_set, str):
+        return [node_set]
+    return [str(tag) for tag in node_set if tag]
 
 
 class CloudClient:
@@ -110,7 +272,10 @@ class CloudClient:
             form.add_field("content_type", str(content_type_kw))
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
+        for tag in _node_set_tags(kwargs.get("node_set")):
+            form.add_field("node_set", tag)
 
+        pinned_ids: list = []
         # Code repos travel as spec strings in the 'repositories' form field —
         # the server clones git URLs itself and reads local paths from its own
         # filesystem (only useful when it shares the caller's filesystem).
@@ -142,29 +307,10 @@ class CloudClient:
                 # the SKILL.md layout when writing to its tempdir.
                 rel = skill_path.relative_to(base).as_posix()
                 form.add_field("data", skill_path.open("rb"), filename=rel)
-        # Handle data — string or file-like objects
-        elif isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
-                elif hasattr(item, "read"):
-                    name = getattr(item, "name", "upload")
-                    form.add_field("data", item, filename=name)
-        elif hasattr(data, "read"):
-            name = getattr(data, "name", "upload")
-            form.add_field("data", data, filename=name)
+        # Normal ingestion — strings, local paths, file-like objects, or
+        # DataItems carrying label / external_metadata / a pinned data_id.
+        else:
+            pinned_ids = _attach_uploads(form, data)
 
         # Code ingestion can block on a clone + whole-repo parse; the archive
         # timeout (no total cap) fits both. Prefer run_in_background=True for
@@ -180,7 +326,9 @@ class CloudClient:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote remember failed ({resp.status}): {body}")
-            return await resp.json()
+            result = await resp.json()
+        _verify_pinned_ids(result, pinned_ids, "remember")
+        return result
 
     async def remember_entry(
         self,
@@ -295,35 +443,79 @@ class CloudClient:
         session = await self._get_session()
 
         form = aiohttp.FormData()
-        form.add_field("datasetName", dataset_name)
+        if dataset_name:
+            form.add_field("datasetName", dataset_name)
+        if kwargs.get("dataset_id"):
+            form.add_field("datasetId", str(kwargs["dataset_id"]))
+        for tag in _node_set_tags(kwargs.get("node_set")):
+            form.add_field("node_set", tag)
+        if kwargs.get("run_in_background"):
+            form.add_field("run_in_background", "true")
 
-        if isinstance(data, str):
-            form.add_field(
-                "data",
-                io.BytesIO(data.encode("utf-8")),
-                filename=_text_upload_filename(data),
-                content_type="text/plain",
-            )
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, str):
-                    form.add_field(
-                        "data",
-                        io.BytesIO(item.encode("utf-8")),
-                        filename=_text_upload_filename(item),
-                        content_type="text/plain",
-                    )
-                elif hasattr(item, "read"):
-                    name = getattr(item, "name", "upload")
-                    form.add_field("data", item, filename=name)
-        elif hasattr(data, "read"):
-            name = getattr(data, "name", "upload")
-            form.add_field("data", data, filename=name)
+        pinned_ids = _attach_uploads(form, data)
 
         async with session.post(f"{self.service_url}/api/v1/add", data=form) as resp:
             if resp.status >= 400:
                 body = await resp.text()
                 raise RuntimeError(f"Remote add failed ({resp.status}): {body}")
+            result = await resp.json()
+        _verify_pinned_ids(result, pinned_ids, "add")
+        return result
+
+    async def update(
+        self,
+        data_id: UUID,
+        data: Any,
+        dataset_id: Optional[UUID] = None,
+        node_set: Optional[list] = None,
+        chunk_level_diff: bool = True,
+        dataset_name: Optional[str] = None,
+    ) -> dict:
+        """PATCH /api/v1/update — replace one document in place on the remote.
+
+        Mirrors the server route: ``data_id``, the dataset (``dataset_id`` or
+        ``dataset_name``, exactly one) and ``chunk_level_diff`` travel as query
+        params, the new content as the multipart ``data`` file, ``node_set`` as
+        repeated form fields. The server keeps the document's id across the
+        update, so this is a real replace — never a local delete plus a remote
+        add, which would mint a fresh id on the remote and leave the original
+        in place.
+        """
+        if (dataset_id is None) == (dataset_name is None):
+            raise ValueError("update() takes exactly one of dataset_id or dataset_name.")
+
+        session = await self._get_session()
+
+        form = aiohttp.FormData()
+        _attach_upload(form, data)
+        for tag in _node_set_tags(node_set):
+            form.add_field("node_set", tag)
+
+        params = {
+            "data_id": str(data_id),
+            "chunk_level_diff": "true" if chunk_level_diff else "false",
+        }
+        if dataset_id is not None:
+            params["dataset_id"] = str(dataset_id)
+        else:
+            params["dataset_name"] = dataset_name
+
+        async with session.patch(
+            f"{self.service_url}/api/v1/update", params=params, data=form
+        ) as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote update failed ({resp.status}): {body}")
+            return await resp.json()
+
+    async def list_data(self, dataset_id: UUID) -> list:
+        """GET /api/v1/datasets/{dataset_id}/data — list the documents in a dataset."""
+        session = await self._get_session()
+
+        async with session.get(f"{self.service_url}/api/v1/datasets/{dataset_id}/data") as resp:
+            if resp.status >= 400:
+                body = await resp.text()
+                raise RuntimeError(f"Remote list_data failed ({resp.status}): {body}")
             return await resp.json()
 
     async def cognify(self, datasets: Any = None, **kwargs) -> dict:

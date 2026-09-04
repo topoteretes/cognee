@@ -56,7 +56,7 @@ async def _restore_row_lineage(
 async def update(
     data_id: UUID,
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
-    dataset_id: UUID,
+    dataset_id: Optional[UUID] = None,
     user: User = None,
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
@@ -69,6 +69,7 @@ async def update(
     custom_prompt: Optional[str] = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
+    dataset_name: Optional[str] = None,
 ) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo], dict]:
     """
     Update existing data in Cognee.
@@ -107,7 +108,11 @@ async def update(
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - Binary file object: open("file.txt", "rb")
-        dataset_id: UUID of the dataset holding the document (required).
+        dataset_id: UUID of the dataset holding the document. Exactly one of
+              dataset_id / dataset_name is required.
+        dataset_name: Name of the dataset holding the document, resolved among the
+              datasets the user may write to. Alternative to dataset_id; the
+              dataset must already exist — update() never creates datasets.
         user: User object for authentication and permissions. Uses default user if None.
               Default user: "default_user@example.com" (created automatically on first use).
               Users can only access datasets they have permissions for.
@@ -144,8 +149,62 @@ async def update(
             - Processing status and any errors
             - Execution timestamps and metadata
     """
+    # Route to the remote instance if connected via serve(). This must come
+    # before any local work: the fallback path below deletes locally and
+    # re-adds, which against a remote dataset id fails with "Dataset not
+    # found" after resolving the LOCAL default user — and even a remote
+    # re-add would mint a new id rather than replace the document.
+    from cognee.api.v1.serve.state import get_remote_client
+
+    if (dataset_id is None) == (dataset_name is None):
+        from cognee.modules.ingestion.exceptions import IngestionError
+
+        raise IngestionError("update() takes exactly one of dataset_id or dataset_name.")
+
+    client = get_remote_client()
+    if client is not None:
+        dropped = [
+            name
+            for name, value, default in (
+                ("vector_db_config", vector_db_config, None),
+                ("graph_db_config", graph_db_config, None),
+                ("preferred_loaders", preferred_loaders, None),
+                ("graph_model", graph_model, KnowledgeGraph),
+                ("custom_prompt", custom_prompt, None),
+                ("chunker", chunker, TextChunker),
+                ("policy", policy, DEFAULT_CHUNK_POLICY),
+            )
+            if value is not default
+        ]
+        if dropped:
+            logger.warning(
+                "update() is proxied to the remote instance; PATCH /api/v1/update has no "
+                "slot for %s — the server applies its own configuration",
+                ", ".join(dropped),
+            )
+        return await client.update(
+            data_id=data_id,
+            data=data,
+            dataset_id=dataset_id,
+            dataset_name=dataset_name,
+            node_set=node_set,
+            chunk_level_diff=chunk_level_diff,
+        )
+
     if not user:
         user = await get_default_user()
+
+    if dataset_id is None:
+        # A name resolves only among datasets this user may write to, and only
+        # to an existing one: update() replaces documents, it never creates
+        # the dataset the way add()/remember() do.
+        from cognee.modules.data.exceptions import DatasetNotFoundError
+        from cognee.modules.data.methods import get_authorized_existing_datasets
+
+        matches = await get_authorized_existing_datasets([dataset_name], "write", user)
+        if not matches:
+            raise DatasetNotFoundError(f"Dataset '{dataset_name}' not found.")
+        dataset_id = matches[0].id
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.methods import resolve_data_id
