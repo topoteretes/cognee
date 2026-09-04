@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, UploadFile as UF, Depends, status
+from fastapi import Form, File, Depends, status
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import WithJsonSchema
 
@@ -20,12 +20,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import ErrorResponse
+from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 
 logger = get_logger()
-
-# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
-#       Once issue is resolved on Swagger side it can be removed.
-UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 # Swagger UI prefills newly added array items from the ITEM-level example;
 # without one it inserts the literal "string". An empty item example keeps
@@ -48,10 +45,10 @@ def get_add_router() -> APIRouter:
     )
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
-        data: List[UploadFile] = File(default=None),
+        data: List[OptionalUploadFile] = File(default=None),
         raw_data: Optional[List[EmptyExampleStr]] = Form(
             default=None,
-            examples=[None],
+            examples=[[]],
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "ingest, a local file or directory path on the server's filesystem "
@@ -157,6 +154,10 @@ def get_add_router() -> APIRouter:
         - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
         - datasetId value can only be the UUID of an already existing dataset
         """
+        # Swagger UI submits an untouched file list as one blank part; treat it
+        # as "no uploads" (and reject its "string" placeholder with a clear 400).
+        data = drop_blank_uploads(data)
+
         send_telemetry(
             "Add API Endpoint Invoked",
             user,

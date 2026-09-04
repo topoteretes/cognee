@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, UploadFile as UF, Depends
+from fastapi import Form, File, Depends
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
@@ -21,12 +21,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.exceptions import CogneeApiError
+from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 
 logger = get_logger()
-
-# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
-#       Once issue is resolved on Swagger side it can be removed.
-UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 # Swagger UI prefills newly added array items from the ITEM-level example;
 # without one it inserts the literal "string". An empty item example keeps
@@ -117,10 +114,10 @@ def get_remember_router() -> APIRouter:
     @router.post("", response_model=dict)
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
-        data: List[UploadFile] = File(default=None),
+        data: List[OptionalUploadFile] = File(default=None),
         raw_data: Optional[List[EmptyExampleStr]] = Form(
             default=None,
-            examples=[None],
+            examples=[[]],
             description=(
                 "Data given as strings instead of uploads, one entry each: raw text to "
                 "remember, a local file or directory path on the server's filesystem "
@@ -185,7 +182,7 @@ def get_remember_router() -> APIRouter:
         ),
         node_set: Optional[List[EmptyExampleStr]] = Form(
             default=None,
-            examples=[None],
+            examples=[[]],
             description=(
                 "Tags the ingested data with named node sets (e.g. per-agent or per-project "
                 "groups). Extracted graph nodes are linked to these sets, and recall/search "
@@ -359,6 +356,10 @@ def get_remember_router() -> APIRouter:
           ACCEPT_LOCAL_FILE_PATH=false)
         - **409 Conflict**: Error during processing
         """
+        # Swagger UI submits an untouched file list as one blank part; treat it
+        # as "no uploads" (and reject its "string" placeholder with a clear 400).
+        data = drop_blank_uploads(data)
+
         send_telemetry(
             "Remember API Endpoint Invoked",
             user,

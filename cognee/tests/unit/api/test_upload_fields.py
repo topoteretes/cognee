@@ -125,9 +125,20 @@ def test_remember_code_ingestion_with_blank_data_part(client, fake_remember):
 def test_remember_blank_data_part_without_content_type_is_treated_as_no_uploads(
     client, fake_remember
 ):
+    """The blank part reaches the handler, which then reports "nothing to ingest"
+    instead of FastAPI's UploadFile type error."""
     response = client.post("/remember", files=BLANK_PART, data={"datasetName": "ds"})
+    assert response.status_code == 400, response.text
+    assert "raw_data" in response.json()["detail"]
+    assert not fake_remember
+
+
+def test_remember_blank_data_part_with_raw_data_reaches_handler(client, fake_remember):
+    response = client.post(
+        "/remember", files=BLANK_PART, data={"datasetName": "ds", "raw_data": "/srv/docs"}
+    )
     assert response.status_code == 200, response.text
-    assert fake_remember["data"] is None
+    assert fake_remember["data"] == ["/srv/docs"]
 
 
 def test_remember_placeholder_text_in_data_gets_clear_400(client, fake_remember):
@@ -173,10 +184,21 @@ def test_remember_openapi_keeps_binary_schema_and_empty_list_examples(client):
 # --- /add and /llm/infer-schema ---------------------------------------------
 
 
-def test_add_blank_data_part_reaches_handler(client, fake_add):
+def test_add_blank_data_part_is_treated_as_no_uploads(client, fake_add):
+    """The blank part reaches the handler, which then reports "nothing to ingest"
+    instead of FastAPI's UploadFile type error."""
     response = client.post("/add", files=BLANK_PART, data={"datasetName": "ds"})
+    assert response.status_code == 400, response.text
+    assert "raw_data" in response.json()["error"]
+    assert not fake_add
+
+
+def test_add_blank_data_part_with_raw_data_reaches_handler(client, fake_add):
+    response = client.post(
+        "/add", files=BLANK_PART, data={"datasetName": "ds", "raw_data": "/srv/docs"}
+    )
     assert response.status_code == 200, response.text
-    assert fake_add["data"] is None
+    assert fake_add["data"] == ["/srv/docs"]
 
 
 def test_infer_schema_blank_data_part_is_no_files(client):
