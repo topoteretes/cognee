@@ -173,6 +173,10 @@ async def update(
                 ("custom_prompt", custom_prompt, None),
                 ("chunker", chunker, TextChunker),
                 ("policy", policy, DEFAULT_CHUNK_POLICY),
+                # No route field for either: the server runs its defaults (both
+                # True), so a caller disabling them locally must hear about it.
+                ("incremental_loading", incremental_loading, True),
+                ("data_cache", data_cache, True),
             )
             if value is not default
         ]

@@ -336,3 +336,29 @@ async def test_local_update_resolves_dataset_name_among_writable_datasets():
     ):
         with pytest.raises(DatasetNotFoundError):
             await update_module.update(data_id=uuid4(), data="x", dataset_name="missing")
+
+
+@pytest.mark.asyncio
+async def test_update_warns_when_incremental_flags_cannot_travel(caplog):
+    """PATCH /api/v1/update has no field for incremental_loading / data_cache: the
+    server runs its defaults. Disabling them locally must not be silent."""
+    import logging
+
+    client = MagicMock()
+    client.update = AsyncMock(return_value={"status": "unchanged"})
+
+    with (
+        patch.object(serve_state, "get_remote_client", return_value=client),
+        caplog.at_level(logging.WARNING),
+    ):
+        await update_module.update(
+            data_id=uuid4(),
+            data="x",
+            dataset_id=uuid4(),
+            incremental_loading=False,
+            data_cache=False,
+        )
+
+    messages = " ".join(record.getMessage() for record in caplog.records)
+    assert "incremental_loading" in messages and "data_cache" in messages
+    client.update.assert_awaited_once()

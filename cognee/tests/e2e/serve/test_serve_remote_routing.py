@@ -193,6 +193,21 @@ async def test_sdk_writes_and_reads_go_to_the_remote_instance(remote_server):
         assert [str(row.id) for row in rows] == [str(pinned)]
         assert await _raw_document(base_url, dataset_id, pinned) == TEXT_V1
 
+        # --- incremental load over the wire: re-sending the identical pinned
+        # document resolves to the same row (no duplicate, content untouched) ---
+        again = await cognee.remember(
+            DataItem(data=TEXT_V1, data_id=pinned), dataset_name=DATASET, node_set=["serve"]
+        )
+        assert again["status"] == "completed", again
+        rows = await cognee.datasets.list_data(UUID(dataset_id))
+        assert [str(row.id) for row in rows] == [str(pinned)], "pinned re-ingest must not duplicate"
+        assert await _raw_document(base_url, dataset_id, pinned) == TEXT_V1
+
+        # --- identical content through update(): the chunk-level path is a no-op ---
+        unchanged = await cognee.update(data_id=pinned, data=TEXT_V1, dataset_id=UUID(dataset_id))
+        assert unchanged["status"] == "unchanged", unchanged
+        assert unchanged["added_chunks"] == 0 and unchanged["deleted_chunks"] == 0, unchanged
+
         # --- update by id: chunk-level path, in place ---
         result = await cognee.update(data_id=pinned, data=TEXT_V2, dataset_id=UUID(dataset_id))
         assert result["status"] == "incremental", result

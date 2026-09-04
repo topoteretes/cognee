@@ -208,6 +208,23 @@ async def add(
 
     client = get_remote_client()
     if client is not None:
+        dropped = [
+            name
+            for name, value, default in (
+                ("incremental_loading", incremental_loading, True),
+                ("data_cache", data_cache, True),
+                ("preferred_loaders", preferred_loaders, None),
+                ("vector_db_config", vector_db_config, None),
+                ("graph_db_config", graph_db_config, None),
+            )
+            if value is not default
+        ]
+        if dropped:
+            logger.warning(
+                "add() is proxied to the remote instance; POST /api/v1/add has no slot for "
+                "%s — the server applies its own defaults",
+                ", ".join(dropped),
+            )
         result = await client.add(
             data,
             dataset_name,
