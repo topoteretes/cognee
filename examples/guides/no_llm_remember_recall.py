@@ -48,8 +48,10 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # self_improvement=False: improve() enriches the graph with LLM calls.
-    await cognee.remember(TEXT, dataset_name="no_llm", self_improvement=False)
+    # remember() runs add + cognify and then improve(). Without session_ids,
+    # improve() only runs the default enrichment (triplet/vector indexing) —
+    # embeddings, no LLM — so it is safe to leave self_improvement on.
+    await cognee.remember(TEXT, dataset_name="no_llm")
 
     for query_type in (SearchType.SUMMARIES, SearchType.CHUNKS):
         results = await cognee.recall(
