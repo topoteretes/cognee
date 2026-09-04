@@ -26,14 +26,36 @@ env:
   ENV: 'dev'
 
 jobs:
+  test-gate:
+    name: Full test suite gate
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - name: Allow full suite only for canonical repository
+        id: gate
+        env:
+          CANONICAL_REPOSITORY: ${{ github.repository == 'topoteretes/cognee' }}
+          INTERNAL_CHANGE: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [[ "$CANONICAL_REPOSITORY" == "true" && "$INTERNAL_CHANGE" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Full test suite is enabled."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Full test suite is skipped for an external or fork repository."
+          fi
+
   # ── Build pre-baked CI container ──────────────────────────────────────
   build-ci-env:
     name: Build CI Environment
+    needs: [ test-gate ]
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+      needs.test-gate.outputs.run == 'true' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
     outputs:
       ci-image: ${{ steps.set-image.outputs.image }}
     steps:
@@ -100,8 +122,8 @@ jobs:
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -109,8 +131,8 @@ jobs:
   e2e-tests:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -118,8 +140,8 @@ jobs:
   cli-tests:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
@@ -127,16 +149,16 @@ jobs:
   slow-e2e-tests:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
   graph-db-tests:
     name: Graph Database Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/graph_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -144,8 +166,8 @@ jobs:
 
   vector-db-tests:
     name: Vector DB Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/vector_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -153,8 +175,8 @@ jobs:
 
   example-tests:
     name: Example Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/examples_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -162,8 +184,8 @@ jobs:
 
   notebook-tests:
     name: Notebook Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/notebooks_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -172,6 +194,8 @@ jobs:
   different-os-tests-basic:
     name: OS and Python Tests Ubuntu
     uses: ./.github/workflows/test_different_operating_systems.yml
+    needs: [ test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     with:
       # The interpreter edges only. Every version-specific fix on dev since
       # 2025-06 was 3.10 (5) or 3.14 (1); none was 3.11/3.12/3.13-only. Those
@@ -192,6 +216,8 @@ jobs:
   different-os-tests-extended:
     name: OS and Python Tests Extended
     uses: ./.github/workflows/test_different_operating_systems.yml
+    needs: [ test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     with:
       python-versions: '["3.13.x"]'
       os: '["macos-15", "windows-latest"]'
@@ -199,8 +225,8 @@ jobs:
 
   llm-tests:
     name: LLM Test Suite
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/test_llms.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -208,8 +234,8 @@ jobs:
 
   s3-file-storage-test:
     name: S3 File Storage Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/test_s3_file_storage.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -217,8 +243,8 @@ jobs:
 
   integration-tests:
     name: Run Integration Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/integration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -227,27 +253,35 @@ jobs:
   mcp-test:
     name: MCP Tests
     uses: ./.github/workflows/test_mcp.yml
+    needs: [ test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' }}
     secrets: inherit
 
   docker-compose-test:
     name: Docker Compose Test
     uses: ./.github/workflows/docker_compose.yml
+    needs: [ test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' }}
     secrets: inherit
 
   docker-ci-test:
     name: Docker CI test
     uses: ./.github/workflows/backend_docker_build_test.yml
+    needs: [ test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' }}
     secrets: inherit
 
   ui-docker-ci-test:
     name: UI Docker CI test
     uses: ./.github/workflows/frontend_docker_build_test.yml
+    needs: [ test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' }}
     secrets: inherit
 
   temporal-graph-tests:
     name: Temporal Graph Test
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/temporal_graph_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -255,8 +289,8 @@ jobs:
 
   search-db-tests:
     name: Search Test on Different DBs
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/search_db_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -271,8 +305,8 @@ jobs:
 
   relational-db-migration-tests:
     name: Relational DB Migration Tests
-    needs: [ build-ci-env ]
-    if: ${{ !cancelled() }}
+    needs: [ build-ci-env, test-gate ]
+    if: ${{ needs.test-gate.outputs.run == 'true' && !cancelled() }}
     uses: ./.github/workflows/relational_db_migration_tests.yml
     with:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
@@ -302,13 +336,16 @@ jobs:
       temporal-graph-tests,
       search-db-tests,
       relational-db-migration-tests,
+      test-gate,
     ]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() }}
     steps:
       - name: Check Status
         run: |
-          if [[ "${{ needs.pre-test.result }}" == "success" &&
+          if [[ "${{ needs.test-gate.outputs.run }}" != "true" ]]; then
+            echo "Full test suite skipped outside the canonical repository."
+          elif [[ "${{ needs.pre-test.result }}" == "success" &&
                 "${{ needs.basic-tests.result }}" == "success" &&
                 "${{ needs.e2e-tests.result }}" == "success" &&
                 "${{ needs.cli-tests.result }}" == "success" &&
@@ -341,7 +378,10 @@ jobs:
   claude-review:
     name: Claude Code Review
     needs: [ notify ]
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: >-
+      github.repository == 'topoteretes/cognee' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
