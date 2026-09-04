@@ -51,6 +51,7 @@ pre-commit install
 - **docling** - Docling document processing, slim profile without torch (office/HTML/email/markdown/LaTeX formats)
 - **docling-full** - Full docling install with torch-based ML models (adds PDF/image conversion through docling; conflicts with **codegraph** due to tree-sitter pins)
 - **codegraph** - Code graph extraction
+- **gliner** - LLM-free graph extraction + summaries via GLiNER2 (`cognee.tasks.graph.gliner.get_gliner_tasks`)
 - **evals** - Evaluation tools
 - **deepeval** - DeepEval testing framework
 - **posthog** - PostHog analytics
@@ -767,6 +768,14 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Tuning** (env): `CONTRADICTION_CONFIDENCE_THRESHOLD` (default 0.5, minimum confidence to flag), `CONTRADICTION_MAX_FACTS` (default 500, cap on facts per LLM call).
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
+
+### LLM-free Graph Extraction (GLiNER)
+Opt-in replacement for the LLM extraction+summary step of `cognify()` (default **llm**, unchanged). `GRAPH_EXTRACTION_BACKEND=gliner` or `cognify(graph_extraction_backend="gliner")` / `remember(graph_extraction_backend="gliner")` swaps `extract_graph_and_summarize` for the GLiNER2 task in `cognee/tasks/graph/gliner/`: one batched local-model pass per chunk batch builds the `KnowledgeGraph` **and** a deterministic two-line `TextSummary` (kept edges as `head rel tail`, then `type: names`). No `extract_content_graph` / `extract_summary` calls; embeddings in `add_data_points` still run.
+
+- **Install**: `pip install "cognee[gliner]"` (pulls torch; `fastino/gliner2.5-base-v1`, ~800 MB, downloads on first use). Missing package → `GlinerNotInstalledError` with the install hint.
+- **Schema** (closed, resolved once on the first batch, then frozen): caller `entity_types`/`relation_types` → else OWL classes / object properties of `ONTOLOGY_FILE_PATH` (snake_case of `rdfs:label` or local name, `rdfs:comment` as description) → else the frozen `LABEL_BANK`/`RELATION_BANK`, filtered to labels that actually fired. Capped at 20 per kind. Explicit labels are only reachable through `get_gliner_tasks(...)` + `run_custom_pipeline(pipeline_name="cognify_pipeline")`.
+- **Constraints**: generic `KnowledgeGraph` only (custom `graph_model` raises), `custom_prompt` ignored, no `--extraction-backend` in the CLI/HTTP (set the env var). Long chunks are scanned with overlapping 384-word windows (`batch_extract_long`) because plain extraction silently truncates at the encoder's 512 tokens. Relation endpoints are matched to entity spans by exact normalized name, then unambiguous containment; unresolved pairs are dropped and counted (`GlinerRunStats`).
+- **Demo**: `examples/guides/gliner_llm_free_cognify.py`. Unit tests: `cognee/tests/unit/tasks/graph/test_gliner_tasks.py`.
 
 ### Skills (Procedural Memory)
 Dataset-scoped `SKILL.md` playbooks agents can discover, load on demand, execute, and improve from run history.

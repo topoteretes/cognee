@@ -54,6 +54,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
+    graph_extraction_backend: Literal["llm", "gliner"]
     node_set: List[str]
     preferred_loaders: list
     incremental_loading: bool
@@ -90,7 +91,9 @@ _ADD_ONLY = frozenset(
         "max_rows_per_table",
     }
 )
-_COGNIFY_ONLY = frozenset({"graph_model", "chunks_per_batch", "config", "temporal_cognify"})
+_COGNIFY_ONLY = frozenset(
+    {"graph_model", "graph_extraction_backend", "chunks_per_batch", "config", "temporal_cognify"}
+)
 _SHARED = frozenset(
     {
         "user",
