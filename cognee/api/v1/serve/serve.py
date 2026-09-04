@@ -56,6 +56,16 @@ async def serve(
 
     Returns:
         CloudClient connected to the instance.
+
+    Raises:
+        CogneeConfigurationError: When called with no ``url``, no usable saved
+            credentials, and no device-login client ID configured — i.e. there
+            is nothing to connect with. The error explains the available
+            options (pass ``url``/``api_key`` or set ``COGNEE_SERVICE_URL`` /
+            ``COGNEE_API_KEY``). Also raised when the instance is reachable
+            but rejects the API key (401/403 on an authenticated probe) —
+            connecting would otherwise appear to succeed and fail on the
+            first operation.
     """
     # Resolve URL from arg or env
     service_url = url or os.getenv("COGNEE_SERVICE_URL")
@@ -84,6 +94,30 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
     health_ok = await client._health_check()
     if not health_ok:
         logger.warning("Instance at %s did not respond to health check", service_url)
+
+    # /health is unauthenticated, so it cannot catch a rejected API key —
+    # without this probe a bad key still prints "Connected" and then every
+    # operation fails with 401. Only a definitive rejection is fatal; an
+    # unreachable instance keeps the warn-and-continue behavior above.
+    auth_status = await client._auth_check()
+    if auth_status in (401, 403):
+        from cognee.exceptions import CogneeConfigurationError
+
+        await client.close()
+        if api_key:
+            detail = "the API key was rejected — check that it belongs to this instance."
+        else:
+            detail = (
+                "it requires authentication and no API key was given. Pass one via "
+                'cognee.serve(url=..., api_key="...") or the COGNEE_API_KEY environment '
+                "variable. On a self-hosted server, mint a key by logging in and calling "
+                "POST /api/v1/auth/api-keys (the key is only revealed in the creation "
+                "response)."
+            )
+        raise CogneeConfigurationError(
+            message=f"Connected to {service_url}, but {detail}",
+            name="ServeAuthenticationError",
+        )
 
     # Save so subsequent serve() calls reconnect without args
     save_credentials(
@@ -139,7 +173,10 @@ async def _serve_cloud(
     if creds and creds.service_url and creds.api_key:
         client = CloudClient(creds.service_url, creds.api_key)
         try:
-            if await client._health_check():
+            # The saved API key must actually authenticate, not just reach the
+            # instance — a stale key on a healthy instance would otherwise
+            # "connect" and fail on the first operation.
+            if await client._health_check() and await client._auth_check() not in (401, 403):
                 logger.info("Using cached credentials for %s (token status ignored)", creds.email)
                 set_remote_client(client)
                 print(f"  Connected to Cognee Cloud at {creds.service_url}")
@@ -162,10 +199,17 @@ async def _serve_cloud(
                 if token.refresh_token:
                     creds.refresh_token = token.refresh_token
                 creds.expires_at = time.time() + token.expires_in
+                # Deliberately saved BEFORE the connect checks below — unlike
+                # the validate-then-save order used for new API keys. This
+                # persists issuer-validated token material only (the API key
+                # beside it is already on disk either way), and with rotating
+                # refresh tokens the old token was consumed by this refresh:
+                # deferring the save would strand a dead refresh token in the
+                # file whenever the connect check fails, breaking recovery.
                 save_credentials(creds)
 
                 client = CloudClient(creds.service_url, creds.api_key)
-                if await client._health_check():
+                if await client._health_check() and await client._auth_check() not in (401, 403):
                     set_remote_client(client)
                     print(f"  Connected to Cognee Cloud at {creds.service_url}")
                     return client
@@ -173,7 +217,40 @@ async def _serve_cloud(
             except Exception as e:
                 logger.warning("Token refresh failed, re-authenticating: %s", e)
 
-    # Step 2: Device Code Flow
+    # Step 2: Device Code Flow — only possible with an Auth0 device client ID.
+    # Fail loudly here rather than mid-flow: a bare serve() with nothing saved
+    # and nothing configured should explain how to connect, not stack-trace
+    # out of the auth internals.
+    if not (auth0_client_id or os.getenv("COGNEE_AUTH0_DEVICE_CLIENT_ID")):
+        from cognee.exceptions import CogneeConfigurationError
+        from cognee.api.v1.serve.credentials import get_credentials_path
+
+        if creds and creds.service_url and creds.api_key:
+            raise CogneeConfigurationError(
+                message=(
+                    f"cognee.serve() found saved credentials ({get_credentials_path()}, "
+                    f"account: {creds.email or 'unknown'}), but the saved instance at "
+                    f"{creds.service_url} is unreachable or the credentials no longer work, "
+                    "and re-authentication is not configured.\n\n"
+                    "To connect to a Cognee instance directly, pass its URL and API key:\n"
+                    '    await cognee.serve(url="https://your-instance", api_key="...")\n'
+                    "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables.\n\n"
+                    "If the saved credentials are stale, delete the file above and connect again."
+                ),
+                name="ServeConfigurationError",
+            )
+        raise CogneeConfigurationError(
+            message=(
+                "cognee.serve() was called without connection details and none were found "
+                f"(no saved credentials at {get_credentials_path()}, no environment variables).\n\n"
+                "To connect to a Cognee instance, pass its URL and API key:\n"
+                '    await cognee.serve(url="http://localhost:8000")\n'
+                '    await cognee.serve(url="https://your-instance", api_key="...")\n'
+                "or set the COGNEE_SERVICE_URL and COGNEE_API_KEY environment variables."
+            ),
+            name="ServeConfigurationError",
+        )
+
     print("  Authenticating with Cognee Cloud...")
     token = await device_code_login(
         domain=auth0_domain,
@@ -200,7 +277,8 @@ async def _serve_cloud(
     # Step 5: Get or create API key
     api_key = await get_or_create_api_key(mgmt_url, access_token)
 
-    # Step 6: Save credentials
+    # Step 6: Build credentials — saved in Step 7 only after the tenant
+    # instance accepts the key (validate-then-save, matching the direct flow)
     creds = CloudCredentials(
         access_token=access_token,
         refresh_token=token.refresh_token,
@@ -212,8 +290,6 @@ async def _serve_cloud(
         tenant_name=tenant.name,
         email=email or "",
     )
-    save_credentials(creds)
-
     # Step 7: Connect
     client = CloudClient(service_url, api_key)
 
@@ -223,6 +299,29 @@ async def _serve_cloud(
             "Service URL %s not responding to health check — may still be starting",
             service_url,
         )
+
+    # A freshly provisioned key that the tenant instance rejects (e.g. a
+    # masked value returned by the management API's key listing) must fail
+    # here, not on the user's first remember/recall.
+    auth_status = await client._auth_check()
+    if auth_status in (401, 403):
+        from cognee.exceptions import CogneeConfigurationError
+
+        await client.close()
+        raise CogneeConfigurationError(
+            message=(
+                f"Authenticated with Cognee Cloud, but the tenant instance at {service_url} "
+                "rejected the provisioned API key. This is a provisioning problem, not a "
+                "problem with your login — nothing was saved. Please try again; if it "
+                "persists, contact support."
+            ),
+            name="ServeAuthenticationError",
+        )
+
+    # Rejections above discard the fresh Auth0 login (refresh token included),
+    # so a retry repeats the browser flow — the cost of never caching a key
+    # the tenant rejected.
+    save_credentials(creds)
 
     set_remote_client(client)
     print(f"  Connected to Cognee Cloud at {service_url}")

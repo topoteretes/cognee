@@ -486,7 +486,9 @@ def _provenance_ctx(ctx):
 EDGE_BATCH_TARGET = 2 * BATCH_NODE_TARGET
 
 
-async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> Dict[str, int]:
+async def stream_graph_from_source(
+    source, stats: Dict[str, int], ctx=None, graph_only: bool = False
+) -> Dict[str, int]:
     """Two-pass streaming graph import for replayable preserve-mode sources.
 
     Pass 1 streams the records once: raw nodes are rehydrated and flushed to
@@ -520,7 +522,12 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
     async def flush(nodes: List[Any], edges: Optional[List[Tuple]] = None) -> None:
         if not nodes and not edges:
             return
-        await add_data_points(list(nodes), custom_edges=list(edges) if edges else None, ctx=ctx)
+        await add_data_points(
+            list(nodes),
+            custom_edges=list(edges) if edges else None,
+            ctx=ctx,
+            graph_only=graph_only,
+        )
         stats["graph_nodes"] += len(nodes)
         stats["graph_edges"] += len(edges or [])
         logger.info("Streamed graph batch: %d nodes, %d edges", len(nodes), len(edges or []))
@@ -625,7 +632,7 @@ async def stream_graph_from_source(source, stats: Dict[str, int], ctx=None) -> D
     return stats
 
 
-async def store_imported_graph(batches, ctx=None):
+async def store_imported_graph(batches, ctx=None, graph_only: bool = False):
     """Pipeline task: persist translated graph batches via add_data_points."""
     from cognee.tasks.storage.add_data_points import add_data_points
 
@@ -640,6 +647,7 @@ async def store_imported_graph(batches, ctx=None):
             batch["nodes"],
             custom_edges=batch["edges"] or None,
             ctx=ctx,
+            graph_only=graph_only,
         )
         logger.info(
             "Stored imported graph batch: %d nodes, %d edges",

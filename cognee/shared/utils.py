@@ -179,10 +179,69 @@ async def _get_telemetry_session() -> aiohttp.ClientSession:
             or _telemetry_session.closed
             or _telemetry_session_loop is not loop
         ):
+            # Close the stale session instead of dropping it: aiohttp accepts
+            # close() from a different loop, and an unowned session emits
+            # "Unclosed client session" at garbage collection.
+            if _telemetry_session is not None and not _telemetry_session.closed:
+                try:
+                    await _telemetry_session.close()
+                except Exception:
+                    pass
             timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
             _telemetry_session = aiohttp.ClientSession(timeout=timeout)
             _telemetry_session_loop = loop
+            _register_telemetry_session_atexit()
         return _telemetry_session
+
+
+async def close_telemetry_session() -> None:
+    """Flush in-flight telemetry tasks and close the shared aiohttp session.
+
+    Safe to call repeatedly and from any loop; ``_get_telemetry_session``
+    rebuilds transparently if telemetry fires again afterwards. Called from the
+    FastAPI lifespan shutdown and, as a last resort, from an ``atexit`` hook so
+    SDK scripts don't print "Unclosed client session" at interpreter exit.
+    """
+    global _telemetry_session, _telemetry_session_loop
+
+    if _TELEMETRY_TASKS:
+        try:
+            await asyncio.gather(*list(_TELEMETRY_TASKS), return_exceptions=True)
+        except Exception:
+            pass
+    session = _telemetry_session
+    _telemetry_session = None
+    _telemetry_session_loop = None
+    if session is not None and not session.closed:
+        try:
+            await session.close()
+        except Exception:
+            pass
+
+
+_telemetry_atexit_registered = False
+
+
+def _register_telemetry_session_atexit() -> None:
+    global _telemetry_atexit_registered
+    if _telemetry_atexit_registered:
+        return
+    _telemetry_atexit_registered = True
+
+    import atexit
+
+    def _close_at_exit() -> None:
+        # The loop that owned the session is gone by now; run the closer on a
+        # fresh one. In-flight tasks died with their loop, so gather() over
+        # them is a no-op here — this exists purely to release the session.
+        if _telemetry_session is None or _telemetry_session.closed:
+            return
+        try:
+            asyncio.run(close_telemetry_session())
+        except Exception:
+            pass
+
+    atexit.register(_close_at_exit)
 
 
 async def _send_telemetry_request(payload: dict) -> None:

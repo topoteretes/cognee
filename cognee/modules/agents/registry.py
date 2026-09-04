@@ -174,6 +174,18 @@ async def register_agent_connection(
     if user_id:
         await _persist_agent_connection(user_id, connection)
 
+    if user_id and session_id:
+        # Attribute the session to this connection in the relational store
+        # (fill-if-null), so agent↔session attribution survives registry
+        # restarts and is joinable by SQL. Best-effort: the session_records
+        # table is optional for registry correctness.
+        try:
+            from cognee.modules.session_lifecycle.metrics import set_session_agent
+
+            await set_session_agent(session_id=session_id, user_id=user_id, agent_id=connection.id)
+        except Exception as error:  # noqa: BLE001 — attribution must not break registration
+            logger.debug("Session agent attribution skipped: %s", error)
+
     return connection
 
 

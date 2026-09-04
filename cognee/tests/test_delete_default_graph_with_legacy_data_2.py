@@ -6,13 +6,16 @@ from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.data.models import Data
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
@@ -135,9 +138,13 @@ async def main(mock_create_structured_output: AsyncMock):
     await setup()
 
     user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(authorized_dataset.id))
+    await set_database_global_context_variables(authorized_dataset.id, user.id)
 
     vector_engine = await get_vector_engine_async()
 
@@ -244,7 +251,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     johns_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(johns_data_id)}-0"),
+        id=content_chunk_id(str(johns_data_id), chunk_content_hash(johns_text), 0),
         text=johns_text,
         chunk_size=14,
         chunk_index=0,
@@ -260,7 +267,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     maries_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(maries_data_id)}-0"),
+        id=content_chunk_id(str(maries_data_id), chunk_content_hash(maries_text), 0),
         text=maries_text,
         chunk_size=14,
         chunk_index=0,

@@ -232,6 +232,41 @@ class TestRecordProvenanceTask:
         assert (await manager.verify_chain())["valid"] is True
 
     @pytest.mark.asyncio
+    async def test_generic_walk_without_the_input_attributes_to_nothing(self, manager):
+        # get_graph_from_model may return a node set that does not include the item
+        # it was given. Attributing those entries to the absent item would forge a
+        # provenance chain pointing at something that was never written.
+        class CustomTail(DataPoint):
+            name: str
+
+        class CustomLeaf(DataPoint):
+            name: str
+            points_to: CustomTail
+
+        class CustomContainer(DataPoint):
+            name: str
+            holds: CustomLeaf
+            metadata: dict = {"index_fields": [], "transparent": True}
+
+        tail = CustomTail(name="tail")
+        leaf = CustomLeaf(name="leaf", points_to=tail)
+        container = CustomContainer(name="container", holds=leaf)
+
+        result = await record_provenance([container], ctx=None)
+
+        assert result == [container]
+        entries = await storage.retrieve_all()
+        entity_ids = {entry.entity_id for entry in entries}
+        assert str(container.id) not in entity_ids
+        # The leaf, the tail, and the one relationship between them.
+        assert {str(leaf.id), str(tail.id)} <= entity_ids
+        assert any(entry.entity_type == "relationship" for entry in entries)
+        # Nothing may be attributed to an entity that was never written.
+        assert all(entry.source_document == "" for entry in entries)
+        assert all(entry.parent_entity_id is None for entry in entries)
+        assert (await manager.verify_chain())["valid"] is True
+
+    @pytest.mark.asyncio
     async def test_raw_item_without_document_still_tracked(self, manager):
         raw_item = SimpleNamespace(id=uuid4())  # no made_from, no is_part_of
         result = await record_provenance([raw_item], ctx=None)

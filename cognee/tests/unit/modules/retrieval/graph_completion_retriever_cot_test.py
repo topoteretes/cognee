@@ -9,6 +9,38 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
+@pytest.fixture(autouse=True)
+def _no_real_llm_calls():
+    """Keep every test in this file off the network.
+
+    The CoT round's validation and follow-up prompts go through
+    ``batch_llm_completion`` -> ``LLMGateway.acreate_structured_output``.
+    Several tests here only patch the final ``generate_completion`` and let
+    that call escape to the real provider. In the full suite an earlier test
+    happened to leave a patched gateway behind; once the suite was sharded
+    the call went out for real, hit the provider's error, and was retried
+    under the 240-second floor until pytest-timeout killed it (300s per test,
+    on macOS and Windows where the accidental polluter is skipped). Patched
+    by object, not by dotted string: the LLMGateway class shadows its module,
+    so a string target lands on the class on Python 3.10.
+    """
+
+    async def _structured(text_input, system_prompt, response_model=str, **_):
+        # Honour the requested model: str prompts get a string, pydantic
+        # models get an unvalidated instance so isinstance checks hold.
+        if response_model is str or response_model is None:
+            return "reasoning"
+        try:
+            return response_model.model_construct()
+        except Exception:
+            return "reasoning"
+
+    with patch.object(
+        LLMGateway, "acreate_structured_output", new=AsyncMock(side_effect=_structured)
+    ):
+        yield
+
+
 @pytest.fixture
 def mock_edge():
     """Create a mock edge."""

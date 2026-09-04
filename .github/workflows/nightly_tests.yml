@@ -1,11 +1,19 @@
 name: Nightly Tests
+# Least-privilege token (OSSF Scorecard: Token-Permissions). packages: read is
+# needed by the called performance_report.yml jobs, whose postgres service
+# container pulls ghcr.io/topoteretes/pgvector:pg17 with the GITHUB_TOKEN.
+# Nothing in this workflow publishes packages, so no write scope.
 permissions:
   contents: read
-  packages: write
+  packages: read
 
 on:
-  schedule:
-    - cron: '0 3 * * *'
+  # No `schedule:` here on purpose. A cron only ever fires against the default
+  # branch's copy of this file, so a plain schedule could only ever test main's
+  # stale copy of the job graph. `.github/workflows/nightly_scheduler.yml`
+  # carries the cron on main and dispatches this workflow at the ref we want:
+  # main daily at 18:00 UTC (peak US hours, so the cloud perf arms measure the
+  # platform under real load), dev weekly on Sunday.
   # Deliberately NOT on pull_request. This workflow used to run on any PR that
   # touched the nightly/perf workflow files, to validate the edit before merge.
   # The cost of that was the whole nightly gating the PR: ~13 jobs including
@@ -15,6 +23,12 @@ on:
   # unrelated PR. Validate workflow edits with `workflow_dispatch` on the branch
   # instead (Actions -> Nightly Tests -> Run workflow -> pick the branch).
   workflow_dispatch:
+    inputs:
+      cadence:
+        description: 'Why this run happened: daily (dev), weekly (main), manual.'
+        required: false
+        default: manual
+        type: string
 
 
 concurrency:
@@ -26,16 +40,6 @@ env:
   ENV: 'dev'
 
 jobs:
-  ollama-tests:
-    name: Ollama Tests
-    uses: ./.github/workflows/test_ollama.yml
-    secrets: inherit
-
-  llamacpp-tests:
-    name: Llama-cpp Tests
-    uses: ./.github/workflows/test_llamacpp.yml
-    secrets: inherit
-
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -81,32 +85,32 @@ jobs:
       mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_war_and_peace.json
     secrets: inherit
 
-  # Henkel technical datasheets: 164 real PDFs (~1.35M chars). Complements the
+  # Technical datasheets: 164 real PDFs (~1.35M chars). Complements the
   # existing corpora on document *count* -- War and Peace is one long document,
   # the 50-doc set is short synthetic ones. This is many medium-sized real-world
   # documents, which is the shape most user datasets actually have.
   #
   # No Rust arms yet: those read fixtures from topoteretes/cognee-rs
   # (scripts/perf/fixtures/<label>/), so they land with that repo's PR.
-  perf-henkel-llm:
-    name: Performance — Henkel (real LLM)
+  perf-datasheets-llm:
+    name: Performance — Datasheets (real LLM)
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: llm
-      label: henkel
+      label: datasheets
       runs: '3'
-      memories_key: nightly_ci_artifacts/performance_test_artifacts/henkel.json
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/datasheets.json
     secrets: inherit
 
-  perf-henkel-mock:
-    name: Performance — Henkel (mock LLM)
+  perf-datasheets-mock:
+    name: Performance — Datasheets (mock LLM)
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
-      label: henkel
+      label: datasheets
       runs: '3'
-      memories_key: nightly_ci_artifacts/performance_test_artifacts/henkel.json
-      mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_henkel.json
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/datasheets.json
+      mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_datasheets.json
     secrets: inherit
 
   # 27x-multiplied capture of the same book (~100k graph nodes/edges per run):
@@ -151,13 +155,13 @@ jobs:
       memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
     secrets: inherit
 
-  perf-henkel-cloud:
-    name: Performance — Henkel (cloud)
+  perf-datasheets-cloud:
+    name: Performance — Datasheets (cloud)
     uses: ./.github/workflows/performance_report_cloud.yml
     with:
-      label: henkel
+      label: datasheets
       runs: '3'
-      memories_key: nightly_ci_artifacts/performance_test_artifacts/henkel.json
+      memories_key: nightly_ci_artifacts/performance_test_artifacts/datasheets.json
     secrets: inherit
 
   # ══ Performance (Rust SDK): builds latest cognee-rs and drives the SAME ═════
@@ -204,18 +208,16 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
-      ollama-tests,
-      llamacpp-tests,
       perf-small-llm,
       perf-small-mock,
       perf-wap-llm,
       perf-wap-mock,
-      perf-henkel-llm,
-      perf-henkel-mock,
+      perf-datasheets-llm,
+      perf-datasheets-mock,
       perf-wap-large-mock,
       perf-small-cloud,
       perf-wap-cloud,
-      perf-henkel-cloud,
+      perf-datasheets-cloud,
       perf-rust,
       perf-rust-wap,
       perf-rust-llm,
@@ -227,23 +229,25 @@ jobs:
       # This job runs repo scripts (the Slack block renderer, the MotherDuck
       # ETL), so it needs a working tree.
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
 
       - name: Determine status
         id: status
+        env:
+          # Via env, not inline ${{ }}: `cadence` is a free-text dispatch input
+          # and inline interpolation would splice it into this shell script.
+          CADENCE: ${{ inputs.cadence }}
         run: |
-          if [[ "${{ needs.ollama-tests.result }}" == "success" &&
-                "${{ needs.llamacpp-tests.result }}" == "success" &&
-                "${{ needs.perf-small-llm.result }}" == "success" &&
+          if [[ "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
                 "${{ needs.perf-wap-mock.result }}" == "success" &&
-                "${{ needs.perf-henkel-llm.result }}" == "success" &&
-                "${{ needs.perf-henkel-mock.result }}" == "success" &&
+                "${{ needs.perf-datasheets-llm.result }}" == "success" &&
+                "${{ needs.perf-datasheets-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-large-mock.result }}" == "success" &&
                 "${{ needs.perf-small-cloud.result }}" == "success" &&
                 "${{ needs.perf-wap-cloud.result }}" == "success" &&
-                "${{ needs.perf-henkel-cloud.result }}" == "success" &&
+                "${{ needs.perf-datasheets-cloud.result }}" == "success" &&
                 "${{ needs.perf-rust.result }}" == "success" &&
                 "${{ needs.perf-rust-wap.result }}" == "success" &&
                 "${{ needs.perf-rust-llm.result }}" == "success" &&
@@ -257,6 +261,9 @@ jobs:
             echo "summary=One or more nightly test suites failed." >> "$GITHUB_OUTPUT"
           fi
           echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+          # Two nightlies now exist (daily dev, weekly main). Everything below
+          # that reaches a human or the warehouse has to say which one this is.
+          echo "cadence=${CADENCE:-manual}" >> "$GITHUB_OUTPUT"
 
       - name: Presign performance report links
         id: presign
@@ -276,14 +283,14 @@ jobs:
             url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
             url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
-            url_file_henkel_llm ${{ needs.perf-henkel-llm.outputs.file_based_html_key }}
-            url_file_henkel_mock ${{ needs.perf-henkel-mock.outputs.file_based_html_key }}
-            url_pg_henkel_llm ${{ needs.perf-henkel-llm.outputs.postgres_html_key }}
-            url_pg_henkel_mock ${{ needs.perf-henkel-mock.outputs.postgres_html_key }}
+            url_file_datasheets_llm ${{ needs.perf-datasheets-llm.outputs.file_based_html_key }}
+            url_file_datasheets_mock ${{ needs.perf-datasheets-mock.outputs.file_based_html_key }}
+            url_pg_datasheets_llm ${{ needs.perf-datasheets-llm.outputs.postgres_html_key }}
+            url_pg_datasheets_mock ${{ needs.perf-datasheets-mock.outputs.postgres_html_key }}
             url_pg_wap_large_mock ${{ needs.perf-wap-large-mock.outputs.postgres_html_key }}
             url_cloud_small ${{ needs.perf-small-cloud.outputs.cloud_html_key }}
             url_cloud_wap ${{ needs.perf-wap-cloud.outputs.cloud_html_key }}
-            url_cloud_henkel ${{ needs.perf-henkel-cloud.outputs.cloud_html_key }}
+            url_cloud_datasheets ${{ needs.perf-datasheets-cloud.outputs.cloud_html_key }}
             url_rust ${{ needs.perf-rust.outputs.html_key }}
             url_rust_wap ${{ needs.perf-rust-wap.outputs.html_key }}
             url_rust_llm ${{ needs.perf-rust-llm.outputs.html_key }}
@@ -303,8 +310,9 @@ jobs:
           STATUS_EMOJI: ${{ steps.status.outputs.emoji }}
           STATUS_SUMMARY: ${{ steps.status.outputs.summary }}
           STATUS_RAN_AT: ${{ steps.status.outputs.ran_at }}
-          STATUS_OLLAMA: ${{ needs.ollama-tests.result }}
-          STATUS_LLAMACPP: ${{ needs.llamacpp-tests.result }}
+          STATUS_BRANCH: ${{ github.ref_name }}
+          STATUS_CADENCE: ${{ steps.status.outputs.cadence }}
+          STATUS_SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.
@@ -313,18 +321,18 @@ jobs:
             📊|File Based — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_small_mock }}
             📚|File Based — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_llm }}
             📚|File Based — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_mock }}
-            🧪|File Based — Henkel — Real LLM|${{ needs.perf-henkel-llm.result }}|${{ needs.perf-henkel-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_henkel_llm }}
-            🧪|File Based — Henkel — Mock LLM|${{ needs.perf-henkel-mock.result }}|${{ needs.perf-henkel-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_henkel_mock }}
+            🧪|File Based — Datasheets — Real LLM|${{ needs.perf-datasheets-llm.result }}|${{ needs.perf-datasheets-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_datasheets_llm }}
+            🧪|File Based — Datasheets — Mock LLM|${{ needs.perf-datasheets-mock.result }}|${{ needs.perf-datasheets-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_datasheets_mock }}
             📊|Full Postgres — 50 Small Documents — Real LLM|${{ needs.perf-small-llm.result }}|${{ needs.perf-small-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_llm }}
             📊|Full Postgres — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_mock }}
             📚|Full Postgres — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_llm }}
             📚|Full Postgres — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_mock }}
             📚|Full Postgres — Medium graph - Artificial 100k nodes/edges — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_large_mock }}
-            🧪|Full Postgres — Henkel — Real LLM|${{ needs.perf-henkel-llm.result }}|${{ needs.perf-henkel-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_henkel_llm }}
-            🧪|Full Postgres — Henkel — Mock LLM|${{ needs.perf-henkel-mock.result }}|${{ needs.perf-henkel-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_henkel_mock }}
+            🧪|Full Postgres — Datasheets — Real LLM|${{ needs.perf-datasheets-llm.result }}|${{ needs.perf-datasheets-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_datasheets_llm }}
+            🧪|Full Postgres — Datasheets — Mock LLM|${{ needs.perf-datasheets-mock.result }}|${{ needs.perf-datasheets-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_datasheets_mock }}
             📊|Cognee Cloud — 50 Small Documents|${{ needs.perf-small-cloud.result }}|${{ needs.perf-small-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_small }}
             📚|Cognee Cloud — War and Peace|${{ needs.perf-wap-cloud.result }}|${{ needs.perf-wap-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_wap }}
-            🧪|Cognee Cloud — Henkel|${{ needs.perf-henkel-cloud.result }}|${{ needs.perf-henkel-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_henkel }}
+            🧪|Cognee Cloud — Datasheets|${{ needs.perf-datasheets-cloud.result }}|${{ needs.perf-datasheets-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_datasheets }}
             📊|Rust SDK (file_based) — 50 Small Documents — Real LLM|${{ needs.perf-rust-llm.result }}|${{ needs.perf-rust-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_llm }}
             📊|Rust SDK (file_based) — 50 Small Documents — Mock LLM|${{ needs.perf-rust.result }}|${{ needs.perf-rust.outputs.metrics }}|${{ steps.presign.outputs.url_rust }}
             📚|Rust SDK (file_based) — War and Peace — Real LLM|${{ needs.perf-rust-wap-llm.result }}|${{ needs.perf-rust-wap-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_wap_llm }}
@@ -335,13 +343,13 @@ jobs:
         # Posts on scheduled and manual (workflow_dispatch) runs. There is no
         # longer a pull_request trigger, so a workflow edit surfaces its reports
         # by being dispatched on the branch rather than by opening a PR.
-        uses: slackapi/slack-github-action@v2.1.0
+        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_NIGHTLY_BOT_TOKEN }}
           payload: |
             channel: ${{ secrets.SLACK_NIGHTLY_CHANNEL_ID }}
-            text: "${{ steps.status.outputs.emoji }} Nightly Tests (${{ steps.status.outputs.ran_at }}): ${{ steps.status.outputs.summary }}"
+            text: "${{ steps.status.outputs.emoji }} Nightly Tests [${{ github.ref_name }}] (${{ steps.status.outputs.ran_at }}): ${{ steps.status.outputs.summary }}"
             blocks: ${{ steps.blocks.outputs.blocks }}
 
       - name: Load performance reports into MotherDuck
@@ -361,6 +369,14 @@ jobs:
           DUCKDB_VERSION: '1.4.5'
           motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
           MD_TARGET: ci_analytics.nightly
+          # The ETL does CREATE OR REPLACE VIEW from the script on the ref that
+          # ran it. With two refs running it, view definitions would be
+          # last-writer-wins ACROSS refs, flip-flopping every week where the
+          # two ETLs differ. Only the DAILY run defines views (main, so the
+          # warehouse always reflects released ETL code -- a dev-side ETL
+          # change takes effect at the release merge); the weekly dev run
+          # loads rows only.
+          PERF_REFRESH_VIEWS: ${{ steps.status.outputs.cadence == 'weekly' && 'false' || 'true' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
           AWS_DEFAULT_REGION: eu-west-1

@@ -48,7 +48,7 @@ async def test_cognify_session_success():
             node_set=["user_sessions_from_cache"],
             user=None,
         )
-        mock_cognify.assert_called_once_with(datasets=["123"], user=None)
+        mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
         # Watermark advanced after successful cognify.
         mock_sm.update_session_context_entry.assert_called_once()
 
@@ -142,6 +142,43 @@ async def test_cognify_session_cognify_failure():
 
 
 @pytest.mark.asyncio
+async def test_cognify_session_errored_run_info_skips_watermark_and_continues():
+    """A window whose build errored (raise_on_error=False path) is skipped:
+    no watermark advance, no raise, remaining windows still processed."""
+    from uuid import uuid4
+
+    from cognee.modules.pipelines.models.PipelineRunInfo import (
+        PipelineRunCompleted,
+        PipelineRunErrored,
+    )
+
+    windows = [
+        _window("Question: q1?\n\nAnswer: a1\n\n", persisted_qa_count=1),
+        _window("Question: q2?\n\nAnswer: a2\n\n", persisted_qa_count=2),
+    ]
+    mock_sm = _mock_session_manager()
+
+    common = {"pipeline_run_id": uuid4(), "dataset_id": uuid4(), "dataset_name": "ds"}
+    errored = PipelineRunErrored(
+        **common, error_class="AuthenticationError", error_message="invalid api key"
+    )
+    completed = PipelineRunCompleted(**common)
+
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+        patch.object(cognify_session_module, "get_session_manager", return_value=mock_sm),
+    ):
+        mock_cognify.side_effect = [{"ds": errored}, {"ds": completed}]
+
+        await cognify_session(windows, dataset_id="123")
+
+        assert mock_cognify.call_count == 2
+        # Only the second (successful) window advanced its watermark.
+        mock_sm.update_session_context_entry.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_cognify_session_re_raises_validation_error():
     """Test that CogneeValidationError is re-raised as-is."""
     with pytest.raises(CogneeValidationError):
@@ -167,7 +204,7 @@ async def test_cognify_session_with_special_characters():
             node_set=["user_sessions_from_cache"],
             user=None,
         )
-        mock_cognify.assert_called_once_with(datasets=["123"], user=None)
+        mock_cognify.assert_called_once_with(datasets=["123"], user=None, raise_on_error=False)
 
 
 @pytest.mark.asyncio
@@ -192,4 +229,4 @@ async def test_cognify_session_passes_user_to_add_and_cognify():
             node_set=["user_sessions_from_cache"],
             user=user,
         )
-        mock_cognify.assert_called_once_with(datasets=["123"], user=user)
+        mock_cognify.assert_called_once_with(datasets=["123"], user=user, raise_on_error=False)
