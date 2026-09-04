@@ -980,10 +980,17 @@ class LanceDBAdapter(VectorDBInterface):
             # If collection doesn't exist, return empty list (no items to retrieve)
             return []
 
-        if len(data_point_ids) == 1:
-            query = collection.query().where(f"id = '{data_point_ids[0]}'")
+        # ids may be UUIDs or graph-computed deterministic strings that can
+        # contain single quotes, so build the predicate with SQL escaping
+        # (mirrors delete_data_points). Python's tuple repr double-quotes such
+        # strings and LanceDB >= 0.38 parses double quotes as column names.
+        escaped_ids = [str(id_).replace("'", "''") for id_ in data_point_ids]
+        if len(escaped_ids) == 1:
+            where_clause = f"id = '{escaped_ids[0]}'"
         else:
-            query = collection.query().where(f"id IN {tuple(data_point_ids)}")
+            id_list = ", ".join(f"'{id_}'" for id_ in escaped_ids)
+            where_clause = f"id IN ({id_list})"
+        query = collection.query().where(where_clause)
 
         # Convert query results to list format
         results_list = await query.to_list()
