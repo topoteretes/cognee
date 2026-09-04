@@ -128,7 +128,15 @@ else
     echo "Direct mode: Using local cognee instance"
 fi
 
-echo "calling cognee-mcp" "${ARGS[@]}"
+# Echo the launch command with the API token redacted: the container log is
+# readable by anyone with docker access, and the token is a long-lived credential.
+LOG_ARGS=("${ARGS[@]}")
+for i in "${!LOG_ARGS[@]}"; do
+    if [ "${LOG_ARGS[$i]}" = "--api-token" ] && [ $((i + 1)) -lt ${#LOG_ARGS[@]} ]; then
+        LOG_ARGS[$((i + 1))]="<redacted>"
+    fi
+done
+echo "calling cognee-mcp" "${LOG_ARGS[@]}"
 
 if [ "$DEBUG" = "true" ] && { [ "$ENV" = "dev" ] || [ "$ENV" = "local" ]; }; then
     DEBUG_PORT=${DEBUG_PORT:-5678}
