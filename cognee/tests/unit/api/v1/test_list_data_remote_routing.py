@@ -73,14 +73,19 @@ async def test_list_data_routes_to_remote_and_returns_local_shaped_rows(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_list_data_remote_keeps_unknown_server_fields(monkeypatch):
+async def test_list_data_remote_rows_are_the_shared_wire_model(monkeypatch):
+    """Remote rows round-trip through the same DTO the server serializes with —
+    one model on both sides, not a client-side copy of it."""
+    from cognee.api.v1.datasets.dto import DataDTO
+
     data_id, dataset_id = uuid4(), uuid4()
-    row = {**_server_row(data_id, dataset_id), "tokenCount": 42}
-    monkeypatch.setattr(state_mod, "_remote_client", _StubClient([row]))
+    monkeypatch.setattr(
+        state_mod, "_remote_client", _StubClient([_server_row(data_id, dataset_id)])
+    )
 
     rows = await datasets_mod.datasets.list_data(dataset_id)
 
-    assert rows[0].tokenCount == 42
+    assert isinstance(rows[0], DataDTO)
 
 
 class _FakeResponse:
