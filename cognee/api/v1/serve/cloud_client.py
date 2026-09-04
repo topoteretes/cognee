@@ -111,14 +111,14 @@ class CloudClient:
         if kwargs.get("import_mode") is not None:
             form.add_field("import_mode", str(kwargs["import_mode"]))
 
-        # Code repos travel as spec strings in the 'repositories' form field —
+        # Code repos travel as spec strings in the 'raw_data' form field —
         # the server clones git URLs itself and reads local paths from its own
         # filesystem (only useful when it shares the caller's filesystem).
         # Nothing is uploaded.
         if content_type_kw == "code":
             specs = data if isinstance(data, list) else [data]
             for spec in specs:
-                form.add_field("repositories", str(spec))
+                form.add_field("raw_data", str(spec))
             if kwargs.get("index_vectors"):
                 form.add_field("index_vectors", "true")
         # Skills are local SKILL.md files. The server's add_skills() reads

@@ -116,13 +116,13 @@ def pair_labels_with_data(
     item_count = len(data or [])
     if has_labels and len(normalized_labels) != item_count:
         raise LabelCountMismatchError(
-            f"Provide one label per uploaded file: got {len(normalized_labels)} labels "
-            f"for {item_count} files."
+            f"Provide one label per data item (uploads first, then raw_data entries): "
+            f"got {len(normalized_labels)} labels for {item_count} items."
         )
     if has_metadata and len(normalized_metadata) != item_count:
         raise ExternalMetadataCountMismatchError(
-            f"Provide one external_metadata entry per uploaded file: got "
-            f"{len(normalized_metadata)} entries for {item_count} files."
+            f"Provide one external_metadata entry per data item (uploads first, then "
+            f"raw_data entries): got {len(normalized_metadata)} entries for {item_count} items."
         )
 
     if not has_labels:

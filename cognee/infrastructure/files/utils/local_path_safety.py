@@ -18,7 +18,10 @@ def get_allowed_local_file_roots() -> tuple[Path, ...]:
     # Cognee's own storage directories are always allowed: internal reads of
     # stored data (open_data_file) go through the same allowlist, and a
     # restrictive COGNEE_ALLOWED_LOCAL_FILE_ROOTS must not lock cognee out of
-    # its own data, system, cache, and log roots.
+    # its own data, system, cache, log, and repo-clone roots. The clones root
+    # holds repositories cognee cloned on request; its document files (README,
+    # docs) are ingested by path exactly like a local project's, so the same
+    # allowlist check they pass through has to admit it.
     base_config = get_base_config()
     root_values.extend(
         [
@@ -26,6 +29,7 @@ def get_allowed_local_file_roots() -> tuple[Path, ...]:
             base_config.system_root_directory,
             base_config.cache_root_directory,
             base_config.logs_root_directory,
+            base_config.repos_root_directory,
         ]
     )
 
