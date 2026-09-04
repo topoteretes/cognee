@@ -5,9 +5,10 @@ GitHub/GitLab repository URL — and joins the uploads as a single list, uploads
 first. The router does no interpretation of its own: the strings reach add()
 exactly as an SDK caller would pass them, and labels/external_metadata pair
 with the combined list. Empty entries (Swagger UI submits untouched array items
-as "") are dropped. A request with neither uploads nor raw_data is a 400, and
-remember rejects raw_data together with any content_type because those paths
-never run string inputs through add().
+as "") are dropped. A request with neither uploads nor raw_data is a 400. With
+content_type="code" the raw_data entries are the repository specs; remember
+rejects raw_data together with content_type="skills" or "cogx-archive" because
+those paths never run string inputs through add().
 """
 
 import uuid
@@ -199,7 +200,25 @@ def test_remember_combines_uploads_and_raw_data_uploads_first(client):
         assert sent[1] == REPO_URL
 
 
-@pytest.mark.parametrize("content_type", ["code", "skills", "cogx-archive"])
+def test_remember_code_content_type_takes_repo_specs_from_raw_data(client):
+    with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
+        mock_remember.return_value = remember_completed()
+
+        response = client.post(
+            "/api/v1/remember",
+            data={
+                "datasetName": "test_dataset",
+                "content_type": "code",
+                "raw_data": [REPO_URL, "", "/srv/other/repo"],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert mock_remember.call_args.args[0] == [REPO_URL, "/srv/other/repo"]
+        assert mock_remember.call_args.kwargs["content_type"] == "code"
+
+
+@pytest.mark.parametrize("content_type", ["skills", "cogx-archive"])
 def test_remember_rejects_raw_data_with_content_type(client, content_type):
     with patch.object(remember_pkg, "remember", new_callable=AsyncMock) as mock_remember:
         response = client.post(
@@ -213,7 +232,7 @@ def test_remember_rejects_raw_data_with_content_type(client, content_type):
 
         assert response.status_code == 400
         detail = response.json()["detail"]
-        assert "raw_data" in detail and "repositories" in detail
+        assert "raw_data" in detail and content_type in detail
         mock_remember.assert_not_awaited()
 
 
