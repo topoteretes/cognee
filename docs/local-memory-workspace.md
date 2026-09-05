@@ -106,6 +106,10 @@ access to memory, not a transfer of the original account or provider tokens.
 ## Review and promote memory
 
 1. Choose the source dataset and a persisted document in Promote memory.
+   With a team selected, your own personal-workspace datasets are also shown as
+   sources when you have direct Read and Share. This explicit promotion path
+   does not make personal memory available to normal team searches. Other
+   people's personal datasets and transfers between unrelated teams are excluded.
 2. Choose Agent → user or User → team, a destination and a reason.
 3. Preview the saved document. The API checks source Read and Share, destination
    Write, and the agent-parent or team relationship.

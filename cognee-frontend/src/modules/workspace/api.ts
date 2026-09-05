@@ -7,6 +7,7 @@ export interface WorkspaceContext {
   user: { id: string; email: string; tenant_id: string | null; is_agent: boolean };
   teams: Team[];
   datasets: Dataset[];
+  promotion_sources?: Dataset[];
   providers: { provider: string; configured: boolean; missing_settings: string[] }[];
 }
 export interface Principal {
@@ -32,7 +33,7 @@ export function describeError(error: unknown): string {
 }
 
 export async function previewDocument(datasetId: string, documentId: string) {
-  const response = await localFetch(`/v1/datasets/${datasetId}/data/${documentId}/raw`);
+  const response = await localFetch(`/v1/promote/sources/${datasetId}/data/${documentId}/raw`);
   const limit = 64 * 1024 * 1024;
   const reader = response.body?.getReader();
   if (!reader) throw new Error("The server returned no document content");

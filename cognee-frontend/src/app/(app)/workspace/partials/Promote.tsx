@@ -22,7 +22,7 @@ export default function Promote({ context, refresh }: { context: WorkspaceContex
   useEffect(() => {
     let cancelled = false;
     setDocuments([]); setDocument("");
-    if (source) request<Document[]>(`/v1/datasets/${source}/data`)
+    if (source) request<Document[]>(`/v1/promote/sources/${source}/data`)
       .then((rows) => { if (!cancelled) setDocuments(rows); })
       .catch((error) => { if (!cancelled) setError(describeError(error)); });
     return () => { cancelled = true; };
@@ -39,10 +39,10 @@ export default function Promote({ context, refresh }: { context: WorkspaceContex
     finally { setBusy(false); }
   }
   return <section className={`${styles.card} ${styles.stack}`}><h2>Review a document before sharing it more widely</h2>
-    <p>Agent → user copies a document into the agent owner’s dataset. User → team copies it into a dataset already shared with the team. Each copy requires source read and share access, plus destination write access. The original stays in place.</p>
+    <p>Agent → user copies a document into the agent owner’s dataset. User → team copies it into a dataset already shared with the team. Each copy requires source read and share access, plus destination write access. The original stays in place. With a team selected, your own personal documents are also available as promotion sources; normal team searches stay scoped to that team.</p>
     {error && <div role="alert" className={styles.error}>{error}</div>}
     <div className={styles.row}>
-      <label className={styles.field}>Source dataset<select disabled={busy} value={source} onChange={(e) => setSource(e.target.value)}><option value="">Select source</option>{context.datasets.filter((row) => row.permissions.includes("read") && row.permissions.includes("share")).map((row) => <option key={row.id} value={row.id}>{row.name} · {row.id.slice(0, 8)}</option>)}</select></label>
+      <label className={styles.field}>Source dataset<select disabled={busy} value={source} onChange={(e) => setSource(e.target.value)}><option value="">Select source</option>{(context.promotion_sources ?? context.datasets).filter((row) => row.permissions.includes("read") && row.permissions.includes("share")).map((row) => <option key={row.id} value={row.id}>{row.name} · {row.id.slice(0, 8)}</option>)}</select></label>
       <label className={styles.field}>Saved document<select disabled={busy} value={document} onChange={(e) => setDocument(e.target.value)}><option value="">Select document</option>{documents.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
     </div>
     <div className={styles.row}>

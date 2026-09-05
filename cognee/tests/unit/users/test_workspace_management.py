@@ -212,3 +212,63 @@ async def test_toggling_one_permission_preserves_other_changes(state):
     listing = await dataset_access(state.owner, state.dataset.id)
     member = next(row for row in listing["principals"] if row["id"] == state.member.id)
     assert member["effective"] == ["write"]
+
+
+@pytest.mark.asyncio
+async def test_personal_promotion_sources_do_not_expand_normal_team_visibility(state, tmp_path):
+    from fastapi.responses import JSONResponse
+
+    from cognee.api.v1.promote.routers import get_promote_router
+    from cognee.modules.data.models import Data
+
+    personal = Dataset(
+        id=uuid4(), name="My personal notes", owner_id=state.owner.id, tenant_id=None
+    )
+    foreign = Dataset(
+        id=uuid4(), name="Someone else's notes", owner_id=state.stranger.id, tenant_id=None
+    )
+    path = tmp_path / "lesson.txt"
+    path.write_text("Reviewed personal lesson")
+    document = Data(
+        id=uuid4(),
+        dataset_id=personal.id,
+        owner_id=state.owner.id,
+        name="Lesson",
+        raw_data_location=path.as_uri(),
+    )
+    async with state.engine.get_async_session() as session:
+        session.add_all([personal, foreign, document])
+        await session.flush()
+        for dataset in (personal, foreign):
+            for permission in state.permissions:
+                if permission.name in ("read", "share"):
+                    session.add(
+                        ACL(
+                            principal_id=state.owner.id,
+                            dataset_id=dataset.id,
+                            permission_id=permission.id,
+                        )
+                    )
+        await session.commit()
+    app = FastAPI()
+    app.include_router(get_workspace_router(), prefix="/workspace")
+    app.include_router(get_promote_router(), prefix="/promote")
+    app.dependency_overrides[get_authenticated_user] = lambda: state.owner
+    app.add_exception_handler(
+        PermissionDeniedError,
+        lambda request, error: JSONResponse(status_code=403, content={"detail": "Denied"}),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        context = (await client.get("/workspace/context")).json()
+        assert str(personal.id) not in {row["id"] for row in context["datasets"]}
+        sources = {row["id"] for row in context["promotion_sources"]}
+        assert str(personal.id) in sources and str(foreign.id) not in sources
+        listed = await client.get(f"/promote/sources/{personal.id}/data")
+        assert listed.status_code == 200
+        assert listed.json() == [{"id": str(document.id), "name": "Lesson"}]
+        raw = await client.get(f"/promote/sources/{personal.id}/data/{document.id}/raw")
+        assert raw.status_code == 200 and raw.text == path.read_text()
+        denied = await client.get(f"/promote/sources/{foreign.id}/data")
+        assert denied.status_code == 403

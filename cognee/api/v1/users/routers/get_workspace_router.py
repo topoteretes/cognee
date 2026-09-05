@@ -16,7 +16,10 @@ from cognee.modules.integrations.slack.slack_settings import slack_settings
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import Tenant, User, UserTenant
 from cognee.modules.users.models.team_invitation import TeamInvitation
-from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+from cognee.modules.users.permissions.methods import (
+    get_all_user_permission_datasets,
+    get_principal_datasets,
+)
 from cognee.modules.users.permissions.workspace_access import dataset_access, set_direct_access
 from cognee.modules.users.tenants.invitations import accept_invitation, create_invitation
 
@@ -80,6 +83,22 @@ def get_workspace_router() -> APIRouter:
                 key = str(dataset.id)
                 permissions.setdefault(key, []).append(permission)
                 datasets[key] = {"id": key, "name": dataset.name, "owner_id": str(dataset.owner_id)}
+        promotion_sources = dict(datasets)
+        if user.parent_user_id is None and user.tenant_id:
+            personal_readable = {
+                dataset.id: dataset
+                for dataset in await get_principal_datasets(user, "read")
+                if dataset.owner_id == user.id and dataset.tenant_id is None
+            }
+            for dataset in await get_principal_datasets(user, "share"):
+                if dataset.id in personal_readable:
+                    key = str(dataset.id)
+                    promotion_sources[key] = {
+                        "id": key,
+                        "name": dataset.name + " (Personal)",
+                        "owner_id": str(dataset.owner_id),
+                    }
+                    permissions[key] = ["read", "share"]
         providers = []
         try:
             encrypt_credentials({})
@@ -135,6 +154,10 @@ def get_workspace_router() -> APIRouter:
             ],
             "datasets": [
                 {**dataset, "permissions": permissions[key]} for key, dataset in datasets.items()
+            ],
+            "promotion_sources": [
+                {**dataset, "permissions": permissions[key]}
+                for key, dataset in promotion_sources.items()
             ],
             "providers": providers,
         }
