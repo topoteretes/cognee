@@ -17,7 +17,6 @@ from cognee.modules.users.methods import get_authenticated_user, get_authenticat
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
@@ -73,8 +72,9 @@ class CognifyPayloadDTO(InDTO):
         examples=[{}],
         description=(
             "JSON schema describing a custom graph model for entity extraction, including a "
-            "top-level 'title' key. When omitted or {}, the default KnowledgeGraph model is "
-            "used — a restrictive schema here can produce an empty graph."
+            "top-level 'title' key. When omitted or {}, the configured graph model is used, "
+            "falling back to KnowledgeGraph — a restrictive schema here can produce an empty "
+            "graph."
         ),
     )
     custom_prompt: Optional[str] = Field(
@@ -153,7 +153,7 @@ def get_cognify_router() -> APIRouter:
         - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
         - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
-        - **graph_model** (Optional[dict]): JSON schema describing a custom graph model for entity extraction. When omitted or {}, the default KnowledgeGraph model is used.
+        - **graph_model** (Optional[dict]): JSON schema describing a custom graph model for entity extraction. When omitted or {}, the configured graph model is used, falling back to KnowledgeGraph.
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk. If omitted, Cognee chooses
           a size from the configured LLM and embedding limits.
@@ -233,10 +233,9 @@ def get_cognify_router() -> APIRouter:
             graph_model_schema = payload.graph_model
             custom_prompt = payload.custom_prompt
 
-            if not graph_model_schema:
-                graph_model = KnowledgeGraph
-            else:
-                graph_model = graph_schema_to_graph_model(graph_model_schema)
+            graph_model = (
+                graph_schema_to_graph_model(graph_model_schema) if graph_model_schema else None
+            )
 
             cognify_run = await cognee_cognify(
                 datasets,
