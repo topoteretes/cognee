@@ -55,6 +55,47 @@ async def test_get_context_success(mock_vector_engine):
 
 
 @pytest.mark.asyncio
+async def test_get_completion_from_context_includes_score(mock_vector_engine):
+    """Test that get_completion_from_context attaches each chunk's score to its payload."""
+    mock_result1 = MagicMock()
+    mock_result1.payload = {"text": "Steve Rodger", "chunk_index": 0}
+    mock_result1.score = 0.12
+    mock_result2 = MagicMock()
+    mock_result2.payload = {"text": "Mike Broski", "chunk_index": 1}
+    mock_result2.score = 0.34
+
+    mock_vector_engine.search.return_value = [mock_result1, mock_result2]
+
+    retriever = ChunksRetriever(top_k=5)
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=_make_unified_mock(mock_vector_engine),
+    ):
+        retrieved_objects = await retriever.get_retrieved_objects("test query")
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=retrieved_objects, context=None
+        )
+
+    assert completion[0]["score"] == 0.12
+    assert completion[0]["text"] == "Steve Rodger"
+    assert completion[1]["score"] == 0.34
+    assert completion[1]["text"] == "Mike Broski"
+
+
+@pytest.mark.asyncio
+async def test_get_completion_from_context_empty_returns_empty_list():
+    """Test that get_completion_from_context returns [] when there are no retrieved objects."""
+    retriever = ChunksRetriever()
+
+    completion = await retriever.get_completion_from_context(
+        query="test query", retrieved_objects=[], context=None
+    )
+
+    assert completion == []
+
+
+@pytest.mark.asyncio
 async def test_get_context_collection_not_found_error(mock_vector_engine):
     """Test that CollectionNotFoundError is converted to NoDataError."""
     mock_vector_engine.search.side_effect = CollectionNotFoundError("Collection not found")
@@ -200,3 +241,19 @@ async def test_get_context_empty_payload(mock_vector_engine):
         )
 
     assert context == ""
+
+
+@pytest.mark.asyncio
+async def test_get_completion_from_context_none_payload_still_returns_score():
+    """A ScoredResult with payload=None yields a dict carrying only the score, not a TypeError."""
+    result = MagicMock()
+    result.payload = None
+    result.score = 0.42
+
+    retriever = ChunksRetriever()
+
+    completion = await retriever.get_completion_from_context(
+        query="test query", retrieved_objects=[result], context=None
+    )
+
+    assert completion == [{"score": 0.42}]

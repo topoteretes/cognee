@@ -210,3 +210,46 @@ def test_only_context_prompt_format_without_a_prompt_keeps_text_readable():
     assert items[0].text == "chunk-a\n---\nchunk-b"
     assert not items[0].text.startswith("{")
     assert items[0].raw["session_context"] == "## Active session guidance\n- be terse"
+
+
+def test_chunk_result_surfaces_retriever_score():
+    """The ``score`` ChunksRetriever attaches to each payload lands on
+    ``SearchResultItem.score`` so callers can rank/fuse across retrievers."""
+    payload = SearchResultPayload(
+        completion=[
+            {"id": "chunk-1", "text": "closest", "score": 0.12},
+            {"id": "chunk-2", "text": "farther", "score": 0.34},
+        ],
+        search_type=SearchType.CHUNKS,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert [item.score for item in items] == [0.12, 0.34]
+    # raw still carries the score alongside the original payload fields.
+    assert items[0].raw["score"] == 0.12
+
+
+def test_summary_result_surfaces_retriever_score():
+    """SUMMARIES payloads carry the same ``score`` key and normalize the same way."""
+    payload = SearchResultPayload(
+        completion=[{"text": "A summary.", "made_from": "chunk-1", "score": 0.2}],
+        search_type=SearchType.SUMMARIES,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert items[0].kind == SearchResultKind.SUMMARY
+    assert items[0].score == 0.2
+
+
+def test_chunk_result_without_score_has_none_score():
+    """Payloads that never carried a score (legacy or non-numeric) stay ``None``."""
+    payload = SearchResultPayload(
+        completion=[{"text": "no score"}, {"text": "bad score", "score": "0.5"}],
+        search_type=SearchType.CHUNKS,
+    )
+
+    items = normalize_search_payload(payload)
+
+    assert [item.score for item in items] == [None, None]

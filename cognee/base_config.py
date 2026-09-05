@@ -24,6 +24,14 @@ class BaseConfig(BaseSettings):
     system_root_directory: str = get_absolute_path(".cognee_system")
     cache_root_directory: str = get_absolute_path(".cognee_cache")
     logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", str(Path.home() / ".cognee" / "logs"))
+    # Where remote git repositories are shallow-cloned for code-graph ingestion:
+    # remember(content_type="code") and GitHub/GitLab repository URLs passed to
+    # add(). Always a local directory, even with S3 storage -- git writes a
+    # working tree -- and one of the always-allowed local file roots
+    # (local_path_safety) so a clone's documents can be ingested by path.
+    repos_root_directory: str = os.getenv(
+        "COGNEE_REPOS_DIR", str(Path.home() / ".cognee" / "repos")
+    )
     monitoring_tool: object = Observer.NONE
     # Default blend weight for the learned feedback signal during graph search.
     # Opt-in by default to preserve existing retrieval behavior.
@@ -152,6 +160,7 @@ class BaseConfig(BaseSettings):
             "monitoring_tool": self.monitoring_tool,
             "cache_root_directory": self.cache_root_directory,
             "logs_root_directory": self.logs_root_directory,
+            "repos_root_directory": self.repos_root_directory,
         }
 
 

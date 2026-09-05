@@ -24,9 +24,9 @@ def read_export_file(path: Union[str, Path]) -> str:
 
     Export paths can arrive from outside the SDK (CLI arguments, callers
     forwarding request data), so they take the same containment check as
-    ingestion's local-file reads: symlink-safe resolution against
-    ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` (default: cwd, tmp, and cognee's own
-    storage roots) instead of dereferencing an arbitrary path.
+    ingestion's local-file reads: symlink-safe resolution, confined to
+    ``COGNEE_ALLOWED_LOCAL_FILE_ROOTS`` when that allowlist is set (unset by
+    default, meaning any local path).
     """
     from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
 

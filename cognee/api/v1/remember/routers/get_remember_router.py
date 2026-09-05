@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, UploadFile as UF, Depends
+from fastapi import Form, File, Depends
 from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
@@ -21,12 +21,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.exceptions import CogneeApiError
+from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 
 logger = get_logger()
-
-# NOTE: Needed because of: https://github.com/fastapi/fastapi/discussions/14975
-#       Once issue is resolved on Swagger side it can be removed.
-UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"})]
 
 # Swagger UI prefills newly added array items from the ITEM-level example;
 # without one it inserts the literal "string". An empty item example keeps
@@ -117,7 +114,24 @@ def get_remember_router() -> APIRouter:
     @router.post("", response_model=dict)
     @log_usage(function_name="POST /v1/remember", log_type="api_endpoint")
     async def remember(
-        data: List[UploadFile] = File(default=None),
+        data: List[OptionalUploadFile] = File(default=None),
+        raw_data: Optional[List[EmptyExampleStr]] = Form(
+            default=None,
+            examples=[[]],
+            description=(
+                "Data given as strings instead of uploads, one entry each: raw text to "
+                "remember, a local file or directory path on the server's filesystem "
+                "(requires ACCEPT_LOCAL_FILE_PATH), a web URL to fetch (requires "
+                "ALLOW_HTTP_REQUESTS), or a GitHub/GitLab repository URL, which is "
+                "shallow-cloned and indexed as a code graph. Combined with 'data': "
+                "uploads come first, then these entries; labels and external_metadata "
+                "pair with that combined order. Empty entries are ignored. With "
+                "content_type='code' every entry is a repository spec (git URL or "
+                "server-local repo path) and one code graph is built per entry; "
+                "rejected with content_type='skills' or 'cogx-archive', which take "
+                "file uploads."
+            ),
+        ),
         labels: Optional[str] = Form(
             default=None,
             examples=[""],
@@ -168,7 +182,7 @@ def get_remember_router() -> APIRouter:
         ),
         node_set: Optional[List[EmptyExampleStr]] = Form(
             default=None,
-            examples=[None],
+            examples=[[]],
             description=(
                 "Tags the ingested data with named node sets (e.g. per-agent or per-project "
                 "groups). Extracted graph nodes are linked to these sets, and recall/search "
@@ -243,8 +257,9 @@ def get_remember_router() -> APIRouter:
             examples=[""],
             description=(
                 "Set to 'skills' to ingest SKILL.md files as dataset-scoped Skill nodes, "
-                "or 'code' to index whole code repositories (pass them via 'repositories') "
-                "as an architectural code graph through the enola-backed pipeline. "
+                "or 'code' to index whole code repositories (pass git URLs or server-local "
+                "repo paths via 'raw_data') as an architectural code graph through the "
+                "enola-backed pipeline. "
                 "Leave empty for normal ingestion."
             ),
         ),
@@ -273,18 +288,6 @@ def get_remember_router() -> APIRouter:
                 "(defaults to 'skill')."
             ),
         ),
-        repositories: Optional[List[EmptyExampleStr]] = Form(
-            default=None,
-            examples=[None],
-            description=(
-                "content_type='code' only: repository specs to index — remote git URLs "
-                "(cloned server-side, shallow) or local directory paths on the server's "
-                "filesystem (requires ACCEPT_LOCAL_FILE_PATH; useful when the server "
-                "shares the caller's filesystem). One code graph is built per entry. "
-                "Combine with run_in_background=true for large repositories and poll "
-                "GET /v1/datasets/status?pipeline=code_graph_pipeline."
-            ),
-        ),
         index_vectors: Optional[bool] = Form(
             default=False,
             description=(
@@ -305,6 +308,13 @@ def get_remember_router() -> APIRouter:
 
         ## Request Parameters
         - **data** (List[UploadFile]): Files to upload and process.
+        - **raw_data** (Optional[List[str]]): String inputs, one entry each: raw text, a
+          local file or directory path on the server (requires ACCEPT_LOCAL_FILE_PATH), a
+          web URL fetched as a page (requires ALLOW_HTTP_REQUESTS), or a GitHub/GitLab
+          repository URL, shallow-cloned and indexed as a code graph. Uploads come first,
+          then raw_data entries; labels and external_metadata pair with that combined
+          order. Normal ingestion only — rejected with content_type. At least one of data
+          or raw_data is required for normal ingestion.
         - **labels** (Optional[str]): JSON array of per-file labels, e.g.
           ["finance", "people", ""], paired positionally with the uploaded files (one
           entry per file; an empty entry skips that file). Stored on each file's data
@@ -330,11 +340,10 @@ def get_remember_router() -> APIRouter:
         - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
         - **graph_model** (Optional[str]): JSON-serialised graph model schema (same dict format accepted by the cognify endpoint).
         - **content_type** (Optional[str]): Set to "skills" to ingest SKILL.md files as
-          Skill nodes, or "code" to index whole repositories (see repositories);
+          Skill nodes, or "code" to index whole repositories — each raw_data entry is
+          then a git URL or server-local repo path and one code graph is built per
+          entry (poll progress via GET /v1/datasets/status?pipeline=code_graph_pipeline);
           omit for normal ingestion.
-        - **repositories** (Optional[List[str]]): content_type="code" only — git URLs or
-          server-local repo paths to index as code graphs, one graph per entry. Poll
-          progress via GET /v1/datasets/status?pipeline=code_graph_pipeline.
         - **index_vectors** (Optional[bool]): content_type="code" only — also embed the
           extracted code facts for semantic retrievers (default false, no LLM/embedding
           calls otherwise).
@@ -352,11 +361,15 @@ def get_remember_router() -> APIRouter:
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided, unsupported
           content_type, invalid graph_model JSON/schema, or invalid code-ingestion
-          combination (missing repositories, file uploads or session_id with
-          content_type="code", repositories/index_vectors without it, or local repo
-          paths while ACCEPT_LOCAL_FILE_PATH=false)
+          combination (no raw_data repository specs, file uploads or session_id with
+          content_type="code", index_vectors without it, or local repo paths while
+          ACCEPT_LOCAL_FILE_PATH=false)
         - **409 Conflict**: Error during processing
         """
+        # Swagger UI submits an untouched file list as one blank part; treat it
+        # as "no uploads" (and reject its "string" placeholder with a clear 400).
+        data = drop_blank_uploads(data)
+
         send_telemetry(
             "Remember API Endpoint Invoked",
             user,
@@ -372,6 +385,28 @@ def get_remember_router() -> APIRouter:
                 status_code=400,
                 detail="Either datasetId or datasetName must be provided.",
             )
+
+        # String inputs join the uploads as one item list, uploads first. Drop
+        # empty entries — Swagger UI submits untouched array items as "". For
+        # content_type='code' the entries are the repository specs and are
+        # consumed by the code branch below instead. The skills and archive
+        # paths never run string inputs through add(), so they would be
+        # silently dropped there — reject instead.
+        raw_items = [item.strip() for item in (raw_data or []) if item and item.strip()]
+        if raw_items and content_type and content_type != "code":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "raw_data is only supported for normal ingestion and content_type='code' "
+                    "(repository paths or git URLs) — 'skills' and 'cogx-archive' take file "
+                    "uploads."
+                ),
+            )
+        # None (not []) when nothing was sent: the skills and archive paths
+        # below distinguish "no uploads" by falsiness either way, and
+        # remember() sees the same value it always did.
+        if content_type != "code":
+            data = [*(data or []), *raw_items] or None
 
         # Invalid JSON raises a CogneeApiError (400) via the global handler.
         parsed_labels = parse_labels(labels)
@@ -422,14 +457,6 @@ def get_remember_router() -> APIRouter:
                 ),
             )
 
-        # Drop empty entries — Swagger UI submits untouched array items as "".
-        repo_specs = [spec.strip() for spec in (repositories or []) if spec and spec.strip()]
-
-        if repo_specs and content_type != "code":
-            raise HTTPException(
-                status_code=400,
-                detail="repositories is only supported with content_type='code'.",
-            )
         if index_vectors and content_type != "code":
             raise HTTPException(
                 status_code=400,
@@ -450,16 +477,18 @@ def get_remember_router() -> APIRouter:
                     status_code=400,
                     detail=(
                         "content_type='code' does not accept file uploads — pass repository "
-                        "paths or git URLs via 'repositories'. To ingest individual code "
+                        "paths or git URLs via 'raw_data'. To ingest individual code "
                         "files, upload them under their real filename without content_type."
                     ),
                 )
+            # For code, the raw_data entries are the repository specs.
+            repo_specs = raw_items
             if not repo_specs:
                 raise HTTPException(
                     status_code=400,
                     detail=(
                         "content_type='code' requires at least one repository path or "
-                        "git URL in 'repositories'."
+                        "git URL in 'raw_data'."
                     ),
                 )
 
@@ -482,6 +511,14 @@ def get_remember_router() -> APIRouter:
                         "(ACCEPT_LOCAL_FILE_PATH=false) — pass a git URL instead."
                     ),
                 )
+
+        # After the field-specific checks above, so a misused code-only field
+        # is reported as such rather than as "nothing to ingest".
+        if not content_type and not data:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide at least one file in 'data' or one entry in 'raw_data'.",
+            )
 
         from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
