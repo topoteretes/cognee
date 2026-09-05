@@ -523,12 +523,23 @@ async def recall(
             span.set_attribute(COGNEE_SESSION_ID, session_id)
         span.set_attribute("cognee.recall.top_k", top_k)
 
-        from cognee.api.v1.serve.state import get_remote_client
+        from cognee.api.v1.serve.state import UNSET, get_remote_client
 
         forward_scope = sources if _scope_should_forward_resolved(scope) else scope
 
         client = get_remote_client()
         if client is not None:
+            # The server's search_type is tri-state: a value pins the
+            # strategy, an explicit null opts into server-side auto-routing
+            # (and session-scope reads), and an omitted key falls back to
+            # GRAPH_COMPLETION. Mirror the local semantics: auto_route=True
+            # with no query_type must send null, not omit the key.
+            if query_type is not None:
+                remote_query_type = query_type
+            elif auto_route:
+                remote_query_type = None
+            else:
+                remote_query_type = UNSET
             # A model class cannot cross the HTTP boundary — send its JSON
             # Schema instead; the server rebuilds a validation model from it
             # and results come back with the validated dict in `structured`.
@@ -536,7 +547,7 @@ async def recall(
             remote_response_model = (retriever_specific_config or {}).get("response_model")
             results = await client.recall(
                 query_text,
-                query_type,
+                remote_query_type,
                 datasets=datasets,
                 dataset_ids=dataset_ids,
                 top_k=top_k,

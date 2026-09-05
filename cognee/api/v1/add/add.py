@@ -211,11 +211,27 @@ async def add(
 
     """
     # Route to remote instance if connected via serve()
-    from cognee.api.v1.serve.state import get_remote_client
+    from cognee.api.v1.serve.state import get_remote_client, warn_unsupported_remote_params
 
     client = get_remote_client()
     if client is not None:
-        result = await client.add(data, dataset_name)
+        warn_unsupported_remote_params(
+            "add",
+            user=user,
+            preferred_loaders=preferred_loaders,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+            llm_config=llm_config,
+            embedding_config=embedding_config,
+            importance_weight=importance_weight if importance_weight not in (None, 0.5) else None,
+        )
+        result = await client.add(
+            data,
+            dataset_name,
+            dataset_id=dataset_id,
+            node_set=node_set,
+            run_in_background=run_in_background,
+        )
         # Wrap in a simple namespace so callers expecting .model_dump() still work
         from types import SimpleNamespace
 

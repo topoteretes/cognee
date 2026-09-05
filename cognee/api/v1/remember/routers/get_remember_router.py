@@ -190,6 +190,16 @@ def get_remember_router() -> APIRouter:
                 "to skip tagging."
             ),
         ),
+        self_improvement: Optional[bool] = Form(
+            default=True,
+            description=(
+                "If true (default), run improve() after the data lands — for a "
+                "session_id write this bridges the session into the permanent graph in "
+                "the background; for a direct add+cognify it enriches the graph. Set "
+                "false to store only, e.g. when the caller batches its own improve() at "
+                "session end."
+            ),
+        ),
         run_in_background: Optional[bool] = Form(
             default=False,
             description=(
@@ -323,6 +333,9 @@ def get_remember_router() -> APIRouter:
           background; the session is tracked in the sessions dashboard. When omitted,
           data is ingested directly via add + cognify.
         - **node_set** (Optional[List[str]]): Node identifiers for graph organisation.
+        - **self_improvement** (Optional[bool]): Run improve() after storing (default: True).
+          For session writes this is the background session-to-graph bridge; set false
+          to store only.
         - **run_in_background** (Optional[bool]): Run the cognify step asynchronously (default: False).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction.
         - **chunk_size** (Optional[int]): Maximum tokens per chunk (default: 4096).
@@ -567,6 +580,7 @@ def get_remember_router() -> APIRouter:
                 dataset_id=datasetId if datasetId else None,
                 node_set=[tag for tag in (node_set or []) if tag] or None,
                 run_in_background=run_in_background or False,
+                self_improvement=True if self_improvement is None else bool(self_improvement),
                 custom_prompt=custom_prompt or None,
                 chunk_size=chunk_size,
                 chunks_per_batch=chunks_per_batch,
