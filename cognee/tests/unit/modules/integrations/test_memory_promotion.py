@@ -254,9 +254,12 @@ async def test_concurrent_promotion_inserts_once_and_never_overwrites_edits(tmp_
 
 
 @pytest.mark.asyncio
-async def test_real_permissions_and_storage_agent_to_user_to_team(tmp_path, monkeypatch):
+@pytest.mark.parametrize("personal_workspace", [False, True])
+async def test_real_permissions_and_storage_agent_to_user_to_team(
+    tmp_path, monkeypatch, personal_workspace
+):
     """Exercise public promotion with real ACL joins, SQLite and local files."""
-    from sqlalchemy import func, select
+    from sqlalchemy import func, select, update
 
     from cognee.base_config import get_base_config
     from cognee.infrastructure.databases.relational import (
@@ -300,6 +303,8 @@ async def test_real_permissions_and_storage_agent_to_user_to_team(tmp_path, monk
         for name, owner in [("agent", agent.id), ("user", parent.id), ("team", parent.id)]
     ]
     source, personal, shared = datasets
+    if personal_workspace:
+        source.tenant_id = personal.tenant_id = parent.tenant_id = agent.tenant_id = None
     permissions = {name: Permission(id=uuid4(), name=name) for name in ("read", "share", "write")}
 
     def acl(principal, dataset, name):
@@ -314,7 +319,7 @@ async def test_real_permissions_and_storage_agent_to_user_to_team(tmp_path, monk
         id=uuid4(),
         dataset_id=source.id,
         owner_id=agent.id,
-        tenant_id=tenant.id,
+        tenant_id=source.tenant_id,
         name="lesson",
         extension="txt",
         mime_type="text/plain",
@@ -359,6 +364,12 @@ async def test_real_permissions_and_storage_agent_to_user_to_team(tmp_path, monk
         first = await m.promote(original.id, **kwargs)
         assert first.status == "copied"
         assert (await m.promote(original.id, **kwargs)).status == "already_promoted"
+        if personal_workspace:
+            async with engine.get_async_session() as session:
+                await session.execute(
+                    update(User).where(User.id == parent.id).values(tenant_id=tenant.id)
+                )
+                await session.commit()
         effective = await authorized_get_principal_datasets(parent.id, "write", parent.id)
         assert shared.id in {dataset.id for dataset in effective}
         second = await m.promote(
@@ -494,3 +505,26 @@ async def test_http_requires_preview_revision_and_rechecks_permissions(state):
         assert copied.status_code == 200
         assert copied.json()["status"] == "copied"
         assert len(state.auth.await_args_list) == 9  # preview, stale revision, confirmed copy
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["own_personal", "foreign_personal", "other_team", "user_level"])
+async def test_personal_source_exception_is_limited_to_explicit_own_team_promotion(
+    state, monkeypatch, kind
+):
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    state.actor.parent_user_id = None
+    state.actor.tenant_id = uuid4()
+    state.source.tenant_id = uuid4() if kind == "other_team" else None
+    state.source.owner_id = uuid4() if kind == "foreign_personal" else state.actor.id
+    monkeypatch.setattr(
+        m, "get_authorized_dataset", AsyncMock(side_effect=PermissionDeniedError("tenant scope"))
+    )
+    monkeypatch.setattr(m, "get_principal_datasets", AsyncMock(return_value=[state.source]))
+    args = (state.actor, state.source.id, "read", "user" if kind == "user_level" else "team")
+    if kind == "own_personal":
+        assert await m.get_promotion_source(*args) is state.source
+    else:
+        with pytest.raises(PermissionDeniedError):
+            await m.get_promotion_source(*args)
