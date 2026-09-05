@@ -40,6 +40,16 @@ env:
   ENV: 'dev'
 
 jobs:
+  # ══ Product journeys against the real providers ═══════════════════════════
+  # The PR gate runs these in mock mode; nightly is where the hit-rate and
+  # answer-leak thresholds are measured against the model we actually ship with.
+  journeys-llm:
+    name: Product Journeys (real LLM)
+    uses: ./.github/workflows/journey_tests.yml
+    with:
+      mode: llm
+    secrets: inherit
+
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-small-llm:
     name: Performance — 50 Small Documents (real LLM)
@@ -208,6 +218,7 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
+      journeys-llm,
       perf-small-llm,
       perf-small-mock,
       perf-wap-llm,
@@ -238,7 +249,8 @@ jobs:
           # and inline interpolation would splice it into this shell script.
           CADENCE: ${{ inputs.cadence }}
         run: |
-          if [[ "${{ needs.perf-small-llm.result }}" == "success" &&
+          if [[ "${{ needs.journeys-llm.result }}" == "success" &&
+                "${{ needs.perf-small-llm.result }}" == "success" &&
                 "${{ needs.perf-small-mock.result }}" == "success" &&
                 "${{ needs.perf-wap-llm.result }}" == "success" &&
                 "${{ needs.perf-wap-mock.result }}" == "success" &&
