@@ -27,8 +27,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: read
 
 concurrency:
   group: telemetry-insights
@@ -36,6 +34,10 @@ concurrency:
 
 jobs:
   telemetry-insights:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

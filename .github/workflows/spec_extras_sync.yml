@@ -76,8 +76,7 @@ on:
     - cron: "0 6 * * 3"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 env:
   # `inputs` is empty outside workflow_dispatch, so the weekly schedule always
@@ -92,6 +91,9 @@ concurrency:
 
 jobs:
   sync-spec-extras:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Detect and fix spec extras drift
     runs-on: ubuntu-22.04
     timeout-minutes: 30

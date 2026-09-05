@@ -1,7 +1,7 @@
 name: Test Suites
 permissions:
   contents: read
-  packages: write
+  packages: read  # reusable test workflows pull the ghcr.io CI image
 
 on:
   push:
@@ -28,6 +28,9 @@ env:
 jobs:
   # ── Build pre-baked CI container ──────────────────────────────────────
   build-ci-env:
+    permissions:
+      contents: read
+      packages: write  # pushes the CI image
     name: Build CI Environment
     runs-on: ubuntu-latest
     if: >-
