@@ -42,11 +42,11 @@ curl -X POST http://localhost:8000/api/v1/recall -H "Content-Type: application/j
   -d '{"query": "What does Cognee do?", "datasets": ["main_dataset"]}'
 ```
 
-`/api/v1/recall` takes the question as `query`. It defaults `search_type` to
-`GRAPH_COMPLETION` for backward compatibility — pass `"search_type": null` to
-opt into auto-routing (the SDK `recall()` default). The difference is real:
-`{"query": "Why does X?"}` answers with `GRAPH_COMPLETION`, while the same
-query with `"search_type": null` routes to `GRAPH_COMPLETION_COT`.
+`/api/v1/recall` takes the question as `query`. Omit `search_type` (or pass
+`null`) and the query is auto-routed by the same rule-based router the SDK
+`recall()` uses, with `HYBRID_COMPLETION` as the fallback; pass a value such as
+`"search_type": "GRAPH_COMPLETION"` to pin a strategy. The rule table is in
+`docs/recall-vs-search.md`.
 
 Request DTOs accept both `snake_case` and `camelCase` for every field
 (`alias_generator=to_camel` + `populate_by_name` in `cognee/api/DTO.py`), so

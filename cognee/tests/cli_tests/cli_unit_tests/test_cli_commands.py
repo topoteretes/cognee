@@ -242,6 +242,30 @@ class TestRecallCommand:
         assert kwargs["session_id"] == "sess"
 
     @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
+    def test_omitted_query_type_lets_sdk_auto_route(self, mock_asyncio_run):
+        """Without -t (and without -s) the CLI must not pin HYBRID_COMPLETION."""
+        mock_cognee = MagicMock()
+        mock_cognee.recall = AsyncMock(return_value=["answer"])
+
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = RecallCommand()
+            args = argparse.Namespace(
+                query_text="Summarize the report",
+                query_type=None,
+                datasets=["docs"],
+                top_k=10,
+                system_prompt=None,
+                session_id=None,
+                output_format="pretty",
+            )
+            command.execute(args)
+
+        kwargs = mock_cognee.recall.await_args.kwargs
+        assert "query_type" not in kwargs
+        assert "session_id" not in kwargs
+        assert kwargs["datasets"] == ["docs"]
+
+    @patch("cognee.cli.commands.recall_command.asyncio.run", side_effect=_mock_run)
     def test_explicit_hybrid_with_session_is_not_session_only(self, mock_asyncio_run):
         mock_cognee = MagicMock()
         mock_cognee.recall = AsyncMock(return_value=["answer"])
