@@ -31,7 +31,10 @@ if TYPE_CHECKING:
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.modules.graph.utils.prepare_edges_for_storage import (
+    get_belongs_to_set_names,
+    get_edge_retrieval_text,
+)
 
 logger = get_logger()
 
@@ -413,11 +416,15 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
 
         # Collect edge type counts for EdgeType vector indexing
         edge_texts = []
+        belongs_to_set_by_text: dict[str, set[str]] = {}
         for edge in edges:
             props = edge[3] if len(edge) > 3 and edge[3] else {}
             edge_text = get_edge_retrieval_text(props.get("edge_text"), edge[2])
             if edge_text:
                 edge_texts.append(edge_text)
+                belongs_to_set_by_text.setdefault(edge_text, set()).update(
+                    get_belongs_to_set_names(props)
+                )
 
         edge_type_counts = Counter(edge_texts)
 
@@ -460,15 +467,17 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             vector = text_to_vector.get(edge_text)
             if vector is None:
                 continue
+            belongs_to_set = sorted(belongs_to_set_by_text[edge_text])
             edge_type_dp = EdgeType(
                 relationship_name=edge_text,
                 number_of_edges=count,
+                belongs_to_set=belongs_to_set or None,
             )
             edge_id = edge_type_dp.id
             index_point = IndexSchema(
                 id=edge_id,
                 text=edge_text,
-                belongs_to_set=(edge_type_dp.belongs_to_set or []),
+                belongs_to_set=belongs_to_set,
             )
             payload = json.dumps(serialize_data(index_point.model_dump()))
             vector_rows.append(

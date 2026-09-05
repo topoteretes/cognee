@@ -185,6 +185,32 @@ async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relatio
     assert {schema.text for schema in schemas} == {"blank_rel", "none_rel"}
 
 
+@pytest.mark.asyncio
+async def test_add_edges_with_vectors_unions_node_sets_for_same_text():
+    adapter = _FakeAdapter()
+    src, tgt = str(uuid4()), str(uuid4())
+    edges = [
+        (
+            src,
+            tgt,
+            "related_to",
+            {"edge_text": "shared relation", "belongs_to_set": ["beta", "shared"]},
+        ),
+        (
+            tgt,
+            src,
+            "related_to",
+            {"edge_text": "shared relation", "belongs_to_set": ["alpha", "shared"]},
+        ),
+    ]
+
+    await adapter.add_edges_with_vectors(edges)
+
+    schemas = adapter.create_data_points.call_args[0][1]
+    assert len(schemas) == 1
+    assert schemas[0].belongs_to_set == ["alpha", "beta", "shared"]
+
+
 # ---------------------------------------------------------------------------
 # search: include_payload and node_name filtering
 # ---------------------------------------------------------------------------

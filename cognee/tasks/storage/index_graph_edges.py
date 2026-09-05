@@ -3,7 +3,10 @@ from typing import Optional, Dict, Any, List, Tuple, Union
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.modules.graph.utils.prepare_edges_for_storage import (
+    get_belongs_to_set_names,
+    get_edge_retrieval_text,
+)
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData
 from cognee.tasks.storage.index_data_points import index_data_points
@@ -39,15 +42,23 @@ def _get_edge_text(edge) -> str:
 def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
     """Transform raw edge data into EdgeType datapoints."""
     edge_texts = []
+    belongs_to_set_by_text: dict[str, set[str]] = {}
     for edge in edges_data:
         edge_text = _get_edge_text(edge)
         if edge_text:
             edge_texts.append(edge_text)
+            belongs_to_set_by_text.setdefault(edge_text, set()).update(
+                get_belongs_to_set_names(_get_edge_properties(edge))
+            )
 
     edge_types = Counter(edge_texts)
 
     return [
-        EdgeType(relationship_name=text, number_of_edges=count)
+        EdgeType(
+            relationship_name=text,
+            number_of_edges=count,
+            belongs_to_set=sorted(belongs_to_set_by_text[text]) or None,
+        )
         for text, count in edge_types.items()
     ]
 

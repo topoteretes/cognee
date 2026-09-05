@@ -23,6 +23,24 @@ def _get_nonblank_text(value: Any) -> str | None:
     return text or None
 
 
+def get_belongs_to_set_names(item: Any) -> list[str]:
+    """Return stable node-set names from a datapoint or properties mapping."""
+    values = _get_value(item, "belongs_to_set")
+    if values is None:
+        return []
+    if not isinstance(values, (list, tuple, set)):
+        values = [values]
+
+    names = set()
+    for value in values:
+        name = value if isinstance(value, str) else _get_value(value, "name")
+        normalized = _get_nonblank_text(name)
+        if normalized:
+            names.add(normalized)
+
+    return sorted(names)
+
+
 def get_edge_retrieval_text(edge_text: Any, relationship_name: Any) -> str:
     """Return the edge text used for retrieval, falling back to relationship_name."""
     return _get_nonblank_text(edge_text) or _get_nonblank_text(relationship_name) or ""
@@ -110,6 +128,12 @@ def ensure_default_edge_properties(
 
     for source_id, target_id, relationship_name, properties in edges:
         props = dict(properties) if properties else {}
+        belongs_to_set = set(get_belongs_to_set_names(props))
+        belongs_to_set.update(get_belongs_to_set_names(nodes_by_id.get(str(source_id))))
+        belongs_to_set.update(get_belongs_to_set_names(nodes_by_id.get(str(target_id))))
+        if belongs_to_set or "belongs_to_set" in props:
+            props["belongs_to_set"] = sorted(belongs_to_set)
+
         if "edge_object_id" not in props:
             props["edge_object_id"] = generate_edge_object_id(
                 source_id, target_id, relationship_name

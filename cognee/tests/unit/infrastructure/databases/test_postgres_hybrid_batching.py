@@ -141,6 +141,32 @@ async def test_add_edges_with_vectors_falls_back_from_blank_edge_text_to_relatio
 
 
 @pytest.mark.asyncio
+async def test_add_edges_with_vectors_unions_node_sets_in_edge_type_payload():
+    adapter = _make_fake_hybrid(batch_size=10)
+    edges = [
+        (
+            str(uuid4()),
+            str(uuid4()),
+            "related_to",
+            {"edge_text": "shared relation", "belongs_to_set": ["beta", "shared"]},
+        ),
+        (
+            str(uuid4()),
+            str(uuid4()),
+            "related_to",
+            {"edge_text": "shared relation", "belongs_to_set": ["alpha", "shared"]},
+        ),
+    ]
+
+    await adapter.add_edges_with_vectors(edges)
+
+    session = _session_from_fake_hybrid(adapter)
+    vector_rows = session.execute.await_args_list[1].args[1]
+    payload = json.loads(vector_rows[0]["payload"])
+    assert payload["belongs_to_set"] == ["alpha", "beta", "shared"]
+
+
+@pytest.mark.asyncio
 async def test_add_nodes_with_vectors_batch_size_zero_falls_back_to_single_call():
     """get_batch_size()==0 must not crash on `range() arg 3 must not be zero`.
 
