@@ -140,7 +140,7 @@ jobs:
       fail-fast: false
       matrix:
         extras:
-          - "neo4j,neptune,postgres-binary,turso,redis,tracing,aws"
+          - "neo4j,neptune,postgres,postgres-binary,turso,redis,tracing,aws"
           - "anthropic,azure,groq,mistral,ollama,posthog,debug,notebook"
           - "fastembed,huggingface,codegraph,rapidocr"
           - "docs,langchain,llama-index,graphiti"
