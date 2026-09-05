@@ -21,6 +21,12 @@ jobs:
       issues: write         # PR labels are issue labels
       pull-requests: write
     steps:
+      - name: Check out base repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.ref }}
+
       - name: Determine if PR author is a core team member
         id: check_core
         shell: bash
@@ -55,7 +61,7 @@ jobs:
 
       - name: Add core-team label
         if: steps.check_core.outputs.core == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
