@@ -22,6 +22,11 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
+    # Summary search returns raw payloads and never calls an LLM, so the conversational
+    # session-turn analysis would add a pre-retrieval LLM round trip to an otherwise
+    # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
+    supports_session_turn_preparation = False
+
     def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
