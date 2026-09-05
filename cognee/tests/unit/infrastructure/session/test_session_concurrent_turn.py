@@ -18,6 +18,7 @@ from cognee.infrastructure.session.session_concurrent_turn import (
     analyze_turn,
     commit_turn,
     complete_turn,
+    context_to_store_for_turn,
     load_turn_context,
 )
 
@@ -293,6 +294,93 @@ async def test_commit_applies_the_analysis_then_stores_the_qa():
     # The QA records the context served to *this* answer.
     assert stored["used_session_context_ids"] == ["ctx-served-now"]
     assert stored["used_graph_element_ids"] == {"node_ids": ["n1"]}
+
+
+@pytest.mark.asyncio
+async def test_commit_stores_the_context_by_the_sequential_rule():
+    """Both search modes must write the same QA row (plan A9).
+
+    The sequential path stores the LLM summary of the retrieval context when
+    ``summarize_context`` is on and "" otherwise
+    (``generate_session_completion_with_optional_summary``). The concurrent commit
+    applies the same rule to the same context, so the session-persist stage copies an
+    identical row whichever ``SESSION_SEARCH_MODE`` produced it.
+    """
+    manager = MagicMock()
+    manager.add_qa = AsyncMock()
+
+    with (
+        patch(
+            "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.infrastructure.session.session_concurrent_turn.summarize_text",
+            new_callable=AsyncMock,
+            return_value="summary of the context",
+        ) as summarize,
+    ):
+        await commit_turn(
+            manager,
+            snapshot=SessionTurnContext(raw_message="question"),
+            analysis=SessionTurnAnalysis(),
+            answer="the answer",
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids=None,
+            context="retrieved passages",
+            summarize_context=True,
+        )
+
+    summarize.assert_awaited_once_with("retrieved passages")
+    assert manager.add_qa.await_args.kwargs["context"] == "summary of the context"
+
+
+@pytest.mark.asyncio
+async def test_commit_stores_empty_context_when_summary_is_off():
+    """summarize_context=False stores "" — never the raw context — exactly like sequential."""
+    manager = MagicMock()
+    manager.add_qa = AsyncMock()
+
+    with (
+        patch(
+            "cognee.infrastructure.session.session_concurrent_turn.apply_session_turn_analysis",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "cognee.infrastructure.session.session_concurrent_turn.summarize_text",
+            new_callable=AsyncMock,
+        ) as summarize,
+    ):
+        await commit_turn(
+            manager,
+            snapshot=SessionTurnContext(raw_message="question"),
+            analysis=SessionTurnAnalysis(),
+            answer="the answer",
+            user_id="u1",
+            session_id="s1",
+            used_graph_element_ids=None,
+            context="retrieved passages",
+        )
+
+    summarize.assert_not_awaited()
+    assert manager.add_qa.await_args.kwargs["context"] == ""
+
+
+@pytest.mark.asyncio
+async def test_context_to_store_fails_open_and_skips_blank_context():
+    with patch(
+        "cognee.infrastructure.session.session_concurrent_turn.summarize_text",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("llm down"),
+    ) as summarize:
+        assert await context_to_store_for_turn("passages", summarize_context=True) == ""
+        summarize.assert_awaited_once()
+        summarize.reset_mock()
+        # Nothing to summarize: no LLM call, empty row field.
+        assert await context_to_store_for_turn("   ", summarize_context=True) == ""
+        assert await context_to_store_for_turn(None, summarize_context=True) == ""
+        summarize.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -65,7 +65,7 @@ def session_mocks():
             new_callable=AsyncMock,
             return_value=[],
         ),
-        patch("cognee.infrastructure.session.session_manager.CacheConfig", return_value=cfg),
+        patch("cognee.infrastructure.session.session_manager.get_cache_config", return_value=cfg),
     ):
         yield
 

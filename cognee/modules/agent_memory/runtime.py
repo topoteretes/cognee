@@ -95,6 +95,40 @@ def reset_current_agent_memory_context(
     _agent_memory_context_var.reset(token)
 
 
+def _validate_session_backed_options(
+    *,
+    with_session_memory: bool,
+    save_session_traces: bool,
+    persist_session_trace_after: Optional[int],
+) -> None:
+    """Check the options that need the session cache, and that the cache is on."""
+    from cognee.infrastructure.databases.cache.config import get_cache_config
+
+    if persist_session_trace_after is not None and (
+        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
+    ):
+        raise CogneeValidationError(
+            "persist_session_trace_after must be a positive integer when provided.",
+            log=False,
+        )
+    if persist_session_trace_after is not None and not save_session_traces:
+        raise CogneeValidationError(
+            "persist_session_trace_after requires save_session_traces=True.",
+            log=False,
+        )
+    cache_config = get_cache_config()
+    if not cache_config.caching and (
+        with_session_memory or save_session_traces or persist_session_trace_after is not None
+    ):
+        raise CogneeValidationError(
+            (
+                "Caching must be enabled to use with_session_memory, save_session_traces, "
+                "or persist_session_trace_after with cognee.agent_memory."
+            ),
+            log=False,
+        )
+
+
 def validate_agent_memory_config(
     *,
     with_memory: bool,
@@ -115,8 +149,6 @@ def validate_agent_memory_config(
     persist_session_trace_node_set_name: Optional[str],
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
-    from cognee.infrastructure.databases.cache.config import get_cache_config
-
     if not isinstance(with_memory, bool):
         raise CogneeValidationError("with_memory must be a boolean.", log=False)
     if not isinstance(with_session_memory, bool):
@@ -184,52 +216,11 @@ def validate_agent_memory_config(
             "session_memory_last_n must be a positive integer.",
             log=False,
         )
-    if persist_session_trace_after is not None and (
-        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
-    ):
-        raise CogneeValidationError(
-            "persist_session_trace_after must be a positive integer when provided.",
-            log=False,
-        )
-    if persist_session_trace_after is not None and not save_session_traces:
-        raise CogneeValidationError(
-            "persist_session_trace_after requires save_session_traces=True.",
-            log=False,
-        )
-    cache_config = get_cache_config()
-    if not cache_config.caching and (
-        with_session_memory or save_session_traces or persist_session_trace_after is not None
-    ):
-        raise CogneeValidationError(
-            (
-                "Caching must be enabled to use with_session_memory, save_session_traces, "
-                "or persist_session_trace_after with cognee.agent_memory."
-            ),
-            log=False,
-        )
-    if persist_session_trace_after is not None and (
-        not isinstance(persist_session_trace_after, int) or persist_session_trace_after < 1
-    ):
-        raise CogneeValidationError(
-            "persist_session_trace_after must be a positive integer when provided.",
-            log=False,
-        )
-    if persist_session_trace_after is not None and not save_session_traces:
-        raise CogneeValidationError(
-            "persist_session_trace_after requires save_session_traces=True.",
-            log=False,
-        )
-    cache_config = get_cache_config()
-    if not cache_config.caching and (
-        with_session_memory or save_session_traces or persist_session_trace_after is not None
-    ):
-        raise CogneeValidationError(
-            (
-                "Caching must be enabled to use with_session_memory, save_session_traces, "
-                "or persist_session_trace_after with cognee.agent_memory."
-            ),
-            log=False,
-        )
+    _validate_session_backed_options(
+        with_session_memory=with_session_memory,
+        save_session_traces=save_session_traces,
+        persist_session_trace_after=persist_session_trace_after,
+    )
     if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
         raise CogneeValidationError(
             "session_id must be a non-empty string when provided.",

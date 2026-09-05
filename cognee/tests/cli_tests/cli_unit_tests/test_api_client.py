@@ -215,3 +215,53 @@ class TestAddFileDetection:
                 assert files_arg[0][1][0] == os.path.basename(path)
         finally:
             os.unlink(path)
+
+
+class TestImproveEndpoint:
+    """improve() serializes every SDK option; omitted ones stay off the wire."""
+
+    def _client_with_mock(self, json_body):
+        with patch("cognee.cli.api_client._import_httpx"):
+            client = CogneeApiClient("http://localhost:8000")
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = json_body
+            http = MagicMock()
+            http.post.return_value = resp
+            client._client = http
+            return client, http
+
+    def test_every_option_is_serialized(self):
+        client, http = self._client_with_mock({"status": "completed", "stages": []})
+
+        result = client.improve(
+            dataset_name="docs",
+            node_name=["Alice"],
+            session_ids=["s1"],
+            run_in_background=True,
+            build_global_context_index=True,
+            build_truth_subspace=True,
+            feedback_alpha=0.2,
+        )
+
+        assert result == {"status": "completed", "stages": []}
+        url, kwargs = http.post.call_args[0][0], http.post.call_args[1]
+        assert url.endswith("/api/v1/improve")
+        assert kwargs["json"] == {
+            "run_in_background": True,
+            "dataset_name": "docs",
+            "node_name": ["Alice"],
+            "session_ids": ["s1"],
+            "build_global_context_index": True,
+            "build_truth_subspace": True,
+            "feedback_alpha": 0.2,
+        }
+
+    def test_defaults_stay_off_the_wire(self):
+        client, http = self._client_with_mock({})
+
+        client.improve(dataset_id="11111111-1111-1111-1111-111111111111")
+
+        assert http.post.call_args[1]["json"] == {
+            "run_in_background": False,
+            "dataset_id": "11111111-1111-1111-1111-111111111111",
+        }

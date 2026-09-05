@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.engine.models import NodeSet, Skill, SkillImprovementProposal, SkillRun
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
+from cognee.modules.improve.constants import SKILLS_NODE_SET
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.tools.resolve_skills import find_skill_by_id, find_skill_by_name
 from cognee.shared.logging_utils import get_logger
@@ -32,7 +33,7 @@ def _dataset_scope(dataset) -> list[str]:
 
 
 def _skills_node_set() -> NodeSet:
-    return NodeSet(id=generate_node_id("NodeSet:skills"), name="skills")
+    return NodeSet(id=generate_node_id(f"NodeSet:{SKILLS_NODE_SET}"), name=SKILLS_NODE_SET)
 
 
 def _storage_context(user, dataset, key: str) -> Optional[PipelineContext]:
@@ -312,7 +313,7 @@ async def _load_nodes_by_type(model):
     get_nodeset = getattr(graph_engine, "get_nodeset_subgraph", None)
     if get_nodeset is not None:
         try:
-            nodes, _ = await get_nodeset(node_type=model, node_name=["skills"])
+            nodes, _ = await get_nodeset(node_type=model, node_name=[SKILLS_NODE_SET])
             if nodes:
                 return nodes
         except Exception as exc:

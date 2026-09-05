@@ -41,7 +41,7 @@ def agent_memory(
     session_id: Optional[str] = None,
     user: Optional[User] = None,
     dataset_name: Optional[str] = None,
-    session_trace_summary: bool = True,
+    session_trace_summary: bool = False,
     persist_session_trace_after: Optional[int] = None,
     persist_session_trace_raw_content: bool = False,
     persist_session_trace_node_set_name: Optional[str] = None,
@@ -53,6 +53,14 @@ def agent_memory(
     ``session_id`` across different decorated entrypoints can mix unrelated trace history and
     make session-memory retrieval or periodic trace memify harder to reason about, especially
     when those decorators do not share the same trace-persistence settings.
+
+    ``session_trace_summary`` controls the per-call LLM summary stored as each trace step's
+    ``session_feedback``. It defaults to ``False`` (earlier releases defaulted to ``True``): the
+    summary is one extra LLM call per wrapped invocation, and the batch agent-context
+    extraction run by ``improve()`` reads the stored return value directly, so the per-call
+    summary is not needed for learning. When set to ``True`` the summary is still generated
+    only while automatic feedback analysis is enabled (``CACHING`` and ``AUTO_FEEDBACK``
+    both on); otherwise the step records a deterministic success/failure line.
     """
     config = validate_agent_memory_config(
         with_memory=with_memory,

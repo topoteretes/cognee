@@ -276,3 +276,84 @@ class TestForgetDispatch:
         dispatch(args)
 
         mock_instance.forget.assert_not_called()
+
+
+class TestImproveDispatch:
+    """--api-url improve forwards the same options as the in-process command and
+    prints the server's ImproveResult one stage per line."""
+
+    def _args(self, **overrides):
+        base = {
+            "api_url": "http://localhost:8000",
+            "command": "improve",
+            "user_id": None,
+            "dataset_name": "docs",
+            "dataset_id": None,
+            "node_name": None,
+            "session_ids": ["s1"],
+            "background": False,
+            "feedback_alpha": 0.2,
+            "build_global_context_index": True,
+            "build_truth_subspace": True,
+        }
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def _client(self, MockClient, result):
+        mock_instance = MagicMock()
+        mock_instance.health.return_value = {"status": "ready"}
+        mock_instance.improve.return_value = result
+        MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        return mock_instance
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_every_option_is_forwarded(self, MockClient):
+        client = self._client(MockClient, {"status": "completed", "stages": []})
+
+        dispatch(self._args())
+
+        client.improve.assert_called_once_with(
+            dataset_name="docs",
+            dataset_id=None,
+            node_name=None,
+            session_ids=["s1"],
+            run_in_background=False,
+            build_global_context_index=True,
+            build_truth_subspace=True,
+            feedback_alpha=0.2,
+        )
+
+    @patch("cognee.cli.api_dispatch.fmt")
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_prints_one_line_per_stage(self, MockClient, mock_fmt):
+        self._client(
+            MockClient,
+            {
+                "status": "completed",
+                "stages": [
+                    {"stage": "feedback_weights", "status": "skipped", "reason": "no_session_ids"},
+                    {"stage": "triplet_enrichment", "status": "completed", "counts": {"n": 2}},
+                ],
+            },
+        )
+
+        with patch("cognee.cli.commands.improve_command.fmt") as command_fmt:
+            dispatch(self._args())
+
+        command_fmt.success.assert_called_once_with("Knowledge graph improved successfully!")
+        printed = [call.args[0] for call in command_fmt.echo.call_args_list]
+        assert any("feedback_weights" in line and "no_session_ids" in line for line in printed)
+        assert any("triplet_enrichment" in line and "n=2" in line for line in printed)
+
+    @patch("cognee.cli.api_dispatch.fmt")
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_legacy_server_payload_is_dumped_as_json(self, MockClient, mock_fmt):
+        """An older server returns the memify run mapping; keep showing it."""
+        self._client(MockClient, {"some-uuid": {"status": "completed"}})
+
+        dispatch(self._args())
+
+        mock_fmt.success.assert_called_once_with("Knowledge graph improved successfully!")
+        dumped = [call.args[0] for call in mock_fmt.echo.call_args_list]
+        assert any('"some-uuid"' in line for line in dumped)

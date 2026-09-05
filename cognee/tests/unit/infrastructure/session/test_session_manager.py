@@ -282,8 +282,11 @@ class TestSessionManager:
         pending_spy.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_returns_trace_id_and_feedback(self, sm, mock_cache):
+    async def test_add_agent_trace_step_returns_trace_id_and_feedback(
+        self, sm, mock_cache, monkeypatch
+    ):
         """add_agent_trace_step returns generated trace_id and persists generated feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -320,8 +323,11 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "Trip plan created successfully."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(self, sm, mock_cache):
+    async def test_add_agent_trace_step_falls_back_when_summary_is_empty(
+        self, sm, mock_cache, monkeypatch
+    ):
         """Empty LLM summaries fall back to the deterministic feedback string."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -346,8 +352,11 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "book_hotel failed. Reason: No availability."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_llm_raises(self, sm, mock_cache):
+    async def test_add_agent_trace_step_falls_back_when_llm_raises(
+        self, sm, mock_cache, monkeypatch
+    ):
         """LLM failures do not block trace writes and use deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -372,8 +381,11 @@ class TestSessionManager:
         assert call_kw["session_feedback"] == "book_hotel failed. Reason: No availability."
 
     @pytest.mark.asyncio
-    async def test_add_agent_trace_step_falls_back_when_prompt_missing(self, sm, mock_cache):
+    async def test_add_agent_trace_step_falls_back_when_prompt_missing(
+        self, sm, mock_cache, monkeypatch
+    ):
         """Missing trace feedback prompt uses deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -399,9 +411,10 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_falls_back_when_llm_returns_wrong_type(
-        self, sm, mock_cache
+        self, sm, mock_cache, monkeypatch
     ):
         """Unexpected LLM result types use deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with (
             patch(
                 "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
@@ -427,9 +440,10 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_method_return_value_none_uses_fallback_without_llm(
-        self, sm, mock_cache
+        self, sm, mock_cache, monkeypatch
     ):
         """None return values skip LLM generation and use deterministic fallback feedback."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
         with patch(
             "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
             new_callable=AsyncMock,
@@ -467,6 +481,72 @@ class TestSessionManager:
         mock_llm.assert_not_awaited()
         call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
         assert call_kw["session_feedback"] == "plan_trip succeeded."
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_skips_llm_summary_when_auto_feedback_is_off(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """Plan C7: the per-step LLM summary runs only under AUTO_FEEDBACK.
+
+        Even when the caller asks for it, a disabled automatic-feedback layer means
+        the step records the deterministic line and the LLM is never touched.
+        """
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: False)
+        with (
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+            ) as mock_llm,
+        ):
+            trace_id = await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+                generate_feedback_with_llm=True,
+            )
+
+        assert trace_id is not None
+        mock_llm.assert_not_awaited()
+        call_kw = mock_cache.append_agent_trace_step.call_args.kwargs
+        assert call_kw["session_feedback"] == "plan_trip succeeded."
+        assert call_kw["method_return_value"] == "Plan created"
+
+    @pytest.mark.asyncio
+    async def test_add_agent_trace_step_llm_summary_needs_both_the_request_and_auto_feedback(
+        self, sm, mock_cache, monkeypatch
+    ):
+        """The LLM summary is made only when requested *and* AUTO_FEEDBACK is on."""
+        monkeypatch.setattr(sm, "is_auto_feedback_enabled", lambda: True)
+        with (
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.read_query_prompt",
+                return_value="summarize this",
+            ),
+            patch(
+                "cognee.infrastructure.session.session_agent_trace.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value=AgentTraceFeedbackSummary(session_feedback="Summarized."),
+            ) as mock_llm,
+        ):
+            await sm.add_agent_trace_step(
+                user_id="u1",
+                origin_function="plan_trip",
+                status="success",
+                session_id="s1",
+                method_return_value="Plan created",
+                generate_feedback_with_llm=True,
+            )
+
+        mock_llm.assert_awaited_once()
+        assert mock_cache.append_agent_trace_step.call_args.kwargs["session_feedback"] == (
+            "Summarized."
+        )
 
     @pytest.mark.asyncio
     async def test_add_agent_trace_step_unavailable_returns_none(self, sm_unavailable):
@@ -740,7 +820,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_manager.generate_completion",
                 new_callable=AsyncMock,
@@ -772,7 +854,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
@@ -845,7 +929,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -890,7 +976,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -940,7 +1028,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
@@ -977,7 +1067,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1021,7 +1113,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1069,7 +1163,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1109,7 +1205,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1159,7 +1257,9 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.session_user"
             ) as mock_session_user,
-            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.get_cache_config"
+            ) as mock_config_cls,
             patch(
                 "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
                 new_callable=AsyncMock,
@@ -1323,3 +1423,25 @@ class TestSessionContextEntryValidation:
             )
         with pytest.raises(SessionParameterValidationError):
             await sm.delete_session_context(user_id=" ", session_id="s1")
+
+
+class TestAutoFeedbackPredicate:
+    """is_auto_feedback_enabled is the one gate; it reads the cached config accessor."""
+
+    @pytest.mark.parametrize(
+        ("caching", "auto_feedback", "expected"),
+        [(True, True, True), (True, False, False), (False, True, False), (False, False, False)],
+    )
+    def test_reads_get_cache_config(self, caching, auto_feedback, expected):
+        sm = SessionManager(cache_engine=MagicMock())
+        with patch(
+            "cognee.infrastructure.session.session_manager.get_cache_config",
+            return_value=MagicMock(caching=caching, auto_feedback=auto_feedback),
+        ) as accessor:
+            assert sm.is_auto_feedback_enabled() is expected
+        accessor.assert_called_once_with()
+
+    def test_module_no_longer_builds_cache_config_directly(self):
+        import cognee.infrastructure.session.session_manager as module
+
+        assert not hasattr(module, "CacheConfig")

@@ -1143,13 +1143,15 @@ async def remember(
     session_id: str = None,
     custom_prompt: str = None,
     background: bool = False,
+    self_improvement: bool = True,
 ) -> list:
     """Store data in memory.
 
     Two modes depending on whether session_id is provided:
 
     Without session_id (permanent memory): Runs the full add + cognify
-    pipeline to ingest data and build the knowledge graph.
+    pipeline to ingest data and build the knowledge graph, then the
+    self-improvement loop (improve) unless self_improvement=False.
 
     With session_id (session memory): Stores the data in the session
     cache only. Fast, no entity extraction. Omit session_id when the
@@ -1183,6 +1185,10 @@ async def remember(
         deadline shorter than ingestion takes. Ignored with session_id, which
         is already fast. Errors surface via cognify_status, not the return
         value.
+    self_improvement : bool
+        Run the improve loop (triplet enrichment and, with sessions, the
+        session bridge) after cognify. Permanent mode only; default True.
+        Pass False for a plain add + cognify ingestion.
     """
     if content_base64 and data:
         return [
@@ -1245,6 +1251,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=None,
                 custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
             )
         )
         queued = f"'{filename}'" if content_base64 else "text"
@@ -1269,6 +1276,7 @@ async def remember(
                 dataset_name=dataset_name,
                 session_id=session_id,
                 custom_prompt=custom_prompt,
+                self_improvement=self_improvement,
             )
             status = result.get("status", "completed")
             if session_id:
@@ -1429,16 +1437,27 @@ async def forget(
 async def improve(
     dataset_name: str = None,
     session_ids: str = None,
+    node_name: str = None,
+    build_global_context_index: bool = False,
+    build_truth_subspace: bool = False,
 ) -> list:
-    """Enrich the knowledge graph and bridge session data to the permanent graph.
+    """Run the self-improvement loop over a dataset and report what each stage did.
 
-    When session_ids is provided, runs a 4-stage pipeline:
-    1. Apply feedback weights from session scores to graph nodes/edges
-    2. Persist session Q&A text into the permanent knowledge graph
-    3. Enrich graph with triplet embeddings (memify)
-    4. Sync enriched graph knowledge back into session caches
+    Nine stages run in a fixed order; each first declines work it cannot do
+    under the current settings (no LLM calls) and only then runs:
+    1. feedback_weights        - scored session answers move graph weights
+    2. persist_session_qa      - session Q&A is cognified into the graph
+    3. persist_agent_traces    - tool-call trace feedback is cognified
+    4. extract_agent_context   - pending traces become agent-profile lessons
+    5. distill_sessions        - gated guidance becomes entity-anchored lessons
+    6. update_user_preferences - ratings fold into preference weights
+    7. build_truth_subspace    - opt-in (build_truth_subspace=True)
+    8. triplet_enrichment      - triplet embeddings, when the graph changed
+    9. global_context_index    - opt-in (build_global_context_index=True)
 
-    Without session_ids, only stage 3 runs (triplet enrichment).
+    Stages 1-7 need session_ids and are skipped with `no_session_ids`
+    otherwise. The reply lists every stage with its status (completed,
+    already_completed, skipped, errored) and the skip reason.
 
     Parameters
     ----------
@@ -1448,28 +1467,62 @@ async def improve(
         detected.
     session_ids : str, optional
         Comma-separated session IDs to bridge into the permanent graph.
+    node_name : str, optional
+        Comma-separated entity names; restricts enrichment to those nodes.
+    build_global_context_index : bool
+        Also build the global context index after enrichment.
+    build_truth_subspace : bool
+        Also build the truth subspace from the sessions' distilled learnings
+        (needs session_ids and a graph backend with truth state).
     """
     dataset_name = dataset_name or _agent_scoped_default_dataset()
     with redirect_stdout(sys.stderr):
         try:
             session_list = parse_csv_list(session_ids)
+            node_list = parse_csv_list(node_name)
             result = await cognee_client.improve(
                 dataset_name=dataset_name,
                 session_ids=session_list,
+                node_name=node_list,
+                build_global_context_index=build_global_context_index,
+                build_truth_subspace=build_truth_subspace,
             )
-            status = result.get("status", "completed") if isinstance(result, dict) else "completed"
-            if session_list:
-                text = (
-                    f"Improve completed (status={status}). "
-                    f"Bridged {len(session_list)} session(s) into permanent graph."
-                )
-            else:
-                text = f"Graph enrichment completed (status={status})."
-            return [types.TextContent(type="text", text=text)]
+            return [
+                types.TextContent(type="text", text=format_improve_result(result, dataset_name))
+            ]
         except Exception as e:
             error_msg = f"Improve failed: {str(e)}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
+
+
+def format_improve_result(result, dataset_name: str) -> str:
+    """Summarize an ImproveResult payload (dict from the API or model_dump) per stage."""
+    if not isinstance(result, dict):
+        return f"Improve completed for dataset '{dataset_name}'."
+    status = result.get("status", "completed")
+    stages = result.get("stages") or []
+    lines = [f"Improve {status} for dataset '{dataset_name}'."]
+    if result.get("session_ids"):
+        lines[0] += f" Sessions: {len(result['session_ids'])}."
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        detail = []
+        if stage.get("reason"):
+            detail.append(str(stage["reason"]))
+        counts = stage.get("counts") or {}
+        if isinstance(counts, dict) and counts:
+            detail.append(", ".join(f"{k}={v}" for k, v in counts.items()))
+        if stage.get("status") == "errored" and stage.get("error"):
+            detail.append(str(stage["error"]))
+        suffix = f" ({'; '.join(detail)})" if detail else ""
+        lines.append(f"- {stage.get('stage', '?')}: {stage.get('status', '?')}{suffix}")
+    if not stages and status == "running":
+        lines.append("The chain is running in the background.")
+    if result.get("error") and status == "errored":
+        lines.append(f"error: {result['error']}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

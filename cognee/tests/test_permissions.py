@@ -1,7 +1,7 @@
 import asyncio
 import os
 import pathlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -366,8 +366,33 @@ async def test_improve_permission_matrix(permissions_example_env):
     await cognee.add(["improve permission fixture text"], dataset_name="IMPROVE_PERMS", user=owner)
     dataset_id = (await get_datasets_by_name(["IMPROVE_PERMS"], owner.id))[0].id
 
-    def memify_patch():
-        return patch("cognee.modules.memify.memify", new_callable=AsyncMock, return_value={})
+    class memify_patch:
+        """Mock the memify engine and force the triplet-enrichment stage to run.
+
+        improve() gates that stage on the cognify ``triplet_embedding`` setting
+        (off by default, so the stage is *skipped* and memify is never called).
+        The permission checks under test happen before any stage, but case 3
+        also asserts that the stage receives the authorized dataset, so the gate
+        is opened here with a patched config.
+        """
+
+        def __init__(self):
+            self._memify = patch(
+                "cognee.modules.memify.memify", new_callable=AsyncMock, return_value={}
+            )
+            self._config = patch(
+                "cognee.modules.cognify.config.get_cognify_config",
+                return_value=MagicMock(triplet_embedding=True),
+            )
+
+        def __enter__(self):
+            self._config.__enter__()
+            return self._memify.__enter__()
+
+        def __exit__(self, *exc):
+            self._memify.__exit__(*exc)
+            self._config.__exit__(*exc)
+            return False
 
     # 1. No grant on an existing dataset: refused with 403.
     with pytest.raises(PermissionDeniedError):

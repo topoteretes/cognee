@@ -24,7 +24,8 @@ async def persist_sessions_in_knowledge_graph_pipeline(
     Persist user sessions into the knowledge graph via memify pipeline.
 
     Reads session data via SessionManager (caching must be enabled). Each session
-    is cognified and added to the graph with node_set "user_sessions_from_cache".
+    is cognified and added to the graph with the ``USER_SESSIONS_NODE_SET`` node set
+    (``cognee.modules.improve.constants``).
 
     Args:
         user: Authenticated user with write access to the dataset.
