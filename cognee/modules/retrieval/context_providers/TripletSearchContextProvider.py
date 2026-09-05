@@ -43,20 +43,31 @@ class TripletSearchContextProvider(BaseContextProvider):
         entities: List[DataPoint],
         query: str,
         memory_fragment: CogneeGraph,
-    ) -> List:
-        """Creates search tasks for valid entities."""
-        tasks = [
-            brute_force_triplet_search(
-                query=f"{entity_text} {query}",
-                top_k=self.top_k,
-                collections=self.collections,
-                properties_to_project=self.properties_to_project,
-                memory_fragment=memory_fragment,
+    ) -> tuple[List[DataPoint], List]:
+        """Creates search tasks for the entities that have searchable text.
+
+        Returns the surviving entities alongside their tasks so callers can keep
+        the two lists aligned — entities without text are skipped, so zipping the
+        original ``entities`` list against the results would misalign every
+        subsequent entity.
+        """
+        valid_entities = []
+        tasks = []
+        for entity in entities:
+            entity_text = self._get_entity_text(entity)
+            if entity_text is None:
+                continue
+            valid_entities.append(entity)
+            tasks.append(
+                brute_force_triplet_search(
+                    query=f"{entity_text} {query}",
+                    top_k=self.top_k,
+                    collections=self.collections,
+                    properties_to_project=self.properties_to_project,
+                    memory_fragment=memory_fragment,
+                )
             )
-            for entity in entities
-            if (entity_text := self._get_entity_text(entity)) is not None
-        ]
-        return tasks
+        return valid_entities, tasks
 
     async def _format_triplets(self, triplets: List, entity_name: str) -> str:
         """Format triplets into readable text."""
@@ -83,10 +94,10 @@ class TripletSearchContextProvider(BaseContextProvider):
             return "No entities provided for context search."
 
         memory_fragment = await get_memory_fragment(self.properties_to_project)
-        search_tasks = self._get_search_tasks(entities, query, memory_fragment)
+        valid_entities, search_tasks = self._get_search_tasks(entities, query, memory_fragment)
 
         if not search_tasks:
             return "No valid entities found for context search."
 
         results = await asyncio.gather(*search_tasks)
-        return await self._results_to_context(entities, results)
+        return await self._results_to_context(valid_entities, results)
