@@ -28,8 +28,8 @@ export default function CreateBrainModal({
 
   return (
     <ModalShell onClose={onCancel}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Create brain</h2>
-      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Give your brain a name. You can upload documents after creation.</p>
+      <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Create dataset</h2>
+      <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Give your dataset a name. You can upload documents after creation.</p>
       <input
         autoFocus
         type="text"

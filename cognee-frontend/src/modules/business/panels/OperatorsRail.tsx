@@ -148,7 +148,7 @@ export default function OperatorsRail({
                     memory:
                     <span
                       className={`${memBadgeBase} border border-solid border-[#E9EEF6] text-[#E9EEF6]`}
-                      title="permanent memory — searches its brains (with_memory)"
+                      title="permanent memory — searches its datasets (with_memory)"
                     >
                       permanent
                     </span>

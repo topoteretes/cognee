@@ -10,7 +10,7 @@ import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
 import UploadProgressBar from "./UploadProgressBar";
 import DocumentList, { type DocRow } from "./DocumentList";
 
-// The Documents column of the brains finder: hidden file input, drag-and-drop,
+// The Documents column of the datasets finder: hidden file input, drag-and-drop,
 // header with add/paste actions, upload progress/error banners, and the doc
 // list (or the appropriate empty/loading state). Owns the file input ref, the
 // drag counter, and the drag-over highlight — all purely presentational.
@@ -128,7 +128,7 @@ export default function DocumentsPanel<T extends DocRow>({
           {!selectedId ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M4 8a2 2 0 012-2h6l2 3h12a2 2 0 012 2v13a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke="rgba(237,236,234,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Select a brain</span>
+              <span style={{ fontSize: 13, color: "rgba(237,236,234,0.35)" }}>Select a dataset</span>
             </div>
           ) : docsLoading ? (
             <PageLoading name="Files" />

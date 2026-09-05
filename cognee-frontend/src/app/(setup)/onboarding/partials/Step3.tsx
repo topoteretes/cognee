@@ -6,7 +6,7 @@ import { useUser } from "@/modules/users/UserContext";
 import { AgentActivityTerminal, type OnboardingDemoEntry } from "@/ui/elements/AgentActivityTerminal";
 import { completeOnboardingAndNavigate } from "../completeOnboardingAndNavigate";
 import { useOnboardingTrackEvent } from "../useOnboardingTrackEvent";
-import { StepBadge, StepDots } from "./Shared";
+import { StepBadge, StepDots, OnboardingFooter } from "./Shared";
 
 // Mirror of the "no answer" detection used in the terminal so the parent
 // can store a non-boilerplate top result. Kept narrow on purpose.
@@ -32,10 +32,11 @@ export function extractFirstAnswer(data: unknown): string | null {
   return null;
 }
 
-export function Step3({ datasetId, cogniInstance, demoEntries }: {
+export function Step3({ datasetId, cogniInstance, demoEntries, onBack }: {
   datasetId: string;
   cogniInstance: NonNullable<ReturnType<typeof useCogniInstance>["cogniInstance"]>;
   demoEntries: OnboardingDemoEntry[] | null;
+  onBack: () => void;
 }) {
   const router = useRouter();
   const { markOnboardingComplete } = useUser();
@@ -54,7 +55,7 @@ export function Step3({ datasetId, cogniInstance, demoEntries }: {
       <div style={{
         position: "absolute", inset: -20, zIndex: 0,
         backgroundImage: "linear-gradient(rgba(244,244,244,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(244,244,244,0.10) 1px, transparent 1px)",
-        backgroundSize: "33px 33px",
+        backgroundSize: "24px 24px",
         pointerEvents: "none",
       }} />
       <div style={{
@@ -63,7 +64,7 @@ export function Step3({ datasetId, cogniInstance, demoEntries }: {
         display: "flex", flexDirection: "column", alignItems: "center", gap: 24,
         background: "#2a2a2e",
         border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: 16,
+        borderRadius: 0,
         boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
         maxWidth: 860, width: "100%", boxSizing: "border-box",
       }}>
@@ -91,16 +92,16 @@ export function Step3({ datasetId, cogniInstance, demoEntries }: {
 
       <StepDots current={3} total={3} />
 
-      <button
-        onClick={() => {
+      {/* Back returns to the path selection rather than Step 2: remounting Step 2
+          re-runs its pipeline, which would upload and cognify the same files a
+          second time. */}
+      <OnboardingFooter
+        onBack={onBack}
+        onContinue={() => {
           track({ pageName: "Onboarding", eventName: "onboarding_completed", additionalProperties: { destination: "dashboard", path: "company" } });
           completeOnboardingAndNavigate(markOnboardingComplete, () => router.push("/dashboard"));
         }}
-        className="cursor-pointer"
-        style={{ background: "#BC9BFF", border: "none", borderRadius: 8, padding: "11px 32px", fontSize: 14, fontWeight: 500, color: "#1e1e1c", letterSpacing: "-0.01em" }}
-      >
-        Connect my agent now →
-      </button>
+      />
       </div>
     </div>
   );

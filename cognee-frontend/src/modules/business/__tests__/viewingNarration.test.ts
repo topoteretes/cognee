@@ -64,24 +64,24 @@ describe("computeViewingNarration", () => {
     expect(line).toContain("0 sources · 0 entities below");
   });
 
-  it("names a single holder's brain personal, and marks the owner", () => {
+  it("names a single holder's dataset personal, and marks the owner", () => {
     const line = computeViewingNarration(
       "ds-1",
       indexWithDataset("ds-1", "Sales", ["u1"]),
       brainStateOf([entityNode("e1", ["slack"])]),
     );
 
-    expect(line).toBe("Sales — personal brain shared by you (owner) · 1 source · 1 entities below");
+    expect(line).toBe("Sales — personal dataset shared by you (owner) · 1 source · 1 entities below");
   });
 
-  it("names a multi-holder brain a team brain", () => {
+  it("names a multi-holder dataset a team dataset", () => {
     const line = computeViewingNarration(
       "ds-1",
       indexWithDataset("ds-1", "Sales", ["u1", "u2"]),
       brainStateOf([entityNode("e1", ["slack"])]),
     );
 
-    expect(line).toContain("team brain shared by u1@topoteretes.com (owner), u2@topoteretes.com");
+    expect(line).toContain("team dataset shared by u1@topoteretes.com (owner), u2@topoteretes.com");
   });
 
   it("falls back to workspace wording and a default name when governance knows nothing about the dataset", () => {
@@ -91,6 +91,6 @@ describe("computeViewingNarration", () => {
 
     const line = computeViewingNarration("ds-unknown", emptyIndex, brainStateOf([entityNode("e1", ["slack"])]));
 
-    expect(line).toBe("brain — personal brain shared by this workspace · 1 source · 1 entities below");
+    expect(line).toBe("dataset — personal dataset shared by this workspace · 1 source · 1 entities below");
   });
 });

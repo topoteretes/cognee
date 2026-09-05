@@ -52,7 +52,7 @@ function Slash() {
 
 const ROUTE_LABELS: Record<string, string> = {
   "/": "Overview", "/dashboard": "Overview",
-  "/datasets": "Brain", "/sessions": "Sessions", "/search": "Search",
+  "/datasets": "Datasets", "/sessions": "Sessions", "/search": "Search",
   "/knowledge-graph": "Mindmap",
   // /business is the same page as /knowledge-graph (page.tsx re-exports
   // BusinessPage) but had no entry here, so visiting it directly fell back
@@ -153,7 +153,7 @@ export default function TopBar() {
         {isDatasetDetail ? (
           <>
             <Slash />
-            <Link href="/datasets" className="hover:opacity-70" style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.55)" }}>Brain</Link>
+            <Link href="/datasets" className="hover:opacity-70" style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.55)" }}>Datasets</Link>
             <Slash />
             <span style={{ fontSize: 14, fontWeight: 500, color: "rgba(237,236,234,0.7)" }}>Documents</span>
           </>

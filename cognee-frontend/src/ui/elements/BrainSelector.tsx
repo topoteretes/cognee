@@ -32,7 +32,7 @@ function Check() {
 }
 
 interface BrainSelectorProps {
-  /** When false, hides the "All brains" option and defaults display to the first dataset. Default: true */
+  /** When false, hides the "All datasets" option and defaults display to the first dataset. Default: true */
   allowAll?: boolean;
   /** Which side the dropdown opens toward. Default: "left" */
   align?: "left" | "right";
@@ -46,7 +46,7 @@ export default function BrainSelector({ allowAll = true, align = "left", directi
   const closeCallback = useCallback(() => close(), [close]);
   const ref = useOutsideClick<HTMLDivElement>(closeCallback, isOpen);
 
-  // When "All brains" is not allowed, fall back to the first dataset for display
+  // When "All datasets" is not allowed, fall back to the first dataset for display
   const displayDataset = allowAll ? selectedDataset : (selectedDataset ?? datasets[0] ?? null);
   const isAllSelected = !selectedDataset;
 
@@ -60,7 +60,7 @@ export default function BrainSelector({ allowAll = true, align = "left", directi
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
-        // Stable hook for e2e: the label is whichever brain is active, so the
+        // Stable hook for e2e: the label is whichever dataset is active, so the
         // control cannot be found by its text.
         data-testid="brain-selector"
         onClick={toggle}
@@ -76,7 +76,7 @@ export default function BrainSelector({ allowAll = true, align = "left", directi
       >
         <DatabaseIcon color={displayDataset ? "rgba(188,155,255,0.60)" : "rgba(255,255,255,0.45)"} />
         <span style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {displayDataset ? displayDataset.name : "All brains"}
+          {displayDataset ? displayDataset.name : "All datasets"}
         </span>
         <Chevron />
       </button>
@@ -107,7 +107,7 @@ export default function BrainSelector({ allowAll = true, align = "left", directi
                 onMouseLeave={e => { if (!isAllSelected) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               >
                 <span style={{ fontSize: 13, fontWeight: isAllSelected ? 500 : 400, color: isAllSelected ? "rgba(188,155,255,0.60)" : "rgba(237,236,234,0.7)", flex: 1 }}>
-                  All brains
+                  All datasets
                 </span>
                 {isAllSelected && <Check />}
               </div>

@@ -9,6 +9,8 @@ import { useCurrentUser } from "@/modules/users/useCurrentUser";
 import type { SessionRow } from "@/modules/sessions/getSessions";
 import { useTenantHourlyCosts } from "@/modules/billing/useTenantHourlyCosts";
 import { useFilter, useRefreshDatasetsOnMount } from "@/ui/layout/FilterContext";
+import { useCoverageRuns } from "@/app/(app)/memory-gap-analysis/hooks/useCoverageRuns";
+import { MAX_SCORE } from "@/app/(app)/memory-gap-analysis/types";
 import type { PipelineRun, Range } from "@/ui/elements/AgentActivityTerminal";
 import DashboardSkeleton from "./DashboardSkeleton";
 import { useDashboardTelemetry } from "./hooks/useDashboardTelemetry";
@@ -35,6 +37,9 @@ import type { TopicScore } from "./partials/redesign/PerformancePanel";
 import { ActivityPanel } from "./partials/redesign/ActivityPanel";
 import type { DashRange } from "./partials/redesign/RangeToggle";
 import { FONT, T } from "./partials/redesign/mono";
+
+/** How many datasets the Memory Gap panel lists at a glance. */
+const MAX_COVERAGE_ROWS = 4;
 
 const DATA_SOURCE_PROVIDERS = DATA_SOURCE_CARDS.map((card) => card.key);
 
@@ -79,6 +84,7 @@ export default function OverviewPage(): React.ReactElement {
   const { cogniInstance, isInitializing, serviceUrl, apiKey } = useCogniInstance();
   const { tenantReady, podUnreachable, tenant, isOwner } = useTenant();
   const { agents, datasets, selectedAgent, loading: filterLoading } = useFilter();
+  const { brains: coverageBrains } = useCoverageRuns();
   // Greeting identity comes from the logged-in user, NOT the FilterContext
   // agent selection (which defaults to null and would leave the greeting nameless).
   const { data: currentUser } = useCurrentUser();
@@ -198,13 +204,13 @@ export default function OverviewPage(): React.ReactElement {
     status: agentStatus(sessions, d.prefixes),
   }));
 
-  // Company Brain reflects whether any data has been ingested (datasets
+  // Company Dataset reflects whether any data has been ingested (datasets
   // present); every other source is a live connector from DATA_SOURCE_CARDS,
   // carrying its real control-plane connection status. Sources that aren't
   // built yet live in the Integrations page's notify-me list, not here — the
   // graph never advertises a source nobody can connect.
   const flowSources: FlowSource[] = [
-    { name: "Company Brain", logo: "company-brain", status: datasets.length > 0 ? "connected" : "disconnected" },
+    { name: "Company Dataset", logo: "company-brain", status: datasets.length > 0 ? "connected" : "disconnected" },
     ...DATA_SOURCE_CARDS.map((card) => ({
       name: card.name,
       // The card's glyph is optional; the graph node falls back to the key,
@@ -219,10 +225,26 @@ export default function OverviewPage(): React.ReactElement {
   const connectedAgentCount = [...PERSISTENT_AGENT_DEFS, ...DYNAMIC_AGENT_DEFS]
     .filter((d) => hasRegistered(sessions, d.prefixes)).length;
 
-  // Memory Coverage is a Cognee Cloud feature (see PerformancePanel) — no
-  // local score to compute, so the panel gets an empty state directly.
-  const recallPct: number | null = null;
-  const topics: TopicScore[] = [];
+  // Coverage scores per dataset. Shares react-query cache keys with the Memory
+  // Gap Analysis page, so opening both costs one fetch per dataset, not two.
+  const scoreByBrainId = new Map(
+    coverageBrains
+      .filter((brain) => brain.result !== null && brain.result.run.status === "complete")
+      .map((brain) => [brain.id, (brain.result!.overall_score / MAX_SCORE) * 100]),
+  );
+
+  const topics: TopicScore[] = datasets.slice(0, MAX_COVERAGE_ROWS).map((d) => ({
+    name: d.name,
+    // Null, not zero: a dataset nobody has scored yet is unknown, and drawing it
+    // as 0% would read as "answers nothing" instead of "not measured".
+    pct: scoreByBrainId.has(d.id) ? Math.round(scoreByBrainId.get(d.id)!) : null,
+  }));
+
+  // Workspace headline: the mean across datasets that actually have a score.
+  const scoredPcts = [...scoreByBrainId.values()];
+  const recallPct = scoredPcts.length
+    ? Math.round(scoredPcts.reduce((total, pct) => total + pct, 0) / scoredPcts.length)
+    : null;
 
   const greetingName = currentUser?.name?.trim() || (currentUser?.email ? currentUser.email.split("@")[0] : "");
 
@@ -284,7 +306,6 @@ export default function OverviewPage(): React.ReactElement {
             apiKey={apiKey}
             isInitializing={isInitializing}
             hasDocuments={datasets.length > 0}
-            sessions={sessions}
             integrationConnected={connectedIntegrations}
           />
         </GetStartedBar>

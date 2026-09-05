@@ -11,7 +11,7 @@ export const AUTOMATION_CARDS: SetupConnectorCfg[] = [
     buildSteps: (baseUrl, apiKey, loading) => [
       { title: "Install the Cognee community node", description: "In n8n, open Settings → Community Nodes → Install and enter the package name.", code: "n8n-nodes-cognee", codeToCopy: "n8n-nodes-cognee" },
       { title: "Create the Cognee API credential", description: "Add a \"Cognee API\" credential, paste your Base URL and API key, and click Test — it verifies the connection against your tenant.", code: baseUrl, codeToCopy: `${baseUrl}\n${apiKey}`, loading },
-      { title: "Test the connection", description: "Add a Cognee node to a workflow (or attach it to an AI Agent) and run it — it should answer from your brain." },
+      { title: "Test the connection", description: "Add a Cognee node to a workflow (or attach it to an AI Agent) and run it — it should answer from your dataset." },
     ],
   },
   {
@@ -25,7 +25,7 @@ export const AUTOMATION_CARDS: SetupConnectorCfg[] = [
       // The Dify plugin needs the /api suffix — without it, validation passes (root /health) but every tool call 404s.
       { title: "Configure the plugin", description: "Open the plugin's authorization settings and enter your Cognee Base URL (including the /api suffix) and API key.", code: `${baseUrl}/api`, codeToCopy: `${baseUrl}/api\n${apiKey}`, loading },
       { title: "Add Cognee tools to your app", description: "In an Agent or Workflow app, add the Cognee tools — create a dataset, ingest text or files, run Cognify, then search your memory." },
-      { title: "Test the connection", description: "Run the app and ask: \"What do you know from cognee?\" — the Cognee search tool should answer from your brain." },
+      { title: "Test the connection", description: "Run the app and ask: \"What do you know from cognee?\" — the Cognee search tool should answer from your dataset." },
     ],
   },
 ];

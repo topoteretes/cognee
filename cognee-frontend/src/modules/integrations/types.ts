@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { PreferredOs } from "@/ui/layout/OsPreferenceContext";
 
 export interface StepDef {
   title: string;
@@ -10,6 +11,10 @@ export interface StepDef {
   codeBlocks?: { code: string; codeToCopy?: string; label?: string; loading?: boolean }[];
   /** Custom rendered content (e.g. an annotated config preview) shown below the description. */
   content?: ReactNode;
+  /** Numbered terminal block with one "copy the lot" button — the shape the
+   *  onboarding flow uses. Takes precedence over `code`/`codeBlocks`. */
+  lines?: string[];
+  copyLabel?: string;
 }
 
 /** A connector whose setup is a self-serve wizard (plugin install, MCP config, API key). */
@@ -20,7 +25,18 @@ export interface SetupConnectorCfg {
   description: string;
   /** Icon shown in the card badge and the modal header (24px) */
   icon: ReactNode;
-  buildSteps: (baseUrl: string, apiKey: string, isInitializing: boolean) => StepDef[];
+  /**
+   * `os` drives the shell-based connectors (credentials, skill installs): the
+   * commands genuinely differ between bash and PowerShell. MCP connectors
+   * configure themselves through JSON and can ignore it.
+   */
+  buildSteps: (baseUrl: string, apiKey: string, isInitializing: boolean, os: PreferredOs) => StepDef[];
+  /**
+   * Whether this connector's steps actually change with `os`. Drives the
+   * Mac/Windows toggle in the wizard header — showing it on a connector whose
+   * instructions are identical either way just invites pointless clicking.
+   */
+  osAware?: boolean;
 }
 
 /** A connector that is shared by the whole workspace (OAuth), not per-user. */

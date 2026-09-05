@@ -44,7 +44,7 @@ export default function CreateModelModal({
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ fontSize: 14, fontWeight: 500, color: "#EDECEA" }}>Infer from data</span>
                 <span style={{ fontSize: 12, color: "rgba(237,236,234,0.55)" }}>
-                  {filesCount === 0 ? "No files in this brain yet" : `Analyze ${filesCount} file${filesCount !== 1 ? "s" : ""} to suggest a schema`}
+                  {filesCount === 0 ? "No files in this dataset yet" : `Analyze ${filesCount} file${filesCount !== 1 ? "s" : ""} to suggest a schema`}
                 </span>
               </div>
             </button>

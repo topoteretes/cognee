@@ -17,9 +17,9 @@ interface ShareDatasetModalProps {
 }
 
 /**
- * Modal for sharing a brain (dataset): with the whole workspace (grant to the
+ * Modal for sharing a dataset: with the whole workspace (grant to the
  * tenant principal — covers all current and future members) or read-only with
- * individual agents and users. Shared between the Brains list and the dataset
+ * individual agents and users. Shared between the Datasets list and the dataset
  * detail page. Sharing is optimistic — the backend has no "list existing
  * shares" endpoint yet, so the shared set is tracked only for this session.
  */
@@ -66,7 +66,7 @@ export default function ShareDatasetModal({ datasetId, datasetName, onClose, pag
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "rgba(15,15,15,0.92)", backdropFilter: "blur(16px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 24, width: 480, maxHeight: "70vh", overflow: "auto", display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.6)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Share brain</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#EDECEA", margin: 0 }}>Share dataset</h2>
           <button onClick={onClose} className="cursor-pointer" style={{ background: "none", border: "none", color: "rgba(237,236,234,0.5)", fontSize: 18 }}>&#10005;</button>
         </div>
         <p style={{ fontSize: 13, color: "rgba(237,236,234,0.55)", margin: 0 }}>Share <strong>{datasetName}</strong> with your whole workspace, or grant read access to individual agents and users.</p>

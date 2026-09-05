@@ -1,2 +1,2 @@
 import PageLoading from "@/ui/elements/PageLoading";
-export default function Loading() { return <PageLoading name="Brain" />; }
+export default function Loading() { return <PageLoading name="Datasets" />; }

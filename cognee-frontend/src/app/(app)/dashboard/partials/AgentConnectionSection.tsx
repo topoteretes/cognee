@@ -1,22 +1,15 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { trackEvent } from "@/modules/analytics";
-import { SEARCH_SESSION_PREFIX } from "@/modules/sessions/getSessions";
-import type { SessionRow } from "@/modules/sessions/getSessions";
 import Modal from "@/ui/elements/Modal/Modal";
 import { OsToggle } from "@/ui/elements/OsToggle";
 import { useOsPreference } from "@/ui/layout/OsPreferenceContext";
-import { exportEnvVar } from "@/utils/osCommands";
 import { CARDS_CFG, getSteps } from "./agentConnectionSteps";
 import type { AciAgentKey } from "./agentConnectionSteps";
 import { AciCard } from "./AciCard";
 import { AciStepRow } from "./AciStepRow";
-
-// Index of the "Upload something" step in the claude-code flow — used to
-// auto-advance when a new session is detected while the modal is open.
-const CLAUDE_CONNECT_STEP = 2;
 
 interface AgentConnectionSectionProps {
   onUploadClick: () => void;
@@ -25,7 +18,6 @@ interface AgentConnectionSectionProps {
   apiKey: string | null;
   isInitializing: boolean;
   hasDocuments: boolean;
-  sessions: SessionRow[];
   integrationConnected?: Record<string, boolean>;
 }
 
@@ -36,51 +28,21 @@ export function AgentConnectionSection({
   apiKey,
   isInitializing,
   hasDocuments,
-  sessions,
   integrationConnected = {},
 }: AgentConnectionSectionProps): React.ReactElement {
   const router = useRouter();
   const { os } = useOsPreference();
   const [activeKey, setActiveKey] = useState<AciAgentKey | null>(null);
   const [stepIndexMap, setStepIndexMap] = useState<Partial<Record<AciAgentKey, number>>>({});
-  const [connectVerified, setConnectVerified] = useState(false);
-  const sessionBaselineRef = useRef<Set<string> | null>(null);
-
   const baseUrl = serviceUrl ?? "https://your-tenant.aws.cognee.ai";
   const resolvedKey = apiKey ?? "your-api-key";
-  const credsCode = `${exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)}\n${exportEnvVar(os, "COGNEE_API_KEY", resolvedKey)}`;
-  const stepOpts = { baseUrl, resolvedKey, credsCode, isInitializing, connectVerified, os };
-
-  // Detect a new Claude Code session while the modal is open. Derives connection
-  // state from the `sessions` prop (circuit-breaker-protected, 15s poll) —
-  // no rogue setInterval bypassing the breaker.
-  useEffect(() => {
-    if (activeKey !== "claude-code") {
-      sessionBaselineRef.current = null;
-      setConnectVerified(false);
-      return;
-    }
-    if (connectVerified) return;
-
-    const realIds = sessions
-      .map((s) => s.session_id)
-      .filter((id) => !id.startsWith(SEARCH_SESSION_PREFIX));
-
-    if (sessionBaselineRef.current === null) {
-      // First render with modal open — snapshot the pre-existing session set.
-      sessionBaselineRef.current = new Set(realIds);
-      return;
-    }
-
-    const baseline = sessionBaselineRef.current;
-    if (realIds.some((id) => !baseline.has(id))) {
-      setConnectVerified(true);
-      setStepIndexMap((prev) => {
-        const cur = prev["claude-code"] ?? 0;
-        return cur <= CLAUDE_CONNECT_STEP ? { ...prev, "claude-code": CLAUDE_CONNECT_STEP + 1 } : prev;
-      });
-    }
-  }, [sessions, activeKey, connectVerified]);
+  // `!apiKey` belongs in the gate as much as `isInitializing` does: provisioning
+  // releases the spinner before the key lands (useTenantInit.ts:256), so a new
+  // user sits at isInitializing === false with no key for a minute or two. The
+  // Claude Code / Codex steps write ~/.cognee/.env, where copying the
+  // "your-api-key" placeholder would replace a working key rather than set a
+  // throwaway shell variable.
+  const stepOpts = { baseUrl, resolvedKey, isInitializing: isInitializing || !apiKey, os };
 
   function handleCardClick(key: AciAgentKey) {
     trackEvent({ pageName: "Dashboard", eventName: "agent_card_clicked", additionalProperties: { card: key } });

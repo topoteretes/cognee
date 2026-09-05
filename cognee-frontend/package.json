@@ -6,9 +6,9 @@
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --turbopack",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
-    "test": "jest",
     "lint": "eslint .",
-    "check:tracking-plan": "node scripts/check-tracking-plan.js"
+    "check:tracking-plan": "node scripts/check-tracking-plan.js",
+    "prepare": "node scripts/setup-git-hooks.js"
   },
   "dependencies": {
     "@mantine/core": "^8.3.13",
@@ -34,7 +34,6 @@
     "react-error-boundary": "^6.0.0",
     "react-force-graph-2d": "^1.29.0",
     "react-markdown": "^10.1.0",
-    "server-only": "^0.0.1",
     "uuid": "^11.1.0",
     "valibot": "^1.2.0"
   },

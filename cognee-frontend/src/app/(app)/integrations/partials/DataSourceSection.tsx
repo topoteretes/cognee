@@ -152,7 +152,7 @@ export default function DataSourceSection(): ReactElement {
         <div>
           <h2 className="m-0 mb-1 text-[18px] font-bold tracking-[-0.01em] text-[var(--color-cognee-fg,#EDECEA)]">Data sources</h2>
           <p className="m-0 text-[14px] text-[var(--color-cognee-fg,#EDECEA)]/55">
-            Connect the tools your team already uses to your brains. One connection per workspace, shared with everyone.
+            Connect the tools your team already uses to your datasets. One connection per workspace, shared with everyone.
           </p>
         </div>
         {DATA_SOURCE_CARDS.length >= SEARCH_MIN_CONNECTORS && (

@@ -482,7 +482,7 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {/* Main panel — same dark-glass container as Sessions / Brain */}
+      {/* Main panel — same dark-glass container as Sessions / Dataset */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", marginInline: 32, marginBottom: 32, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(20px)" }}>
 
       {/* Sidebar */}
@@ -637,7 +637,7 @@ export default function SearchPage() {
         {/* Input area */}
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", padding: "12px 32px 16px" }}>
           <div style={{ maxWidth: 800, marginInline: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-            {/* Dataset picker — searches are scoped to one brain
+            {/* Dataset picker — searches are scoped to one dataset
                 (searchDatasetIds), so the scope must be visible and
                 changeable right where the question is typed. */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>

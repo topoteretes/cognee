@@ -22,7 +22,7 @@ export function computeViewingNarration(
   brainState: BrainState,
 ): string {
   const dataset = index.datasetById[datasetId];
-  const name = String(dataset?.name || "brain");
+  const name = String(dataset?.name || "dataset");
   const holders = index.users
     .filter((u) => (index.access[u.id] || {})[datasetId])
     .map((u) => userLabel(index, u) + (index.access[u.id]?.[datasetId]?.owns ? " (owner)" : ""));
@@ -30,5 +30,5 @@ export function computeViewingNarration(
   const who = holders.join(", ") || "this workspace";
   const sourceCount = brainState.sourceNames.length;
   const entityCount = brainState.entities.length;
-  return `${name} — ${kind} brain shared by ${who} · ${sourceCount} source${sourceCount === 1 ? "" : "s"} · ${entityCount} entities below`;
+  return `${name} — ${kind} dataset shared by ${who} · ${sourceCount} source${sourceCount === 1 ? "" : "s"} · ${entityCount} entities below`;
 }

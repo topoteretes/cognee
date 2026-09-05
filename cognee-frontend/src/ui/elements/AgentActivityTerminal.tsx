@@ -179,7 +179,7 @@ function parseQATime(t: string | null): number | null {
 type DatasetResult = { dataset: string | null; text: string };
 
 // Boilerplate "nothing found" completions returned by datasets that hold no
-// relevant knowledge — dropped so one query only shows brains that answered.
+// relevant knowledge — dropped so one query only shows datasets that answered.
 const NO_ANSWER_PATTERNS = [
   /no (relevant |specific |such )?(information|data|context|knowledge|results?|answer)/i,
   /\b(does not|doesn'?t|do not|don'?t)\b[^.]{0,60}\b(contain|include|provide|mention|have|appear)/i,
@@ -892,12 +892,12 @@ export function AgentActivityTerminal({
               let reason = "";
               let body: React.ReactNode = null;
               if (ev.kind === "userQuery") {
-                const scope = selectedDataset ? selectedDataset.name : `${datasets.length} ${datasets.length === 1 ? "brain" : "brains"}`;
+                const scope = selectedDataset ? selectedDataset.name : `${datasets.length} ${datasets.length === 1 ? "dataset" : "datasets"}`;
                 if (ev.searching) { outcome = "running"; }
                 else if (ev.error) { outcome = "error"; reason = ev.errorMessage || "check your connection"; }
                 else if (ev.results && ev.results.length > 0) {
                   outcome = "hit";
-                  reason = `${ev.results.length} ${ev.results.length === 1 ? "brain" : "brains"} answered · searched ${scope}`;
+                  reason = `${ev.results.length} ${ev.results.length === 1 ? "dataset" : "datasets"} answered · searched ${scope}`;
                   body = (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                       {ev.results.map((r, i) => (
@@ -908,7 +908,7 @@ export function AgentActivityTerminal({
                       ))}
                     </div>
                   );
-                } else { outcome = "empty"; reason = `no brain returned relevant knowledge · searched ${scope}`; }
+                } else { outcome = "empty"; reason = `no dataset returned relevant knowledge · searched ${scope}`; }
               } else {
                 const isRemember = ev.source === "remember";
                 if (ev.answer && !isNoAnswer(ev.answer)) {

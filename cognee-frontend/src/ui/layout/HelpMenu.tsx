@@ -89,7 +89,9 @@ export default function HelpMenu() {
 
   function startOnboarding() {
     close();
-    router.push("/onboarding");
+    // ?replay=1 tells the route guard this is a deliberate re-entry — without
+    // it an already-onboarded user is redirected back to /dashboard.
+    router.push("/onboarding?replay=1");
   }
 
   function openExtractionSettings() {
@@ -120,7 +122,7 @@ export default function HelpMenu() {
             width: 260,
             background: "rgba(10,10,10,0.92)",
             backdropFilter: "blur(16px)",
-            borderRadius: 10,
+            borderRadius: 0,
             boxShadow: "0px 8px 30px rgba(0,0,0,0.5), 0px 0px 0px 1px rgba(255,255,255,0.1)",
             padding: 6,
           }}
@@ -128,7 +130,7 @@ export default function HelpMenu() {
           {/* Onboarding */}
           <button
             onClick={startOnboarding}
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] w-full cursor-pointer"
+            className="flex items-center gap-[10px] rounded-none px-3 py-[10px] w-full cursor-pointer"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", background: "none", border: "none", textAlign: "left", fontFamily: "inherit" }}
             onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.07)")}
             onMouseLeave={e => (e.currentTarget.style.background = "none")}
@@ -140,7 +142,7 @@ export default function HelpMenu() {
           {/* Extraction Settings */}
           <button
             onClick={openExtractionSettings}
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] w-full cursor-pointer"
+            className="flex items-center gap-[10px] rounded-none px-3 py-[10px] w-full cursor-pointer"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", background: "none", border: "none", textAlign: "left", fontFamily: "inherit" }}
             onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.07)")}
             onMouseLeave={e => (e.currentTarget.style.background = "none")}
@@ -159,7 +161,7 @@ export default function HelpMenu() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={close}
-              className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px]"
+              className="flex items-center gap-[10px] rounded-none px-3 py-[10px]"
               style={{ fontSize: 13, color: "rgba(237,236,234,0.8)", textDecoration: "none" }}
               onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.07)")}
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "transparent")}
@@ -174,7 +176,7 @@ export default function HelpMenu() {
 
           {/* Keyboard shortcuts */}
           <div
-            className="flex items-center justify-between gap-[10px] rounded-[6px] px-3 py-[10px] cursor-default"
+            className="flex items-center justify-between gap-[10px] rounded-none px-3 py-[10px] cursor-default"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)" }}
           >
             <div className="flex items-center gap-[10px]">
@@ -182,7 +184,7 @@ export default function HelpMenu() {
               Keyboard shortcuts
             </div>
             <kbd
-              className="flex items-center justify-center rounded-[4px]"
+              className="flex items-center justify-center rounded-none"
               style={{
                 background: "rgba(255,255,255,0.08)",
                 border: "1px solid rgba(255,255,255,0.12)",
@@ -198,7 +200,7 @@ export default function HelpMenu() {
 
           {/* System status */}
           <div
-            className="flex items-center gap-[10px] rounded-[6px] px-3 py-[10px] cursor-default"
+            className="flex items-center gap-[10px] rounded-none px-3 py-[10px] cursor-default"
             style={{ fontSize: 13, color: "rgba(237,236,234,0.8)" }}
           >
             <StatusIcon />
@@ -219,7 +221,7 @@ export default function HelpMenu() {
           {CHANGELOG_ITEMS.map((item) => (
             <div
               key={item.label}
-              className="flex items-start gap-[10px] rounded-[6px] px-3 py-[8px] cursor-default"
+              className="flex items-start gap-[10px] rounded-none px-3 py-[8px] cursor-default"
               style={{ fontSize: 13, color: "rgba(237,236,234,0.7)" }}
             >
               <span

@@ -681,7 +681,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       trackEvent({ pageName: "Dataset Detail", eventName: "dataset_deleted", additionalProperties: { dataset_id: datasetId } });
       router.push("/datasets");
     } catch (err) {
-      console.error("Delete brain failed:", err);
+      console.error("Delete dataset failed:", err);
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
@@ -822,7 +822,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       {/* Delete confirmation modal */}
       {showDeleteConfirm && (
         <DeleteConfirmModal
-          title="Delete brain"
+          title="Delete dataset"
           message={<>Are you sure you want to delete <strong>{datasetName}</strong>? This will permanently remove the dataset and all its files. This action cannot be undone.</>}
           onConfirm={handleDeleteDataset}
           onCancel={() => setShowDeleteConfirm(false)}

@@ -2,6 +2,9 @@
 
 import { useState, type ReactNode } from "react";
 import { CLAUDE_DESKTOP_MCP_ENTRY, fillTemplate } from "@/data/prompts";
+import { terminalName } from "./agentSetupSteps";
+import { exportEnvVar } from "@/utils/osCommands";
+import type { PreferredOs } from "@/ui/layout/OsPreferenceContext";
 
 const MONO_FONT = 'ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace';
 
@@ -9,12 +12,21 @@ export function imgIcon(src: string, alt: string) {
   return <img src={src} alt={alt} style={{ width: 24, height: 24, objectFit: "contain" }} />;
 }
 
-export function credStep(baseUrl: string, apiKey: string, loading: boolean) {
+// Shell exports, deliberately — NOT the ~/.cognee/.env file the plugins use.
+//
+// This step belongs to the cards whose later steps read the variables out of
+// the environment of the shell that runs them: OpenClaw's AGENTS.md and the
+// generic skill both curl with "X-Api-Key: $COGNEE_API_KEY", and both tell the
+// user to "run the export commands from ... Step 1" when the variables are
+// missing (see prompts.ts). Nothing on those paths sources ~/.cognee/.env —
+// only the Claude Code and Codex plugins read it, and those two build their
+// steps from agentSetupSteps() instead (CLO-532).
+export function credStep(baseUrl: string, apiKey: string, loading: boolean, os: PreferredOs) {
   return {
     title: "Set your API credentials",
-    description: "Open a terminal and run these commands to configure your Cognee endpoint and key.",
-    code: `export COGNEE_BASE_URL="${baseUrl}"`,
-    codeToCopy: `export COGNEE_BASE_URL="${baseUrl}"\nexport COGNEE_API_KEY="${apiKey}"`,
+    description: `Run these in the ${terminalName(os)} you will start your agent from — they apply to that session. Add them to your shell profile to keep them across terminals.`,
+    code: exportEnvVar(os, "COGNEE_BASE_URL", baseUrl),
+    codeToCopy: `${exportEnvVar(os, "COGNEE_BASE_URL", baseUrl)}\n${exportEnvVar(os, "COGNEE_API_KEY", apiKey)}`,
     loading,
   };
 }
@@ -43,7 +55,7 @@ export function installUvStep() {
 // the main step instruction.
 export function InfoBox({ children }: { children: ReactNode }) {
   return (
-    <div style={{ display: "flex", gap: 9, background: "rgba(188,155,255,0.08)", border: "1px solid rgba(188,155,255,0.22)", borderRadius: 8, padding: "10px 12px" }}>
+    <div style={{ display: "flex", gap: 9, background: "rgba(188,155,255,0.08)", border: "1px solid rgba(188,155,255,0.22)", borderRadius: 0, padding: "10px 12px" }}>
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
         <circle cx="8" cy="8" r="6.5" stroke="#BC9BFF" strokeWidth="1.3" />
         <path d="M8 7.2V11" stroke="#BC9BFF" strokeWidth="1.4" strokeLinecap="round" />
@@ -94,7 +106,7 @@ export function ConfigPreview({ baseUrl, apiKey, loading }: { baseUrl: string; a
   ];
   const dim = "rgba(237,236,234,0.4)";
   return (
-    <div style={{ position: "relative", background: "#18181B", borderRadius: 8, marginBottom: 4 }}>
+    <div style={{ position: "relative", background: "#18181B", borderRadius: 0, marginBottom: 4 }}>
       <CopyButton copied={copied} onCopy={doCopy} ariaLabel={copied ? "Copied" : "Copy the highlighted block"} />
       <div style={{ overflowX: "auto", padding: "12px 0", fontFamily: MONO_FONT, fontSize: 12.5, lineHeight: 1.75, whiteSpace: "pre" }}>
         <div style={{ padding: "0 14px", color: dim }}>{"{"}</div>
@@ -135,7 +147,7 @@ export function CursorConfigPreview({ baseUrl, apiKey, loading }: { baseUrl: str
   }
   const dim = "rgba(237,236,234,0.4)";
   return (
-    <div style={{ position: "relative", background: "#18181B", borderRadius: 8, marginBottom: 4 }}>
+    <div style={{ position: "relative", background: "#18181B", borderRadius: 0, marginBottom: 4 }}>
       <CopyButton copied={copied} onCopy={doCopy} ariaLabel={copied ? "Copied" : "Copy the cognee entry"} />
       <div style={{ overflowX: "auto", padding: "12px 0", fontFamily: MONO_FONT, fontSize: 12.5, lineHeight: 1.75, whiteSpace: "pre" }}>
         <div style={{ padding: "0 14px", color: dim }}>{"{"}</div>
@@ -185,7 +197,7 @@ export function GeminiConfigPreview({ baseUrl, apiKey, loading }: { baseUrl: str
     setTimeout(() => setCopied(false), 1800);
   }
   return (
-    <div style={{ position: "relative", background: "#18181B", borderRadius: 8, marginBottom: 4 }}>
+    <div style={{ position: "relative", background: "#18181B", borderRadius: 0, marginBottom: 4 }}>
       <CopyButton copied={copied} onCopy={doCopy} ariaLabel={copied ? "Copied" : "Copy the full config"} />
       <div style={{ overflowX: "auto", padding: "12px 0", fontFamily: MONO_FONT, fontSize: 12.5, lineHeight: 1.75, whiteSpace: "pre" }}>
         {fullBlock.map((line, i) => (

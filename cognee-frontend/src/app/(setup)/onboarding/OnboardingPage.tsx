@@ -41,14 +41,18 @@ export default function OnboardingPage() {
   const initialStep = Math.min(Math.max(isNaN(rawStep) ? 0 : rawStep, 0), 3);
   const [step, setStep] = useState(initialStep);
   // Top-level branch: preparing → path selection → either the Claude/Codex
-  // card flow ("agent") or the existing Company Brain upload flow ("company").
-  // A ?step= deep link jumps straight into the Company Brain sub-steps. The
+  // card flow ("agent") or the existing Company Dataset upload flow ("company").
+  // A ?step= deep link jumps straight into the Company Dataset sub-steps. The
   // former "welcome" step here duplicated the real /welcome page's content —
   // that content now lives there instead, so onboarding starts on preparing.
   const [view, setView] = useState<"preparing" | "select" | "company" | "agent">(initialStep >= 1 ? "company" : "preparing");
   const [agent, setAgent] = useState<"claude-code" | "codex">("claude-code");
   const [files, setFiles] = useState<File[]>([]);
   const [datasetId, setDatasetId] = useState<string | null>(null);
+  // Signature of the file set Step 2 already sent. Lives here rather than in
+  // Step 2 so it survives Back unmounting that component, and so it stops
+  // matching as soon as the Step 1 selection changes.
+  const [ingestedKey, setIngestedKey] = useState<string | null>(null);
   // Demo recalls are kicked off the moment cognify finishes (datasetId is set).
   // The Step 3 terminal reveals them sequentially with a typewriter — by the
   // time the user reads the first question, the answers are usually already in.
@@ -83,10 +87,14 @@ export default function OnboardingPage() {
     });
   }, [datasetId, cogniInstance, demoEntries]);
 
+  // Shared by the agent flow's Back and the Company Brain steps that can't
+  // safely step backwards into a stage with side effects.
+  const backToSelect = () => { setView("select"); setStep(0); };
+
   const darkPage: React.CSSProperties = {
     backgroundColor: "#000000",
     backgroundImage: "linear-gradient(rgba(244,244,244,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(244,244,244,0.10) 1px, transparent 1px)",
-    backgroundSize: "33px 33px",
+    backgroundSize: "24px 24px",
   };
 
   if (isInitializing) {
@@ -109,7 +117,7 @@ export default function OnboardingPage() {
     return <ServeOnboarding />;
   }
 
-  // Within the Company Brain flow, steps 1 and 2 render fine while the tenant
+  // Within the Company Dataset flow, steps 1 and 2 render fine while the tenant
   // pod is still being provisioned in the background (Step 2 owns its own
   // loading state). Step 3 renders recall results, so it needs both the pod
   // (cogniInstance) AND the dataset before it can show anything.
@@ -137,7 +145,7 @@ export default function OnboardingPage() {
           serviceUrl={serviceUrl}
           apiKey={apiKey}
           cogniInstance={cogniInstance}
-          onRestart={() => { setView("select"); setStep(0); }}
+          onRestart={backToSelect}
         />
       )}
       {view === "company" && (
@@ -150,17 +158,17 @@ export default function OnboardingPage() {
             <button
               onClick={() => skipToDashboard(router, markOnboardingComplete, track)}
               className="cursor-pointer"
-              style={{ marginTop: 8, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)" }}
+              style={{ marginTop: 8, background: "none", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 0, padding: "8px 18px", fontSize: 13, fontWeight: 500, color: "rgba(237,236,234,0.8)" }}
             >
               Skip to dashboard
             </button>
           </div>
         ) : (
           <>
-            {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} />}
-            {step === 2 && <Step2 files={files} datasetId={datasetId} onNext={(id) => { setDatasetId(id); setStep(3); }} cogniInstance={cogniInstance} />}
+            {step === 1 && <Step1 files={files} setFiles={setFiles} onNext={() => setStep(2)} onBack={backToSelect} />}
+            {step === 2 && <Step2 files={files} datasetId={datasetId} onNext={(id) => { setDatasetId(id); setStep(3); }} onDatasetCreated={setDatasetId} ingestedKey={ingestedKey} onIngested={setIngestedKey} onBack={() => setStep(1)} cogniInstance={cogniInstance} />}
             {step === 3 && cogniInstance && datasetId && (
-              <Step3 datasetId={datasetId} cogniInstance={cogniInstance} demoEntries={demoEntries} />
+              <Step3 datasetId={datasetId} cogniInstance={cogniInstance} demoEntries={demoEntries} onBack={backToSelect} />
             )}
           </>
         )

@@ -47,16 +47,15 @@ function CheckIcon() {
   );
 }
 
+const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+
 export default function ApiKeysPage() {
   const { cogniInstance, serviceUrl, isInitializing } = useCogniInstance();
   const { tenant, hasAccess, tenantReady } = useTenant();
   const isCloud = isCloudEnvironment();
-  // In cloud, never fall back to localhost — show the real tenant URL when
-  // known, otherwise treat as provisioning. In local mode LocalProvider always
-  // sets serviceUrl (from getLocalApiUrl), so there is nothing to fall back to:
-  // a build-time NEXT_PUBLIC_LOCAL_API_URL default here would only ever show a
-  // stale URL that ignores the container's COGNEE_BACKEND_URL.
-  const baseUrl = serviceUrl;
+  // In cloud, never fall back to localhost — show the real tenant URL when known,
+  // otherwise treat as provisioning. Only local/OSS mode uses localApiUrl.
+  const baseUrl = isCloud ? serviceUrl : (serviceUrl || localApiUrl);
   const urlProvisioning = isCloud && !serviceUrl;
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);

@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ReactElement } from "react";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
+import { useOsPreference } from "@/ui/layout/OsPreferenceContext";
 import type { SetupConnectorCfg } from "@/modules/integrations/types";
 import SetupConnectorCard from "./SetupConnectorCard";
 import SetupWizardModal from "./SetupWizardModal";
@@ -15,6 +16,7 @@ interface SetupConnectorSectionProps {
 
 export default function SetupConnectorSection({ cards, connectedKeys = {} }: SetupConnectorSectionProps): ReactElement {
   const { serviceUrl, apiKey, isInitializing } = useCogniInstance();
+  const { os } = useOsPreference();
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [stepIndexMap, setStepIndexMap] = useState<Partial<Record<string, number>>>({});
 
@@ -22,7 +24,10 @@ export default function SetupConnectorSection({ cards, connectedKeys = {} }: Set
   const resolvedKey = apiKey || "your-api-key";
 
   const activeCfg = cards.find(c => c.key === activeKey);
-  const activeSteps = activeCfg ? activeCfg.buildSteps(baseUrl, resolvedKey, isInitializing) : [];
+  // See AgentConnectionSection: the gate is "no usable key yet", not just
+  // "still initializing" — otherwise the placeholder key above can be copied into
+  // ~/.cognee/.env over a real one.
+  const activeSteps = activeCfg ? activeCfg.buildSteps(baseUrl, resolvedKey, isInitializing || !apiKey, os) : [];
   const currentStep = activeKey ? (stepIndexMap[activeKey] ?? 0) : 0;
 
   const closeModal = useCallback(() => setActiveKey(null), []);
@@ -42,11 +47,12 @@ export default function SetupConnectorSection({ cards, connectedKeys = {} }: Set
         .aci-step-row[data-active="true"]:hover { background: transparent; }
         /* Same track sizing as the Data sources grid, so both sections share
            card width and a short list (e.g. 2 automation platforms) packs left
-           instead of stretching to fill the row. */
+           instead of stretching to fill the row. 224px tracks give 4 columns
+           at the page's max width. */
         .int-agent-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 16px;
+          grid-template-columns: repeat(auto-fill, minmax(224px, 1fr));
+          gap: 14px;
         }
       `}</style>
 
