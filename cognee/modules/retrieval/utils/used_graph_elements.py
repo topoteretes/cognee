@@ -69,14 +69,24 @@ def extract_from_scored_results(results: List[Any]) -> Optional[Dict[str, List[s
 
 def extract_from_temporal_dict(obj: Dict[str, Any]) -> Optional[Dict[str, List[str]]]:
     """
-    From temporal retriever dict: triplets -> extract_from_edges; events path -> extract_from_scored_results.
-    Returns None if nothing extracted.
+    From temporal retriever dict: triplets -> extract_from_edges; events path -> the
+    ``selected_events`` that reached the prompt, else extract_from_scored_results over
+    the vector candidate pool. Returns None if nothing extracted.
     """
     if not isinstance(obj, dict):
         return None
     triplets = obj.get("triplets")
     if triplets is not None and is_edge_list(triplets):
         return extract_from_edges(triplets)
+    selected_events = obj.get("selected_events")
+    if isinstance(selected_events, list) and selected_events:
+        node_ids = {
+            str(event["id"])
+            for event in selected_events
+            if isinstance(event, dict) and event.get("id") is not None
+        }
+        if node_ids:
+            return {"node_ids": sorted(node_ids)}
     scored_results = obj.get("vector_search_results")
     if isinstance(scored_results, list) and scored_results:
         return extract_from_scored_results(scored_results)

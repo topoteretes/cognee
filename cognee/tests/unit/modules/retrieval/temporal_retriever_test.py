@@ -4,7 +4,7 @@ import os
 from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime
 
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever, expand_to_period_end
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
 from cognee.infrastructure.llm import LLMGateway
 
@@ -87,13 +87,9 @@ async def test_filter_top_k_events_sorts_and_limits():
     tr = TemporalRetriever(top_k=2)
 
     relevant_events = [
-        {
-            "events": [
-                {"id": "e1", "description": "E1"},
-                {"id": "e2", "description": "E2"},
-                {"id": "e3", "description": "E3 - not in vector results"},
-            ]
-        }
+        {"id": "e1", "description": "E1"},
+        {"id": "e2", "description": "E2"},
+        {"id": "e3", "description": "E3 - not in vector results"},
     ]
 
     scored_results = [
@@ -115,13 +111,9 @@ async def test_filter_top_k_events_includes_unknown_as_infinite_but_not_in_top_k
     tr = TemporalRetriever(top_k=2)
 
     relevant_events = [
-        {
-            "events": [
-                {"id": "known1", "description": "Known 1"},
-                {"id": "unknown", "description": "Unknown"},
-                {"id": "known2", "description": "Known 2"},
-            ]
-        }
+        {"id": "known1", "description": "Known 1"},
+        {"id": "unknown", "description": "Unknown"},
+        {"id": "known2", "description": "Known 2"},
     ]
 
     scored_results = [
@@ -152,13 +144,9 @@ async def test_filter_top_k_events_matches_uuid_scored_results_against_str_event
 
     # Event ids come from the graph as strings (str() of the node UUID).
     relevant_events = [
-        {
-            "events": [
-                {"id": str(id_third), "description": "Third - not scored"},
-                {"id": str(id_second), "description": "Second"},
-                {"id": str(id_first), "description": "First"},
-            ]
-        }
+        {"id": str(id_third), "description": "Third - not scored"},
+        {"id": str(id_second), "description": "Second"},
+        {"id": str(id_first), "description": "First"},
     ]
 
     # Real ScoredResult objects: .id is a UUID (not a str).
@@ -194,7 +182,7 @@ def test_descriptions_to_string_unicode_and_newlines():
 @pytest.mark.asyncio
 async def test_filter_top_k_events_limits_when_top_k_exceeds_events():
     tr = TemporalRetriever(top_k=10)
-    relevant_events = [{"events": [{"id": "a"}, {"id": "b"}]}]
+    relevant_events = [{"id": "a"}, {"id": "b"}]
     scored_results = [
         SimpleNamespace(id="a", payload={"id": "a"}, score=0.1),
         SimpleNamespace(id="b", payload={"id": "b"}, score=0.2),
@@ -207,7 +195,7 @@ async def test_filter_top_k_events_limits_when_top_k_exceeds_events():
 @pytest.mark.asyncio
 async def test_filter_top_k_events_handles_empty_scored_results():
     tr = TemporalRetriever(top_k=2)
-    relevant_events = [{"events": [{"id": "x"}, {"id": "y"}]}]
+    relevant_events = [{"id": "x"}, {"id": "y"}]
     scored_results = []
     out = await tr.filter_top_k_events(relevant_events, scored_results)
     assert [e["id"] for e in out] == ["x", "y"]
@@ -256,12 +244,8 @@ async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine
 
     mock_graph_engine.collect_time_ids.return_value = ["e1", "e2"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-                {"id": "e2", "description": "Event 2"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
+        {"id": "e2", "description": "Event 2"},
     ]
 
     mock_result1 = SimpleNamespace(id="e2", payload={"id": "e2"}, score=0.05)
@@ -362,11 +346,7 @@ async def test_get_context_time_from_only(mock_graph_engine, mock_vector_engine)
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
     ]
 
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
@@ -395,11 +375,7 @@ async def test_get_context_time_to_only(mock_graph_engine, mock_vector_engine):
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
     ]
 
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
@@ -428,11 +404,7 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
     ]
 
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
@@ -522,11 +494,7 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
     ]
 
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
@@ -584,11 +552,7 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
     ]
 
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
@@ -643,11 +607,7 @@ async def test_get_completion_with_response_model(mock_graph_engine, mock_vector
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
-        {
-            "events": [
-                {"id": "e1", "description": "Event 1"},
-            ]
-        }
+        {"id": "e1", "description": "Event 1"},
     ]
 
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
@@ -715,7 +675,14 @@ async def test_extract_time_from_query_relative_path():
         time_from, time_to = await retriever.extract_time_from_query("What happened in 2024?")
 
     assert time_from == mock_timestamp_from
-    assert time_to == mock_timestamp_to
+    # The upper bound is widened to the end of the stated day (SDK-544).
+    assert (time_to.year, time_to.month, time_to.day, time_to.hour, time_to.second) == (
+        2024,
+        12,
+        31,
+        23,
+        59,
+    )
 
 
 @pytest.mark.asyncio
@@ -756,7 +723,14 @@ async def test_extract_time_from_query_absolute_path():
         time_from, time_to = await retriever.extract_time_from_query("What happened in 2024?")
 
     assert time_from == mock_timestamp_from
-    assert time_to == mock_timestamp_to
+    # The upper bound is widened to the end of the stated day (SDK-544).
+    assert (time_to.year, time_to.month, time_to.day, time_to.hour, time_to.second) == (
+        2024,
+        12,
+        31,
+        23,
+        59,
+    )
 
 
 @pytest.mark.asyncio
@@ -786,3 +760,180 @@ async def test_extract_time_from_query_with_none_values():
 
     assert time_from is None
     assert time_to is None
+
+
+# ---------------------------------------------------------------------------
+# Ranking regression (SDK-544): the vector candidate pool must be wider than
+# top_k, unscored window events must survive in chronological order, and the
+# rendered context must be chronological with time labels.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_candidate_pool_is_at_least_wide_search_top_k(mock_graph_engine, mock_vector_engine):
+    """A pool of top_k would leave most window events unscored (the old bug)."""
+    retriever = TemporalRetriever(top_k=3, wide_search_top_k=100)
+
+    mock_graph_engine.collect_time_ids.return_value = ["t1"]
+    mock_graph_engine.collect_events.return_value = [
+        {"id": f"e{i}", "description": f"Event {i}", "time_at": i * 1000} for i in range(10)
+    ]
+    mock_vector_engine.search.return_value = []
+
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+    with (
+        patch.object(retriever, "extract_time_from_query", return_value=("from", "to")),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
+    ):
+        await retriever.get_retrieved_objects("What happened?")
+
+    assert mock_vector_engine.search.await_args.kwargs["limit"] >= 100
+
+
+@pytest.mark.asyncio
+async def test_candidate_pool_grows_with_the_time_window(mock_graph_engine, mock_vector_engine):
+    retriever = TemporalRetriever(top_k=3, wide_search_top_k=10)
+
+    mock_graph_engine.collect_time_ids.return_value = ["t1"]
+    mock_graph_engine.collect_events.return_value = [{"id": f"e{i}"} for i in range(250)]
+    mock_vector_engine.search.return_value = []
+
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+    with (
+        patch.object(retriever, "extract_time_from_query", return_value=("from", "to")),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
+    ):
+        await retriever.get_retrieved_objects("What happened?")
+
+    assert mock_vector_engine.search.await_args.kwargs["limit"] == 250
+
+
+@pytest.mark.asyncio
+async def test_filter_top_k_events_keeps_unscored_events_chronologically_after_scored():
+    tr = TemporalRetriever(top_k=4)
+    relevant_events = [
+        {"id": "late", "time_at": 3000},
+        {"id": "scored_worse", "time_at": 500},
+        {"id": "early", "time_at": 1000},
+        {"id": "scored_best", "time_at": 2000},
+        {"id": "undated"},
+    ]
+    scored_results = [
+        SimpleNamespace(id="scored_best", score=0.1),
+        SimpleNamespace(id="scored_worse", score=0.4),
+    ]
+
+    top = await tr.filter_top_k_events(relevant_events, scored_results)
+
+    # Scored by relevance first, then the unscored ones oldest-first; the undated
+    # event is the last candidate and falls outside top_k.
+    assert [e["id"] for e in top] == ["scored_best", "scored_worse", "early", "late"]
+
+
+def test_descriptions_to_string_is_chronological_with_time_labels():
+    tr = TemporalRetriever()
+    results = [
+        {"description": "Second", "time_at": 946684800000},  # 2000-01-01
+        {
+            "description": "Interval",
+            "time_from": 631152000000,
+            "time_to": 662688000000,
+        },  # 1990-1991
+        {"description": "Undated"},
+        {"description": "First", "time_at": 0, "location": "Oslo"},
+        {"name": "Only a name", "time_at": 1},
+    ]
+
+    s = tr.descriptions_to_string(results)
+    blocks = s.split("\n#####################\n")
+
+    assert blocks[0] == "[1970-01-01 00:00:00] First (location: Oslo)"
+    assert blocks[1] == "[1970-01-01 00:00:00] Only a name"
+    assert blocks[2] == "[1990-01-01 00:00:00 to 1991-01-01 00:00:00] Interval"
+    assert blocks[3] == "[2000-01-01 00:00:00] Second"
+    assert blocks[4] == "Undated"
+
+
+@pytest.mark.asyncio
+async def test_get_retrieved_objects_falls_back_when_backend_lacks_temporal_queries(
+    mock_graph_engine,
+):
+    """A backend without collect_time_ids must degrade to triplet search, not crash."""
+    retriever = TemporalRetriever()
+    mock_graph_engine.collect_time_ids.side_effect = NotImplementedError("collect_time_ids ...")
+    unified_mock = _make_unified_mock(mock_graph_engine)
+
+    with (
+        patch.object(retriever, "extract_time_from_query", return_value=("from", "to")),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
+        ),
+        patch.object(retriever, "get_triplets", return_value=["triplet"]) as mock_get_triplets,
+    ):
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+
+    assert objects == {"triplets": ["triplet"]}
+    mock_get_triplets.assert_awaited_once_with("What happened in 2024?")
+
+
+# ---------------------------------------------------------------------------
+# Query bound expansion: "1996" means the whole of 1996, not its first second.
+# ---------------------------------------------------------------------------
+
+
+class TestExpandToPeriodEnd:
+    def test_none_passes_through(self):
+        assert expand_to_period_end(None) is None
+
+    def test_year_only_expands_to_end_of_year(self):
+        ts = expand_to_period_end(Timestamp(year=1996))
+        assert (ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second) == (
+            1996,
+            12,
+            31,
+            23,
+            59,
+            59,
+        )
+        assert ts.precision == "year"
+
+    def test_month_only_expands_to_end_of_month_including_leap_day(self):
+        ts = expand_to_period_end(Timestamp(year=2024, month=2))
+        assert (ts.month, ts.day, ts.hour, ts.minute, ts.second) == (2, 29, 23, 59, 59)
+
+    def test_day_expands_to_end_of_day(self):
+        ts = expand_to_period_end(Timestamp(year=2022, month=3, day=5))
+        assert (ts.day, ts.hour, ts.minute, ts.second) == (5, 23, 59, 59)
+
+    def test_explicit_precision_wins_over_heuristic(self):
+        # Jan 1st stated as a day stays a day; the heuristic alone would call it a year.
+        ts = expand_to_period_end(Timestamp(year=2022, month=1, day=1, precision="day"))
+        assert (ts.month, ts.day, ts.hour) == (1, 1, 23)
+
+    def test_full_timestamp_is_unchanged(self):
+        ts = expand_to_period_end(
+            Timestamp(year=2022, month=3, day=5, hour=10, minute=30, second=15)
+        )
+        assert (ts.hour, ts.minute, ts.second) == (10, 30, 15)
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_expands_only_the_upper_bound():
+    retriever = TemporalRetriever()
+    interval = QueryInterval(starts_at=Timestamp(year=1994), ends_at=Timestamp(year=1996))
+
+    with (
+        patch("cognee.modules.retrieval.temporal_retriever.render_prompt", return_value="p"),
+        patch.object(LLMGateway, "acreate_structured_output", AsyncMock(return_value=interval)),
+    ):
+        time_from, time_to = await retriever.extract_time_from_query("between 1994 and 1996")
+
+    assert (time_from.year, time_from.month, time_from.day) == (1994, 1, 1)
+    assert (time_to.year, time_to.month, time_to.day, time_to.second) == (1996, 12, 31, 59)
