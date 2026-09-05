@@ -114,8 +114,9 @@ async def promote(
     share permissions, and target write permission; ancestry is not authority.
 
     Agents choose which persisted document to promote and why. Inspect the
-    selected document: a persisted session window can contain several entries. This operation never grants itself
-    permissions, impersonates the target owner, copies other memories, or runs
+    selected document: a persisted session window can contain several entries.
+    This operation never grants itself permissions, impersonates the target
+    owner, copies other memories, or runs
     an LLM. Session entries must first be persisted with improve(). The copied
     document is ingest-complete; call cognify(datasets=[target_dataset_id],
     user=user) explicitly to make it searchable in the destination graph.

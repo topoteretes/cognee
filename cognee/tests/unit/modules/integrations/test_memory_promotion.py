@@ -240,3 +240,132 @@ async def test_concurrent_promotion_inserts_once_and_never_overwrites_edits(tmp_
         assert len(objects) == 1
     finally:
         await engine.engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_real_permissions_and_storage_agent_to_user_to_team(tmp_path, monkeypatch):
+    """Exercise public promotion with real ACL joins, SQLite and local files."""
+    from sqlalchemy import func, select
+
+    from cognee.base_config import get_base_config
+    from cognee.infrastructure.databases.relational import (
+        get_relational_config,
+        get_relational_engine,
+    )
+    from cognee.infrastructure.files.storage import get_file_storage
+    from cognee.modules.data.models import Data, Dataset
+    from cognee.modules.users.exceptions import PermissionDeniedError
+    from cognee.modules.users.models import ACL, Permission, Role, Tenant, User
+    from cognee.modules.users.permissions.methods.authorized_get_principal_datasets import (
+        authorized_get_principal_datasets,
+    )
+    from cognee.tasks.documents.classify_documents import classify_documents
+
+    monkeypatch.setattr(get_relational_config(), "db_path", str(tmp_path))
+    monkeypatch.setattr(get_relational_config(), "db_name", "promotion-real.db")
+    monkeypatch.setattr(get_relational_config(), "db_provider", "sqlite")
+    monkeypatch.setattr(get_base_config(), "data_root_directory", str(tmp_path / "files"))
+    engine = get_relational_engine()
+    await engine.create_database()
+    tenant = Tenant(id=uuid4(), name="test team")
+    parent = User(
+        id=uuid4(),
+        email="parent@example.test",
+        hashed_password="unused",
+        tenant_id=tenant.id,
+        tenants=[tenant],
+    )
+    agent = User(
+        id=uuid4(),
+        email="agent@example.test",
+        hashed_password="unused",
+        parent_user_id=parent.id,
+        tenant_id=tenant.id,
+        tenants=[tenant],
+    )
+    role = Role(id=uuid4(), name="publisher", tenant_id=tenant.id, users=[parent])
+    datasets = [
+        Dataset(id=uuid4(), name=name, owner_id=owner, tenant_id=tenant.id)
+        for name, owner in [("agent", agent.id), ("user", parent.id), ("team", parent.id)]
+    ]
+    source, personal, shared = datasets
+    permissions = {name: Permission(id=uuid4(), name=name) for name in ("read", "share", "write")}
+
+    def acl(principal, dataset, name):
+        return ACL(
+            principal_id=principal.id, dataset_id=dataset.id, permission_id=permissions[name].id
+        )
+
+    content = b"One verified lesson selected by the agent."
+    storage = get_file_storage(get_base_config().data_root_directory)
+    location = await storage.store("source.txt", BytesIO(content))
+    original = Data(
+        id=uuid4(),
+        dataset_id=source.id,
+        owner_id=agent.id,
+        tenant_id=tenant.id,
+        name="lesson",
+        extension="txt",
+        mime_type="text/plain",
+        loader_engine="text_loader",
+        raw_data_location=location,
+        original_data_location=location,
+        content_hash=hashlib.md5(content).hexdigest(),
+        raw_content_hash=hashlib.md5(content).hexdigest(),
+        pipeline_status={},
+        external_metadata={"reviewed": True},
+    )
+    try:
+        async with engine.get_async_session() as session:
+            session.add_all(
+                [tenant, parent, agent, role, *datasets, *permissions.values(), original]
+            )
+            await session.flush()
+            session.add_all(
+                [
+                    acl(agent, source, "read"),
+                    acl(agent, source, "share"),
+                    acl(parent, personal, "read"),
+                    acl(parent, personal, "share"),
+                    acl(role, shared, "write"),
+                    acl(tenant, shared, "read"),
+                ]
+            )
+            await session.commit()
+        kwargs = {
+            "source_dataset_id": source.id,
+            "target_dataset_id": personal.id,
+            "level": "user",
+            "reason": "Reusable lesson",
+            "user": agent,
+        }
+        with pytest.raises(PermissionDeniedError):
+            await m.promote(original.id, **kwargs)
+        async with engine.get_async_session() as session:
+            assert await session.scalar(select(func.count()).select_from(Data)) == 1
+            session.add(acl(agent, personal, "write"))
+            await session.commit()
+        first = await m.promote(original.id, **kwargs)
+        assert first.status == "copied"
+        assert (await m.promote(original.id, **kwargs)).status == "already_promoted"
+        effective = await authorized_get_principal_datasets(parent.id, "write", parent.id)
+        assert shared.id in {dataset.id for dataset in effective}
+        second = await m.promote(
+            first.target_data_id,
+            source_dataset_id=personal.id,
+            target_dataset_id=shared.id,
+            level="team",
+            reason="Team approved lesson",
+            user=parent,
+        )
+        assert second.status == "copied"
+        copied = await m._get_data(second.target_data_id, shared.id)
+        assert copied.system_metadata["promotion"]["previous"]["source_data_id"] == str(original.id)
+        async with m.open_data_file(copied.raw_data_location, "rb") as stream:
+            assert stream.read() == content
+        documents = await classify_documents([copied])
+        assert documents[0].id == second.target_data_id
+        async with engine.get_async_session() as session:
+            assert await session.scalar(select(func.count()).select_from(Data)) == 3
+    finally:
+        await engine.engine.dispose()
