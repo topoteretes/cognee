@@ -17,10 +17,12 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   mirror:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
