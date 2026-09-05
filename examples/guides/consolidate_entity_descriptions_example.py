@@ -1,5 +1,15 @@
+"""Consolidate Entity descriptions and EntityType summaries from the graph.
+
+Calls consolidate_entity_descriptions_pipeline(), which rewrites each Entity's
+description from its graph neighborhood, then summarizes each EntityType from
+its member Entities and writes is_a edge text.
+"""
+
 import asyncio
+import sys
 from os import path
+
+sys.path.insert(0, path.abspath(path.join(path.dirname(__file__), "..", "..")))
 
 import cognee
 from cognee import visualize_graph
@@ -9,7 +19,8 @@ from cognee.memify_pipelines.consolidate_entity_descriptions import (
 
 custom_prompt = """
 Extract only people and cities as entities.
-Connect people to cities with the relationship "lives_in".
+Connect people to cities with whatever relationship the text actually
+describes (e.g. born_in, lives_in, resides_in, settled_in, visited).
 Ignore all other entities.
 """
 
@@ -27,6 +38,7 @@ async def main():
     await cognee.remember(
         [
             "Alice moved to Paris in 2010, while Bob has always lived in New York.",
+            "Bob visited Paris in 2015 to see Alice.",
             "Andreas was born in Venice, but later settled in Lisbon.",
             "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
         ],
@@ -39,6 +51,14 @@ async def main():
     await consolidate_entity_descriptions_pipeline()
 
     await visualize_graph(graph_visualization_path_after_enrichment)
+
+    # Only recall() can prove the new EntityType/is_a text is actually used in
+    # retrieval - the description and edge text themselves are visible in the
+    # graph visualization above.
+    answer = await cognee.recall(
+        "How many Person entities are in this graph, and what do they have in common?"
+    )
+    print(answer)
 
 
 if __name__ == "__main__":
