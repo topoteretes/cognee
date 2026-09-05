@@ -1,0 +1,30 @@
+.page { max-width: 1180px; margin: 0 auto; padding: 32px; color: #edecea; }
+.header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 28px; }
+.page h1 { margin: 0 0 8px; font-size: 26px; font-weight: 600; }
+.page h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
+.page p { color: #aaa9a7; line-height: 1.6; font-size: 14px; }
+.muted { color: #aaa9a7; font-size: 13px; overflow-wrap: anywhere; }
+.tabs { display: flex; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid #ffffff20; margin-bottom: 24px; flex-wrap: wrap; }
+.tabs button, .button { border: 1px solid #ffffff25; background: #ffffff08; color: #edecea; border-radius: 8px; padding: 9px 14px; cursor: pointer; font: inherit; font-size: 13px; }
+.tabs button[aria-selected=true], .primary { background: #bc9bff; color: #201832; border-color: #bc9bff; }
+.button:disabled { opacity: .45; cursor: default; }
+.button:hover:not(:disabled) { border-color: #bc9bff; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; }
+.card { border: 1px solid #ffffff20; border-radius: 12px; padding: 22px; background: #171719; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 7px; font-size: 13px; flex: 1; min-width: 180px; }
+.field input, .field select, .field textarea { width: 100%; background: #212121; border: 1px solid #ffffff30; border-radius: 7px; padding: 10px; color: #edecea; font: inherit; }
+.field textarea { min-height: 78px; }
+.error { border: 1px solid #f8717180; background: #f8717110; color: #fca5a5; border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; }
+.success { color: #a7f3d0; }
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th, .table td { text-align: left; border-bottom: 1px solid #ffffff15; padding: 12px 10px; vertical-align: top; }
+.table th { color: #aaa9a7; font-weight: 500; }
+.scroll { overflow-x: auto; }
+.preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; background: #111; border-radius: 8px; padding: 16px; font-size: 12px; }
+.link { color: #bc9bff; text-decoration: underline; }
+.badge { display: inline-block; font-size: 12px; padding: 4px 8px; border-radius: 5px; background: #ffffff0d; }
+@media (max-width: 640px) { .page { padding: 20px 14px; } .header { flex-direction: column; } }
+
+.conversation { white-space: pre-wrap; }

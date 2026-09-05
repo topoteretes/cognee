@@ -6,23 +6,17 @@ import { TenantContext, localInstance } from "./TenantContext";
 import { tokens } from "@/ui/theme/tokens";
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 import { UserContext, type AvailableTenant } from "@/modules/users/UserContext";
+import { request, type WorkspaceContext } from "@/modules/workspace/api";
 
-// Single-user local mode: the only user is always the owner of the only
-// workspace. `useTenant()` derives isOwner by looking the active tenant up in
-// UserContext's availableTenants, and the cloud UserProvider that would fill
-// that list is not mounted here — so without this, isOwner is permanently
-// false and every owner-gated surface (the Connect buttons on the Data
-// Sources cards, for one) renders inert.
-const LOCAL_TENANT_ID = "local";
-const LOCAL_AVAILABLE_TENANTS: AvailableTenant[] = [
-  { id: LOCAL_TENANT_ID, name: LOCAL_TENANT_ID, isOwner: true, ownerHasSubscription: false },
-];
+// Local servers can have several users and teams. Ownership must come from
+// the authenticated SDK account, just as it does for a hosted workspace.
 
 export function LocalProvider({ children }: { children: React.ReactNode }) {
   const localApiUrl = getLocalApiUrl();
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
 
   // Memoized: consumers key effects off availableTenants, so a fresh array on
   // every render would re-fire them on unrelated re-renders.
@@ -34,13 +28,15 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
       markWelcomeSeen: async () => {},
       markOnboardingComplete: async () => {},
       dismissFeatureAnnouncement: async () => {},
-      availableTenants: LOCAL_AVAILABLE_TENANTS,
+      availableTenants: (workspace?.teams ?? []).map((team): AvailableTenant => ({
+        id: team.id, name: team.name, isOwner: team.is_owner, ownerHasSubscription: false,
+      })),
       isLoadingTenants: false,
       isTenantsError: false,
       refetchTenants: () => {},
       setAvailableTenantsOptimistic: () => {},
     }),
-    [],
+    [workspace],
   );
 
   useEffect(() => {
@@ -72,7 +68,11 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
 
         // Authenticated — set up the local instance
-        setTenant({ tenant_id: LOCAL_TENANT_ID, tenant_name: LOCAL_TENANT_ID });
+        const current = await request<WorkspaceContext>("/v1/workspace/context");
+        if (cancelled) return;
+        setWorkspace(current);
+        const selected = current.teams.find((team) => team.id === current.user.tenant_id);
+        setTenant({ tenant_id: selected?.id ?? "", tenant_name: selected?.name ?? "Personal" });
       } catch (err) {
         if (cancelled) return;
 
@@ -95,7 +95,7 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [localApiUrl]);
 
   if (error && !isInitializing) {
     return (
@@ -120,10 +120,15 @@ export function LocalProvider({ children }: { children: React.ReactNode }) {
         podUnreachable: false,
         error,
         statusMessage: null,
-        switchTenant: () => {},
+        switchTenant: async (tenantId) => {
+          try {
+            await request("/v1/permissions/tenants/select", "POST", { tenant_id: tenantId || null });
+            window.location.reload();
+          } catch (error) { setError(error instanceof Error ? error.message : "Could not switch team"); }
+        },
         planType: null,
         hasAccess: true,
-        requestCreateWorkspace: () => {},
+        requestCreateWorkspace: () => { window.location.href = "/workspace"; },
         nameModalOpen: false,
         releaseLoader: () => {},
       }}>

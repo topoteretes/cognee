@@ -177,6 +177,9 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
+For a shared local server with agent permissions, team invitations and reviewed
+memory promotion, see the [local memory workspace guide](docs/local-memory-workspace.md).
+
 > **Note:** The MCP server launched by `cognee-cli -ui` runs inside a Docker container.
 > Docker Desktop, Colima, or any OCI-compatible runtime with a working `docker` CLI is
 > required. See [Docker & Colima Setup](docs/docker-colima-setup.md) for details.

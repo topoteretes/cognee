@@ -3,18 +3,7 @@ import { LocalProvider } from "../LocalProvider";
 import { useTenant } from "../TenantContext";
 import { useUser } from "@/modules/users/UserContext";
 
-// Regression guard for a sync revert that shipped twice.
-//
-// `useTenant()` derives isOwner by looking the active tenant up in
-// UserContext's availableTenants. In cloud mode UserProvider fills that list;
-// in local mode nothing does, so LocalProvider has to supply it. When the SaaS
-// sync dropped that (it deleted LocalProvider's `isOwner: true`), isOwner went
-// permanently false and every owner-gated control rendered inert — most
-// visibly the Connect buttons on the Data Sources cards, which
-// DataSourceCard's `ctaFor` returns null for when !isOwner.
-//
-// The failure was invisible: it type-checks, it builds, and the only frontend
-// CI job renders /local-login, which reads none of this.
+// Local ownership follows the authenticated server account, including invited members.
 
 function Probe() {
   const { isOwner, tenant } = useTenant();
@@ -39,9 +28,11 @@ describe("LocalProvider ownership", () => {
     fetchMock.resetMocks();
   });
 
-  it("treats the single local user as owner of the local workspace", async () => {
-    // The /api/v1/users/me probe LocalProvider runs before it sets the tenant.
-    fetchMock.mockResponseOnce(JSON.stringify({ id: "local" }));
+  it.each([true, false])("uses the server ownership flag %s", async (isOwner) => {
+    fetchMock.mockResponses(
+      JSON.stringify({ id: "person" }),
+      JSON.stringify({ user: { id: "person", tenant_id: "team" }, teams: [{ id: "team", name: "Engineering", is_owner: isOwner }] }),
+    );
 
     render(
       <LocalProvider>
@@ -50,13 +41,16 @@ describe("LocalProvider ownership", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("tenant-id")).toHaveTextContent("local");
+      expect(screen.getByTestId("tenant-id")).toHaveTextContent("team");
     });
-    expect(screen.getByTestId("is-owner")).toHaveTextContent("true");
+    expect(screen.getByTestId("is-owner")).toHaveTextContent(String(isOwner));
   });
 
   it("exposes the local workspace as an owned tenant, so owner-gated lists are not empty", async () => {
-    fetchMock.mockResponseOnce(JSON.stringify({ id: "local" }));
+    fetchMock.mockResponses(
+      JSON.stringify({ id: "person" }),
+      JSON.stringify({ user: { id: "person", tenant_id: "team" }, teams: [{ id: "team", name: "Engineering", is_owner: true }] }),
+    );
 
     render(
       <LocalProvider>
