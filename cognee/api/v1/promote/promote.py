@@ -106,6 +106,30 @@ async def _persist_copy(row, content, provenance, actor, target, target_id) -> b
         raise
 
 
+async def get_promotion_source(actor, dataset_id, permission, level):
+    """Permit an explicit own-personal-to-team copy without changing tenant state."""
+    from cognee.modules.users.exceptions import PermissionDeniedError
+
+    if permission not in ("read", "share"):
+        raise ValueError("Promotion source access requires read or share")
+    try:
+        return await get_authorized_dataset(actor, dataset_id, permission)
+    except PermissionDeniedError:
+        # Normal dataset access remains tenant-scoped. Only this explicit copy
+        # operation may read a human actor's own personal dataset while that
+        # actor has selected the destination team. Each source grant is checked
+        # independently; another person's personal data is never eligible.
+        if level == "team" and actor.parent_user_id is None and actor.tenant_id:
+            for dataset in await get_principal_datasets(actor, permission):
+                if (
+                    dataset.id == dataset_id
+                    and dataset.owner_id == actor.id
+                    and dataset.tenant_id is None
+                ):
+                    return dataset
+        raise
+
+
 async def promote(
     data_id: UUID,
     *,
@@ -147,8 +171,8 @@ async def promote(
     if user is None:
         raise ValueError("Promotion requires an explicit authenticated user")
     actor = await get_user(user.id)
-    source = await get_authorized_dataset(actor, source_dataset_id, "read")
-    shareable = await get_authorized_dataset(actor, source_dataset_id, "share")
+    source = await get_promotion_source(actor, source_dataset_id, "read", level)
+    shareable = await get_promotion_source(actor, source_dataset_id, "share", level)
     target = await get_authorized_dataset(actor, target_dataset_id, "write")
     if source is None or target is None or shareable is None:
         raise ValueError("Source or target dataset is unavailable")
