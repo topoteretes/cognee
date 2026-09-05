@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, PrivateAttr, field_serializer
 from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
 
 
@@ -20,6 +20,15 @@ class Node(BaseModel):
     skeleton_edges: List["Edge"]
     status: np.ndarray
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # O(1) membership index for skeleton_neighbours, kept in sync with the list.
+    # Node equality is by id (see __eq__/__hash__), so id membership == Node
+    # membership. Without this, add_skeleton_neighbor scanned the list on every
+    # call, making a degree-D node cost O(D^2) to build.
+    _neighbour_ids: set = PrivateAttr(default_factory=set)
+
+    def model_post_init(self, __context: Any) -> None:
+        self._neighbour_ids = {neighbor.id for neighbor in self.skeleton_neighbours}
 
     def __init__(
         self,
@@ -75,11 +84,13 @@ class Node(BaseModel):
         distances[query_index] = score
 
     def add_skeleton_neighbor(self, neighbor: "Node") -> None:
-        if neighbor not in self.skeleton_neighbours:
+        if neighbor.id not in self._neighbour_ids:
+            self._neighbour_ids.add(neighbor.id)
             self.skeleton_neighbours.append(neighbor)
 
     def remove_skeleton_neighbor(self, neighbor: "Node") -> None:
-        if neighbor in self.skeleton_neighbours:
+        if neighbor.id in self._neighbour_ids:
+            self._neighbour_ids.discard(neighbor.id)
             self.skeleton_neighbours.remove(neighbor)
 
     def add_skeleton_edge(self, edge: "Edge") -> None:
