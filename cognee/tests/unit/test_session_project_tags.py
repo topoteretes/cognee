@@ -1,23 +1,23 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4, UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
 from cognee.infrastructure.session.project_tags import (
+    TaggedTrace,
     bind_project_tags,
     get_project_tags,
-    TaggedTrace,
 )
 from cognee.infrastructure.session.session_persist_watermark import SessionPersistWindow
 from cognee.memory.entries import QAEntry, TraceEntry
-from cognee.tasks.memify.cognify_session import cognify_session
-from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
 from cognee.modules.data.methods.provision_session_companion import (
-    provision_session_companion,
     CompanionConflict,
+    provision_session_companion,
 )
+from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
+from cognee.tasks.memify.cognify_session import cognify_session
 
 
 @pytest.mark.asyncio
@@ -67,9 +67,9 @@ async def test_qa_and_trace_tags_reach_graph_ingestion():
 
 @pytest.mark.asyncio
 async def test_companion_copies_authoritative_acl_and_rejects_drift():
-    from cognee.modules.users.methods import get_default_user
-    from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
     from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
+    from cognee.modules.users.methods import get_default_user
     from cognee.modules.users.models import ACL
 
     user = await get_default_user()
@@ -98,6 +98,7 @@ async def test_companion_copies_authoritative_acl_and_rejects_drift():
 
 def test_http_schema_advertises_typed_project_tags():
     from fastapi import FastAPI
+
     from cognee.api.v1.remember.routers.get_remember_router import get_remember_router
 
     app = FastAPI()
