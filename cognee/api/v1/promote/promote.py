@@ -8,7 +8,6 @@ from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -80,18 +79,30 @@ async def _persist_copy(row, content, provenance, actor, target, target_id) -> b
             await session.commit()
         return True
     except Exception as error:
+        # A failed commit acknowledgement does not prove rollback. Re-read
+        # before deleting the object: the committed row might reference it.
         try:
-            await storage.remove(relative)
-        except Exception:  # noqa: BLE001 - cleanup must preserve the original persistence error
-            get_logger("promotion").exception("Could not clean an uncommitted promotion object")
-        if isinstance(error, IntegrityError):
             winner = await _get_data(target_id, target.id)
-            if (
-                winner is not None
-                and (winner.system_metadata or {}).get("promotion", {}).get("source_revision")
-                == provenance["source_revision"]
-            ):
-                return False
+        except Exception as lookup_error:
+            get_logger("promotion").warning(
+                "Promotion commit could not be verified; retaining its storage object"
+            )
+            raise error from lookup_error
+        referenced = winner is not None and location in (
+            winner.raw_data_location,
+            winner.original_data_location,
+        )
+        if not referenced:
+            try:
+                await storage.remove(relative)
+            except Exception:  # noqa: BLE001 - preserve the original persistence error
+                get_logger("promotion").exception("Could not clean an uncommitted promotion object")
+        if (
+            winner is not None
+            and (winner.system_metadata or {}).get("promotion", {}).get("source_revision")
+            == provenance["source_revision"]
+        ):
+            return referenced
         raise
 
 

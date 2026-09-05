@@ -369,3 +369,72 @@ async def test_real_permissions_and_storage_agent_to_user_to_team(tmp_path, monk
             assert await session.scalar(select(func.count()).select_from(Data)) == 3
     finally:
         await engine.engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("can_verify", [True, False])
+async def test_commit_ack_failure_never_removes_published_storage(
+    tmp_path, monkeypatch, can_verify
+):
+    from sqlalchemy import select
+
+    from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
+        SQLAlchemyAdapter,
+    )
+    from cognee.modules.data.models import Data
+
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp_path / 'ack.db'}")
+    await engine.create_database()
+    objects = {}
+
+    class Storage:
+        async def store(self, path, stream):
+            objects[path] = stream.getvalue()
+            return path
+
+        async def remove(self, path):
+            objects.pop(path, None)
+
+    class InterruptedEngine:
+        calls = 0
+
+        @asynccontextmanager
+        async def get_async_session(self):
+            self.calls += 1
+            first = self.calls == 1
+            if not first and not can_verify:
+                raise ConnectionError("database unavailable")
+            async with engine.get_async_session() as session:
+                yield session
+            if first:
+                raise ConnectionError("commit acknowledgement lost")
+
+    monkeypatch.setattr(m, "get_relational_engine", lambda: interrupted_engine)
+    interrupted_engine = InterruptedEngine()
+    monkeypatch.setattr(m, "get_file_storage", lambda root: Storage())
+    actor = SimpleNamespace(id=uuid4())
+    target = SimpleNamespace(id=uuid4(), tenant_id=None)
+    target_id = uuid4()
+    row = SimpleNamespace(
+        name="lesson",
+        label=None,
+        extension="txt",
+        mime_type="text/plain",
+        loader_engine="text_loader",
+        raw_content_hash=hashlib.md5(b"lesson").hexdigest(),
+        external_metadata={},
+    )
+    provenance = {"source_revision": hashlib.sha256(b"lesson").hexdigest()}
+    try:
+        if can_verify:
+            assert (
+                await m._persist_copy(row, b"lesson", provenance, actor, target, target_id) is True
+            )
+        else:
+            with pytest.raises(ConnectionError, match="acknowledgement"):
+                await m._persist_copy(row, b"lesson", provenance, actor, target, target_id)
+        async with engine.get_async_session() as session:
+            copied = (await session.execute(select(Data))).scalar_one()
+        assert objects[copied.raw_data_location] == b"lesson"
+    finally:
+        await engine.engine.dispose()
