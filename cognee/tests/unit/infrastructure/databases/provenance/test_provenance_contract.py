@@ -35,6 +35,14 @@ def test_source_ref_key_round_trip():
 
 
 def test_source_ref_key_rejects_unknown_prefix():
+    source_ref_key = f"source_ref:v3:{uuid4()}:{uuid4()}"
+
+    with pytest.raises(ValueError, match="Unsupported source ref key format"):
+        get_dataset_id_from_source_ref_key(source_ref_key)
+
+
+def test_source_ref_key_rejects_malformed_v2():
+    # A v2 prefix with the chunk segment missing is malformed, not v1.
     source_ref_key = f"source_ref:v2:{uuid4()}:{uuid4()}"
 
     with pytest.raises(ValueError, match="Unsupported source ref key format"):

@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
         with:
           enable-cache: true
 
@@ -26,4 +26,4 @@ jobs:
         run: uv lock --check || { echo "'uv lock --check' failed."; echo "Run 'uv lock' and push your changes."; exit 1; }
 
       - name: Run pre-commit hooks
-        uses: pre-commit/action@v3.0.1
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1

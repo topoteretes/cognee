@@ -160,6 +160,23 @@ class PlainFileHandler(logging.handlers.RotatingFileHandler):
             if self.stream is None:
                 self.stream = self._open()
 
+            # This method fully overrides RotatingFileHandler.emit() (needed
+            # for structlog-aware formatting below), which means the parent
+            # class's rotation trigger (shouldRollover()/doRollover(), called
+            # from ITS emit()) is never reached -- maxBytes/backupCount were
+            # accepted by __init__ but had no effect. Check size directly
+            # instead of calling self.shouldRollover(record): its stock
+            # implementation estimates the pending message's length via
+            # self.format(record), which assumes a plain-string message --
+            # this handler exists specifically for structlog dict-shaped
+            # records (record.msg is often a dict), so running the stock
+            # formatter just to estimate a length risks raising on the very
+            # record this check is meant to protect.
+            if self.maxBytes > 0:
+                self.stream.seek(0, 2)
+                if self.stream.tell() >= self.maxBytes:
+                    self.doRollover()
+
             # Extract the message from the structlog record
             if isinstance(record.msg, dict) and "event" in record.msg:
                 # Extract the basic message
@@ -336,6 +353,17 @@ def setup_logging(log_level=None, name=None) -> bool:
         A configured structlog logger instance
     """
     global _is_structlog_configured
+
+    # Logging is process-global state: configure it exactly once. setup_logging
+    # is called from several import-time sites (cognee/__init__, api/client,
+    # embeddings utils) plus server startup; without this guard every call
+    # appended another root-logger file handler (each record written N times to
+    # the same log file) and re-emitted the startup banner — a server start
+    # logged the "Cognee 1.0 changes" warning four times. Later callers just
+    # get a logger; the first caller's handlers, excepthook, and log file stay
+    # authoritative.
+    if _is_structlog_configured:
+        return structlog.get_logger(name if name else __name__)
 
     # Regular detailed logging for non-CLI usage
     log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO").upper()]

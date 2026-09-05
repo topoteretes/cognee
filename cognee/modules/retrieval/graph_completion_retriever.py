@@ -23,7 +23,7 @@ from cognee.modules.retrieval.utils.used_graph_elements import (
     is_edge_list,
     extract_from_edges,
 )
-from cognee.modules.retrieval.utils.references import append_answer_grounded_evidence
+from cognee.modules.retrieval.utils.evidence import graph_context_evidence
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
@@ -308,6 +308,10 @@ class GraphCompletionRetriever(BaseRetriever):
             return None
         return extract_from_edges(retrieved_objects)
 
+    def get_context_evidence(self, retrieved_objects: Any, dataset_id: Any = None):
+        """Return the exact graph nodes and edges rendered into completion context."""
+        return graph_context_evidence(retrieved_objects, dataset_id=dataset_id)
+
     def _completion_kwargs(self, context: str) -> dict:
         """Common kwargs for completion calls (no session)."""
         return {
@@ -346,19 +350,13 @@ class GraphCompletionRetriever(BaseRetriever):
         return [completion]
 
     async def _append_graph_evidence(self, completions: List[Any]) -> List[Any]:
-        """Append an answer-grounded chunk Evidence block to string completions.
+        """Compatibility no-op; graph evidence is now returned as structured payload data.
 
-        Each answer is run as a vector query against the chunk index, so the
-        Evidence bullets reflect where the answer text is grounded in the corpus
-        rather than which graph elements happened to be retrieved. Evidence is
-        appended only when references are enabled and the completion is a plain
-        string (never corrupt a structured response_model); search failures
-        degrade to no Evidence.
+        The previous implementation embedded every answer and performed another
+        chunk-index search. Besides adding latency, that described post-hoc
+        similarity rather than the graph context used for generation.
         """
-        return await append_answer_grounded_evidence(
-            completions,
-            enabled=self.include_references and self.response_model is str,
-        )
+        return completions
 
     async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
         # Graph evidence is grounded in the answer text, not the retrieved edges, so
@@ -417,9 +415,11 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         # Session and non-session branches rejoin here so every variant that calls
-        # this method (including via super()) appends references once. Evidence is
-        # grounded in each completion's own text, so a cache-hit answer never
-        # cites chunks that share nothing with it.
+        # this method (including via super()) applies the append_references hook
+        # once. For graph completion that hook is a no-op: the search coordinator
+        # attaches structured evidence from the exact retrieved graph context
+        # after this method returns, keeping completion generation free of any
+        # post-hoc vector lookup.
         return await self.append_references(completions, retrieved_objects)
 
     async def get_completion(

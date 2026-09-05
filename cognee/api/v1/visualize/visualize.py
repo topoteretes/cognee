@@ -93,9 +93,24 @@ async def fetch_visualization_data(
 
     search_events = None
     if include_session_events:
-        from cognee.modules.visualization.session_events import collect_session_events
-
-        search_events = await collect_session_events(user=user, session_ids=session_ids)
+        if dataset and resolved_dataset is None:
+            # A named dataset that did not resolve: missing, or the caller
+            # cannot read it. get_authorized_existing_datasets reports that by
+            # returning [] rather than raising, so falling through here would
+            # collect with dataset_id=None and widen the listing to every
+            # dataset the caller has queried. Failing a scope check must scope
+            # to nothing, not to everything.
+            search_events = []
+        else:
+            # Scope to the dataset authorized above, so this page's timeline
+            # shows this dataset's activity rather than every dataset the
+            # caller has queried. No dataset asked for at all leaves the
+            # listing unscoped, which is all a datasetless render can show.
+            search_events = await collect_session_events(
+                user=user,
+                session_ids=session_ids,
+                dataset_id=resolved_dataset.id if resolved_dataset else None,
+            )
 
     return graph_data, search_events
 
@@ -170,8 +185,9 @@ async def visualize_graph(
             spotlights, rated answers as reinforcement (improve) events.
             Collection never fails the render; an unavailable session layer
             simply yields no events.
-        session_ids: Restrict event collection to these sessions. Defaults to
-            the user's most recently active sessions.
+        session_ids: Restrict event collection to these sessions. An explicit
+            list is used as given and is not narrowed to ``dataset``. Defaults
+            to the user's most recently active sessions *for* ``dataset``.
         user: User whose sessions are read. Defaults to the default user.
         dataset: Dataset to render, given by name or UUID. Wrapped into a
             single-element list for get_authorized_existing_datasets; the
@@ -497,18 +513,26 @@ async def get_live_events(
     """Delta of search/improve events since a cursor, for the Memory tab's
     live timeline.
 
-    ``dataset_id`` gates who may call this — the same read-permission check
-    every other visualize endpoint runs (``get_authorized_existing_datasets``)
-    — not which events come back. Session events are collected per *user*,
-    not per dataset, matching how ``visualize_graph``'s own
-    ``include_session_events`` already embeds the same events into whichever
-    dataset's page happens to be open. Scoping the event *content* to one
-    dataset would mean checking each event's referenced node/edge ids against
-    that dataset's graph membership — real extra cost that this endpoint's
-    one job (avoid recomputing the whole graph payload every ~1.5s just to
-    refresh a timeline) does not need, and it would make this endpoint
-    disagree with the very same events already shown in ``search_events`` on
-    ``/visualize/json`` for that dataset.
+    ``dataset_id`` both gates and scopes. It gates as on every other visualize
+    endpoint (``get_authorized_existing_datasets``, read permission), and it
+    scopes the events: only sessions attributed to that dataset contribute.
+    Attribution is one SQL predicate on the session listing — the row's
+    ``dataset_id``, or the per-dataset default session's
+    ``{default_session_id}_{dataset_id}`` suffix — not a graph-membership
+    check per event, so scoping costs nothing this endpoint's one job (avoid
+    recomputing the whole graph payload every ~1.5s just to refresh a
+    timeline) cannot afford. ``visualize_graph``'s ``include_session_events``
+    scopes the same way, so ``/visualize/json``'s ``search_events`` and this
+    endpoint agree for a given dataset.
+
+    A session attributed to no dataset contributes to neither. It could belong
+    to any dataset the caller has queried, so surfacing it under all of them
+    would reopen exactly the over-disclosure this scoping closes.
+
+    Attribution is per session, not per answered turn, and that is the limit
+    of this guarantee: a session id reused across datasets keeps the first one
+    it touched, so its later turns show on that dataset's timeline instead of
+    the one they came from. ``_list_recent_session_ids`` has the detail.
 
     ``since=None`` returns every available event — the first call, before a
     client has a cursor of its own.
@@ -531,7 +555,7 @@ async def get_live_events(
     if not authorized:
         raise PermissionDeniedError(message="Not authorized to read this dataset")
 
-    events = await collect_session_events(user=user)
+    events = await collect_session_events(user=user, dataset_id=dataset_id)
 
     if since is not None:
         cutoff = _as_naive_utc(since)

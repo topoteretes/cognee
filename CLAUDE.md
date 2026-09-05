@@ -236,6 +236,16 @@ Key files:
 - `cognee/tasks/graph/extract_graph_from_data.py`
 - `cognee/tasks/storage/add_data_points.py`
 
+#### UPDATE: Chunk-Level Incremental Updates
+`update(data_id, data, dataset_id)` diffs the new content against the stored processed text (`Data.raw_data_location`) and replaces only the chunks the edits touched: a paragraph-anchored multi-region diff (near-linear for any change shape, including repeated-line-heavy content) finds every disjoint changed span (so edits at the top, middle, and end of a document are three small regions, not one giant one), each span is expanded to chunk boundaries and re-chunked with the standard TextChunker (same boundary semantics as pipeline chunks, cut against the token budget recorded on the chunks it replaces — every chunk stores `max_chunk_tokens`, so documents stay self-consistent across config changes; legacy chunks without the field fall back to the current config; only a region's last chunk may be under-filled), replaced chunks (plus their summaries, chunk-orphaned entities, and triplet embeddings) are deleted, and only the new chunks run through LLM extraction. Chunks between regions are kept without being re-chunked, so their boundaries and ids cannot drift. Unaffected chunks keep their node ids, entities, summaries, and embeddings; surviving chunks are renumbered so `chunk_index` stays contiguous. Chunk identity is content-derived (`uuid5(doc : sha256(text) : occurrence)`, see `cognee/modules/chunking/chunk_id.py`), so unchanged content keeps its identity across edits. Both incremental and full fallback paths preserve `data_id`.
+
+Runs under the per-dataset lock with the dataset-scoped database context (multi-tenant-safe). Falls back to the full delete + re-add + cognify flow when preconditions fail (first ingestion, non-text content, pre-v2 chunk ownership, or an unverified graph adapter — verified: Kuzu/Ladybug, Neo4j and the Postgres demo adapter; Neptune falls back); disable with `update(..., chunk_level_diff=False)` or the same query param on `PATCH /update`.
+
+Key files:
+- `cognee/api/v1/update/update.py` / `cognee/api/v1/update/incremental.py`
+- `cognee/modules/chunking/incremental_chunking.py` (diff + balanced re-split, no-loss invariant)
+- `cognee/modules/graph/methods/delete_chunks_incremental.py` (chunk-scoped orphan deletion)
+
 #### SEARCH: Retrieval
 `search(query_text, query_type)` → route to retriever type → filter by permissions → return results
 
@@ -255,6 +265,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
+- **SKILLS** - Semantic discovery of skill playbooks (metadata-only, no LLM; requires exactly one dataset)
 
 `recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is omitted or `null` (the default). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
 
@@ -641,6 +652,7 @@ this rule applies only to internal PRs.
 Tests are organized in `cognee/tests/`:
 - `unit/` - Unit tests for individual modules
 - `integration/` - Full pipeline integration tests
+- `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
 
@@ -688,6 +700,7 @@ All functions are async - use `await` or `asyncio.run()`. See `examples/advanced
 
 Several security environment variables in `.env`:
 - `ACCEPT_LOCAL_FILE_PATH` - Allow local file paths (default: True)
+- `COGNEE_ALLOWED_LOCAL_FILE_ROOTS` - Optional `os.pathsep`-separated allowlist of directories local paths may be read from. Unset (default) means any local path is accepted, so a local repo or document tree can be ingested from anywhere; a path-looking string that does not exist is still ingested as text. When set, paths outside the listed roots are rejected (or ingested as text on the non-strict `add()` path); cognee's own data/system/cache/logs/repos roots are always allowed. Set it for servers reachable by untrusted callers.
 - `ALLOW_HTTP_REQUESTS` - Allow HTTP requests from Cognee (default: True)
 - `ALLOW_CYPHER_QUERY` - Allow raw Cypher queries (default: True)
 - `ENABLE_BACKEND_ACCESS_CONTROL` - Multi-tenant isolation (default: True). When `true`, API auth is required and per-user/dataset DB isolation is enabled. When `false`, single-user mode: shared DBs and auth off unless overridden.
@@ -755,12 +768,38 @@ Opt-in LLM check that runs as the last `cognify()` task (default **off**). After
 - **Applies to `remember()` too** — and to session memory bridged back by `improve()` — since those build their graphs through `cognify()`. The exception is `remember(content_type="code")`, which runs the separate code-graph pipeline.
 - **Scope / limitations**: only the 1-hop neighbourhood of the touched entities is compared; structural edges (`contains`, `is_part_of`, `made_from`, `exists_in`, `contradicts`) and edges with an unnamed endpoint are skipped; the temporal cognify path is not covered.
 
+### Skills (Procedural Memory)
+Dataset-scoped `SKILL.md` playbooks agents can discover, load on demand, execute, and improve from run history.
+
+- **Ingest**: `remember(content_type="skills", dataset_name=...)` (folder, file, or inline via `skills_text`/`skill_name`) — requires an explicit dataset; re-ingest upserts (deterministic ids). HTTP: `POST /skills`.
+- **Discover**: `SearchType.SKILLS` — one vector search over the `Skill_search_text` collection, no LLM, **metadata-only results** (never the procedure body; progressive disclosure). Requires exactly one dataset; skills outside that dataset's scope, inactive skills, and empty-scope legacy skills are filtered out. Missing collection returns `[]`, not an error.
+- **Skill gate**: `recall()` runs a deterministic regex gate (`cognee/api/v1/recall/skill_gate.py`); procedural-sounding queries trigger a concurrent SKILLS lookup whose hits are appended tagged `source="skills"`. Additive and fail-safe; only fires when exactly one dataset is targeted. Disable with `SKILL_GATE_ENABLED=false`.
+- **Execute**: `SearchType.AGENTIC_COMPLETION` with `skills=[...]` — LLM sees name+description, loads bodies via the `load_skill` tool (12k char cap).
+- **Improve**: `SkillRun` records (via `remember()` skill-run entries) feed LLM-drafted `SkillImprovementProposal`s; preview then apply by proposal id (`/proposals` router).
+
 ### Code Files (cognify CODE route)
 Supported code files (`.py`, `.go`, `.ts`, `.java`, `.rs`, … — the extension list lives on `code_loader`) are recognized at add time through the loader system: the code loader claims the file, stores it under its real extension, and `ingest_data` tags the record with `system_metadata = {"source": "code"}`. Cognify then routes such items down the CODE route, which runs the deterministic enola code graph pipeline per file — typed `CodeSymbol`/`CodeModule`/… nodes with `calls`/`imports`/`has_method` edges, **no LLM calls**.
 
-- **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
+- **Search**: code is searchable through `SearchType.CODE` only (deterministic graph operations via `code_query`: `query_facts`, `explore`, `traverse`, `find_path`, `impact_analysis`, `insights`, `architecture`, `delta`). Completion/chunk search types (`GRAPH_COMPLETION`, `CHUNKS`, `RAG_COMPLETION`) do not cover code — the route produces no chunks and no embeddings.
+- **Diagrams**: add `"diagram": "mermaid"` (or `"dot"`, or `True`) to any `code_query` and the result carries a `diagram` block with deterministic diagram source (nodes shaped by kind, one subgraph per repository, seeds/focus/path highlighted). `{"operation": "architecture"}` is the module-level overview — symbol-to-symbol edges are rolled up into counted module-to-module edges, routes/storage/services hang off their modules — and it draws itself as Mermaid by default. Renderer: `cognee/modules/retrieval/code_graph_diagram.py`; no LLM, no network. Same option over REST (`code_query` on `POST /api/v1/search` and `/api/v1/recall` with `scope=["code"]`) and the CLI: `cognee-cli search "" -t CODE --code-query '{"operation": "architecture"}' --diagram-out arch.html` (`.html` renders Mermaid in a browser, `.svg/.png/.pdf` run Graphviz on DOT, other extensions get raw source; `--diagram mermaid|dot` prints the source in a fenced block).
+- **enola version**: pinned (with per-platform SHA-256) in `cognee/tasks/code_graph/install_enola.py` and auto-installed to `~/.cognee/bin` on first use (`ENOLA_AUTO_INSTALL=false` opts out; `ENOLA_PATH` always wins). Cognee reads enola's documented snapshot contract (`facts.jsonl`, `insights.json`, `receipt.json`; `format_version` 1) and rejects a receipt with a format version it does not understand. Fact ids and resolved relation `target_id`s from the writer are used when present; explainer findings become `CodeInsight` nodes with `evidences` edges; the receipt's provenance/quality block is stamped on the `CodeRepository` node and reported by the `delta` operation. Bumping the pin means re-pinning the checksums and re-checking the known answers in `cognee/tests/test_code_graph_e2e.py`.
 - **Opt-out per add**: `preferred_loaders={"text_loader": {}}` treats a code file as a plain document (chunking + LLM extraction).
-- **Whole repositories**: `remember(content_type="code")` remains the repo-level path (cross-file edges); the CODE route is per-file.
+- **Whole repositories**: a local code-project directory or a GitHub/GitLab repository URL passed to `add()`/`remember()` (API: the `raw_data` form field) resolves to ONE `code_repo` manifest that cognify runs through the CODE_REPO route — a single enola pass with cross-file edges, plus the repo's documents as ordinary items. Remote URLs are shallow-cloned under `COGNEE_REPOS_DIR` (default `~/.cognee/repos`). `remember(content_type="code")` builds the same graph without the add step. The CODE route is per-file.
+
+### Provenance
+Cognee has five provenance mechanisms. They answer different questions and are controlled by three unrelated flags — do not confuse them:
+
+| # | Mechanism | Question it answers | Stored where | Flag (default) |
+|---|---|---|---|---|
+| 1 | Source stamping | who/which run wrote this node | `source_*` fields on the graph node | `COGNEE_PROVENANCE_MODE` (`lightweight`) |
+| 2 | Graph source-refs | which documents own this node/edge (drives `forget()` delete/rollback) | source-ref keys on graph nodes/edges | always on (`cognee/infrastructure/databases/provenance/`) |
+| 3 | Audit ledger | tamper-evident history for audits | `provenance_entries` table, hash-chained | `PROVENANCE_TRACKING` (**false**) |
+| 4 | Memory-provenance projection | who can access what (tenant → user → dataset → data + ACL grants) | computed on request from the relational DB (`GET /v1/schema/provenance`) | n/a |
+| 5 | Edge evidence | which document chunk supports this graph edge | `provenance_edge_evidence` table | `EDGE_EVIDENCE_ENABLED` (`true`) |
+
+All three table-backed systems (2, 3, 5) identify a document by the same `make_source_ref_key(dataset_id, data_id)` key.
+
+**Edge evidence** (5) is captured in memory during `add_data_points` and bulk-written once per data item (`EDGE_EVIDENCE_FLUSH_THRESHOLD`, default 10000, forces an earlier flush for huge documents). Search with `include_references=True` returns it as structured `EvidenceReference` objects. Rows are ignored at read time when their pipeline run did not complete or their document is gone, and swept when a document is deleted or its memory dropped with `forget(memory_only=True)`. Scope: only edges extracted from document chunks — contradiction edges, `improve()` enrichment, session bridging, and the code-graph route record no evidence yet (`evidence_kind` is the extension point). Implementation: `cognee/modules/provenance/edge_evidence/`.
 
 ### Permissions System
 Multi-tenant architecture with users, roles, and Access Control Lists (ACLs):

@@ -123,3 +123,24 @@ async def test_an_event_with_no_time_is_dropped_by_a_since_filter_rather_than_cr
         )
 
     assert result["events"] == [_event("2026-08-03T09:00:10.000000")]
+
+
+@pytest.mark.asyncio
+async def test_the_requested_dataset_is_passed_down_as_the_collection_scope():
+    """The scope kwarg is the whole fix, and every test above survives without
+    it — they assert on whatever the mocked collector returns, so a dropped
+    ``dataset_id=`` would leave them green while re-opening COG-6121."""
+    user = SimpleNamespace(id="44444444-4444-4444-4444-444444444444")
+    collect = AsyncMock(return_value=[])
+
+    with (
+        patch.object(
+            visualize_module,
+            "get_authorized_existing_datasets",
+            AsyncMock(return_value=[SimpleNamespace(id=DATASET_ID)]),
+        ),
+        patch.object(visualize_module, "collect_session_events", collect),
+    ):
+        await visualize_module.get_live_events(DATASET_ID, user=user)
+
+    collect.assert_awaited_once_with(user=user, dataset_id=DATASET_ID)

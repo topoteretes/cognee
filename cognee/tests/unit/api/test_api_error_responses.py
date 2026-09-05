@@ -496,6 +496,32 @@ class TestUpdateEndpoint:
         )
         assert resp.status_code == 200
 
+    @pytest.mark.parametrize("incremental_status", ["incremental", "unchanged"])
+    def test_update_incremental_summary_returns_200(self, client, incremental_status):
+        import cognee.api.v1.update as update_pkg
+
+        summary = {
+            "status": incremental_status,
+            "regions": 1 if incremental_status == "incremental" else 0,
+            "deleted_chunks": 1 if incremental_status == "incremental" else 0,
+            "added_chunks": 1 if incremental_status == "incremental" else 0,
+            "reused_chunks": 0,
+            "kept_chunks": 2,
+            "reindexed_chunks": 1,
+        }
+        update_pkg.update = AsyncMock(return_value=summary)
+
+        resp = client.patch(
+            "/update",
+            params={"data_id": str(uuid4()), "dataset_id": str(uuid4())},
+            files={"data": ("updated.txt", b"updated content", "text/plain")},
+            data={"node_set": ""},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == summary
+        assert update_pkg.update.await_args.kwargs["node_set"] is None
+
     def test_update_internal_error_returns_500(self, client):
         import cognee.api.v1.update as update_pkg
 

@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
@@ -142,6 +144,11 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     cognify_result: dict = await cognee.cognify(user=new_user)
     maries_dataset_id = list(cognify_result.keys())[0]
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(johns_dataset_id))
     await set_database_global_context_variables(johns_dataset_id, default_user.id)
     graph_engine = await get_graph_engine()
     johns_initial_nodes, johns_initial_edges = await graph_engine.get_graph_data()
@@ -150,6 +157,10 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
         f"Expected 9 data nodes and 10 edges for John, got {len(johns_data_nodes)} and {len(johns_initial_edges)}"
     )
 
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    await _lock_stack.enter_async_context(dataset_lock(maries_dataset_id))
     await set_database_global_context_variables(maries_dataset_id, new_user.id)
     graph_engine = await get_graph_engine()
     maries_initial_nodes, maries_initial_edges = await graph_engine.get_graph_data()
