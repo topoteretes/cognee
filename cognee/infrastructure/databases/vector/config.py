@@ -36,6 +36,14 @@ class VectorConfig(BaseSettings):
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
     vector_pool_args: Union[str, None] = None
+    # Writes-per-table threshold at which accumulated LanceDB fragments/
+    # versions are folded back down via `optimize()`. Every `merge_insert`
+    # mints a new table version *and* a new data fragment, and LanceDB never
+    # compacts on its own -- left unbounded this inflates storage, query
+    # cost and process memory without limit on a long-lived deployment
+    # (see https://github.com/topoteretes/cognee/issues/4684). Ignored by
+    # backends other than LanceDB. `0` disables background compaction.
+    vector_db_compaction_write_interval: int = 25
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -113,6 +121,7 @@ class VectorConfig(BaseSettings):
             "vector_db_password": self.vector_db_password,
             "vector_db_host": self.vector_db_host,
             "vector_db_subprocess_enabled": self.vector_db_subprocess_enabled,
+            "vector_db_compaction_write_interval": self.vector_db_compaction_write_interval,
         }
 
 
