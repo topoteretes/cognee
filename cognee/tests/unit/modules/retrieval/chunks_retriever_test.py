@@ -241,3 +241,19 @@ async def test_get_context_empty_payload(mock_vector_engine):
         )
 
     assert context == ""
+
+
+@pytest.mark.asyncio
+async def test_get_completion_from_context_none_payload_still_returns_score():
+    """A ScoredResult with payload=None yields a dict carrying only the score, not a TypeError."""
+    result = MagicMock()
+    result.payload = None
+    result.score = 0.42
+
+    retriever = ChunksRetriever()
+
+    completion = await retriever.get_completion_from_context(
+        query="test query", retrieved_objects=[result], context=None
+    )
+
+    assert completion == [{"score": 0.42}]
