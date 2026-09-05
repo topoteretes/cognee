@@ -13,6 +13,8 @@ something" is never a pass here.
 | `test_data_lifecycle.py` | remember, update, forget one item, forget dataset, forget everything, remember again; snapshot all three stores after each step | Stale vectors or graph nodes after update/delete, deletion leaving zombies |
 | `test_idempotency_and_recovery.py` | Same content twice, explicit cognify re-run, injected LLM outage, retry | Duplicate ingestion, half-written graphs, dishonest pipeline status |
 | `test_http_api_journey.py` | Register, login, add, cognify (blocking + background polling), search, remember/recall, isolation between users, delete; route-table snapshot | Wire-shape drift, auth holes, 500s on bad input, polling contract |
+| `test_mcp_journey.py` | Spawn `cognee-mcp` over stdio like Claude Code does: list tools, session remember on a fresh system, recall, permanent remember, graph recall, status; then read the same state over HTTP | stdout pollution breaking the protocol, first-session dataset creation (SDK-192), tool surface drift, transport-specific bugs |
+| `test_extras_install_smoke.py` | Resolve every extra alone and all together on Python 3.10 to 3.14 (always on); build the wheel and install each extra into an empty venv, then import `cognee`, every module the extra's requirements ship, and the cognee modules it enables (opt-in) | Extras that conflict (the docling-full vs codegraph case), extras that install but do not import, adapters broken by a dependency bump |
 
 ## Modes
 
@@ -46,6 +48,12 @@ COGNEE_JOURNEY_MODE=llm pytest cognee/tests/journeys -m "journey and not quickst
 
 # accept an intentional route-table change
 COGNEE_UPDATE_API_SNAPSHOT=1 pytest cognee/tests/journeys/test_http_api_journey.py
+
+# MCP journey (needs the mcp client and fastmcp in the interpreter)
+uv run --with fastmcp --with mcp pytest cognee/tests/journeys/test_mcp_journey.py
+
+# extras install smoke (slow; pick a subset with COGNEE_EXTRAS)
+COGNEE_JOURNEY_EXTRAS=1 COGNEE_EXTRAS=neo4j,redis pytest cognee/tests/journeys/test_extras_install_smoke.py
 ```
 
 ## Golden corpus
