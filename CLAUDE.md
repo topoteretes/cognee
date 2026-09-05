@@ -862,5 +862,5 @@ shutdown = visualization_server(port=8080)  # synchronous; returns a shutdown ca
 - [Documentation](https://docs.cognee.ai/)
 - [Discord Community](https://discord.gg/NQPKmU5CCg)
 - [GitHub Issues](https://github.com/topoteretes/cognee/issues)
-- [Example Notebooks](examples/python/)
+- [Example Notebooks](examples/)
 - [Research Paper](https://arxiv.org/abs/2505.24478) - Optimizing knowledge graphs for LLM reasoning
