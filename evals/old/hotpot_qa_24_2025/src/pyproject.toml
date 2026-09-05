@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
-    "cognee==0.2.0",
+    "cognee==1.5.0",
     "deepeval>=3.2.8",
     "dotenv>=0.9.9",
     "gdown>=5.2.0",
