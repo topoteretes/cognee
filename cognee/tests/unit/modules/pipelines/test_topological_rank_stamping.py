@@ -59,7 +59,7 @@ def _stamp_provenance(
             if current_rank is None or current_rank == 0:
                 data.topological_rank = task_index
 
-        for field_name in data.model_fields:
+        for field_name in type(data).model_fields:
             field_value = getattr(data, field_name, None)
             if field_value is not None:
                 _stamp_provenance(
