@@ -224,6 +224,9 @@ docling = [
     "docling-slim[convert-core,format-pdf,format-office,format-html,format-email,format-markdown,format-latex]>=2.115,<3",
 ]
 docling-full = ["docling>=2.115,<3", "transformers>=4.55"]
+# LLM-free graph extraction and summaries with GLiNER2 (cognee/tasks/graph/gliner).
+# Pulls torch; protobuf + sentencepiece are needed by the DeBERTa tokenizer fallback.
+gliner = ["gliner2[local]>=2.0.0,<3", "protobuf>=5.29.6", "sentencepiece>=0.2.0"]
 rapidocr = ["rapidocr-onnxruntime>=1.3.0,<2"]
 
 [project.urls]

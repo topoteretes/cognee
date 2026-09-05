@@ -94,6 +94,15 @@ class TestOnlyEmbeddingsConfiguredTrap:
         assert len(problems) == 1
         assert "LLM_API_KEY" in problems[0]
 
+    def test_missing_llm_key_is_fine_when_extraction_is_llm_free(self, monkeypatch):
+        # GRAPH_EXTRACTION_BACKEND=gliner: ingestion needs embeddings, not an LLM.
+        monkeypatch.setattr(config_preflight, "_llm_free_extraction", lambda: True)
+        problems = check_provider_config(
+            llm(provider="openai", api_key=None),
+            embeddings(provider="fastembed", model="BAAI/bge-small-en-v1.5"),
+        )
+        assert problems == []
+
     def test_whitespace_llm_key_counts_as_missing(self):
         problems = check_provider_config(
             llm(api_key="   "),

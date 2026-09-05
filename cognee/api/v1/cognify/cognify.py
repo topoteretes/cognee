@@ -125,6 +125,7 @@ async def cognify(
     dry_run: bool = False,
     raise_on_error: bool = True,
     chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    graph_extraction_backend: Optional[Literal["llm", "gliner"]] = None,
     **kwargs,
 ):
     """
@@ -135,7 +136,9 @@ async def cognify(
     relationships, and creates semantic connections for enhanced search and reasoning.
 
     Prerequisites:
-        - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation)
+        - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation
+          on the default ``llm`` backend; ``graph_extraction_backend="gliner"`` extracts the graph
+          and summaries with a local GLiNER2 model instead — see the ``gliner`` extra)
         - **Data Added**: Must have data previously added via `cognee.add()`
         - **Vector Database**: Must be accessible for embeddings storage
         - **Graph Database**: Must be accessible for relationship storage
@@ -388,6 +391,7 @@ async def cognify(
                 chunks_per_batch=chunks_per_batch,
                 functional_relationships=functional_relationships,
                 chunk_attachment=chunk_attachment,
+                graph_extraction_backend=graph_extraction_backend,
                 **kwargs,
             )
 
@@ -473,6 +477,66 @@ async def cognify(
         return result
 
 
+GRAPH_EXTRACTION_BACKENDS = ("llm", "gliner")
+
+
+def _resolve_graph_extraction_backend(value: Optional[str], cognify_config) -> str:
+    """Explicit argument wins over GRAPH_EXTRACTION_BACKEND; ``llm`` is the default."""
+    backend = (value or cognify_config.graph_extraction_backend or "llm").strip().lower()
+    if backend not in GRAPH_EXTRACTION_BACKENDS:
+        raise ValueError(
+            f"Unknown graph_extraction_backend {backend!r}; "
+            f"expected one of {', '.join(GRAPH_EXTRACTION_BACKENDS)}"
+        )
+    return backend
+
+
+def _build_extraction_task(
+    backend: str,
+    *,
+    graph_model: BaseModel,
+    config: Config,
+    custom_prompt: Optional[str],
+    chunk_attachment: Optional[Literal["direct", "all"]],
+    chunks_per_batch: int,
+    **kwargs,
+) -> Task:
+    """The graph+summary extraction task for the chosen backend.
+
+    ``llm`` is the historical ``extract_graph_and_summarize`` task, unchanged.
+    ``gliner`` swaps in the GLiNER2 task from ``cognee.tasks.graph.gliner``: it
+    produces the generic ``KnowledgeGraph`` (a custom ``graph_model`` is
+    rejected rather than silently ignored), ignores ``custom_prompt``, and
+    resolves its label schema from the configured ontology, else the built-in
+    label banks. Callers who want explicit labels use ``get_gliner_tasks``.
+    """
+    if backend == "gliner":
+        if graph_model is not KnowledgeGraph:
+            raise ValueError(
+                "graph_extraction_backend='gliner' builds the generic KnowledgeGraph; "
+                "a custom graph_model is only supported by the 'llm' backend."
+            )
+        if custom_prompt:
+            logger.warning("custom_prompt is ignored when graph_extraction_backend='gliner'.")
+        from cognee.tasks.graph.gliner import build_gliner_extraction_task
+
+        return build_gliner_extraction_task(
+            config=config,
+            chunk_attachment=chunk_attachment,
+            chunks_per_batch=chunks_per_batch,
+        )
+
+    return Task(
+        extract_graph_and_summarize,
+        graph_model=graph_model,
+        config=config,
+        custom_prompt=custom_prompt,
+        chunk_attachment=chunk_attachment,
+        task_config={"batch_size": chunks_per_batch},
+        **kwargs,
+    )
+
+
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
@@ -483,6 +547,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunks_per_batch: int = None,
     functional_relationships: Optional[Collection[str]] = None,
     chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    graph_extraction_backend: Optional[str] = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
@@ -495,6 +560,16 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 2000
         )
 
+    extraction_task = _build_extraction_task(
+        _resolve_graph_extraction_backend(graph_extraction_backend, cognify_config),
+        graph_model=graph_model,
+        config=config,
+        custom_prompt=custom_prompt,
+        chunk_attachment=chunk_attachment,
+        chunks_per_batch=chunks_per_batch,
+        **kwargs,
+    )
+
     default_tasks = [
         # EXTRACT: classify raw Data items into typed Document objects
         Task(classify_documents),
@@ -504,17 +579,10 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             max_chunk_size=chunk_size or await get_max_chunk_tokens(),
             chunker=chunker,
         ),
-        # COGNIFY: LLM-extract entities and relationships into a knowledge graph
-        # COGNIFY: LLM-summarize each chunk for retrieval
-        Task(
-            extract_graph_and_summarize,
-            graph_model=graph_model,
-            config=config,
-            custom_prompt=custom_prompt,
-            chunk_attachment=chunk_attachment,
-            task_config={"batch_size": chunks_per_batch},
-            **kwargs,
-        ),
+        # COGNIFY: extract entities and relationships into a knowledge graph and
+        # summarize each chunk for retrieval — with the LLM (default) or with
+        # the local GLiNER2 model (graph_extraction_backend="gliner").
+        extraction_task,
         # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
