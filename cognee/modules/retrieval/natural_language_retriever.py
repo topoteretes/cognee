@@ -101,11 +101,14 @@ class NaturalLanguageRetriever(BaseRetriever):
         node_schemas = [row for row in node_schemas or [] if not _is_internal_schema_row(row)]
         return node_schemas, edge_schemas
 
-    async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
+    async def _generate_cypher_query(
+        self, query: str, node_schemas, edge_schemas, previous_attempts=None
+    ) -> str:
         """Generate a Cypher query using LLM based on natural language query and schema information."""
         system_prompt = render_prompt(
             self.system_prompt_path,
             context={
+                "node_schemas": node_schemas,
                 "edge_schemas": edge_schemas,
                 "previous_attempts": previous_attempts or "No attempts yet",
             },
@@ -127,7 +130,7 @@ class NaturalLanguageRetriever(BaseRetriever):
             logger.info(f"Starting attempt {attempt + 1}/{self.max_attempts} for query generation")
             try:
                 cypher_query = await self._generate_cypher_query(
-                    query, edge_schemas, previous_attempts
+                    query, node_schemas, edge_schemas, previous_attempts
                 )
 
                 logger.info(

@@ -33,26 +33,8 @@ ERROR PREVENTION:
 4. Use pattern variables consistently throughout the query
 5. If previous attempts failed, analyze the failures and adjust your approach
 
-Node schemas:
-- EntityType
-Properties: description, ontology_valid, name, created_at, type, version, topological_rank, updated_at, metadata, id
-Purpose: Represents the categories or classifications for entities in the database.
-
-- Entity
-Properties: description, ontology_valid, name, created_at, type, version, topological_rank, updated_at, metadata, id
-Purpose: Represents individual entities that belong to a specific type or classification.
-
-- TextDocument
-Properties: raw_data_location, name, mime_type, external_metadata, created_at, type, version, topological_rank, updated_at, metadata, id
-Purpose: Represents documents containing text data, along with metadata about their storage and format.
-
-- DocumentChunk
-Properties: version, created_at, type, topological_rank, cut_type, text, metadata, chunk_index, chunk_size, updated_at, id
-Purpose: Represents segmented portions of larger documents, useful for processing or analysis at a more granular level.
-
-- TextSummary
-Properties: topological_rank, metadata, id, type, updated_at, created_at, text, version
-Purpose: Represents summarized content generated from larger text documents, retaining essential information and metadata.
+Node schemas (node labels and their properties):
+`{{node_schemas}}`
 
 Edge schema (relationship properties):
 `{{edge_schemas}}`
