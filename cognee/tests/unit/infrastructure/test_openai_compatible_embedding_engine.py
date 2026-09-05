@@ -105,3 +105,86 @@ class TestOpenAICompatibleEmbeddingEngine:
         base_url = str(engine._client._base_url).rstrip("/")
         assert base_url.endswith("/v1")
         assert "/embeddings" not in base_url
+
+    @pytest.mark.asyncio
+    async def test_oversized_input_is_chunked_not_sent_whole(self, monkeypatch):
+        """Inputs above the endpoint's input cap must be chunked, not sent whole.
+
+        NVIDIA NIM rejects any request with more than 256 inputs with a 400
+        ("input count 464 exceeds maximum allowed batch size") that no retry
+        can fix — sending 464 texts in one call burned the full 128s retry
+        budget and then failed. The engine must split first.
+        """
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        monkeypatch.delenv("EMBEDDING_MAX_INPUT_BATCH", raising=False)
+
+        engine = self._make_engine(dimensions=8)
+
+        def make_response(n):
+            items = []
+            for i in range(n):
+                item = MagicMock()
+                item.embedding = [float(i)] * 8
+                items.append(item)
+            resp = MagicMock()
+            resp.data = items
+            return resp
+
+        calls = []
+
+        async def fake_create(**kwargs):
+            calls.append(len(kwargs["input"]))
+            return make_response(len(kwargs["input"]))
+
+        engine._client = MagicMock()
+        engine._client.embeddings.create = AsyncMock(side_effect=fake_create)
+
+        result = await engine.embed_text([f"text {i}" for i in range(464)])
+
+        assert len(result) == 464
+        # 464 inputs at the default 256 cap → chunks of 256 and 208
+        assert calls == [256, 208]
+        # Order preserved: first chunk's vectors come first
+        assert result[0] == [0.0] * 8
+        assert result[255] == [255.0] * 8
+        assert result[256] == [0.0] * 8
+        assert result[463] == [207.0] * 8
+
+    @pytest.mark.asyncio
+    async def test_batch_size_error_triggers_recursive_split(self, monkeypatch):
+        """A 400 mentioning batch size must fall into the recursive split path."""
+        monkeypatch.delenv("MOCK_EMBEDDING", raising=False)
+        monkeypatch.delenv("EMBEDDING_MAX_INPUT_BATCH", raising=False)
+
+        engine = self._make_engine(dimensions=8)
+
+        # Simulate an endpoint whose cap is lower than our default chunking
+        call_count = {"n": 0}
+
+        async def fake_create(**kwargs):
+            call_count["n"] += 1
+            if len(kwargs["input"]) > 4:
+                raise RuntimeError(
+                    "Error code: 400 - input count exceeds maximum allowed batch size"
+                )
+            items = []
+            for i in range(len(kwargs["input"])):
+                item = MagicMock()
+                item.embedding = [1.0] * 8
+                items.append(item)
+            resp = MagicMock()
+            resp.data = items
+            return resp
+
+        engine._client = MagicMock()
+        engine._client.embeddings.create = AsyncMock(side_effect=fake_create)
+
+        # Bypass pre-chunking (cap raised above input size) so only the
+        # error-driven recursive split handles it.
+        engine.max_input_batch = 100
+        result = await engine.embed_text([f"t{i}" for i in range(8)])
+
+        assert len(result) == 8
+        assert all(v == [1.0] * 8 for v in result)
+        # 8 > 4 → split to 4+4, both succeed
+        assert call_count["n"] == 3
