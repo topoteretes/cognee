@@ -1,15 +1,15 @@
-from typing import Optional, List
+from typing import List, Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.project_tags import get_project_tags
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     get_persisted_qa_count,
 )
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.session.project_tags import get_project_tags
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("extract_user_sessions")
 

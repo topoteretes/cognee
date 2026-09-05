@@ -1,10 +1,10 @@
 import json
-from cognee.infrastructure.session.project_tags import get_project_tags, TaggedTrace
 from typing import Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.infrastructure.session.project_tags import TaggedTrace, get_project_tags
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 

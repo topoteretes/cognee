@@ -2,16 +2,15 @@ from typing import Optional, Union
 from uuid import UUID
 
 import cognee
-
-from cognee.exceptions import CogneeValidationError, CogneeSystemError
-from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
+from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     save_persisted_qa_count,
 )
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("cognify_session")
 

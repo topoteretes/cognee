@@ -2,9 +2,8 @@ from typing import Optional
 from uuid import UUID
 
 import cognee
-from cognee.infrastructure.session.project_tags import TaggedTrace
-
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
+from cognee.infrastructure.session.project_tags import TaggedTrace
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
