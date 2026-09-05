@@ -400,6 +400,23 @@ async def test_chunks_lexical_returns_bm25_retriever():
 
 
 @pytest.mark.asyncio
+async def test_chunks_lexical_forwards_node_set_filtering():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.CHUNKS_LEXICAL,
+        query_text="q",
+        top_k=3,
+        node_name=["set_a"],
+        node_name_filter_operator="AND",
+    )
+    assert isinstance(retriever_instance, BM25ChunksRetriever)
+    assert retriever_instance.node_name == ["set_a"]
+    assert retriever_instance.node_name_filter_operator == "AND"
+
+
+@pytest.mark.asyncio
 async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever

@@ -14,6 +14,8 @@ class JaccardChunksRetriever(LexicalRetriever):
         with_scores: bool = False,
         stop_words: Optional[list[str]] = None,
         multiset_jaccard: bool = False,
+        node_name: Optional[list[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """
         Parameters
@@ -26,12 +28,23 @@ class JaccardChunksRetriever(LexicalRetriever):
             List of tokens to filter out.
         multiset_jaccard : bool
             If True, use multiset Jaccard (frequency aware).
+        node_name : list[str], optional
+            Node set names to scope the corpus to. Defaults to None, which searches
+            every chunk.
+        node_name_filter_operator : str
+            "OR" keeps a chunk tagged with any of the requested node sets, "AND"
+            only one tagged with all of them.
         """
         self.stop_words = {t.lower() for t in stop_words} if stop_words else set()
         self.multiset_jaccard = multiset_jaccard
 
         super().__init__(
-            tokenizer=self._tokenizer, scorer=self._scorer, top_k=top_k, with_scores=with_scores
+            tokenizer=self._tokenizer,
+            scorer=self._scorer,
+            top_k=top_k,
+            with_scores=with_scores,
+            node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
         )
 
     def _tokenizer(self, text: str) -> list[str]:
