@@ -21,6 +21,14 @@ def _rebuild(
     *,
     max_bucket_size: int = 2,
     min_overlap: float = 0.1,
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+    entity_relations: list[tuple[str, str, str]] | None = None,
+    edge_type_embeddings: dict[str, list[float]] | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ):
     return rebuild_graph_buckets_for_level(
         [_summary(summary_id) for summary_id in summary_ids],
@@ -30,6 +38,14 @@ def _rebuild(
         level=0,
         max_bucket_size=max_bucket_size,
         min_overlap=min_overlap,
+        entity_type_by_entity_id=entity_type_by_entity_id,
+        type_idf_weights=type_idf_weights,
+        entity_weight=entity_weight,
+        type_weight=type_weight,
+        entity_relations=entity_relations,
+        edge_type_embeddings=edge_type_embeddings,
+        pattern_weight=pattern_weight,
+        pattern_distance_threshold=pattern_distance_threshold,
     )
 
 
@@ -64,6 +80,14 @@ def _incremental(
     *,
     max_bucket_size: int = 2,
     min_overlap: float = 0.1,
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    entity_weight: float = 1.0,
+    type_weight: float = 0.0,
+    entity_relations: list[tuple[str, str, str]] | None = None,
+    edge_type_embeddings: dict[str, list[float]] | None = None,
+    pattern_weight: float = 0.0,
+    pattern_distance_threshold: float = 0.5,
 ):
     return place_graph_summaries_incrementally(
         [_summary(summary_id) for summary_id in new_summary_ids],
@@ -74,6 +98,14 @@ def _incremental(
         level=0,
         max_bucket_size=max_bucket_size,
         min_overlap=min_overlap,
+        entity_type_by_entity_id=entity_type_by_entity_id,
+        type_idf_weights=type_idf_weights,
+        entity_weight=entity_weight,
+        type_weight=type_weight,
+        entity_relations=entity_relations,
+        edge_type_embeddings=edge_type_embeddings,
+        pattern_weight=pattern_weight,
+        pattern_distance_threshold=pattern_distance_threshold,
     )
 
 
@@ -411,6 +443,63 @@ def test_graph_incremental_normalizes_misc_bucket_before_placement():
     ]
 
 
+def test_graph_rebuild_keeps_no_shared_entity_summaries_separate_by_default():
+    buckets, _ = _rebuild(
+        ["hiking", "sailing"],
+        {
+            "hiking": {"trail-x"},
+            "sailing": {"boat-y"},
+        },
+        {"trail-x": 1.0, "boat-y": 1.0},
+        min_overlap=0.1,
+        entity_type_by_entity_id={"trail-x": "activity", "boat-y": "activity"},
+        type_idf_weights={"activity": 1.0},
+    )
+
+    assert _bucket_child_sets(buckets) == [{"hiking"}, {"sailing"}]
+
+
+def test_graph_rebuild_groups_by_shared_entity_type_when_type_weight_is_positive():
+    buckets, _ = _rebuild(
+        ["hiking", "sailing"],
+        {
+            "hiking": {"trail-x"},
+            "sailing": {"boat-y"},
+        },
+        {"trail-x": 1.0, "boat-y": 1.0},
+        min_overlap=0.1,
+        entity_type_by_entity_id={"trail-x": "activity", "boat-y": "activity"},
+        type_idf_weights={"activity": 1.0},
+        entity_weight=0.5,
+        type_weight=0.5,
+    )
+
+    assert _bucket_child_sets(buckets) == [{"hiking", "sailing"}]
+
+
+def test_graph_incremental_places_by_shared_entity_type_when_type_weight_is_positive():
+    existing_bucket = _bucket("bucket-hiking", {"s1"}, {"trail-x"})
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [existing_bucket],
+        {"s1": {"trail-x"}, "s2": {"boat-y"}},
+        {"trail-x": 1.0, "boat-y": 1.0},
+        max_bucket_size=3,
+        min_overlap=0.1,
+        entity_type_by_entity_id={"trail-x": "activity", "boat-y": "activity"},
+        type_idf_weights={"activity": 1.0},
+        entity_weight=0.5,
+        type_weight=0.5,
+    )
+
+    assert buckets == {"bucket-hiking": existing_bucket}
+    assert existing_bucket.child_ids == {"s1", "s2"}
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
+        ("s2", "bucket-hiking")
+    ]
+
+
 def test_graph_incremental_demotes_zero_weight_bucket_before_misc_reuse():
     bucket = _bucket("bucket-demoted", {"s1"}, {"standup"})
 
@@ -428,4 +517,93 @@ def test_graph_incremental_demotes_zero_weight_bucket_before_misc_reuse():
     assert bucket.graph_bucket_entity_ids == set()
     assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
         ("s2", "bucket-demoted")
+    ]
+
+
+def _pattern_test_entities() -> tuple[dict[str, set[str]], dict[str, float]]:
+    """Two summaries share only ("alice", "alps") out of ten total distinct
+    entities (weighted-jaccard entity_score == 0.2), so a min_overlap of 0.3
+    keeps them apart on entity overlap alone. Both also carry the same
+    ("alice", "alps", "goes_to") relation triple, giving a perfect (1.0)
+    relationship-pattern match that plain entity overlap does not capture."""
+    entities_by_summary_id = {
+        "s1": {"alice", "alps", "misc-1", "misc-2", "misc-3", "misc-4"},
+        "s2": {"alice", "alps", "other-1", "other-2", "other-3", "other-4"},
+    }
+    idf_weights = {
+        entity_id: 1.0 for entity_id in entities_by_summary_id["s1"] | entities_by_summary_id["s2"]
+    }
+    return entities_by_summary_id, idf_weights
+
+
+def test_graph_rebuild_keeps_low_overlap_summaries_separate_by_default_despite_matching_pattern():
+    entities_by_summary_id, idf_weights = _pattern_test_entities()
+
+    buckets, _ = _rebuild(
+        ["s1", "s2"],
+        entities_by_summary_id,
+        idf_weights,
+        min_overlap=0.3,
+        entity_relations=[("alice", "alps", "goes_to")],
+    )
+
+    assert _bucket_child_sets(buckets) == [{"s1"}, {"s2"}]
+
+
+def test_graph_rebuild_groups_by_matching_relationship_pattern_when_pattern_weight_is_positive():
+    entities_by_summary_id, idf_weights = _pattern_test_entities()
+
+    buckets, _ = _rebuild(
+        ["s1", "s2"],
+        entities_by_summary_id,
+        idf_weights,
+        min_overlap=0.3,
+        entity_relations=[("alice", "alps", "goes_to")],
+        pattern_weight=1.0,
+    )
+
+    assert _bucket_child_sets(buckets) == [{"s1", "s2"}]
+
+
+def test_graph_incremental_keeps_low_overlap_summary_separate_by_default_despite_matching_pattern():
+    entities_by_summary_id, idf_weights = _pattern_test_entities()
+    existing_bucket = _bucket("bucket-s1", {"s1"}, entities_by_summary_id["s1"])
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [existing_bucket],
+        entities_by_summary_id,
+        idf_weights,
+        max_bucket_size=2,
+        min_overlap=0.3,
+        entity_relations=[("alice", "alps", "goes_to")],
+    )
+
+    new_bucket_id = str(create_bucket_id("dataset-1", 0, ["s2"]))
+    assert set(buckets) == {new_bucket_id}
+    assert existing_bucket.child_ids == {"s1"}
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
+        ("s2", new_bucket_id)
+    ]
+
+
+def test_graph_incremental_places_by_matching_relationship_pattern_when_pattern_weight_is_positive():
+    entities_by_summary_id, idf_weights = _pattern_test_entities()
+    existing_bucket = _bucket("bucket-s1", {"s1"}, entities_by_summary_id["s1"])
+
+    buckets, assignments = _incremental(
+        ["s2"],
+        [existing_bucket],
+        entities_by_summary_id,
+        idf_weights,
+        max_bucket_size=2,
+        min_overlap=0.3,
+        entity_relations=[("alice", "alps", "goes_to")],
+        pattern_weight=1.0,
+    )
+
+    assert buckets == {"bucket-s1": existing_bucket}
+    assert existing_bucket.child_ids == {"s1", "s2"}
+    assert [(assignment.child_id, assignment.parent_id) for assignment in assignments] == [
+        ("s2", "bucket-s1")
     ]

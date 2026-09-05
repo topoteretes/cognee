@@ -8,6 +8,9 @@ import pytest
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.pipelines.models import PipelineContext
+from cognee.tasks.memify.global_context_index.bucketing.graph.inputs import (
+    GraphBucketingInputs,
+)
 from cognee.tasks.memify.global_context_index.constants import SUMMARIZED_IN
 from cognee.tasks.memify.global_context_index.load import (
     extract_context_index_input,
@@ -20,6 +23,7 @@ from cognee.tasks.memify.global_context_index.models import (
 from cognee.tasks.memify.global_context_index.persist import (
     ensure_global_context_storage_context,
 )
+from cognee.tasks.memify.global_context_index.build import resolve_graph_similarity_weights
 from cognee.tasks.memify.global_context_index.update import (
     update_global_context_index,
 )
@@ -187,8 +191,19 @@ async def test_extract_global_context_index_input_rejects_direct_input_data(monk
 def _graph_input(
     entities_by_summary_id: dict[str, set[str]],
     idf_weights: dict[str, float],
-) -> tuple[dict[str, set[str]], dict[str, float]]:
-    return entities_by_summary_id, idf_weights
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    entity_relations: list[tuple[str, str, str]] | None = None,
+    edge_type_embeddings: dict[str, list[float]] | None = None,
+) -> GraphBucketingInputs:
+    return GraphBucketingInputs(
+        entities_by_summary_id=entities_by_summary_id,
+        idf_weights=idf_weights,
+        entity_type_by_entity_id=entity_type_by_entity_id or {},
+        type_idf_weights=type_idf_weights or {},
+        entity_relations=entity_relations or [],
+        edge_type_embeddings=edge_type_embeddings or {},
+    )
 
 
 def test_extract_context_index_input_uses_summary_edges_for_assignment():
@@ -1436,3 +1451,58 @@ async def test_persist_context_index_edges_unstamped_on_ledger_graph(monkeypatch
     kwargs = unified_engine.graph.add_edges.await_args.kwargs
     assert kwargs["source_ref_key"] is None
     assert kwargs["pipeline_run_id"] is None
+
+
+def test_resolve_graph_similarity_weights_entity_reproduces_entity_only_defaults():
+    assert resolve_graph_similarity_weights("entity") == (1.0, 0.0, 0.0)
+
+
+def test_resolve_graph_similarity_weights_combined_uses_equal_thirds():
+    entity_weight, type_weight, pattern_weight = resolve_graph_similarity_weights("combined")
+
+    assert entity_weight == pytest.approx(1 / 3)
+    assert type_weight == pytest.approx(1 / 3)
+    assert pattern_weight == pytest.approx(1 / 3)
+
+
+@pytest.mark.asyncio
+async def test_update_global_context_index_threads_graph_similarity_mode_to_build_context_index(
+    monkeypatch,
+):
+    summaries = [_summary_node("alpha")]
+    summary_input = GlobalContextIndexInput(text_summaries=summaries, buckets=[])
+    dataset_id = uuid4()
+    unified_engine = SimpleNamespace(
+        graph=SimpleNamespace(
+            delete_nodes=AsyncMock(),
+            add_nodes=AsyncMock(),
+            add_edges=AsyncMock(),
+        ),
+        vector=SimpleNamespace(search=AsyncMock(return_value=[]), delete_data_points=AsyncMock()),
+    )
+    build_context_index_mock = AsyncMock(return_value=([], []))
+
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "get_unified_engine",
+        AsyncMock(return_value=unified_engine),
+    )
+    monkeypatch.setattr(
+        update_global_context_index_module,
+        "build_context_index",
+        build_context_index_mock,
+    )
+    monkeypatch.setattr(
+        "cognee.tasks.memify.global_context_index.persist.add_data_points",
+        AsyncMock(),
+    )
+
+    ctx = PipelineContext(dataset=SimpleNamespace(id=dataset_id, name="dataset-name"))
+    await update_global_context_index(
+        summary_input,
+        max_bucket_size=10,
+        ctx=ctx,
+        graph_similarity_mode="combined",
+    )
+
+    assert build_context_index_mock.await_args.kwargs["graph_similarity_mode"] == "combined"

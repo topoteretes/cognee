@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.summarization.models import GlobalContextSummary
@@ -22,6 +22,27 @@ from .summarize import (
 )
 
 
+GraphSimilarityMode = Literal["entity", "combined"]
+
+_GRAPH_SIMILARITY_WEIGHTS: dict[GraphSimilarityMode, tuple[float, float, float]] = {
+    "entity": (1.0, 0.0, 0.0),
+    "combined": (1 / 3, 1 / 3, 1 / 3),
+}
+
+
+def resolve_graph_similarity_weights(mode: GraphSimilarityMode) -> tuple[float, float, float]:
+    """
+    Returns (entity_weight, type_weight, pattern_weight) for the "graph"
+    bucketing strategy's level-0 placement score.
+
+    ``"entity"`` (default) reproduces today's entity-only behavior exactly.
+    ``"combined"`` blends entity, entity-type, and relationship-pattern
+    signals with equal (1/3) weight each -- not separately tunable; empirical
+    comparison against other weight splits is future, out-of-scope work.
+    """
+    return _GRAPH_SIMILARITY_WEIGHTS[mode]
+
+
 @dataclass(frozen=True)
 class BuildOptions:
     dataset_id: str
@@ -32,6 +53,14 @@ class BuildOptions:
     min_overlap: float
     entities_by_summary_id: Mapping[str, set[str]]
     idf_weights: Mapping[str, float]
+    entity_type_by_entity_id: Mapping[str, str]
+    type_idf_weights: Mapping[str, float]
+    entity_weight: float
+    type_weight: float
+    pattern_weight: float
+    entity_relations: list[tuple[str, str, str]]
+    edge_type_embeddings: Mapping[str, list[float]]
+    pattern_distance_threshold: float
     ctx: PipelineContext | None
 
 
@@ -77,6 +106,14 @@ def place_graph_items(
             level=level,
             max_bucket_size=options.max_bucket_size,
             min_overlap=options.min_overlap,
+            entity_type_by_entity_id=options.entity_type_by_entity_id,
+            type_idf_weights=options.type_idf_weights,
+            entity_weight=options.entity_weight,
+            type_weight=options.type_weight,
+            entity_relations=options.entity_relations,
+            edge_type_embeddings=options.edge_type_embeddings,
+            pattern_weight=options.pattern_weight,
+            pattern_distance_threshold=options.pattern_distance_threshold,
         )
 
     return rebuild_graph_buckets_for_level(
@@ -87,6 +124,14 @@ def place_graph_items(
         level=level,
         max_bucket_size=options.max_bucket_size,
         min_overlap=options.min_overlap,
+        entity_type_by_entity_id=options.entity_type_by_entity_id,
+        type_idf_weights=options.type_idf_weights,
+        entity_weight=options.entity_weight,
+        type_weight=options.type_weight,
+        entity_relations=options.entity_relations,
+        edge_type_embeddings=options.edge_type_embeddings,
+        pattern_weight=options.pattern_weight,
+        pattern_distance_threshold=options.pattern_distance_threshold,
     )
 
 
@@ -210,6 +255,12 @@ async def build_context_index(
     min_overlap: float = 0.05,
     entities_by_summary_id: dict[str, set[str]] | None = None,
     idf_weights: dict[str, float] | None = None,
+    entity_type_by_entity_id: dict[str, str] | None = None,
+    type_idf_weights: dict[str, float] | None = None,
+    graph_similarity_mode: GraphSimilarityMode = "entity",
+    entity_relations: list[tuple[str, str, str]] | None = None,
+    edge_type_embeddings: Mapping[str, list[float]] | None = None,
+    pattern_distance_threshold: float = 0.5,
     ctx: PipelineContext | None = None,
 ) -> tuple[list[GlobalContextSummary], list[BucketAssignment]]:
     """
@@ -220,7 +271,15 @@ async def build_context_index(
     level does not exist yet. The loop stops once the topmost non-root level
     fits in the root's capacity. Root is regenerated when anything below
     changed or when no root exists yet.
+
+    ``graph_similarity_mode`` controls how the "graph" strategy's level-0
+    placement score is computed: ``"entity"`` (default) reproduces today's
+    entity-only behavior exactly; ``"combined"`` blends in entity-type and
+    relationship-pattern signals too (see ``resolve_graph_similarity_weights``).
     """
+    entity_weight, type_weight, pattern_weight = resolve_graph_similarity_weights(
+        graph_similarity_mode
+    )
     options = BuildOptions(
         dataset_id=dataset_id,
         vector_engine=vector_engine,
@@ -230,6 +289,14 @@ async def build_context_index(
         min_overlap=min_overlap,
         entities_by_summary_id=entities_by_summary_id or {},
         idf_weights=idf_weights or {},
+        entity_type_by_entity_id=entity_type_by_entity_id or {},
+        type_idf_weights=type_idf_weights or {},
+        entity_weight=entity_weight,
+        type_weight=type_weight,
+        pattern_weight=pattern_weight,
+        entity_relations=entity_relations or [],
+        edge_type_embeddings=edge_type_embeddings or {},
+        pattern_distance_threshold=pattern_distance_threshold,
         ctx=ctx,
     )
 
