@@ -65,8 +65,30 @@ _IDENT = (
 )
 # Surface the event came from: 'sdk' (default), 'cloud', 'cli', ... Safe enum.
 _ORIGIN = "coalesce(json_extract_string(properties, '$.telemetry_origin'), 'unknown')"
+
+
+def _san(expr: str) -> str:
+    """Scrub identifier-shaped substrings from a user-configurable string column.
+
+    Provider/model/endpoint/version values come from customer config and can
+    embed UUIDs (deployment names), long hex ids, or even email addresses —
+    the first scheduled run tripped the privacy guard on exactly this (an
+    identifier inside an llm_model string). Replace them with typed tokens so
+    the aggregate keys stay useful without carrying identifiers.
+    """
+    uuid = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    email = "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+    long_hex = "[0-9a-fA-F]{16,}"
+    return (
+        f"regexp_replace(regexp_replace(regexp_replace({expr}, "
+        f"'{uuid}', '<uuid>', 'g'), "
+        f"'{email}', '<email>', 'g'), "
+        f"'{long_hex}', '<hex>', 'g')"
+    )
+
+
 # Normalized version: strip the -local suffix so builds compare cleanly.
-_VERSION = "coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')"
+_VERSION = _san("coalesce(regexp_replace(cognee_version, '-local$', ''), 'unknown')")
 
 _EVENTS_SQL = "(" + ",".join(f"'{e}'" for e in EVENT_ALLOWLIST) + ")"
 _BASE_FILTER = (
@@ -112,7 +134,7 @@ QUERIES: dict[str, str] = {
     # FastAPI surface: which routes are hit (endpoint is a route template
     # constant like 'POST /v1/search' — no user data), by day.
     "api_endpoint_daily": f"""
-        SELECT ingestion_date AS day, endpoint, {_VERSION} AS version,
+        SELECT ingestion_date AS day, {_san("endpoint")} AS endpoint, {_VERSION} AS version,
                count(*) AS events,
                count(DISTINCT {_IDENT}) AS distinct_identities
         FROM analytics.main.pipeline_events
@@ -123,11 +145,11 @@ QUERIES: dict[str, str] = {
     # Provider stack correlation (from completed pipeline runs).
     "provider_stack_daily": f"""
         SELECT ingestion_date AS day,
-               json_extract_string(properties, '$.llm.provider')   AS llm_provider,
-               left(lower(json_extract_string(properties, '$.llm.model')), 60) AS llm_model,
-               json_extract_string(properties, '$.graph.provider') AS graph_provider,
-               json_extract_string(properties, '$.vector.provider') AS vector_provider,
-               json_extract_string(properties, '$.relational.provider') AS relational_provider,
+               {_san("json_extract_string(properties, '$.llm.provider')")}   AS llm_provider,
+               {_san("left(lower(json_extract_string(properties, '$.llm.model')), 60)")} AS llm_model,
+               {_san("json_extract_string(properties, '$.graph.provider')")} AS graph_provider,
+               {_san("json_extract_string(properties, '$.vector.provider')")} AS vector_provider,
+               {_san("json_extract_string(properties, '$.relational.provider')")} AS relational_provider,
                {_VERSION} AS version,
                count(*) AS completed_runs,
                count(DISTINCT {_IDENT}) AS distinct_identities
@@ -167,8 +189,9 @@ HEADER_DENYLIST = re.compile(
 )
 CELL_PATTERNS = (
     re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),  # email
-    re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),  # uuid
-    re.compile(r"\bak_[0-9a-f]{16,}\b"),  # key hash
+    re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE),  # uuid
+    re.compile(r"\bak_[0-9a-f]{16,}\b", re.IGNORECASE),  # key hash
+    re.compile(r"\b[0-9a-fA-F]{16,}\b"),  # bare long hex/opaque id
 )
 
 
