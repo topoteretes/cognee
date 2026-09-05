@@ -124,6 +124,16 @@ jobs:
       ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
     secrets: inherit
 
+  journey-tests:
+    # Product contract journeys in mock-LLM mode: no secrets, so fork PRs get a
+    # real signal here even when the secret-dependent suites cannot run.
+    name: Product Journeys
+    uses: ./.github/workflows/journey_tests.yml
+    needs: [ build-ci-env ]
+    if: ${{ !cancelled() }}
+    with:
+      ci-image: ${{ needs.build-ci-env.outputs.ci-image || '' }}
+
   slow-e2e-tests:
     name: Slow End-to-End Tests
     uses: ./.github/workflows/slow_e2e_tests.yml
@@ -285,6 +295,7 @@ jobs:
       basic-tests,
       e2e-tests,
       cli-tests,
+      journey-tests,
       slow-e2e-tests,
       graph-db-tests,
       vector-db-tests,
@@ -312,6 +323,7 @@ jobs:
                 "${{ needs.basic-tests.result }}" == "success" &&
                 "${{ needs.e2e-tests.result }}" == "success" &&
                 "${{ needs.cli-tests.result }}" == "success" &&
+                "${{ needs.journey-tests.result }}" == "success" &&
                 "${{ needs.slow-e2e-tests.result }}" == "success" &&
                 "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
