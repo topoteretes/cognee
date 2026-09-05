@@ -49,6 +49,13 @@ def write_graphml(nodes: List[Node], edges: List[Edge], destination: Path) -> No
     for _, properties in nodes:
         for key in properties or {}:
             node_keys.setdefault(key)
+    # Every edge emits a "relationship_name" datum below. It comes from the edge
+    # tuple rather than the per-edge properties dict, so the loop below would never
+    # register it; declare it explicitly whenever edges are present, otherwise the
+    # emitted <data key="e_relationship_name"> has no matching <key> declaration and
+    # strict GraphML readers (e.g. networkx.read_graphml) reject the file.
+    if edges:
+        edge_keys.setdefault("relationship_name")
     for _, _, _, properties in edges:
         for key in properties or {}:
             if key not in _SKIP_EDGE_KEYS:
