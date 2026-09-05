@@ -112,12 +112,49 @@ def result_text(results: Any) -> str:
     return "\n".join(parts).lower()
 
 
+def answer_text(results: Any) -> str:
+    """Only the human-facing answer strings, lowercased.
+
+    Unlike ``result_text`` this skips ``raw`` payloads, dataset ids and other
+    envelope fields, so a leak check on it cannot trip on a UUID that happens to
+    contain the digits of a forbidden number.
+    """
+    parts: list[str] = []
+
+    def _collect(item: Any) -> None:
+        if item is None:
+            return
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, (list, tuple, set)):
+            for sub in item:
+                _collect(sub)
+        elif isinstance(item, dict):
+            for key in ("text", "completion", "answer", "search_result"):
+                if key in item:
+                    _collect(item[key])
+        elif hasattr(item, "search_result"):  # cognee.search -> SearchResult
+            _collect(getattr(item, "search_result"))
+        elif hasattr(item, "text") and isinstance(getattr(item, "text"), str):
+            parts.append(item.text)
+
+    _collect(results)
+    return "\n".join(parts).lower()
+
+
+def _contains_token(text: str, token: str) -> bool:
+    """Whole-token match: ``41`` must not match inside ``1941`` or a UUID."""
+    import re
+
+    return re.search(rf"(?<![0-9a-z]){re.escape(token)}(?![0-9a-z])", text) is not None
+
+
 def answered(question: Question, text: str) -> bool:
     return any(token in text for token in question.expected_any)
 
 
 def forbidden_hits(question: Question, text: str) -> list[str]:
-    return [token for token in question.forbidden if token in text]
+    return [token for token in question.forbidden if _contains_token(text, token)]
 
 
 @dataclass
@@ -132,7 +169,15 @@ class Scorecard:
         self.misses = self.misses or []
         self.leaks = self.leaks or []
 
-    def record(self, question: Question, text: str, check_forbidden: bool) -> None:
+    def record(
+        self,
+        question: Question,
+        text: str,
+        check_forbidden: bool,
+        answer: Optional[str] = None,
+    ) -> None:
+        """``text`` is scored for the expected fact; ``answer`` (the human-facing
+        answer only) is scanned for leaked facts from other documents."""
         self.total += 1
         if answered(question, text):
             self.hits += 1
@@ -141,7 +186,7 @@ class Scorecard:
                 f"{question.id}: {question.question!r} -> none of {question.expected_any}"
             )
         if check_forbidden:
-            leaked = forbidden_hits(question, text)
+            leaked = forbidden_hits(question, answer if answer is not None else text)
             if leaked:
                 self.leaks.append(f"{question.id}: leaked {leaked}")
 

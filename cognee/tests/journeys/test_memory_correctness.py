@@ -48,7 +48,11 @@ async def test_golden_corpus_is_answerable_through_every_user_path(
     clean_env, default_user, corpus, questions, journey_mode
 ):
     thresholds = THRESHOLDS[journey_mode]
+    # A leak check only makes sense where a model writes a concise answer. CHUNKS
+    # and SUMMARIES return the raw top-k neighbours, which legitimately include
+    # other documents; in mock mode completions echo the whole context too.
     check_forbidden = journey_mode == "llm"
+    completion_paths = {SearchType.RAG_COMPLETION, SearchType.GRAPH_COMPLETION}
 
     # --- remember the whole corpus through the public API --------------------
     result = await cognee.remember([d.text for d in corpus], dataset_name=DATASET)
@@ -76,7 +80,12 @@ async def test_golden_corpus_is_answerable_through_every_user_path(
     for q in questions:
         results = await cognee.recall(q.question, datasets=[DATASET], session_id=f"{q.id}-recall")
         assert results, f"recall returned nothing for {q.id}: {q.question!r}"
-        card.record(q, _support.result_text(results), check_forbidden)
+        card.record(
+            q,
+            _support.result_text(results),
+            check_forbidden,
+            answer=_support.answer_text(results),
+        )
     cards.append(card)
     assert card.rate >= thresholds["recall_default"], card.report()
 
@@ -96,8 +105,12 @@ async def test_golden_corpus_is_answerable_through_every_user_path(
                 session_id=f"{q.id}-{search_type.value}",
             )
             assert results, f"{search_type.value} returned nothing for {q.id}: {q.question!r}"
-            # Completions echo retrieved context in mock mode; a leak check there is meaningless.
-            card.record(q, _support.result_text(results), check_forbidden)
+            card.record(
+                q,
+                _support.result_text(results),
+                check_forbidden and search_type in completion_paths,
+                answer=_support.answer_text(results),
+            )
         cards.append(card)
         assert card.rate >= thresholds[search_type], card.report()
 
