@@ -5,8 +5,7 @@ import { TrackPageView } from "@/modules/analytics";
 import { AGENT_CARDS } from "@/modules/integrations/agentCards";
 import { AUTOMATION_CARDS } from "@/modules/integrations/automationCards";
 import SetupConnectorSection from "./partials/SetupConnectorSection";
-import DataSourceSection from "./partials/DataSourceSection";
-import MoreDataSourcesSection from "./partials/MoreDataSourcesSection";
+import LocalSources from "./partials/LocalSources";
 import { useAgentConnectionStatus } from "./partials/useAgentConnectionStatus";
 
 export default function IntegrationsPage(): ReactElement {
@@ -38,11 +37,10 @@ export default function IntegrationsPage(): ReactElement {
 
         <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
 
-        <DataSourceSection />
+        <LocalSources />
 
         <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
 
-        <MoreDataSourcesSection />
 
       </div>
     </div>

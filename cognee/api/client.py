@@ -57,6 +57,8 @@ from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.sessions import get_sessions_router
 from cognee.api.v1.slack.routers import get_slack_channels_router, get_slack_router
 from cognee.api.v1.integrations.routers import get_integrations_router
+from cognee.api.v1.promote.routers import get_promote_router
+from cognee.api.v1.users.routers.get_workspace_router import get_workspace_router
 
 # Registers the GitHub and Linear integrations with the integrations registry
 # as import side effects. Slack registers via its router imports above; GitHub
@@ -351,6 +353,8 @@ app.include_router(get_forget_router(), prefix="/api/v1/forget", tags=["forget"]
 app.include_router(get_slack_router(), prefix="/api/v1/slack", tags=["slack"])
 app.include_router(get_slack_channels_router(), prefix="/api/v1/slack", tags=["slack"])
 app.include_router(get_integrations_router(), prefix="/api/v1/integrations", tags=["integrations"])
+app.include_router(get_promote_router(), prefix="/api/v1/promote", tags=["memory promotion"])
+app.include_router(get_workspace_router(), prefix="/api/v1/workspace", tags=["workspace"])
 
 
 @app.get("/")

@@ -103,6 +103,17 @@ async def test_dry_run_reads_the_selected_snapshot_without_writes(state):
 
 
 @pytest.mark.asyncio
+async def test_promotion_rejects_document_changed_since_preview(state):
+    preview = await state.run(dry_run=True)
+    assert preview.source_revision == hashlib.sha256(state.content).hexdigest()
+    with pytest.raises(ValueError, match="after preview"):
+        await state.run(expected_source_revision="0" * 64)
+    state.add.assert_not_awaited()
+    result = await state.run(expected_source_revision=preview.source_revision)
+    assert result.status == "copied"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("permission", ["read", "share", "write"])
 async def test_denied_permission_precedes_storage_reads(state, permission):
     original = state.auth.side_effect
@@ -438,3 +449,48 @@ async def test_commit_ack_failure_never_removes_published_storage(
         assert objects[copied.raw_data_location] == b"lesson"
     finally:
         await engine.engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_http_requires_preview_revision_and_rechecks_permissions(state):
+    import httpx
+    from fastapi import FastAPI
+
+    from cognee.api.v1.promote.routers import get_promote_router
+    from cognee.modules.users.methods import get_authenticated_user
+
+    app = FastAPI()
+    app.include_router(get_promote_router(), prefix="/promote")
+    app.dependency_overrides[get_authenticated_user] = lambda: state.actor
+    payload = {
+        "data_id": str(state.row.id),
+        "source_dataset_id": str(state.source.id),
+        "target_dataset_id": str(state.target.id),
+        "level": "user",
+        "reason": "Reviewed lesson",
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        preview = await client.post("/promote", json=payload)
+        assert preview.status_code == 200
+        assert preview.json()["status"] == "planned"
+        state.add.assert_not_awaited()
+        missing = await client.post("/promote", json={**payload, "dry_run": False})
+        assert missing.status_code == 400
+        changed = await client.post(
+            "/promote", json={**payload, "dry_run": False, "expected_source_revision": "0" * 64}
+        )
+        assert changed.status_code == 400
+        state.add.assert_not_awaited()
+        copied = await client.post(
+            "/promote",
+            json={
+                **payload,
+                "dry_run": False,
+                "expected_source_revision": preview.json()["source_revision"],
+            },
+        )
+        assert copied.status_code == 200
+        assert copied.json()["status"] == "copied"
+        assert len(state.auth.await_args_list) == 9  # preview, stale revision, confirmed copy
