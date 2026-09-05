@@ -1,39 +1,49 @@
 import asyncio
 import os
-from typing import List
+from typing import Annotated, Literal
 
 from cognee import forget, remember, visualize_graph
+from cognee.infrastructure.engine import Edge, FromIdentity
 from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = (
-    "Extract all people mentioned in the text. "
-    "For each person, extract ALL activities they like, including shared activities."
+    "Extract every person, the role they hold, and every group with its members. "
+    "Extract friendships, family links (married_to or sibling_of), "
+    "and other named relationships between people."
 )
 
 
-class Activity(DataPoint):
+class Role(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class Person(DataPoint):
     name: str
-    likes: List[Activity] | None = None
+    is_a: Annotated[Role, FromIdentity()] | None = None
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class Group(DataPoint):
+    name: str
+    members: list[Person] | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class PeopleGraph(DataPoint):
-    people: List[Person]
+    people: list[Person]
+    groups: list[Group] = []
+    friends_with: list[Edge[Person, Person]] = []
+    family_links: list[Edge[Person, Person, Literal["married_to", "sibling_of"]]] = []
+    other_links: list[Edge[Person, Person, str]] = []
 
 
 async def main():
     await forget(everything=True)
 
     text = (
-        "Alice likes biking and swimming. Bob likes playing basketball. "
-        "Alice and Bob are friends. "
-        "Charlie likes skiing. "
-        "Alice and Bob like playing board games together."
+        "Maya and Owen are engineers on the Search team and are friends. "
+        "Priya is a manager and Maya's sibling. Owen mentors Maya."
     )
 
     await remember(
@@ -43,7 +53,7 @@ async def main():
         self_improvement=False,
     )
 
-    graph_path = os.path.join(os.path.dirname(__file__), ".artifacts", "hobbies_graph.html")
+    graph_path = os.path.join(os.path.dirname(__file__), ".artifacts", "custom_graph.html")
     await visualize_graph(graph_path)
 
 

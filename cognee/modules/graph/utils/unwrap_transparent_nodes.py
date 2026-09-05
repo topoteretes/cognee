@@ -9,11 +9,6 @@ walk decides what to write.
 from typing import Any, List, Optional
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils.extract_field_relationships import (
-    EdgeTargets,
-    iter_targets,
-    iter_fields,
-)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -58,6 +53,23 @@ def _warn_dropped_field(data_point: DataPoint, field_name: str, value: Any) -> N
     )
 
 
+def _warn_foreign_source_edge(data_point: DataPoint, field_name: str) -> None:
+    """Warn once per (class, field) that a container is skipping a foreign-source edge."""
+    key = (type(data_point).__qualname__, field_name)
+    if key in _WARNED_DROPPED_FIELDS:
+        return
+    _WARNED_DROPPED_FIELDS.add(key)
+
+    logger.warning(
+        "%s is marked transparent but %r declares a relationship whose source is not "
+        "this container; a transparent node is never stored, so that edge is skipped "
+        "rather than half-hoisted. Put the edge on a node that owns it, or remove "
+        "metadata['transparent'].",
+        type(data_point).__qualname__,
+        field_name,
+    )
+
+
 def unwrap_transparent(
     data_point: DataPoint,
     _active: Optional[frozenset] = None,
@@ -79,38 +91,15 @@ def unwrap_transparent(
         return []
     _active = (_active or frozenset()) | {id(data_point)}
 
+    for field_name, value in data_point.get_fields_without_edges():
+        _warn_dropped_field(data_point, field_name, value)
+
     resolved: List[DataPoint] = []
-    seen = set()
-
-    # ``belongs_to_set`` is a relationship, but a wrapper's NodeSets are not its
-    # children - inheriting them would mint ``Parent --field--> NodeSet`` edges.
-    for field_name, field_value, edge_targets in iter_fields(data_point, ("belongs_to_set",)):
-        if not edge_targets:
-            _warn_dropped_field(data_point, field_name, field_value)
+    for field_name, edge in data_point.get_edges_from_fields():
+        if field_name == "belongs_to_set":
             continue
-
-        for target in iter_targets(edge_targets):
-            for node in unwrap_transparent(target, _active):
-                if str(node.id) not in seen:
-                    seen.add(str(node.id))
-                    resolved.append(node)
-
+        if edge.source is not data_point:
+            _warn_foreign_source_edge(data_point, field_name)
+            continue
+        resolved.extend(unwrap_transparent(edge.target, _active))
     return resolved
-
-
-def unwrap_transparent_targets(edge_targets: List[EdgeTargets]) -> List[EdgeTargets]:
-    """Replace every transparent target with its children, in place of the container.
-
-    Returns the very same list object when nothing in the field is transparent, so a
-    graph using no containers behaves exactly as it does without this function.
-
-    A declaration whose targets all resolve away is kept as ``(edge, [])`` rather than
-    dropped, so the result stays one-for-one with what was declared.
-    """
-    if not any(is_transparent(target) for target in iter_targets(edge_targets)):
-        return edge_targets
-
-    return [
-        (edge_metadata, [node for t in targets for node in unwrap_transparent(t)])
-        for edge_metadata, targets in edge_targets
-    ]

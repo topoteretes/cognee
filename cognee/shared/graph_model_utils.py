@@ -1,9 +1,11 @@
 import asyncio
+import logging
 import re
 import sys
 import types
+from functools import lru_cache
 from pprint import pprint
-from typing import Any, Union, cast, get_args, get_origin
+from typing import Any, Literal, Union, cast, get_args, get_origin
 
 from datamodel_code_generator import DataModelType, GenerateConfig, InputFileType, generate
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -13,8 +15,279 @@ from pydantic_core import PydanticUndefined
 
 import cognee
 from cognee.api.v1.search import SearchType
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, Edge
+from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
+from cognee.modules.engine.utils import generate_edge_name
+from cognee.modules.graph.utils.get_graph_from_model import collect_stored_data_points
 from cognee.shared.logging_utils import ERROR, setup_logging
+from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
+
+logger = logging.getLogger(__name__)
+
+
+def _reference_target_type(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in (list,):
+        return _reference_target_type(get_args(annotation)[0])
+    if origin in (Union, types.UnionType):
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(args) == 1:
+            return _reference_target_type(args[0])
+    return annotation
+
+
+def from_identity_fields(model: type[BaseModel]) -> dict[str, type[DataPoint]]:
+    """Map field name to the DataPoint type a FromIdentity field refers to."""
+    fields: dict[str, type[DataPoint]] = {}
+    for name, field_info in model.model_fields.items():
+        if any(isinstance(meta, _FromIdentity) for meta in field_info.metadata):
+            fields[name] = _reference_target_type(field_info.annotation)
+    return fields
+
+
+def _single_identity_field(target_type: type[DataPoint], owning_field: str) -> str:
+    identity = target_type._get_identity_fields()
+    if not identity or len(identity) != 1:
+        raise InvalidReferenceTypeError(
+            f"{target_type.__name__} on {owning_field} needs exactly one identity_fields "
+            f"entry, got {identity!r}"
+        )
+    return identity[0]
+
+
+def _check_single_identity_field(target_type: type[DataPoint], owning_field: str) -> None:
+    _single_identity_field(target_type, owning_field)
+
+
+def _check_constructible_from_identity(target_type: type[DataPoint], owning_field: str) -> None:
+    identity = set(target_type._get_identity_fields() or [])
+    offending = [
+        name
+        for name, info in target_type.model_fields.items()
+        if name not in DataPoint.model_fields and name not in identity and info.is_required()
+    ]
+    if offending:
+        raise InvalidReferenceTypeError(
+            f"{target_type.__name__} on {owning_field} has required fields that cannot "
+            f"be filled from an identity string: {offending}"
+        )
+
+
+def _from_identity_llm_annotation(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in (list,):
+        return list[str]
+    if origin in (Union, types.UnionType) and type(None) in get_args(annotation):
+        return str | None
+    return str
+
+
+def _list_edge_inner(annotation: Any) -> type[Edge] | None:
+    """Return the Edge[...] class if this is list[Edge[...]], else None."""
+    if get_origin(annotation) not in (list,):
+        return None
+    inner = get_args(annotation)[0]
+    if isinstance(inner, type) and issubclass(inner, Edge):
+        return inner
+    return None
+
+
+def _edge_type_args(inner: type[Edge]) -> tuple[type[DataPoint], type[DataPoint], Any]:
+    metadata = getattr(inner, "__pydantic_generic_metadata__", None)
+    if not isinstance(metadata, dict):
+        raise InvalidReferenceTypeError(f"{inner!r} is not a parametrized Edge")
+    args = metadata.get("args")
+    if not isinstance(args, (list, tuple)) or len(args) < 3:
+        raise InvalidReferenceTypeError(f"{inner!r} is not a parametrized Edge")
+    return args[0], args[1], args[2]
+
+
+def edge_field_types(
+    model: type[BaseModel],
+) -> dict[str, tuple[type[DataPoint], type[DataPoint], Any]]:
+    """Map each list[Edge[...]] field to (source type, target type, third Edge generic)."""
+    fields: dict[str, tuple[type[DataPoint], type[DataPoint], Any]] = {}
+    for name, field_info in model.model_fields.items():
+        inner = _list_edge_inner(field_info.annotation)
+        if inner is None:
+            continue
+        fields[name] = _edge_type_args(inner)
+    return fields
+
+
+def _row_class_name(field_name: str) -> str:
+    return "".join(part.title() for part in field_name.split("_")) + "Edge"
+
+
+@lru_cache(maxsize=128)
+def _edge_row_model_for(field_name: str, edge_types: tuple) -> type[BaseModel]:
+    source_type, target_type, relationship_generic = edge_types
+    source_id = _single_identity_field(source_type, field_name)
+    target_id = _single_identity_field(target_type, field_name)
+    fields: dict[str, Any] = {
+        "source": (
+            str,
+            Field(description=f"The {source_id} of a {source_type.__name__} already in the graph"),
+        ),
+        "target": (
+            str,
+            Field(description=f"The {target_id} of a {target_type.__name__} already in the graph"),
+        ),
+    }
+    if relationship_generic is str or get_origin(relationship_generic) is Literal:
+        fields["relationship_type"] = (relationship_generic, ...)
+    return create_model(_row_class_name(field_name), **fields)
+
+
+def _edge_field_spec(
+    model: type[BaseModel], field_name: str
+) -> tuple[type[DataPoint], type[DataPoint], type[BaseModel]]:
+    edge_types = edge_field_types(model)[field_name]
+    source_type, target_type, _ = edge_types
+    return source_type, target_type, _edge_row_model_for(field_name, edge_types)
+
+
+def _llm_edge_field(
+    model_type: type[BaseModel], field_name: str, field_info: Any, default_value: Any
+) -> tuple | None:
+    if _list_edge_inner(field_info.annotation) is None:
+        return None
+    *_, row_model = _edge_field_spec(model_type, field_name)
+    return (
+        types.GenericAlias(list, (row_model,)),
+        default_value if default_value is not PydanticUndefined else PydanticUndefined,
+    )
+
+
+def _rewrite_from_identity(value: Any, target_type: type[DataPoint]) -> Any:
+    identity_field = _single_identity_field(target_type, target_type.__name__)
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [_rewrite_from_identity(item, target_type) for item in value]
+    if isinstance(value, str):
+        return {identity_field: value}
+    return value
+
+
+def _llm_dump_to_model_dump(
+    value: Any, model_class: type[BaseModel], path: tuple[Any, ...] = ()
+) -> tuple[Any, dict]:
+    if not isinstance(value, dict) or not (
+        isinstance(model_class, type) and issubclass(model_class, BaseModel)
+    ):
+        return value, {}
+
+    is_datapoint = issubclass(model_class, DataPoint)
+    refs = from_identity_fields(model_class) if is_datapoint else {}
+    edges = edge_field_types(model_class) if is_datapoint else {}
+    converted: dict[str, Any] = {}
+    rows: dict = {}
+    for name, item in value.items():
+        if name in edges:
+            converted[name] = []
+            if isinstance(item, list) and item:
+                rows[(path, name)] = item
+            continue
+        if name in refs:
+            converted[name] = _rewrite_from_identity(item, refs[name])
+            continue
+        field_info = model_class.model_fields.get(name)
+        if field_info is None:
+            converted[name] = item
+            continue
+        nested_dump, nested_rows = _descend_llm_dump(item, field_info.annotation, (*path, name))
+        converted[name] = nested_dump
+        rows.update(nested_rows)
+
+    for name in edges:
+        if name not in converted:
+            converted[name] = []
+
+    return converted, rows
+
+
+def _descend_llm_dump(value: Any, annotation: Any, path: tuple[Any, ...]) -> tuple[Any, dict]:
+    origin = get_origin(annotation)
+    if origin in (list,):
+        if not isinstance(value, list):
+            return value, {}
+        inner = get_args(annotation)[0]
+        converted_items = []
+        rows: dict = {}
+        for index, item in enumerate(value):
+            converted, nested = _descend_llm_dump(item, inner, (*path, index))
+            converted_items.append(converted)
+            rows.update(nested)
+        return converted_items, rows
+    if origin in (Union, types.UnionType):
+        args = [arg for arg in get_args(annotation) if arg is not type(None)]
+        if len(args) == 1:
+            return _descend_llm_dump(value, args[0], path)
+        return value, {}
+    if isinstance(annotation, type) and issubclass(annotation, DataPoint):
+        return _llm_dump_to_model_dump(value, annotation, path)
+    return value, {}
+
+
+def _instance_at(root: DataPoint, path: tuple[Any, ...]) -> Any:
+    current: Any = root
+    for step in path:
+        current = current[step] if isinstance(step, int) else getattr(current, step)
+    return current
+
+
+def _lookup_endpoint(index: dict, endpoint_type: type[DataPoint], identity_value: str):
+    return index.get((endpoint_type, endpoint_type.id_for(identity_value)))
+
+
+def _resolve_edge_row(
+    row: dict,
+    row_model: type[BaseModel],
+    index: dict,
+    source_type: type[DataPoint],
+    target_type: type[DataPoint],
+    field_name: str,
+) -> Edge | None:
+    validated = row_model.model_validate(row).model_dump()
+    source_node = _lookup_endpoint(index, source_type, validated["source"])
+    target_node = _lookup_endpoint(index, target_type, validated["target"])
+    if source_node is None or target_node is None:
+        logger.warning("Skipping unresolved edge on %s: %s", field_name, row)
+        return None
+    name = validated.get("relationship_type")
+    rel_field = row_model.model_fields.get("relationship_type")
+    if not isinstance(name, str):
+        name = None
+    elif rel_field is not None and rel_field.annotation is str:
+        name = generate_edge_name(name)
+    return Edge(
+        source=source_node,
+        target=target_node,
+        relationship_type=name,
+    ).normalize(source_node, field_name, target=target_node)
+
+
+async def _attach_edge_rows(root: DataPoint, rows: dict) -> None:
+    stored = await collect_stored_data_points(root)
+    index = {(type(node), node.id): node for node in stored}
+    for (path, field_name), row_dicts in rows.items():
+        owner = _instance_at(root, path)
+        source_type, target_type, row_model = _edge_field_spec(type(owner), field_name)
+        built = []
+        for row in row_dicts:
+            edge = _resolve_edge_row(row, row_model, index, source_type, target_type, field_name)
+            if edge is not None:
+                built.append(edge)
+        setattr(owner, field_name, built)
+
+
+async def content_graph_to_data_point(content_graph: BaseModel, graph_model: type[DataPoint]):
+    dump, rows = _llm_dump_to_model_dump(content_graph.model_dump(), graph_model)
+    root = graph_model.model_validate(dump)
+    if rows:
+        await _attach_edge_rows(root, rows)
+    return root
 
 
 def datapoint_model_to_basemodel(
@@ -91,6 +364,31 @@ def datapoint_model_to_basemodel(
                 if field_info.default_factory is not None
                 else field_info.default
             )
+            if any(isinstance(meta, _FromIdentity) for meta in field_info.metadata):
+                target_type = _reference_target_type(field_info.annotation)
+                _check_single_identity_field(target_type, field_name)
+                _check_constructible_from_identity(target_type, field_name)
+                identity_field = target_type._get_identity_fields()[0]
+                description = (
+                    f"The {identity_field} of a {target_type.__name__} already in the graph"
+                )
+                if field_info.default_factory is not None:
+                    field_default = Field(
+                        default_factory=field_info.default_factory, description=description
+                    )
+                elif default_value is not PydanticUndefined:
+                    field_default = Field(default=default_value, description=description)
+                else:
+                    field_default = Field(description=description)
+                converted_fields[field_name] = (
+                    _from_identity_llm_annotation(field_info.annotation),
+                    field_default,
+                )
+                continue
+            edge_field = _llm_edge_field(model_type, field_name, field_info, default_value)
+            if edge_field is not None:
+                converted_fields[field_name] = edge_field
+                continue
             converted_fields[field_name] = (
                 _replace_datapoint_types(field_info.annotation, cache),
                 default_value if default_value is not PydanticUndefined else PydanticUndefined,
@@ -235,7 +533,7 @@ if __name__ == "__main__":
         await visualize_graph()
         print("Visualization saved to ~/graph_visualization.html")
 
-    logger = setup_logging(log_level=ERROR)
+    setup_logging(log_level=ERROR)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

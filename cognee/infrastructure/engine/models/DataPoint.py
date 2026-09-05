@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -8,6 +8,9 @@ from typing_extensions import NotRequired, TypedDict
 
 from cognee.infrastructure.engine.models.FieldAnnotations import _Dedup, _Embeddable
 from cognee.infrastructure.engine.utils.generate_node_id import generate_node_id
+
+if TYPE_CHECKING:
+    from cognee.infrastructure.engine.models.Edge import Edge
 
 logger = logging.getLogger(__name__)
 
@@ -374,3 +377,47 @@ class DataPoint(BaseModel):
               data.
         """
         return cls.model_validate(data)
+
+    def get_edges_from_fields(self) -> list[tuple[str, "Edge"]]:
+        """Return ``(field_name, edge)`` for every field that expands into graph edges.
+
+        Targets stay raw: a transparent container is still a container here.
+        """
+        return [
+            (field_name, edge)
+            for field_name, field_value in self
+            if field_name != "metadata"
+            for edge in self._edges_in_field(field_name, field_value)
+        ]
+
+    def get_fields_without_edges(self) -> list[tuple[str, Any]]:
+        """Return ``(field_name, value)`` for fields that do not expand into edges."""
+        return [
+            (field_name, field_value)
+            for field_name, field_value in self
+            if field_name != "metadata" and not self._edges_in_field(field_name, field_value)
+        ]
+
+    def _edges_in_field(self, field_name: str, value: Any) -> "list[Edge]":
+        from cognee.infrastructure.engine.models.Edge import Edge
+
+        items = value if isinstance(value, list) else [value]
+        edges: list[Edge] = []
+        for item in items:
+            if isinstance(item, DataPoint):
+                edges.append(
+                    Edge.model_construct(source=self, target=item, relationship_type=field_name)
+                )
+                continue
+            if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], Edge):
+                edge_metadata, targets = item
+                if isinstance(targets, DataPoint):
+                    edges.append(edge_metadata.normalize(self, field_name, target=targets))
+                    continue
+                if isinstance(targets, list) and targets and isinstance(targets[0], DataPoint):
+                    for inner in targets:
+                        edges.append(edge_metadata.normalize(self, field_name, target=inner))
+                continue
+            if isinstance(item, Edge) and item.target is not None:
+                edges.append(item.normalize(self, field_name))
+        return edges
