@@ -44,11 +44,14 @@ logger = get_logger("LiteLLMEmbeddingEngine")
 # the per-prediction instance cap ("2048 instance(s) is allowed per prediction")
 # and the per-model batch cap ("a batchSize value of 1234 but the supported
 # range is from 1 (inclusive) to 251 (exclusive)" -- "too many instances").
+# OpenAI caps the number of inputs per embeddings request ("'$.input' is
+# invalid ... array length must be 2048 or less").
 _EMBED_LENGTH_ERROR_RE = re.compile(
     r"maximum\s+input\s+length"
     r"|instance\(s\)\s+is\s+allowed\s+per\s+prediction"
     r"|too\s+many\s+instances"
-    r"|batchsize\s+value\s+of",
+    r"|batchsize\s+value\s+of"
+    r"|array\s+length\s+must\s+be",
     re.IGNORECASE,
 )
 
