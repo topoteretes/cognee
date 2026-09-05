@@ -133,6 +133,24 @@ class TestRejections:
         with pytest.raises(CogneeValidationError, match="items"):
             model_from_json_schema({"type": "object", "properties": {"xs": {"type": "array"}}})
 
+    def test_empty_any_of_rejected_as_schema_error(self):
+        with pytest.raises(CogneeValidationError, match="anyOf.*at least one"):
+            model_from_json_schema(
+                {
+                    "type": "object",
+                    "properties": {"value": {"anyOf": []}},
+                }
+            )
+
+    def test_empty_type_list_rejected_as_schema_error(self):
+        with pytest.raises(CogneeValidationError, match="type.*at least one"):
+            model_from_json_schema(
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": []}},
+                }
+            )
+
     def test_property_budget(self):
         schema = {
             "type": "object",

@@ -39,6 +39,15 @@ def _fail(message: str) -> CogneeValidationError:
     return CogneeValidationError(message=f"response_schema: {message}")
 
 
+def _union_from_members(members: list[Any], source: str) -> Any:
+    """Build a type union while preserving schema errors as API validation errors."""
+    if not members:
+        raise _fail(f"{source} must contain at least one schema")
+    if len(members) == 1:
+        return members[0]
+    return Union[tuple(members)]
+
+
 class _Budget:
     """Caps total property count across the whole schema."""
 
@@ -97,7 +106,7 @@ def _type_from(
             _type_from(member, defs, depth + 1, in_flight_refs, budget)
             for member in schema["anyOf"]
         ]
-        return Union[tuple(members)]
+        return _union_from_members(members, "anyOf")
 
     schema_type = schema.get("type")
     if isinstance(schema_type, list):
@@ -105,7 +114,7 @@ def _type_from(
             _type_from({**schema, "type": single}, defs, depth + 1, in_flight_refs, budget)
             for single in schema_type
         ]
-        return Union[tuple(members)]
+        return _union_from_members(members, "type")
 
     if schema_type == "null":
         return type(None)
