@@ -102,6 +102,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.feedback_command", "FeedbackCommand"),
         ("cognee.cli.commands.memify_command", "MemifyCommand"),
         ("cognee.cli.commands.remember_command", "RememberCommand"),
+        ("cognee.cli.commands.seed_command", "SeedCommand"),
         ("cognee.cli.commands.recall_command", "RecallCommand"),
         ("cognee.cli.commands.improve_command", "ImproveCommand"),
         ("cognee.cli.commands.forget_command", "ForgetCommand"),
