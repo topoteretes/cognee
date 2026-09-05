@@ -56,6 +56,7 @@ def _patch(
     monkeypatch.setattr(_mod, "get_user", fake_get_user)
     monkeypatch.setattr(_mod, "get_principal", fake_get_principal)
     monkeypatch.setattr(_mod, "get_principal_datasets", fake_get_principal_datasets)
+    monkeypatch.setattr(_mod, "get_all_user_permission_datasets", fake_get_principal_datasets)
     monkeypatch.setattr(_mod, "get_user_role_names_in_tenant", fake_get_user_role_names_in_tenant)
     monkeypatch.setattr(_mod, "has_user_management_permission", fake_has_user_management_permission)
 

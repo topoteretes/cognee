@@ -193,6 +193,7 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
+    dataset_id: UUID | None = None,
     session_id: Optional[str],
     user,
     skill_improvement: Optional[dict[str, Any]] = None,
@@ -209,6 +210,7 @@ async def _remember_entry(
         payload = await client.remember_entry(
             entry,
             dataset_name=dataset_name,
+            **({"dataset_id": dataset_id} if dataset_id is not None else {}),
             session_id=session_id,
             skill_improvement=skill_improvement,
         )
@@ -234,6 +236,7 @@ async def _remember_entry(
     return await _dispatch_session_entry(
         entry,
         dataset_name=dataset_name,
+        dataset_id=dataset_id,
         session_id=session_id,
         user=user,
         skill_improvement=skill_improvement,
@@ -244,6 +247,7 @@ async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
     dataset_name: str,
+    dataset_id: UUID | None = None,
     session_id: Optional[str],
     user,
     skill_improvement: Optional[dict[str, Any]] = None,
@@ -256,6 +260,8 @@ async def _dispatch_session_entry(
     can chain writes.
     """
     if isinstance(entry, SkillRunEntry):
+        if dataset_id is not None:
+            raise ValueError("Skill-run entries currently require dataset_name")
         from cognee.modules.tools.skill_runs import remember_skill_run_entry
 
         run, dataset = await remember_skill_run_entry(
@@ -324,37 +330,44 @@ async def _dispatch_session_entry(
     if not sm.is_available:
         raise RuntimeError("Session cache unavailable — set CACHING=true to enable session memory")
 
-    # Resolve the dataset UUID for this session so the session_records
-    # row carries dataset_id — otherwise downstream permission filtering
-    # (e.g. the dashboard listing) can't match the session via granted
-    # dataset reads. We backfill via ensure_and_touch_session, which
-    # upserts the row and only sets dataset_id when currently null.
-    try:
-        from uuid import UUID as _UUID
+    if dataset_id is not None:
+        from .session_dataset import bind_typed_session_dataset
 
-        from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
-        from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
-
-        resolved_dataset = None
+        dataset = await bind_typed_session_dataset(user, session_id, dataset_id)
+        dataset_name = dataset.name
+    else:
+        # Resolve the dataset UUID for this session so the session_records
+        # row carries dataset_id — otherwise downstream permission filtering
+        # (e.g. the dashboard listing) can't match the session via granted
+        # dataset reads. We backfill via ensure_and_touch_session, which
+        # upserts the row and only sets dataset_id when currently null.
         try:
-            ds = await get_authorized_dataset(user, dataset_name, "write")
-            if ds is not None:
-                resolved_dataset = ds.id
-        except Exception:
-            # Fall through with None — we still create the session row.
-            resolved_dataset = None
+            from uuid import UUID as _UUID
 
-        await ensure_and_touch_session(
-            session_id=session_id,
-            user_id=_UUID(user_id),
-            dataset_id=resolved_dataset,
-        )
-    except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
+            from cognee.modules.data.methods.get_authorized_dataset import get_authorized_dataset
+            from cognee.modules.session_lifecycle.metrics import ensure_and_touch_session
+
+            resolved_dataset = None
+            try:
+                ds = await get_authorized_dataset(user, dataset_name, "write")
+                if ds is not None:
+                    resolved_dataset = ds.id
+            except Exception:
+                # Fall through with None — we still create the session row.
+                resolved_dataset = None
+
+            await ensure_and_touch_session(
+                session_id=session_id,
+                user_id=_UUID(user_id),
+                dataset_id=resolved_dataset,
+            )
+        except Exception as exc:
+            logger.debug("remember: pre-upsert session_record failed (%s)", exc)
 
     result = RememberResult(
         status="session_stored",
         dataset_name=dataset_name,
+        dataset_id=str(dataset_id) if dataset_id is not None else None,
         session_ids=[session_id],
     )
     result.elapsed_seconds = time.monotonic() - result._started_at
@@ -693,8 +706,9 @@ async def remember(
         dataset_name: Target dataset. Defaults to ``"main_dataset"``.
         dataset_id: UUID of an existing dataset to target directly. Takes
             precedence over ``dataset_name``. Not supported for
-            ``MemorySource`` imports or typed ``MemoryEntry`` payloads,
-            which are dataset-name based.
+            ``MemorySource`` imports or ``SkillRunEntry`` payloads. Typed
+            QA, trace and feedback entries support UUIDs and require a
+            writable dataset; a session cannot change its dataset binding.
         session_id: Optional session ID. When set, stores data in the
             session cache instead of the permanent graph.
         chunk_size: Max tokens per chunk. Auto-calculated when *None*.
@@ -817,13 +831,10 @@ async def remember(
     if isinstance(data, MEMORY_ENTRY_TYPES):
         if dry_run:
             raise ValueError("dry_run is supported for add+cognify remember inputs only.")
-        if dataset_id is not None:
-            raise ValueError(
-                "dataset_id is not supported for typed memory entries; use dataset_name."
-            )
         return await _remember_entry(
             data,
             dataset_name=dataset_name,
+            dataset_id=dataset_id,
             session_id=session_id,
             user=kwargs.get("user"),
             skill_improvement=kwargs.get("skill_improvement"),

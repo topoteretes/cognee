@@ -638,7 +638,11 @@ def get_remember_router() -> APIRouter:
         )
         skill_improvement: Optional[dict] = None
 
-    @router.post("/entry", response_model=dict)
+    @router.post(
+        "/entry",
+        response_model=dict,
+        openapi_extra={"x-cognee-session-dataset-ids": True},
+    )
     @log_usage(function_name="POST /v1/remember/entry", log_type="api_endpoint")
     async def remember_entry(
         payload: RememberEntryRequest,
