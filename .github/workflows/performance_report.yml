@@ -1,10 +1,12 @@
 name: performance report
 
 # Least-privilege GITHUB_TOKEN (OSSF Scorecard: Token-Permissions). A caller can
-# only narrow this further; nothing in this workflow writes to the repository.
+# only narrow this further. packages: read is required: the jobs run inside the
+# private ghcr.io CI image (and pull ghcr.io service images), which the runner
+# fetches with this token before the first step. Nothing here writes.
 permissions:
   contents: read
-  packages: read  # pull the ghcr.io service images
+  packages: read
 
 # Reusable workflow: runs the percentile performance report once for a given
 # dataset + mode, uploads the JSON + HTML artifacts to S3, and exposes the
