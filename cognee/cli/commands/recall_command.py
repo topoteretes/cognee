@@ -17,7 +17,7 @@ from cognee.cli.hints import hint_recall_empty
 AUTO_QUERY_TYPE = "auto"
 
 
-def _resolved_search_type(results, fallback: str) -> str:
+def resolved_search_type(results, fallback: str) -> str:
     """Read the search type the SDK actually ran from the first result."""
     if not results:
         return fallback
@@ -182,7 +182,7 @@ Pass --query-type to pin one. See docs/recall-vs-search.md.
                         if i < len(results):
                             fmt.echo("-" * 40)
                 else:
-                    resolved_type = _resolved_search_type(results, effective_query_type)
+                    resolved_type = resolved_search_type(results, effective_query_type)
                     fmt.echo(f"\nFound {len(results)} result(s) using {resolved_type}:")
                     fmt.echo("=" * 60)
 

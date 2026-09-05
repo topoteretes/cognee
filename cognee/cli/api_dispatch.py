@@ -13,7 +13,8 @@ import os
 
 import cognee.cli.echo as fmt
 from cognee.cli.api_client import CogneeApiClient, is_connection_error
-from cognee.cli.config import COMPLETION_SEARCH_TYPES, DEFAULT_SEARCH_TYPE
+from cognee.cli.commands.recall_command import AUTO_QUERY_TYPE, resolved_search_type
+from cognee.cli.config import COMPLETION_SEARCH_TYPES
 
 SUPPORTED_COMMANDS = {
     "add",
@@ -292,7 +293,8 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
     # Session-only mode: -s without -d and without explicit -t. Mirrors the
     # local recall_command behaviour so --api-url users get the same UX.
     session_only = args.session_id is not None and not args.datasets and args.query_type is None
-    effective_query_type = args.query_type or DEFAULT_SEARCH_TYPE
+    # No -t means "let the server route"; the label is refined from the results.
+    effective_query_type = args.query_type or AUTO_QUERY_TYPE
 
     if session_only:
         fmt.echo(f"Searching session '{args.session_id}': '{args.query_text}'")
@@ -302,7 +304,7 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
     results = client.recall(
         query=args.query_text,
-        search_type=None if session_only else effective_query_type,
+        search_type=args.query_type,
         datasets=args.datasets,
         top_k=args.top_k,
         system_prompt=getattr(args, "system_prompt", None),
@@ -338,9 +340,10 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
             if i < len(results):
                 fmt.echo("-" * 40)
     else:
-        fmt.echo(f"\nFound {len(results)} result(s) using {effective_query_type}:")
+        resolved_type = resolved_search_type(results, effective_query_type)
+        fmt.echo(f"\nFound {len(results)} result(s) using {resolved_type}:")
         fmt.echo("=" * 60)
-        if effective_query_type in COMPLETION_SEARCH_TYPES:
+        if resolved_type in COMPLETION_SEARCH_TYPES:
             for i, result in enumerate(results, 1):
                 fmt.echo(f"{fmt.bold('Response:')} {result}")
                 if i < len(results):

@@ -21,6 +21,8 @@ GOLDEN = [
     ("MATCH (n:Person) RETURN n.name", SearchType.CYPHER),
     ("RETURN 1", SearchType.CYPHER),
     ("MATCH (a)--(b) RETURN a", SearchType.CYPHER),
+    ("OPTIONAL MATCH (n:Person) RETURN n", SearchType.CYPHER),
+    ("UNWIND [1, 2, 3] AS x RETURN x", SearchType.CYPHER),
     # quoted_phrase / exact_match_intent
     ('"polonium and radium"', SearchType.CHUNKS_LEXICAL),
     ("Find the exact phrase in the documents", SearchType.CHUNKS_LEXICAL),
@@ -135,6 +137,10 @@ class TestNegativeInvariants:
             "Which teams match the description?",
             "Does the return value matter?",
             "create a summary of the merge",
+            # Relationship-like syntax mid-sentence is not Cypher on its own.
+            "What happened at --( the meeting",
+            "Compare (a)--(b) style notation with arrows",
+            "Run diff --( format on the file",
         ],
     )
     def test_no_cypher_without_leading_keyword(self, query):

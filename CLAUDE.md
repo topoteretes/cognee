@@ -256,7 +256,7 @@ Available search types (from `cognee/modules/search/types/SearchType.py`), passe
 - **FEELING_LUCKY** - Automatic search type selection
 - **CODING_RULES** - Code-specific search rules
 
-`recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is `null` (its default stays `HYBRID_COMPLETION`). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
+`recall()` picks one of these automatically when `query_type` is omitted; so does `cognee-cli recall` when `--query-type` is omitted, and `POST /api/v1/recall` when `searchType` is omitted or `null` (the default). The CLI's explicit `--query-type` accepts only the choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`; the rest are SDK-only. Routing rules and bypass options: `docs/recall-vs-search.md`.
 
 Key files:
 - `cognee/api/v1/search/search.py`

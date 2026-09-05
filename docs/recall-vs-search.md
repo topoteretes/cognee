@@ -28,7 +28,7 @@ to `HYBRID_COMPLETION`. Matching is case-insensitive except for Cypher.
 
 | # | Rule | Signal in the query | Routes to |
 |---|---|---|---|
-| 1 | `cypher_syntax` | Starts with `MATCH`, `RETURN`, `CREATE`, or `MERGE`, or contains `--(` / `)--` | `CYPHER` |
+| 1 | `cypher_syntax` | Starts with an upper-case Cypher clause: `MATCH`, `OPTIONAL MATCH`, `RETURN`, `CREATE`, `MERGE`, or `UNWIND` | `CYPHER` |
 | 2 | `quoted_phrase` | The whole query is one `"quoted phrase"` | `CHUNKS_LEXICAL` |
 | 3 | `exact_match_intent` | `exact`, `verbatim`, `literal`, `word for word` | `CHUNKS_LEXICAL` |
 | 4 | `summary_intent` | `summarize`, `summary`, `overview`, `outline`, `tl;dr`, `gist`, `main points`, `key takeaways` | `GRAPH_SUMMARY_COMPLETION` |
@@ -63,12 +63,14 @@ That is why these are *not* auto-routed, even though they are valid
 | Surface | Route automatically | Pin a strategy |
 |---|---|---|
 | SDK `recall()` | omit `query_type` (default) | pass `query_type=SearchType.X`; `auto_route=False` forces `HYBRID_COMPLETION` without routing |
-| REST `POST /api/v1/recall` | `"searchType": null` | omit the field (defaults to `HYBRID_COMPLETION`) or pass a value |
+| REST `POST /api/v1/recall` | omit `searchType` or pass `null` (default) | pass a value |
 | CLI `cognee-cli recall` | omit `--query-type` | `--query-type X` (choices in `cognee/cli/config.py:SEARCH_TYPE_CHOICES`) |
 
-The REST default stays `HYBRID_COMPLETION` on purpose: with `sessionId` set,
-a null `searchType` also enables the session short-circuit, and changing the
-default would change that behaviour for existing clients.
+All three surfaces auto-route by default. On every surface, an omitted type
+together with a `session_id` and no datasets also lets a session hit
+short-circuit the graph search; pinning a type disables that. REST clients that
+relied on the old `HYBRID_COMPLETION` default should pass
+`"searchType": "HYBRID_COMPLETION"` explicitly.
 
 ### Seeing what ran
 

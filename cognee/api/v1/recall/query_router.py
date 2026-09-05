@@ -48,9 +48,12 @@ _TEMPORAL_PATTERNS = "|".join(
 
 # (rule name, pattern, search type). First match wins.
 _RULES: tuple[tuple[str, re.Pattern, SearchType], ...] = (
+    # Anchored to a leading Cypher clause keyword, case-sensitive. Relationship
+    # syntax such as ``)--(`` is not matched on its own: real Cypher always opens
+    # with a clause, and an unanchored alternative would fire mid-sentence.
     (
         "cypher_syntax",
-        re.compile(r"^(?:MATCH|RETURN|CREATE|MERGE)\s|--\(|\)--"),
+        re.compile(r"^(?:OPTIONAL\s+MATCH|MATCH|RETURN|CREATE|MERGE|UNWIND)\s"),
         SearchType.CYPHER,
     ),
     (

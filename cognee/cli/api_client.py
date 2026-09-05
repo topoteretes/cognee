@@ -312,7 +312,7 @@ class CogneeApiClient:
     def recall(
         self,
         query: str,
-        search_type: Optional[str] = "HYBRID_COMPLETION",
+        search_type: Optional[str] = None,
         datasets: Optional[list[str]] = None,
         top_k: int = 15,
         system_prompt: Optional[str] = None,
@@ -322,8 +322,8 @@ class CogneeApiClient:
         context_format: str = "context",
         verbose: bool = False,
     ) -> list:
-        # search_type=None opts the server into auto-routing (session-only
-        # mode when session_id is set, graph otherwise).
+        # search_type=None (the server default) auto-routes the query; with
+        # session_id and no datasets it also searches the session cache first.
         payload: dict[str, Any] = {
             "query": query,
             "search_type": search_type,

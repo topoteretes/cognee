@@ -133,6 +133,53 @@ class TestDispatchRouting:
         }
 
 
+class TestRecallDispatch:
+    def _client(self, MockClient, results):
+        mock_instance = MagicMock()
+        mock_instance.recall.return_value = results
+        MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+        MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        return mock_instance
+
+    def _args(self, **overrides):
+        base = dict(
+            api_url="http://localhost:8000",
+            command="recall",
+            user_id=None,
+            query_text="Summarize the report",
+            query_type=None,
+            datasets=["docs"],
+            top_k=10,
+            system_prompt=None,
+            session_id=None,
+            output_format="pretty",
+        )
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_omitted_query_type_lets_server_auto_route(self, MockClient, capsys):
+        """Without -t the remote path must not pin HYBRID_COMPLETION; it prints
+        the type the server actually ran."""
+        mock_instance = self._client(
+            MockClient,
+            [{"search_type": "GRAPH_SUMMARY_COMPLETION", "text": "answer", "_source": "graph"}],
+        )
+
+        dispatch(self._args())
+
+        assert mock_instance.recall.call_args.kwargs["search_type"] is None
+        assert "using GRAPH_SUMMARY_COMPLETION" in capsys.readouterr().out
+
+    @patch("cognee.cli.api_dispatch.CogneeApiClient")
+    def test_explicit_query_type_is_forwarded(self, MockClient):
+        mock_instance = self._client(MockClient, ["answer"])
+
+        dispatch(self._args(query_type="CHUNKS"))
+
+        assert mock_instance.recall.call_args.kwargs["search_type"] == "CHUNKS"
+
+
 class TestUserIdHeader:
     @patch("cognee.cli.api_dispatch.CogneeApiClient")
     def test_user_id_passed_as_header(self, MockClient):
