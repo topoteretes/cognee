@@ -8,6 +8,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
     get_persisted_qa_count,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.session.project_tags import get_project_tags
 from cognee.modules.users.models import User
 
 logger = get_logger("extract_user_sessions")
@@ -107,6 +108,7 @@ async def extract_user_sessions(
                         session_id=session_id,
                         text=session_string,
                         persisted_qa_count=len(qa_data),
+                        node_set=await get_project_tags(session_manager, user_id, session_id),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to extract session {session_id}: {str(e)}")

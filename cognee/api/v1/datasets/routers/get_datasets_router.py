@@ -131,6 +131,25 @@ class DatasetSchemaPayloadDTO(InDTO):
 def get_datasets_router() -> APIRouter:
     router = APIRouter()
 
+    @router.post("/{dataset_id}/session-companion")
+    async def session_companion(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+        """Create/verify an owner-authorized companion with an atomic ACL snapshot.
+
+        Existing mismatched ACLs return 409; callers must fall back to the primary.
+        This copies a snapshot, not ongoing inheritance of later sharing changes.
+        """
+        from cognee.modules.data.methods.provision_session_companion import (
+            CompanionConflict,
+            provision_session_companion,
+        )
+
+        try:
+            return await provision_session_companion(dataset_id, user)
+        except PermissionError as error:
+            raise HTTPException(status_code=403, detail=str(error)) from error
+        except CompanionConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @router.get("", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):
         """

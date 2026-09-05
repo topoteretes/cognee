@@ -2,6 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 import cognee
+from cognee.infrastructure.session.project_tags import TaggedTrace
 
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
@@ -12,7 +13,7 @@ logger = get_logger("cognify_agent_trace_feedback")
 
 
 async def cognify_agent_trace_feedback(
-    data: str,
+    data: str | TaggedTrace,
     dataset_id: Optional[UUID | str] = None,
     node_set_name: str = "agent_trace_feedbacks",
     user: Optional[User] = None,
@@ -33,6 +34,8 @@ async def cognify_agent_trace_feedback(
         CogneeValidationError: If data is None or empty.
         CogneeSystemError: If cognee operations fail.
     """
+    tags = data.node_set if isinstance(data, TaggedTrace) else ()
+    data = data.text if isinstance(data, TaggedTrace) else data
     try:
         if not data or (isinstance(data, str) and not data.strip()):
             logger.warning(
@@ -45,7 +48,12 @@ async def cognify_agent_trace_feedback(
 
         logger.info("Processing agent trace content for cognification")
 
-        await cognee.add(data, dataset_id=dataset_id, node_set=[node_set_name], user=user)
+        await cognee.add(
+            data,
+            dataset_id=dataset_id,
+            node_set=list(dict.fromkeys([node_set_name, *tags])),
+            user=user,
+        )
         logger.debug(
             "Agent trace content added to cognee with node_set: %s",
             node_set_name,

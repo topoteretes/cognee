@@ -44,6 +44,7 @@ class SessionPersistWindow:
     session_id: str
     text: str
     persisted_qa_count: int
+    node_set: tuple[str, ...] = ()
 
 
 def _extract_state_row(raw_entries: list) -> dict | None:

@@ -42,6 +42,7 @@ def _make_mock_session_manager(entries_or_empty, is_available: bool = True):
     """Create a mock SessionManager with get_session, watermark APIs and is_available."""
     mock_sm = MagicMock()
     mock_sm.is_available = is_available
+    mock_sm._cache.get_session_context_entries = AsyncMock(return_value=[])
     mock_sm.get_session = AsyncMock(return_value=entries_or_empty)
     # Watermark storage surface: no stored state means nothing persisted yet.
     mock_sm.get_session_context_entries = AsyncMock(return_value=[])
