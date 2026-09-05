@@ -476,7 +476,7 @@ docker run \
 **API Mode behavior:**
 The MCP server intentionally exposes only the memory API: `remember`, `recall`, and `forget`.
 In API mode these tools call the Cognee API server endpoints directly. Operational helpers such as
-`cognify`, `search`, `list_data`, `delete`, `prune`, `improve`, and document retrieval helpers are
+`cognify`, `search`, `delete`, `prune`, `improve`, and document retrieval helpers are
 kept internal and are not exposed as MCP tools.
 
 ## 💻 Basic Usage
