@@ -44,8 +44,7 @@ on:
     - cron: "0 5 * * 3"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 # Queue rather than cancel: a run cancelled between the branch push and the
 # PR update would leave the fix PR half-refreshed.
@@ -55,6 +54,9 @@ concurrency:
 
 jobs:
   sync-docstrings:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Detect and fix router docstring drift
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -203,6 +205,9 @@ jobs:
           fi
 
   describe-params:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Generate missing parameter descriptions with Claude
     runs-on: ubuntu-22.04
     timeout-minutes: 15

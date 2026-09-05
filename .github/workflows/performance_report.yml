@@ -1,5 +1,11 @@
 name: performance report
 
+# Least-privilege GITHUB_TOKEN (OSSF Scorecard: Token-Permissions). A caller can
+# only narrow this further; nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+  packages: read  # pull the ghcr.io service images
+
 # Reusable workflow: runs the percentile performance report once for a given
 # dataset + mode, uploads the JSON + HTML artifacts to S3, and exposes the
 # headline metrics + HTML object key as outputs for the caller (the Slack bot in

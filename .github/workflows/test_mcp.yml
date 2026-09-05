@@ -1,5 +1,10 @@
 name: test | mcp
 
+# Least-privilege GITHUB_TOKEN (OSSF Scorecard: Token-Permissions). A caller can
+# only narrow this further; nothing in this workflow writes to the repository.
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
