@@ -151,7 +151,7 @@ MCP server and Frontend:
 
 ## Commit & Pull Request Guidelines
 
-- Use clear, imperative subjects (≤ 72 chars) and conventional commit styling in PR titles. Our CI validates semantic PR titles (see `.github/workflows/pr_lint`). Examples:
+- Use clear, imperative subjects (≤ 72 chars) and conventional commit styling in PR titles. Our CI validates semantic PR titles (see `.github/workflows/pr_lint.yml`). Examples:
   - `feat(graph): add temporal edge weighting`
   - `fix(api): handle missing auth cookie`
   - `docs: update installation instructions`
