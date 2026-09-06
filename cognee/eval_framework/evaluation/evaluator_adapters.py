@@ -26,6 +26,12 @@ class EvaluatorAdapter(Enum):
         "BeamEvalAdapter",
         None,
     )
+    LOCOMO = (
+        "LocomoEval",
+        "cognee.eval_framework.locomo.eval_adapter",
+        "LocomoEvalAdapter",
+        None,
+    )
     DIRECT_LLM = (
         "DirectLLM",
         "cognee.eval_framework.evaluation.direct_llm_eval_adapter",
