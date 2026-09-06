@@ -79,61 +79,13 @@
 
 ## Quickstart
 
-Requires **Python 3.10–3.14**. This example targets **Cognee 1.5.4**.
+Requires **Python 3.10–3.14**. 
+
+You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
 ```bash
-python -m pip install "cognee==1.5.4"
-export LLM_API_KEY="YOUR_OPENAI_API_KEY"
+uv pip install cognee
 ```
-
-This uses OpenAI for language models and embeddings. Processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
-
-### Text, code, and lessons from a session
-
-The [complete runnable demo](examples/demos/company_brain_demo.py) stores a document, builds a code graph, learns a release rule, and recalls that rule in a fresh session. Its core operations are:
-
-```python
-# 1. Store text as permanent memory.
-await cognee.remember(
-    "Alice maintains the payments API. The payments API uses PostgreSQL.",
-    dataset_name="company_brain_readme_demo",
-)
-
-# 2. Build a graph of the example repository's code.
-await cognee.remember(
-    "./payments-example",  # The complete script creates this tiny repository.
-    content_type="code",
-    dataset_name="company_brain_readme_demo",
-)
-
-# 3. Learn a durable rule during a session, then distill it.
-await cognee.recall(
-    "Always run the replay test before deploying the payments API.",
-    datasets=["company_brain_readme_demo"],
-    session_id="release-review",
-)
-await cognee.session.distill_session(
-    "release-review", dataset="company_brain_readme_demo"
-)
-
-# 4. Recall permanent knowledge in a new session.
-answers = await cognee.recall(
-    "Who maintains the payments API, and what must happen before release?",
-    datasets=["company_brain_readme_demo"],
-    session_id="next-session",
-)
-for answer in answers:
-    print(answer.text)
-```
-
-Save the [complete script](examples/demos/company_brain_demo.py) as `company_brain_demo.py`, then run:
-
-```bash
-python company_brain_demo.py
-python company_brain_demo.py --recall-only
-```
-
-Look for indexed code symbols, the printed distillation status and lesson, and a fresh-session answer identifying Alice and the replay-test rule. Wording depends on the model. The second command queries saved memory in a new process. The script creates its sample code and sets default storage paths; code extraction downloads Enola on first use if needed.
 
 ### Try it without an API key
 
@@ -141,7 +93,48 @@ Look for indexed code symbols, the printed distillation status and lesson, and a
 cognee-cli demo
 ```
 
-Explore a prebuilt graph with keyword search and sample answers. Building memory from new text uses your configured LLM and embedding provider. For setup help, run `cognee-cli doctor` or open the [CLI guide](https://docs.cognee.ai/cognee-cli/overview).
+
+### Step 2: Configure the LLM
+```python
+import os
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+```
+Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
+
+The default uses OpenAI for language models and embeddings. Processing and generated answers make provider calls. See [installation](https://docs.cognee.ai/getting-started/installation), [other providers](https://docs.cognee.ai/setup-configuration/llm-providers), or [local Ollama models](https://docs.cognee.ai/guides/local-ollama) for other setups.
+
+
+```python
+import cognee
+import asyncio
+
+
+async def main():
+    # Store permanently in the knowledge graph (runs add + cognify + improve)
+    await cognee.remember("Cognee turns documents into AI memory.")
+
+    # Store in session memory (fast cache, syncs to graph in background)
+    await cognee.remember("User prefers detailed explanations.", session_id="chat_1")
+
+    # Query with auto-routing (picks best search strategy automatically)
+    results = await cognee.recall("What does Cognee do?")
+    for result in results:
+        print(result)
+
+    # Query session memory first, fall through to graph if needed
+    results = await cognee.recall("What does the user prefer?", session_id="chat_1")
+    for result in results:
+        print(result)
+
+    # Delete when done
+    await cognee.forget(dataset="main_dataset")
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
+
+```
+
 
 ## How Cognee works
 
@@ -159,12 +152,12 @@ At query time, retrieval selects relevant graph, vector, or code context. Your a
 
 | Operation | What it does | Learn more |
 | --- | --- | --- |
-| `remember` | Store content in permanent memory, or in a session when a session ID is supplied. | [Store memory](https://docs.cognee.ai/core-concepts/main-operations/remember) |
+| `remember` | Store content or code in permanent memory, or in a session when a session ID is supplied. | [Store memory](https://docs.cognee.ai/core-concepts/main-operations/remember) |
 | `recall` | Retrieve context and answers, using automatic routing or a chosen search strategy. | [Query memory](https://docs.cognee.ai/core-concepts/main-operations/recall) |
 | `improve` | Enrich memory, apply feedback, and bridge session knowledge into the graph. | [Improve memory](https://docs.cognee.ai/core-concepts/main-operations/improve) |
 | `forget` | Remove a specific item or dataset. | [Delete memory](https://docs.cognee.ai/core-concepts/main-operations/forget) |
 
-For direct pipeline control, use `add`, `cognify`, `search`, and `memify`. Explore the [architecture](https://docs.cognee.ai/core-concepts/architecture) and [session lifecycle](https://docs.cognee.ai/core-concepts/sessions-and-caching).
+Explore the [architecture](https://docs.cognee.ai/core-concepts/architecture) and [session lifecycle](https://docs.cognee.ai/core-concepts/sessions-and-caching).
 
 ## Connect your agent
 
@@ -173,6 +166,20 @@ Install the Claude Code plugin:
 ```bash
 claude plugin marketplace add topoteretes/cognee-integrations
 claude plugin install cognee-memory@cognee
+```
+
+or Codex plugin 
+
+Make sure to enable hooks: 
+```bash
+# ~/.codex/config.toml
+[features]
+hooks = true
+```
+
+```bash
+codex plugin marketplace add topoteretes/cognee-integrations --ref main
+codex plugin add cognee@cognee
 ```
 
 Follow the [plugin setup guide](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) to configure local or remote memory.
@@ -221,6 +228,12 @@ docker compose --profile ui --profile mcp up
 
 The default ports are API **8000**, UI **3000**, and MCP **8001**. For deployment beyond a local demo, configure authentication, persistent storage, and compatible backends using the [permissions guide](https://docs.cognee.ai/setup-configuration/permissions) and [deployment templates](distributed/deploy/README.md). [Cognee Cloud](https://docs.cognee.ai/cognee-cloud/overview) provides the managed option.
 
+## Run the Whole Memory Layer on Postgres
+
+Graph memory traditionally means operating a stack — a graph database for relationships, a vector database for embeddings, Redis for sessions, and a relational database for metadata — all deployed, secured, and paid for before an agent remembers anything. In cognee 1.0 you can run the entire memory layer on a single Postgres instance.
+
+> **⚠️ Warning:** Using Postgres as a graph store is currently a released as a demo feature. The production ready feature is available as a licenced product. Use it to demo keeping relational metadata, PGVector, and graph working together
+
 <a id="benchmarks"></a>
 
 ## Benchmarks and research
@@ -236,14 +249,30 @@ The two settings use different conversations, ingestion models, and retrieval-se
 
 For the research behind Cognee's graph/LLM interface, see [Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning](https://arxiv.org/abs/2505.24478) (Markovic et al., 2025).
 
-## Community and contributing
+## Latest News
 
-[Discord](https://discord.gg/NQPKmU5CCg) · [GitHub discussions](https://github.com/topoteretes/cognee/discussions) · [Report an issue](https://github.com/topoteretes/cognee/issues) · [r/AIMemory](https://www.reddit.com/r/AIMemory/) · [Sponsor](https://github.com/sponsors/topoteretes)
+[![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for development and contribution requirements, and our [Code of Conduct](CODE_OF_CONDUCT.md).
+- Cognee comes with better incremental load
+- Cognee now supports ingestion of multiple repositories at once
+- Cognee now has better memory usage
+- Cognee now has better conflict resolution
+- Cognee now has ability to call external relational stores
+- Cognee can now ingest from relational databases at scale
 
-<details>
-<summary>Cite the research paper</summary>
+
+## Community & Support
+
+### Contributing
+We welcome contributions from the community! Your input helps make Cognee better for everyone. See [`CONTRIBUTING.md`](CONTRIBUTING.md) to get started.
+
+### Code of Conduct
+
+We're committed to fostering an inclusive and respectful community. Read our [Code of Conduct](https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md) for guidelines.
+
+## Research & Citation
+
+We recently published a research paper on optimizing knowledge graphs for LLM reasoning:
 
 ```bibtex
 @misc{markovic2025optimizinginterfaceknowledgegraphs,
