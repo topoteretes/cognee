@@ -190,7 +190,10 @@ def _submission(payload):
     if metadata.get("team_id") != (payload.get("team") or {}).get("id"):
         raise ValueError("Slack workspace mismatch.")
     values = view["state"]["values"]
-    value = lambda name: values.get(name, {}).get("value", {})
+
+    def value(name):
+        return values.get(name, {}).get("value", {})
+
     options = {option["value"] for option in value("options").get("selected_options") or []}
     channels = value("channels").get("selected_conversations") or []
     selection = SlackHistoryRequest(
