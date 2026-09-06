@@ -3,6 +3,7 @@ import copy
 import inspect
 import threading
 import types
+from datetime import timedelta
 from collections import OrderedDict
 from os import path
 from uuid import UUID
@@ -13,6 +14,7 @@ from lancedb.pydantic import LanceModel, Vector
 from typing import List, Optional, Union, get_args, get_origin, get_type_hints
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
@@ -200,6 +202,10 @@ class LanceDBAdapter(VectorDBInterface):
         #   (*,     True)  — closed, not reusable in either mode
         self._subprocess_mode = session is not None
         self._permanently_closed = False
+        # Per-collection write counter driving periodic compaction (see
+        # `_maybe_compact`). Instance-level, not class-level: it must not be
+        # shared across adapters pointed at different LanceDB stores.
+        self._compaction_write_counts: dict[str, int] = {}
 
     async def get_connection(self):
         """
@@ -405,6 +411,56 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
+    async def _maybe_compact(self, collection_name: str, collection) -> None:
+        """Best-effort LanceDB compaction, run periodically as a table is written.
+
+        Every `merge_insert` mints a new table version *and* a new data
+        fragment, and LanceDB never compacts on its own:
+        https://github.com/topoteretes/cognee/issues/4684. Left alone this
+        grows without bound on a long-lived deployment -- one real-world
+        store reached 6,592 versions / 6,557 fragments across 20 tables
+        (937 MB for a 2,461-node graph) before an offline `optimize()` cut
+        it to 48 / 27 / 411 MB with identical row counts.
+
+        Runs `optimize()` every `vector_db_compaction_write_interval` writes
+        to a given table (tracked per collection, per adapter instance)
+        rather than after every write, so the cost is amortized instead of
+        paid on the hot path each time. Mirrors the same best-effort
+        compaction already used after re-keying in
+        `cognee/modules/migrations/versions/_vector_rekey.py`.
+
+        Compaction is hygiene, not correctness: any failure -- including
+        subprocess-proxy handles that don't expose `optimize` -- is
+        swallowed so it can never fail, or slow down the caller's view of,
+        the write that already succeeded.
+        """
+        interval = get_vectordb_config().vector_db_compaction_write_interval
+        if interval <= 0:
+            return
+
+        count = self._compaction_write_counts.get(collection_name, 0) + 1
+        self._compaction_write_counts[collection_name] = count
+        if count % interval != 0:
+            return
+
+        optimize = getattr(collection, "optimize", None)
+        if optimize is None:
+            return
+
+        try:
+            # cleanup_older_than=timedelta(seconds=0) forces immediate
+            # removal of old fragment files. Without it, optimize() merges
+            # fragments but keeps the old ones on disk under LanceDB's
+            # default retention window -- which defeats the point here,
+            # since the goal is to actually shrink storage now.
+            await optimize(cleanup_older_than=timedelta(seconds=0))
+        except Exception as exc:  # noqa: BLE001 - compaction is an optimization, not correctness
+            logger.warning(
+                "Periodic compaction skipped for collection '%s': %s",
+                collection_name,
+                exc,
+            )
+
     async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set with any prior rows."""
         payload_schema = type(data_points[0])
@@ -534,6 +590,7 @@ class LanceDBAdapter(VectorDBInterface):
             #      schema now requires to be non-null. Raised from the Rust side
             #      (lance-file writer) when an old-schema row is upserted against
             #      a newer schema with a non-null field and no default in storage.
+
             err = str(e)
             if "not found in target schema" not in err and "contained null values" not in err:
                 raise
@@ -545,6 +602,11 @@ class LanceDBAdapter(VectorDBInterface):
             await self._migrate_collection_schema(
                 collection_name, collection, payload_schema, lance_data_points
             )
+        else:
+            # Only on the plain (non-migration) success path: the migration
+            # path already rebuilds the table from scratch, so it starts
+            # fragment-free and needs no extra compaction here.
+            await self._maybe_compact(collection_name, collection)
 
     async def upsert_raw_vectors(
         self,
@@ -601,6 +663,7 @@ class LanceDBAdapter(VectorDBInterface):
                 .when_not_matched_insert_all()
                 .execute(self._records_for_write(raw_points))
             )
+        await self._maybe_compact(collection_name, collection)
 
     async def _migrate_collection_schema(
         self,
