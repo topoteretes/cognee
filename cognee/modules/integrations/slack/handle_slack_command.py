@@ -22,6 +22,7 @@ from urllib.parse import parse_qs
 
 from cognee.modules.integrations.slack.handle_cognee_ask import handle_cognee_ask
 from cognee.modules.integrations.slack.handle_cognee_remember import handle_cognee_remember
+from cognee.modules.integrations.slack.handle_history import handle_cognee_import
 from cognee.modules.integrations.slack.handle_slack_link import handle_cognee_link
 from cognee.modules.integrations.slack.persistence import get_by_team, is_active
 
@@ -61,5 +62,8 @@ async def handle_slack_command(raw_body: bytes) -> dict[str, Any]:
 
     if command == "/cognee-link":
         return await handle_cognee_link(raw_body)
+
+    if command == "/cognee-import":
+        return await handle_cognee_import(raw_body)
 
     return _ephemeral(f"Command `{command}` is not yet supported.")

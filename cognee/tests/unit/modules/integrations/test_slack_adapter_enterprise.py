@@ -63,14 +63,13 @@ class _FakeSessionContext:
 @pytest.mark.asyncio
 async def test_revoke_remote_does_nothing_without_an_access_token():
     credential = _fake_credential()
-    with patch(
-        "cognee.modules.integrations.slack.adapter.decrypt_token_payload",
-        return_value={},
+    with (
+        patch("cognee.modules.integrations.slack.adapter.decrypt_token_payload", return_value={}),
+        patch("aiohttp.ClientSession") as session_cls,
     ):
         # No aiohttp session should even be opened.
-        with patch("aiohttp.ClientSession") as session_cls:
-            await integration.revoke_remote(credential)
-            session_cls.assert_not_called()
+        await integration.revoke_remote(credential)
+        session_cls.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -121,19 +120,26 @@ async def test_revoke_remote_never_raises_on_slack_error_response():
 @pytest.mark.asyncio
 async def test_refresh_is_a_noop_without_a_refresh_token():
     credential = _fake_credential()
-    with patch(
-        "cognee.modules.integrations.slack.adapter.decrypt_token_payload",
-        return_value={"access_token": "xoxb-secret"},  # no refresh_token
+    with (
+        patch(
+            "cognee.modules.integrations.slack.adapter.decrypt_token_payload",
+            return_value={"access_token": "xoxb-secret"},
+        ),  # no refresh_token
+        patch("aiohttp.ClientSession") as session_cls,
     ):
-        with patch("aiohttp.ClientSession") as session_cls:
-            await integration.refresh(credential)
-            session_cls.assert_not_called()
+        await integration.refresh(credential)
+        session_cls.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_refresh_persists_rotated_tokens():
-    credential = _fake_credential()
+    credential = _fake_credential(id=uuid4(), ciphertext=b"old")
     expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db = AsyncMock()
+    db.__aenter__.return_value = db
+    db.execute.return_value = MagicMock(rowcount=1)
+    engine = MagicMock()
+    engine.get_async_session.return_value = db
     session = _fake_session(
         {
             "ok": True,
@@ -150,20 +156,28 @@ async def test_refresh_persists_rotated_tokens():
         ),
         patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)),
         patch(
-            "cognee.modules.integrations.slack.adapter.upsert_credential", new=AsyncMock()
-        ) as upsert,
+            "cognee.modules.integrations.slack.adapter.get_relational_engine", return_value=engine
+        ),
+        patch(
+            "cognee.modules.integrations.slack.adapter.encrypt_credentials",
+            return_value=(b"new", b"nonce", 1, "1"),
+        ) as encrypt,
         patch("cognee.modules.integrations.slack.adapter.require", return_value="x"),
     ):
         await integration.refresh(credential)
 
-    upsert.assert_awaited_once()
-    _, kwargs = upsert.call_args
-    assert kwargs["token_payload"] == {"access_token": "xoxb-new", "refresh_token": "xoxe-new"}
-    assert kwargs["provider_account_id"] == "T123"
+    encrypt.assert_called_once_with({"access_token": "xoxb-new", "refresh_token": "xoxe-new"})
+    db.execute.assert_awaited_once()
+    db.commit.assert_awaited_once()
+    values = {
+        column.name: value.value for column, value in db.execute.call_args.args[0]._values.items()
+    }
+    assert values["ciphertext"] == b"new"
+    assert "provider_metadata" not in values
     # expires_in: 3600 in the mocked response should become an expiry ~1 hour
     # out; allow a few seconds of slack for the two `datetime.now(timezone.utc)` calls
     # (this test's and the code under test's) not landing in the same instant.
-    assert abs((kwargs["token_expires_at"] - expires_at).total_seconds()) < 5
+    assert abs((values["token_expires_at"] - expires_at).total_seconds()) < 5
 
 
 @pytest.mark.asyncio
@@ -177,6 +191,6 @@ async def test_refresh_raises_on_rejected_refresh():
         ),
         patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)),
         patch("cognee.modules.integrations.slack.adapter.require", return_value="x"),
+        pytest.raises(RuntimeError, match="invalid_grant"),
     ):
-        with pytest.raises(RuntimeError, match="invalid_grant"):
-            await integration.refresh(credential)
+        await integration.refresh(credential)

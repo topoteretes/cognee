@@ -13,9 +13,11 @@ Slack delivers events at-least-once (3 retries: immediate, 1 min, 5 min) and
 does NOT guarantee ordering between event types, so every handler here is
 idempotent and independent of the others.
 
-Message/mention events for ingestion are deliberately absent — that requires
-Slack Marketplace approval (non-Marketplace apps get channel-history reads
-throttled to 1 req/min).
+History ingestion uses an opt-in, resumable source refresh (history_sync.py),
+including edits/deletions and replies to old threads. It does not depend on
+receiving every message event while the server is online. Internal apps have
+Slack's normal history rate tier; commercially distributed apps may have
+stricter limits, which the history client honors.
 """
 
 import json
@@ -70,7 +72,7 @@ async def handle_slack_event(raw_body: bytes) -> dict[str, Any]:
     return {"ok": True}
 
 
-async def _publish_home_view(team_id: str, slack_user_id: Optional[str]) -> None:
+async def _publish_home_view(team_id: str, slack_user_id: str | None) -> None:
     """Best-effort Home tab refresh — never raises.
 
     A broken Home tab is a cosmetic problem, not a reason to fail this
@@ -89,5 +91,5 @@ async def _publish_home_view(team_id: str, slack_user_id: Optional[str]) -> None
         access_token = decrypt_token_payload(credential).get("access_token")
         if access_token:
             await publish_home_view(access_token, slack_user_id)
-    except Exception:  # noqa: BLE001 - a broken Home tab must never fail the event ack
+    except Exception:
         logger.exception("Failed to publish App Home view for team %s", team_id)
