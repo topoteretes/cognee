@@ -29,7 +29,8 @@ class SessionQAEntry(BaseModel):
         feedback_text: Optional user feedback text.
         feedback_score: Optional feedback score 1-5.
         used_graph_element_ids: Optional dict with only "node_ids" and "edge_ids" (lists of str).
-        memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied") and bool values.
+        memify_metadata: Optional dict with memify status keys (e.g. "feedback_weights_applied").
+            Values are bools, ints (attempt counters) or lists of str (applied element ids).
         used_session_context_ids: Optional list of session-context entry ids served to this answer.
     """
 
@@ -41,7 +42,7 @@ class SessionQAEntry(BaseModel):
     feedback_text: Optional[str] = None
     feedback_score: Optional[int] = None
     used_graph_element_ids: Optional[Dict[str, List[str]]] = None
-    memify_metadata: Optional[Dict[str, bool]] = None
+    memify_metadata: Optional[Dict[str, Any]] = None
     used_session_context_ids: Optional[List[str]] = None
 
     @field_validator("used_graph_element_ids")
@@ -81,16 +82,22 @@ class SessionQAEntry(BaseModel):
     @field_validator("memify_metadata")
     @classmethod
     def memify_metadata_only_pipeline_keys(
-        cls, v: Optional[Dict[str, bool]]
-    ) -> Optional[Dict[str, bool]]:
+        cls, v: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
         if v is None:
             return None
         if not isinstance(v, dict):
             raise ValueError("memify_metadata must be a dict or None")
-        out: Dict[str, bool] = {}
+        out: Dict[str, Any] = {}
         for key, val in v.items():
-            if not isinstance(key, str) or not isinstance(val, bool):
-                raise ValueError("memify_metadata may only have string keys and bool values")
+            if not isinstance(key, str):
+                raise ValueError("memify_metadata may only have string keys")
+            is_scalar = isinstance(val, (bool, int))
+            is_id_list = isinstance(val, list) and all(isinstance(item, str) for item in val)
+            if not (is_scalar or is_id_list):
+                raise ValueError(
+                    "memify_metadata values may only be bools, ints or lists of strings"
+                )
             out[key] = val
         return out if out else None
 

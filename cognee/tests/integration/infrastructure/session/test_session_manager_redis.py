@@ -363,7 +363,7 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
     mock_user.id = "u1"
     with (
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
-        patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+        patch("cognee.infrastructure.session.session_manager.get_cache_config") as mock_config_cls,
         patch(
             "cognee.infrastructure.session.session_turn.generate_session_completion_with_optional_summary",
             new_callable=AsyncMock,
@@ -409,7 +409,7 @@ async def test_generate_completion_with_session_feedback_only_records_qa(session
     mock_user.id = "u1"
     with (
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
-        patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+        patch("cognee.infrastructure.session.session_manager.get_cache_config") as mock_config_cls,
         patch(
             "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
             new_callable=AsyncMock,
@@ -463,7 +463,7 @@ async def test_generate_completion_with_session_feedback_and_followup_adds_qa(se
     mock_user.id = "u1"
     with (
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
-        patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+        patch("cognee.infrastructure.session.session_manager.get_cache_config") as mock_config_cls,
         patch(
             "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
             new_callable=AsyncMock,

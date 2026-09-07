@@ -13,7 +13,6 @@ work, never the whole run.
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import List, Optional, Union
 from uuid import UUID
 
@@ -23,13 +22,21 @@ from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.session.session_context_builder import coerce_active_context_entries
+from cognee.infrastructure.session.session_persist_watermark import (
+    get_distilled_entry_ids,
+    save_distilled_entry_ids,
+)
+from cognee.infrastructure.session.session_context_builder import (
+    clamped_net_helpfulness,
+    coerce_active_context_entries,
+)
 from cognee.infrastructure.session.session_context_models import (
+    MIN_GATE_CONFIDENCE,
     SessionContextEntry,
-    is_context_entry_usable,
 )
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_authorized_existing_datasets
+from cognee.modules.improve.constants import SESSION_LEARNINGS_NODE_SET
 from cognee.modules.truth_subspace.constants import truth_session_node_set
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -42,6 +49,7 @@ from .models import (
     GLOSSARY_ENTITIES_PER_LESSON,
     MAX_CANDIDATE_CHARS,
     MAX_QA_ANSWER_CHARS,
+    MAX_QA_FEEDBACK_CHARS,
     MAX_QA_QUESTION_CHARS,
     NOVELTY_LESSONS_PER_LESSON,
     WRITER_CONCURRENCY,
@@ -58,7 +66,7 @@ WRITER_PROMPT_FILE = "session_distillation_writer_system.txt"
 
 # Node set marking distillate documents in the graph: used to tag them on write and to
 # scope the novelty search to previously persisted lessons.
-DISTILLATE_NODE_SET = ["session_learnings"]
+DISTILLATE_NODE_SET = [SESSION_LEARNINGS_NODE_SET]
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +127,16 @@ async def resolve_distillation_scope(
     )
 
 
+def is_entry_distillable(entry: SessionContextEntry) -> bool:
+    """Distillation gate: net helpfulness is not negative and confidence clears the threshold.
+
+    Net helpfulness is helpful_count minus harmful_count, clamped exactly as the session
+    ranker scores it. One misread harmful rating no longer disqualifies an entry forever:
+    an entry rated harmful once and helpful three times is distillable.
+    """
+    return clamped_net_helpfulness(entry) >= 0 and entry.confidence >= MIN_GATE_CONFIDENCE
+
+
 async def load_distillable_session_inputs(
     scope: SessionDistillationScope,
 ) -> tuple[List[dict], List[SessionContextEntry]]:
@@ -142,7 +160,7 @@ async def load_distillable_session_inputs(
     context_entries = [
         entry
         for entry in coerce_active_context_entries(context_rows)
-        if is_context_entry_usable(entry)
+        if is_entry_distillable(entry)
     ]
     return qa_rows, context_entries
 
@@ -159,6 +177,9 @@ def build_curator_batches(
         if not question and not answer:
             continue
         block = f"User: {question}\nAssistant: {answer}"
+        feedback_text = " ".join((row.get("feedback_text") or "").split())[:MAX_QA_FEEDBACK_CHARS]
+        if feedback_text:
+            block += f"\nUser feedback on this answer: {feedback_text}"
         timeline.append((row.get("time") or "", block))
 
     for entry in context_entries:
@@ -350,28 +371,25 @@ def render_lesson_document(
     lesson: WrittenLesson,
     *,
     session_id: str,
-    distilled_on: str,
 ) -> str:
     """Render ONE accepted lesson as a standalone markdown document.
 
     The template — not the LLM — controls the format. One document per lesson, so each
-    learning is an independently identifiable unit in the graph.
+    learning is an independently identifiable unit in the graph. The document carries no
+    run date: an identical lesson re-accepted on a later run must hash identically so
+    add()'s content dedup absorbs it instead of storing a second copy.
     """
     statement = lesson.statement.strip()
     why = lesson.why_learned.strip().rstrip(".")
     body = f"{statement} ({why}.)" if why else statement
-    return f"# Session learning — {distilled_on} (session {session_id})\n\n{body}\n"
+    return f"# Session learning (session {session_id})\n\n{body}\n"
 
 
 async def publish_distilled_lessons(
     scope: SessionDistillationScope,
     accepted: List[WrittenLesson],
 ) -> List[str]:
-    distilled_on = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    documents = [
-        render_lesson_document(lesson, session_id=scope.session_id, distilled_on=distilled_on)
-        for lesson in accepted
-    ]
+    documents = [render_lesson_document(lesson, session_id=scope.session_id) for lesson in accepted]
 
     # Imported lazily to avoid a circular import through the cognee package root.
     from cognee.api.v1.add import add
@@ -383,25 +401,73 @@ async def publish_distilled_lessons(
     return documents
 
 
+async def select_undistilled_entries(
+    scope: SessionDistillationScope,
+    context_entries: List[SessionContextEntry],
+) -> List[SessionContextEntry]:
+    """Gated entries not yet covered by this (session, dataset)'s distillation watermark."""
+    distilled_ids = await get_distilled_entry_ids(
+        get_session_manager(), scope.user_id, scope.session_id, scope.dataset_id
+    )
+    return [entry for entry in context_entries if entry.id not in distilled_ids]
+
+
+async def advance_distillation_watermark(
+    scope: SessionDistillationScope,
+    context_entries: List[SessionContextEntry],
+) -> None:
+    """Record every gated entry this run saw as distilled into the scope's dataset.
+
+    Called only once the run is complete: lessons published, or the LLM decided there
+    was nothing durable to keep. A run that raised never reaches this point, so its
+    window is retried next time.
+    """
+    await save_distilled_entry_ids(
+        get_session_manager(),
+        scope.user_id,
+        scope.session_id,
+        scope.dataset_id,
+        [entry.id for entry in context_entries],
+    )
+
+
 async def distill_session(
     session_id: str,
     dataset: Union[str, UUID],
     user: Optional[User] = None,
 ) -> DistillationResult:
-    """Distill one finished session's distillable learnings into its dataset's knowledge graph."""
+    """Distill one finished session's distillable learnings into its dataset's knowledge graph.
+
+    A per-(session, dataset) watermark records which gated entries a completed run
+    already covered; when none are new the call returns ``no_new_entries`` and makes
+    zero LLM calls.
+    """
     scope = await resolve_distillation_scope(session_id=session_id, dataset=dataset, user=user)
 
     qa_rows, context_entries = await load_distillable_session_inputs(scope)
     if not context_entries:
         return scope.result("no_gated_entries")
 
+    new_entries = await select_undistilled_entries(scope, context_entries)
+    if not new_entries:
+        logger.info(
+            "Session %s: all %d gated entries already distilled into dataset %s",
+            scope.session_id,
+            len(context_entries),
+            scope.dataset_id,
+        )
+        return scope.result("no_new_entries")
+
     proposed = await propose_lessons(qa_rows, context_entries)
     if not proposed:
+        await advance_distillation_watermark(scope, context_entries)
         return scope.result("no_proposed_lessons")
 
     accepted = await accept_proposed_lessons(scope, proposed, context_entries)
     if not accepted:
+        await advance_distillation_watermark(scope, context_entries)
         return scope.result("no_accepted_lessons")
 
     documents = await publish_distilled_lessons(scope, accepted)
+    await advance_distillation_watermark(scope, context_entries)
     return scope.result("completed", documents=documents)

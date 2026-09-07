@@ -18,6 +18,13 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from cognee.modules.improve.constants import (
+    AGENT_TRACE_FEEDBACKS_NODE_SET,
+    SESSION_LEARNINGS_NODE_SET,
+    SKILLS_NODE_SET,
+    USER_SESSIONS_NODE_SET,
+)
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 
@@ -134,11 +141,12 @@ _UNKNOWN_TYPE_COLOR = "#DBD8D8"
 # These get stable, meaningful colors in the "color by node set" overlay
 # instead of the deterministic hue-rotation, so they stay recognizable across
 # graphs. session_learnings (distilled lessons) is the headline feature.
-_DISTILLED_LEARNING_NODE_SET = "session_learnings"
+_DISTILLED_LEARNING_NODE_SET = SESSION_LEARNINGS_NODE_SET
 _MEMORY_NODESET_COLORS: Dict[str, str] = {
-    "session_learnings": "#FFC53D",  # distilled lessons (gold)
-    "user_sessions_from_cache": "#00C2AA",  # persisted session Q&A (teal)
-    "agent_trace_feedbacks": "#FF7A59",  # persisted agent trace feedback (coral)
+    SESSION_LEARNINGS_NODE_SET: "#FFC53D",  # distilled lessons (gold)
+    USER_SESSIONS_NODE_SET: "#00C2AA",  # persisted session Q&A (teal)
+    AGENT_TRACE_FEEDBACKS_NODE_SET: "#FF7A59",  # persisted agent trace feedback (coral)
+    SKILLS_NODE_SET: "#7DD3FC",  # ingested / improved skills (sky)
 }
 
 

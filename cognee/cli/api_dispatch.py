@@ -356,22 +356,30 @@ def _dispatch_recall(client: CogneeApiClient, args: argparse.Namespace) -> None:
 
 
 def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None:
+    from cognee.cli.commands.improve_command import print_improve_result
+
     dataset = args.dataset_id or args.dataset_name
     fmt.echo(f"Improving knowledge graph for dataset '{dataset}'...")
-    if getattr(args, "feedback_alpha", 0.1) != 0.1:
-        fmt.warning("--feedback-alpha is ignored in --api-url mode; the server uses its default.")
     result = client.improve(
         dataset_name=args.dataset_name if not args.dataset_id else None,
         dataset_id=args.dataset_id,
         node_name=getattr(args, "node_name", None),
         session_ids=getattr(args, "session_ids", None),
         run_in_background=getattr(args, "background", False),
+        build_global_context_index=getattr(args, "build_global_context_index", False),
+        build_truth_subspace=getattr(args, "build_truth_subspace", False),
+        feedback_alpha=getattr(args, "feedback_alpha", None),
     )
+    if isinstance(result, dict) and "stages" in result:
+        # The server returned an ImproveResult: same per-stage lines as in-process.
+        print_improve_result(result, background=getattr(args, "background", False))
+        return
     if getattr(args, "background", False):
         fmt.success("Improvement started in background!")
     else:
         fmt.success("Knowledge graph improved successfully!")
     if result:
+        # An older server returns the legacy memify run mapping.
         fmt.echo(json.dumps(result, indent=2, default=str))
 
 

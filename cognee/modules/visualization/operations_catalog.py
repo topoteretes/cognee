@@ -10,9 +10,14 @@ on edges or weights — live here.
 Curated from the implementation:
   * cognee/api/v1/cognify/cognify.py
   * cognee/modules/memify/memify.py + cognee/memify_pipelines/*
-  * cognee/api/v1/improve/improve.py
   * cognee/api/v1/forget/forget.py
   * cognee/tasks/codingagents/coding_rule_associations.py
+
+The self-improvement rows (feedback weighting, session/trace persistence,
+distillation, preferences, truth subspace, triplet enrichment, global context
+index) are **generated** from ``cognee.modules.improve.DEFAULT_STAGES`` — the
+only description of the improve chain — so this view cannot drift from what
+``improve()`` actually runs (plan Part 5.5).
 
 Effects use raw type names. ``"Entity"`` is expanded by the preprocessor to the
 semantic entity types actually present (Person/Broker/Tool/…); other names match
@@ -21,7 +26,7 @@ present type of the same name.
 """
 
 from copy import deepcopy
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 # effect ∈ {"produces", "enriches", "modifies", "removes"}
 # kind   ∈ {"pipeline", "self_improve", "lifecycle"}
@@ -43,73 +48,6 @@ _OPERATIONS: List[Dict[str, Any]] = [
         ],
     },
     {
-        "name": "memify",
-        "label": "memify (triplets)",
-        "kind": "pipeline",
-        "scope": "whole",
-        "pipeline_name": "memify_pipeline",
-        "summary": "Default enrichment: builds triplet embeddings over the graph.",
-        "effects": [
-            {"effect": "enriches", "target_type": "Entity"},
-        ],
-    },
-    {
-        "name": "persist_sessions",
-        "label": "persist sessions",
-        "kind": "pipeline",
-        "scope": "subset",
-        "pipeline_name": "memify_pipeline",
-        "summary": "Cognifies cached user Q&A sessions into the graph.",
-        "effects": [
-            {
-                "effect": "produces",
-                "target_type": "Session",
-                "target_node_set": "user_sessions_from_cache",
-            },
-            {
-                "effect": "produces",
-                "target_type": "Entity",
-                "target_node_set": "user_sessions_from_cache",
-            },
-        ],
-    },
-    {
-        "name": "persist_agent_trace_feedbacks",
-        "label": "persist agent traces",
-        "kind": "pipeline",
-        "scope": "subset",
-        "pipeline_name": "memify_pipeline",
-        "summary": "Cognifies agent trace feedback into the graph.",
-        "effects": [
-            {
-                "effect": "produces",
-                "target_type": "Entity",
-                "target_node_set": "agent_trace_feedbacks",
-            },
-        ],
-    },
-    {
-        "name": "apply_feedback_weights",
-        "label": "feedback weighting",
-        "kind": "self_improve",
-        "scope": "subset",
-        "summary": "Re-weights used nodes/edges from session feedback (feedback_weight).",
-        "effects": [
-            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
-            {"effect": "modifies", "target_type": "EntityType", "property": "feedback_weight"},
-        ],
-    },
-    {
-        "name": "apply_frequency_weights",
-        "label": "frequency weighting",
-        "kind": "self_improve",
-        "scope": "subset",
-        "summary": "Increments usage counts on used nodes/edges (frequency_weight).",
-        "effects": [
-            {"effect": "modifies", "target_type": "Entity", "property": "frequency_weight"},
-        ],
-    },
-    {
         "name": "consolidate_entity_descriptions",
         "label": "consolidate descriptions",
         "kind": "pipeline",
@@ -121,18 +59,6 @@ _OPERATIONS: List[Dict[str, Any]] = [
         ],
     },
     {
-        "name": "global_context_index",
-        "label": "global context index",
-        "kind": "pipeline",
-        "scope": "whole",
-        "pipeline_name": "memify_pipeline",
-        "summary": "Builds hierarchical context summaries for retrieval.",
-        "effects": [
-            {"effect": "produces", "target_type": "GlobalContextSummary"},
-            {"effect": "enriches", "target_type": "TextSummary"},
-        ],
-    },
-    {
         "name": "coding_rule_associations",
         "label": "coding rules",
         "kind": "pipeline",
@@ -140,21 +66,6 @@ _OPERATIONS: List[Dict[str, Any]] = [
         "summary": "Extracts Rule nodes and links them to chunks.",
         "effects": [
             {"effect": "produces", "target_type": "Rule"},
-        ],
-    },
-    {
-        "name": "improve",
-        "label": "improve (self-improve)",
-        "kind": "self_improve",
-        "scope": "subset",
-        "summary": "Self-improvement loop: feedback weighting + persisting sessions/traces.",
-        "effects": [
-            {"effect": "modifies", "target_type": "Entity", "property": "feedback_weight"},
-            {
-                "effect": "produces",
-                "target_type": "Session",
-                "target_node_set": "user_sessions_from_cache",
-            },
         ],
     },
     {
@@ -195,6 +106,45 @@ _OPERATIONS: List[Dict[str, Any]] = [
 ]
 
 
+def iter_improve_operations() -> Iterator[Dict[str, Any]]:
+    """Yield one catalog row per improve stage, from the stage registry.
+
+    ``name`` is the stage name (``StageResult.stage``), ``kind`` is always
+    ``"self_improve"``, ``scope`` is ``"subset"`` for session-fed stages and
+    ``"whole"`` for graph-wide ones, ``pipeline_name`` lets the preprocessor
+    corroborate the row against live ``source_pipeline`` provenance, and
+    ``node_sets`` lists the node sets the stage produces.
+    """
+    from cognee.modules.improve.registry import DEFAULT_STAGES
+
+    for stage in DEFAULT_STAGES:
+        effects = deepcopy(list(getattr(stage, "effects", []) or []))
+        node_sets = sorted(
+            {
+                effect["target_node_set"]
+                for effect in effects
+                if effect.get("effect") == "produces" and effect.get("target_node_set")
+            }
+        )
+        row: Dict[str, Any] = {
+            "name": stage.name,
+            "label": stage.label or stage.name.replace("_", " "),
+            "kind": "self_improve",
+            "scope": "whole" if stage.kind == "graph" else "subset",
+            "summary": stage.summary,
+            "effects": effects,
+            "node_sets": node_sets,
+        }
+        pipeline_name = getattr(stage, "pipeline_name", None)
+        if pipeline_name:
+            row["pipeline_name"] = pipeline_name
+        yield row
+
+
 def get_operations_catalog() -> List[Dict[str, Any]]:
-    """Return the operation catalog (list of operation dicts)."""
-    return deepcopy(_OPERATIONS)
+    """Return the operation catalog (list of operation dicts).
+
+    Hand-curated rows first, then the improve rows generated from the stage
+    registry.
+    """
+    return deepcopy(_OPERATIONS) + list(iter_improve_operations())

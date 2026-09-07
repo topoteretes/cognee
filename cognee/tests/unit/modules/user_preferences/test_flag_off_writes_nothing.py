@@ -1,13 +1,14 @@
 """With PERSONALIZATION_ENABLED off (the default), the feature writes nothing.
 
 The flag must gate the writing half of personalization, not just the reading
-half in ``lookup.py``:
+half in ``lookup.py``: ``update_user_preferences`` returns early — no preference
+node, no ``prefers`` edges, no new ``memify_metadata`` keys on session rows.
 
-- ``update_user_preferences`` returns early — no preference node, no
-  ``prefers`` edges, no new ``memify_metadata`` keys on session rows.
-- The per-turn analysis LLM call does not ask the 1-5 rating question.
-- A rating-only turn saves no feedback row (turns that used to save nothing
-  still save nothing).
+The implicit 1-5 answer rating is *not* personalization's to gate (plan item
+C6). It is part of automatic feedback analysis: the per-turn LLM call asks the
+rating question whenever ``AUTO_FEEDBACK`` is on, and a rating-only turn saves
+its feedback row regardless of the personalization flag. Personalization is one
+consumer of that row; with the flag off it simply never reads it.
 """
 
 from types import SimpleNamespace
@@ -84,11 +85,14 @@ class TestUpdateUserPreferencesFlagOff:
         assert session_manager.created_entries == []
 
 
-class TestTurnAnalysisRatingQuestionFlagOff:
-    async def _captured_system_prompt(self, enabled: bool) -> str:
+class TestTurnAnalysisRatingQuestionIgnoresPersonalizationFlag:
+    """The rating question follows AUTO_FEEDBACK, not PERSONALIZATION_ENABLED (C6)."""
+
+    async def _captured_system_prompt(self, *, auto_feedback: bool) -> str:
         llm_mock = AsyncMock(return_value=SessionTurnAnalysis())
+        cache_config = SimpleNamespace(caching=True, auto_feedback=auto_feedback)
         with (
-            patch.object(feedback_detection_module, "get_base_config", lambda: _config(enabled)),
+            patch.object(feedback_detection_module, "get_cache_config", lambda: cache_config),
             patch.object(
                 feedback_detection_module.LLMGateway,
                 "acreate_structured_output",
@@ -103,24 +107,29 @@ class TestTurnAnalysisRatingQuestionFlagOff:
         return llm_mock.call_args.kwargs["system_prompt"]
 
     @pytest.mark.asyncio
-    async def test_flag_off_prompt_omits_the_rating_question(self):
-        system_prompt = await self._captured_system_prompt(enabled=False)
+    async def test_personalization_off_still_asks_the_rating_question(self, monkeypatch):
+        # PERSONALIZATION_ENABLED is off by default; the module no longer reads it.
+        assert not hasattr(feedback_detection_module, "get_base_config")
+        system_prompt = await self._captured_system_prompt(auto_feedback=True)
+        assert "Previous answer rating" in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_auto_feedback_off_omits_the_rating_question(self):
+        system_prompt = await self._captured_system_prompt(auto_feedback=False)
         assert "Previous answer rating" not in system_prompt
         assert "previous_answer_rating" not in system_prompt
 
-    @pytest.mark.asyncio
-    async def test_flag_on_prompt_asks_the_rating_question(self):
-        system_prompt = await self._captured_system_prompt(enabled=True)
-        assert "Previous answer rating" in system_prompt
 
+class TestFeedbackRowSaveIgnoresPersonalizationFlag:
+    """A produced rating is persisted whether or not personalization consumes it (C6)."""
 
-class TestFeedbackRowSaveFlagOff:
     def _rating_only_analysis(self) -> SessionTurnAnalysis:
         return SessionTurnAnalysis(previous_answer_rating=5)
 
     @pytest.mark.asyncio
-    async def test_flag_off_rating_only_turn_saves_no_feedback_row(self, monkeypatch):
-        monkeypatch.setattr(session_turn_module, "get_base_config", lambda: _config(False))
+    async def test_rating_only_turn_saves_the_feedback_row_without_personalization(self):
+        # session_turn no longer consults base config at all.
+        assert not hasattr(session_turn_module, "get_base_config")
         session_manager = FlagOffSessionManager()
 
         touched = await apply_session_turn_analysis(
@@ -134,23 +143,24 @@ class TestFeedbackRowSaveFlagOff:
         )
 
         assert touched == []
-        assert session_manager.created_entries == []
+        [entry] = session_manager.created_entries
+        assert entry["referenced_qa_rating"] == 5
+        assert entry["referenced_qa_ids"] == ["qa-1"]
 
     @pytest.mark.asyncio
-    async def test_flag_on_rating_only_turn_saves_the_feedback_row(self, monkeypatch):
-        monkeypatch.setattr(session_turn_module, "get_base_config", lambda: _config(True))
+    async def test_rating_without_a_previous_turn_saves_nothing(self):
+        """No previous QA means nothing the rating can refer to, so no row."""
         session_manager = FlagOffSessionManager()
 
-        await apply_session_turn_analysis(
+        touched = await apply_session_turn_analysis(
             session_manager,
             user_id="user-1",
             session_id="s1",
             query="That answer was perfect, thanks!",
             analysis=self._rating_only_analysis(),
-            previous_qa_id="qa-1",
+            previous_qa_id=None,
             served_ids=[],
         )
 
-        [entry] = session_manager.created_entries
-        assert entry["referenced_qa_rating"] == 5
-        assert entry["referenced_qa_ids"] == ["qa-1"]
+        assert touched == []
+        assert session_manager.created_entries == []

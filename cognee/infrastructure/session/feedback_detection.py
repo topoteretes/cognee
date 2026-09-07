@@ -1,6 +1,6 @@
 """Session turn analysis from user messages via LLM."""
 
-from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -37,6 +37,12 @@ def _render_served_context(served_context) -> str:
     return "\n".join(lines)
 
 
+def is_auto_feedback_enabled() -> bool:
+    """True when session caching and automatic turn-feedback analysis are both on."""
+    cache_config = get_cache_config()
+    return bool(cache_config.caching and cache_config.auto_feedback)
+
+
 def _append_optional_section(text_input: str, title: str, content: str | None) -> str:
     if not content or not str(content).strip():
         return text_input
@@ -70,10 +76,11 @@ async def analyze_turn_for_session_context(
             logger.warning("Feedback detection: system prompt not found, skipping")
             return SessionTurnAnalysis()
 
-        # The 1-5 previous-answer-rating question exists only to feed
-        # preference personalization. With the flag off, don't ask the model
-        # to produce a signal nothing will ever consume.
-        if get_base_config().personalization_enabled:
+        # The 1-5 previous-answer-rating question is part of automatic feedback
+        # analysis: it is asked whenever AUTO_FEEDBACK is on, so the implicit
+        # rating is produced and stored even when no consumer is switched on
+        # yet. Personalization is one consumer of it, not its gate.
+        if is_auto_feedback_enabled():
             rating_section = read_query_prompt("feedback_detection_rating_section.txt")
             if rating_section:
                 system_prompt = system_prompt + "\n\n" + rating_section

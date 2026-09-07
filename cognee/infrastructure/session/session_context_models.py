@@ -3,14 +3,17 @@ from typing import Annotated, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from cognee.modules.improve.constants import GATE_CONFIDENCE
+
 VALID_RATINGS = {"helpful", "harmful"}
 MAX_CONTEXT_CONTENT_CHARS = 280
-MIN_CANDIDATE_CONFIDENCE = 0.75
 
-# Gate shared by every downstream consumer of stored guidance (session
-# distillation, preference personalization): an entry is usable only when it
-# was never rated harmful and its confidence clears this threshold.
-MIN_GATE_CONFIDENCE = 0.75
+# One threshold, declared once in ``cognee.modules.improve.constants``: a
+# candidate must clear it to be stored, and a stored entry must clear it (and
+# never have been rated harmful) to be served, distilled, or folded into
+# preferences. The two names are kept for their existing importers.
+MIN_CANDIDATE_CONFIDENCE = GATE_CONFIDENCE
+MIN_GATE_CONFIDENCE = GATE_CONFIDENCE
 
 
 class ContextSection(str, Enum):
@@ -126,7 +129,10 @@ class CandidateContextUpdate(BaseModel):
     )
     confidence: float = Field(
         default=0.0,
-        description="Confidence from 0 to 1. Only candidates with confidence >= 0.75 are stored.",
+        description=(
+            "Confidence from 0 to 1. Only candidates with confidence "
+            f">= {GATE_CONFIDENCE} are stored."
+        ),
     )
 
     @field_validator("section")

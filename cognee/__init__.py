@@ -86,6 +86,10 @@ from .api.v1 import (
 )
 from .memory import MemoryEntry, QAEntry, TraceEntry, FeedbackEntry
 
+# Background work: wait for fire-and-forget tasks (background remember, the
+# session-to-graph improve bridge) before the process exits.
+from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
 # Memory migration (cognee.migration has the provider sources:
 # Mem0Source, ZepSource/GraphitiSource, LettaSource, COGXArchiveSource)
 from . import migration

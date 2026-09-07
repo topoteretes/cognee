@@ -68,6 +68,18 @@ CONFLICT_INSTRUCTION = (
 )
 
 
+# Net helpfulness is clamped so a run of ratings in one direction cannot dominate a score.
+NET_HELP_CLAMP = 3
+
+
+def clamped_net_helpfulness(entry: SessionContextEntry) -> int:
+    """helpful_count minus harmful_count, clamped to [-NET_HELP_CLAMP, NET_HELP_CLAMP].
+
+    The ranker scores with it; the distillation gate reads its sign.
+    """
+    return max(-NET_HELP_CLAMP, min(NET_HELP_CLAMP, entry.helpful_count - entry.harmful_count))
+
+
 class ContextRanker(Protocol):
     """Thin interface for scoring an active session-context entry against a query."""
 
@@ -134,7 +146,7 @@ class DeterministicRanker:
     def score(self, entry: SessionContextEntry, query: str) -> float:
         priority_map = self.PRIORITY_BY_PROFILE.get(entry.context_profile, self.SECTION_PRIORITY)
         section_priority = priority_map.get(entry.section, 0)
-        net_help = max(-3, min(3, entry.helpful_count - entry.harmful_count))
+        net_help = clamped_net_helpfulness(entry)
         relevance = self._query_overlap(entry.content, query)
         return (
             self.W_SECTION * section_priority

@@ -125,7 +125,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 
 1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
 2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `HYBRID_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
-3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
+3. **improve()** - Run the self-improvement stages over a dataset: with `session_ids`, bridge session Q&A, agent traces, distilled learnings and user preferences into the permanent graph and apply feedback weights; always, triplet enrichment (when `triplet_embedding` is on) and the opt-in global context index. Returns an `ImproveResult` with one `StageResult` per stage (see "IMPROVE: the orchestrator" below).
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
 #### Low level operations: add → cognify → search/memify
@@ -220,6 +220,17 @@ NOTE: This is how the memory API flow works under the hood; it's read as a flow 
 `recall(query)` → auto-route to a `SearchType` → `search()` → permission filter → results
 
 Key files: `cognee/api/v1/remember/remember.py`, `cognee/api/v1/recall/recall.py`, `cognee/api/v1/improve/improve.py`, `cognee/api/v1/forget/forget.py`
+
+#### IMPROVE: the orchestrator
+`improve()` is a thin orchestrator over an ordered registry of nine stages (`cognee/modules/improve/registry.py:DEFAULT_STAGES`): `feedback_weights`, `persist_session_qa`, `persist_agent_traces`, `extract_agent_context`, `distill_sessions`, `update_user_preferences`, `build_truth_subspace`, `triplet_enrichment`, `global_context_index`. The first seven need `session_ids`; the last two work on the graph alone. Order is load-bearing (4 feeds 5, 5 feeds 7, 7 runs before 8) and a test pins it.
+
+Each stage is a gate plus a call into existing code plus a result mapping — it never owns retries or ordering. `gate()` runs before any LLM or embedding cost and returns a skip reason (`no_session_ids`, `feedback_influence_zero`, `backend_unsupported`, `triplet_embedding_disabled`, `opt_in_disabled`, `personalization_disabled`, `disabled_by_config`, …). `run()` returns a `StageResult` whose `status` reuses `PipelineRunInfo`'s vocabulary — `completed`, `already_completed` (nothing new since the stage's watermark), `errored` — plus `skipped`. Only `persist_session_qa` is `fatal=True`; every other failure is recorded as `errored` and the chain continues.
+
+The run resolves the dataset once and hands every stage a frozen `ImproveRunInputs` (user, resolved dataset id, session ids, `ImproveConfig`, adapter `GraphCapabilities`). It claims one improve lock keyed to the run — every session id given, or `dataset:<id>` when none — and holds it for the whole chain, background included; a lost claim returns an `ImproveResult` whose stages are all `skipped: lock_held` (never `{}`). `run_in_background=True` runs the whole chain in one anchored task; await it with `await result.wait()`. `ImproveResult` is what every surface returns: SDK, `POST /api/v1/improve` (`response_model`), the CLI (one line per stage), MCP, and `RememberResult.improve` / `.improve_error` (an improve failure after a successful cognify no longer marks the remember as errored). Triplet enrichment reports `already_completed` when `pipeline_runs` shows no write pipeline for the dataset since the last improve; it never counts the graph. Feedback-weight application records applied element ids per QA row so a deleted node no longer causes the same feedback to be re-applied on every run; trace persistence and distillation carry watermarks like Q&A persistence already did.
+
+Settings the loop owns live in `ImproveConfig` (env prefix `IMPROVE_`): `IMPROVE_AUTO_ENABLED` (default true; false turns off the automatic improve after `remember()`), `IMPROVE_DEBOUNCE_ENTRIES` / `IMPROVE_DEBOUNCE_SECONDS` (session-path auto-improve fires only after that many new entries or that much time), `IMPROVE_STAGES_DISABLED` (csv of stage names), `IMPROVE_FEEDBACK_ALPHA` (learning rate, default 0.1). Shared knobs stay with their owners: `triplet_embedding` (cognify), `CACHING` / `AUTO_FEEDBACK` (cache layer), `PERSONALIZATION_ENABLED`, `DEFAULT_FEEDBACK_INFLUENCE`. `cognee.wait_for_background_tasks()` drains background improves before a script exits; the API server drains them on shutdown. Frequency weights were removed (no adapter implemented them and nothing read them).
+
+Key files: `cognee/modules/improve/` (`stage.py`, `stages.py`, `registry.py`, `result.py`, `inputs.py`, `capabilities.py`, `config.py`, `graph_changes.py`), `cognee/api/v1/improve/improve.py`, `cognee/infrastructure/background_tasks.py`, `cognee/api/v1/remember/auto_improve_debounce.py`
 
 The stages below are the Low level operations these call underneath.
 

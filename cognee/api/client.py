@@ -79,6 +79,10 @@ install_websocket_query_param_redaction()
 
 app_environment = os.getenv("ENV", "prod")
 
+# How long the shutdown hook waits for background tasks (B6). Overridable so
+# operators with short SIGTERM grace periods can trim it.
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = float(os.getenv("BACKGROUND_DRAIN_TIMEOUT_SECONDS", "30"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -108,6 +112,19 @@ async def lifespan(app: FastAPI):
     logger.info("Backend server has started")
 
     yield
+
+    # Let in-flight background work (background remember runs, the session
+    # improve bridge) finish before the engines below are torn down under it.
+    # Bounded so a stuck task cannot hold the process hostage; nothing is
+    # cancelled on timeout, it is only reported.
+    from cognee.infrastructure.background_tasks import wait_for_background_tasks
+
+    logger.info("Shutting down: draining background tasks")
+    if not await wait_for_background_tasks(timeout=BACKGROUND_DRAIN_TIMEOUT_SECONDS):
+        logger.warning(
+            "Shutting down with background tasks still running after %.0fs",
+            BACKGROUND_DRAIN_TIMEOUT_SECONDS,
+        )
 
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,

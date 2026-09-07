@@ -1,9 +1,15 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cognee.infrastructure.session.feedback_detection import detect_feedback
+import cognee.infrastructure.session.feedback_detection as feedback_detection_module
+from cognee.infrastructure.session.feedback_detection import (
+    analyze_turn_for_session_context,
+    detect_feedback,
+    is_auto_feedback_enabled,
+)
 from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
 from cognee.infrastructure.session.session_context_models import (
     CandidateContextUpdate,
@@ -308,3 +314,66 @@ class TestFeedbackDetectionResultModel:
             "rule 1",
             "rule 2",
         ]
+
+
+class TestRatingSectionFollowsAutoFeedback:
+    """The 1-5 previous-answer rating question is gated by AUTO_FEEDBACK alone (plan C6).
+
+    Personalization consumes the rating but does not own it; the prompt must ask for
+    it whenever automatic feedback analysis runs so the implicit signal is produced and
+    stored even before any consumer is switched on.
+    """
+
+    @staticmethod
+    def _cache_config(*, caching: bool = True, auto_feedback: bool = True):
+        return SimpleNamespace(caching=caching, auto_feedback=auto_feedback)
+
+    async def _system_prompt_sent(self, cache_config) -> str:
+        llm_mock = AsyncMock(return_value=feedback_detection_module.SessionTurnAnalysis())
+
+        def _prompt(name):
+            return {
+                "feedback_detection_system.txt": "BASE PROMPT",
+                "feedback_detection_rating_section.txt": "RATING SECTION previous_answer_rating",
+            }[name]
+
+        with (
+            patch.object(feedback_detection_module, "get_cache_config", lambda: cache_config),
+            patch.object(feedback_detection_module, "read_query_prompt", side_effect=_prompt),
+            patch.object(
+                feedback_detection_module.LLMGateway, "acreate_structured_output", llm_mock
+            ),
+        ):
+            await analyze_turn_for_session_context("great answer", previous_answer="a")
+        return llm_mock.await_args.kwargs["system_prompt"]
+
+    def test_is_auto_feedback_enabled_needs_both_flags(self):
+        with patch.object(
+            feedback_detection_module, "get_cache_config", lambda: self._cache_config()
+        ):
+            assert is_auto_feedback_enabled() is True
+        with patch.object(
+            feedback_detection_module,
+            "get_cache_config",
+            lambda: self._cache_config(auto_feedback=False),
+        ):
+            assert is_auto_feedback_enabled() is False
+        with patch.object(
+            feedback_detection_module,
+            "get_cache_config",
+            lambda: self._cache_config(caching=False),
+        ):
+            assert is_auto_feedback_enabled() is False
+
+    @pytest.mark.asyncio
+    async def test_rating_section_appended_when_auto_feedback_is_on(self):
+        prompt = await self._system_prompt_sent(self._cache_config())
+        assert prompt == "BASE PROMPT\n\nRATING SECTION previous_answer_rating"
+
+    @pytest.mark.asyncio
+    async def test_rating_section_omitted_when_auto_feedback_is_off(self):
+        prompt = await self._system_prompt_sent(self._cache_config(auto_feedback=False))
+        assert prompt == "BASE PROMPT"
+
+    def test_module_does_not_read_the_personalization_flag(self):
+        assert not hasattr(feedback_detection_module, "get_base_config")

@@ -58,10 +58,14 @@ cognee-cli improve -d my_project             # enrich/index the graph (no sessio
 cognee-cli feedback ...                      # attach feedback to results
 ```
 
-`improve` also takes `--node-name`, `--feedback-alpha` (default 0.1), and
-`--background`/`-b`. `remember`/`improve` build their graphs through
-`cognify()`, so cognify-level settings (e.g. `CONTRADICTION_DETECTION=true`)
-apply to them too.
+`improve` also takes `--node-name`, `--feedback-alpha` (learning rate in
+(0, 1]; default `IMPROVE_FEEDBACK_ALPHA`, 0.1), `--build-global-context-index`,
+`--build-truth-subspace` (both opt-in stages; the truth subspace needs
+`-s`), and `--background`/`-b`. It prints one line per stage — name, status
+(`completed` / `already_completed` / `skipped` / `errored`) and the skip
+reason (e.g. `no_session_ids`, `lock_held`, `triplet_embedding_disabled`).
+`remember`/`improve` build their graphs through `cognify()`, so cognify-level
+settings (e.g. `CONTRADICTION_DETECTION=true`) apply to them too.
 
 ## Legacy / lower-level commands
 

@@ -573,7 +573,7 @@ def test_operation_layer_maps_operations_to_present_types():
     feedback_targets = {
         (link["target"], link["effect"])
         for link in schema["operation_links"]
-        if link["source"] == "op:apply_feedback_weights"
+        if link["source"] == "op:feedback_weights"
     }
     assert ("type:Person", "modifies") in feedback_targets
 

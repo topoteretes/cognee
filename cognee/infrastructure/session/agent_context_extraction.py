@@ -19,7 +19,6 @@ raises into the trace write path — a failure just means no lesson this time.
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt
@@ -33,6 +32,7 @@ from cognee.infrastructure.session.session_context_models import (
     CandidateFailureLessonUpdate,
     ContextProfile,
 )
+from cognee.infrastructure.session.session_persist_watermark import StateRowWatermark
 from cognee.modules.agent_memory.sanitization import sanitize_value
 from cognee.shared.logging_utils import get_logger
 
@@ -58,6 +58,13 @@ TRACE_EXTRACTION_INTERVAL = 10
 TRACE_EXTRACTION_OVERLAP = 3
 TRACE_EXTRACTION_STATE_ID = "__agent_context_extraction_state__"
 TRACE_EXTRACTION_STATE_KIND = "agent_context_extraction_state"
+# Count watermark over trace steps already turned into lessons: the shared
+# state-row implementation every improve() stage uses (session_persist_watermark).
+TRACE_EXTRACTION_WATERMARK = StateRowWatermark(
+    state_id=TRACE_EXTRACTION_STATE_ID,
+    state_kind=TRACE_EXTRACTION_STATE_KIND,
+    field="processed_trace_count",
+)
 
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _BEARER_RE = re.compile(r"(?i)\b(Bearer)\s+[A-Za-z0-9._~+/=-]+")
@@ -148,56 +155,6 @@ def _trace_window_size(pending_trace_count: int, overlap: int, max_window: int) 
     return max(1, min(max_window, pending_trace_count + overlap))
 
 
-def _extract_state_row(raw_entries: list) -> dict | None:
-    """Find this session's internal agent-extraction watermark row, if present."""
-    for raw in raw_entries or []:
-        if not isinstance(raw, dict):
-            continue
-        if raw.get("id") == TRACE_EXTRACTION_STATE_ID:
-            return raw
-        if raw.get("kind") == TRACE_EXTRACTION_STATE_KIND:
-            return raw
-    return None
-
-
-async def _get_processed_trace_count(session_manager, user_id: str, session_id: str) -> int:
-    """Read the count watermark. Missing or malformed state means no traces processed yet."""
-    raw_entries = await session_manager.get_session_context_entries(
-        user_id=user_id, session_id=session_id
-    )
-    row = _extract_state_row(raw_entries)
-    if row is None:
-        return 0
-    try:
-        return max(0, int(row.get("processed_trace_count") or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-async def _save_processed_trace_count(
-    session_manager, user_id: str, session_id: str, processed_trace_count: int
-) -> None:
-    """Persist the count watermark as an internal non-rendered session-context row."""
-    payload = {
-        "id": TRACE_EXTRACTION_STATE_ID,
-        "kind": TRACE_EXTRACTION_STATE_KIND,
-        "processed_trace_count": max(0, int(processed_trace_count)),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    updated = await session_manager.update_session_context_entry(
-        user_id=user_id,
-        session_id=session_id,
-        entry_id=TRACE_EXTRACTION_STATE_ID,
-        merge=payload,
-    )
-    if not updated:
-        await session_manager.create_session_context_entry(
-            user_id=user_id,
-            session_id=session_id,
-            entry_dump=payload,
-        )
-
-
 async def _plan_pending_extraction(
     *,
     session_manager,
@@ -211,7 +168,9 @@ async def _plan_pending_extraction(
     total_trace_count = await session_manager.get_agent_trace_count(
         user_id=user_id, session_id=session_id
     )
-    processed_count = await _get_processed_trace_count(session_manager, user_id, session_id)
+    processed_count = await TRACE_EXTRACTION_WATERMARK.read_count(
+        session_manager, user_id, session_id
+    )
     pending_count = max(0, total_trace_count - processed_count)
     if pending_count < min_new_traces:
         return None
@@ -383,11 +342,11 @@ async def extract_pending_agent_context(
             session_id=session_id,
             traces=traces,
         )
-        await _save_processed_trace_count(
+        await TRACE_EXTRACTION_WATERMARK.write_count(
             session_manager,
             user_id,
             session_id,
-            processed_trace_count=plan.total_trace_count,
+            count=plan.total_trace_count,
         )
         return touched
     except Exception as error:

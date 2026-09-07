@@ -78,6 +78,9 @@ class _InMemoryRedisList:
         e = (end + 1) if end >= 0 else len(lst) + end + 1
         return lst[s:e]
 
+    async def llen(self, key: str):
+        return len(self.data.get(key, []))
+
     async def lindex(self, key: str, idx: int):
         lst = self.data.get(key, [])
         return lst[idx] if -len(lst) <= idx < len(lst) else None

@@ -78,7 +78,7 @@ def _patches(completion_return, analysis_return=None):
     user.id = "owner-1"  # non-UUID -> skips track_session_usage + session_records side effects
 
     mock_user = patch("cognee.infrastructure.session.session_manager.session_user")
-    mock_cfg = patch("cognee.infrastructure.session.session_manager.CacheConfig")
+    mock_cfg = patch("cognee.infrastructure.session.session_manager.get_cache_config")
     mock_analyze = patch(
         "cognee.infrastructure.session.session_turn.analyze_turn_for_session_context",
         new_callable=AsyncMock,

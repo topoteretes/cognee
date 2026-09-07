@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.session.feedback_detection import analyze_turn_for_session_context
 from cognee.infrastructure.session.feedback_models import SessionTurnAnalysis
@@ -348,14 +347,11 @@ async def apply_session_turn_analysis(
     served_ids: list[str],
 ) -> list[str]:
     """Persist turn evidence, apply candidate updates, and bump helpful/harmful counters."""
-    # A rating is only evidence when there is a previous turn it can refer to,
-    # and only worth persisting when preference personalization can ever
-    # consume it — with the flag off, a rating-only turn must save nothing.
-    previous_answer_rating = (
-        analysis.previous_answer_rating
-        if previous_qa_id and get_base_config().personalization_enabled
-        else None
-    )
+    # A rating is only evidence when there is a previous turn it can refer to.
+    # It is persisted whenever the analysis produced one: the row is the
+    # signal, and which consumers read it (personalization, feedback weights)
+    # is decided where they run, not here.
+    previous_answer_rating = analysis.previous_answer_rating if previous_qa_id else None
     if (
         not analysis.candidate_context_updates
         and not analysis.served_context_ratings

@@ -7,7 +7,11 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
+from cognee.modules.improve.constants import DEFAULT_FEEDBACK_ALPHA
+from cognee.tasks.memify.apply_feedback_weights import (
+    apply_feedback_weights,
+    validate_feedback_alpha,
+)
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
@@ -18,7 +22,7 @@ async def apply_feedback_weights_pipeline(
     user: User,
     session_ids: List[str],
     dataset: str = DEFAULT_DATASET_NAME,
-    alpha: float = 0.1,
+    alpha: float = DEFAULT_FEEDBACK_ALPHA,
     batch_size: int = 100,
     run_in_background: bool = False,
 ):
@@ -36,8 +40,7 @@ async def apply_feedback_weights_pipeline(
     ):
         raise CogneeValidationError(message="session_ids must be a non-empty list", log=False)
 
-    if alpha <= 0 or alpha > 1:
-        raise CogneeValidationError(message="alpha must be in range (0, 1]", log=False)
+    validate_feedback_alpha(alpha)
     if not isinstance(batch_size, int) or batch_size < 1:
         raise CogneeValidationError(message="batch_size must be a positive integer", log=False)
 

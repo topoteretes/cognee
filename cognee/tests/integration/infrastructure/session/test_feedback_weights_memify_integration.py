@@ -8,6 +8,7 @@ from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
 from cognee.tasks.memify.feedback_weights_constants import (
     MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY,
+    MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY,
 )
 
 
@@ -23,6 +24,9 @@ class _InMemoryRedisList:
         s = start if start >= 0 else len(lst) + start
         e = (end + 1) if end >= 0 else len(lst) + end + 1
         return lst[s:e]
+
+    async def llen(self, key: str):
+        return len(self.data.get(key, []))
 
     async def lindex(self, key: str, idx: int):
         lst = self.data.get(key, [])
@@ -170,7 +174,15 @@ async def test_feedback_weights_first_run_then_idempotent(session_manager_with_b
 
 
 @pytest.mark.asyncio
-async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_backend):
+async def test_feedback_weights_mixed_success_prunes_and_applies_once(session_manager_with_backend):
+    """A deleted element id must not keep the row eligible forever.
+
+    Before the B1 fix a QA whose ``used_graph_element_ids`` referenced one missing
+    element stayed ``feedback_weights_applied=False``, so every later improve()
+    re-applied the same alpha step to the surviving elements (compounding drift).
+    Now the missing id is pruned, the surviving element moves exactly once, and
+    the row is marked processed so a second run extracts nothing.
+    """
     sm = session_manager_with_backend
     user = _make_user()
 
@@ -186,25 +198,45 @@ async def test_feedback_weights_mixed_success_keeps_false(session_manager_with_b
 
     graph = InMemoryGraphWithWeights()
 
-    with (
-        patch("cognee.tasks.memify.extract_feedback_qas.session_user") as extract_user_ctx,
-        patch("cognee.tasks.memify.apply_feedback_weights.session_user") as apply_user_ctx,
-        patch("cognee.tasks.memify.extract_feedback_qas.get_session_manager", return_value=sm),
-        patch("cognee.tasks.memify.apply_feedback_weights.get_session_manager", return_value=sm),
-        patch("cognee.tasks.memify.apply_feedback_weights.get_graph_engine", return_value=graph),
-    ):
-        extract_user_ctx.get.return_value = user
-        apply_user_ctx.get.return_value = user
+    async def run_once():
+        with (
+            patch("cognee.tasks.memify.extract_feedback_qas.session_user") as extract_user_ctx,
+            patch("cognee.tasks.memify.apply_feedback_weights.session_user") as apply_user_ctx,
+            patch("cognee.tasks.memify.extract_feedback_qas.get_session_manager", return_value=sm),
+            patch(
+                "cognee.tasks.memify.apply_feedback_weights.get_session_manager", return_value=sm
+            ),
+            patch(
+                "cognee.tasks.memify.apply_feedback_weights.get_graph_engine", return_value=graph
+            ),
+        ):
+            extract_user_ctx.get.return_value = user
+            apply_user_ctx.get.return_value = user
 
-        items = []
-        async for item in extract_feedback_qas([{}], session_ids=["s1"]):
-            items.append(item)
+            items = []
+            async for item in extract_feedback_qas([{}], session_ids=["s1"]):
+                items.append(item)
 
-        result = await apply_feedback_weights(items, alpha=0.1)
+            result = await apply_feedback_weights(items, alpha=0.1) if items else None
+            return items, result
 
+    items, result = await run_once()
     assert len(items) == 1
+    assert result is not None
     assert result["processed"] == 1
-    assert result["applied"] == 0
+    assert result["applied"] == 1
+
+    weight_after_first_run = graph.node_weights["n1"]
+    assert weight_after_first_run > 0.5  # the surviving node moved
+    assert "missing-edge" not in graph.edge_weights  # the missing edge was pruned, not created
 
     entries = await sm.get_session(user_id="u1", session_id="s1", formatted=False)
-    assert entries[0].memify_metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is False
+    metadata = entries[0].memify_metadata
+    assert metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_KEY] is True
+    assert "n1" in metadata[MEMIFY_METADATA_FEEDBACK_WEIGHTS_APPLIED_NODE_IDS_KEY]
+
+    # A second improve() run finds nothing eligible and moves nothing.
+    items, result = await run_once()
+    assert items == []
+    assert result is None
+    assert graph.node_weights["n1"] == weight_after_first_run

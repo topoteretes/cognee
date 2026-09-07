@@ -337,6 +337,7 @@ async def run_concurrent_session_turn(
             user_id=user_cache_key,
             session_id=session_id,
             used_graph_element_ids=retriever.extract_context_object_ids(retrieved_objects),
+            context=context,
         )
 
     completions = await retriever.append_references([answer], retrieved_objects)

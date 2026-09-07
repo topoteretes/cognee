@@ -268,7 +268,7 @@ async def test_graph_completion_decomposition_combined_mode_session_stores_only_
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_retriever_cache_config,
         patch(
-            "cognee.infrastructure.session.session_manager.CacheConfig"
+            "cognee.infrastructure.session.session_manager.get_cache_config"
         ) as mock_session_cache_config,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.session_user"
