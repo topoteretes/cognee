@@ -7,15 +7,20 @@ policy live in ``cognee.infrastructure.llm.overload_policy``; configuration
 is read at use-time, never snapshotted at import.
 """
 
+import logging
 from contextlib import asynccontextmanager, nullcontext
+from typing import Any, Iterable, Union
 
 from aiolimiter import AsyncLimiter
+
+logger = logging.getLogger(__name__)
 
 # Limiters are built lazily on first use so their budgets bind the resolved
 # configuration (LLMConfig gives local inference servers a smaller default
 # LLM_RATE_LIMIT_REQUESTS) and so importing this module stays dependency-light.
 _llm_rate_limiter: "AsyncLimiter | None" = None
 _embedding_rate_limiter: "AsyncLimiter | None" = None
+_embedding_token_rate_limiter: "AsyncLimiter | None" = None
 
 
 def _get_llm_rate_limiter() -> AsyncLimiter:
@@ -81,3 +86,75 @@ def embedding_rate_limiter_context_manager():
             embedding_config.embedding_rate_limit_interval,
         )
     return _embedding_rate_limiter
+
+
+def count_embedding_tokens(tokenizer: Any, texts: Union[str, Iterable[str]]) -> int:
+    """Size one embedding dispatch in tokens, for EMBEDDING_RATE_LIMIT_TOKENS.
+
+    Returns 0 — "no token budget applies to this dispatch" — whenever the budget
+    is not in force. The configuration is read before the tokenizer runs, so the
+    default path (no budget configured) never pays for tokenization. A tokenizer
+    that cannot size the input also yields 0: a pacing knob must never be able to
+    fail a dispatch.
+    """
+    # NOTE: Import inside function to avoid a circular import at module load
+    # (embedding engines, which EmbeddingConfig is reached through, import
+    # this module).
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        get_embedding_config,
+    )
+
+    embedding_config = get_embedding_config()
+    if not (
+        embedding_config.embedding_rate_limit_enabled
+        and embedding_config.embedding_rate_limit_tokens > 0
+    ):
+        return 0
+
+    if tokenizer is None:
+        return 0
+
+    if isinstance(texts, str):
+        texts = [texts]
+
+    try:
+        return sum(tokenizer.count_tokens(text) for text in texts)
+    except Exception as error:
+        logger.warning(
+            "Could not count embedding tokens for rate limiting (%s: %s). "
+            "Pacing this dispatch by request count only.",
+            type(error).__name__,
+            error,
+        )
+        return 0
+
+
+async def consume_embedding_token_budget(tokenizer: Any, texts: Union[str, Iterable[str]]) -> None:
+    """Pace one embedding dispatch against EMBEDDING_RATE_LIMIT_TOKENS.
+
+    Called from inside ``embedding_rate_limiter_context_manager()``, which paces
+    requests per interval; this adds the tokens-per-interval budget on the same
+    interval. It is a no-op unless the operator sets a token budget, so the
+    shipped default (0 = disabled) is unchanged.
+    """
+    global _embedding_token_rate_limiter
+    # NOTE: Import inside function to avoid a circular import at module load.
+    from cognee.infrastructure.databases.vector.embeddings.config import (
+        get_embedding_config,
+    )
+
+    token_count = count_embedding_tokens(tokenizer, texts)
+    if token_count <= 0:
+        return
+
+    embedding_config = get_embedding_config()
+    token_budget = embedding_config.embedding_rate_limit_tokens
+    if _embedding_token_rate_limiter is None:
+        _embedding_token_rate_limiter = AsyncLimiter(
+            token_budget, embedding_config.embedding_rate_limit_interval
+        )
+
+    # A single dispatch larger than the whole budget can never be admitted, so
+    # spend one full interval's worth on it rather than raising ValueError out
+    # of the limiter.
+    await _embedding_token_rate_limiter.acquire(min(token_count, token_budget))

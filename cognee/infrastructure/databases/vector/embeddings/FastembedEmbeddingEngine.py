@@ -29,7 +29,10 @@ from cognee.infrastructure.databases.exceptions import (
     EmbeddingException,
 )
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.shared.rate_limiting import (
+    consume_embedding_token_budget,
+    embedding_rate_limiter_context_manager,
+)
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     sanitize_embedding_text_inputs,
     handle_embedding_response,
@@ -123,6 +126,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
                 embeddings = [[0.0] * self.dimensions for _ in sanitized_text]
             else:
                 async with embedding_rate_limiter_context_manager():
+                    await consume_embedding_token_budget(self.tokenizer, sanitized_text)
                     embeddings = self.embedding_model.embed(
                         sanitized_text,
                         batch_size=len(sanitized_text),
