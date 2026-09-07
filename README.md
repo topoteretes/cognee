@@ -121,6 +121,7 @@ uv pip install cognee
 ### Step 2: Configure the LLM
 ```python
 import os
+
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
@@ -157,9 +158,8 @@ async def main():
     await cognee.forget(dataset="main_dataset")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 
 ### Use the Cognee CLI
@@ -209,8 +209,9 @@ history:
 await cognee.remember("./skills", content_type="skills", dataset_name="ops")
 
 # Discover by meaning — returns name/description/metadata, never the full procedure
-results = await cognee.search("how do I deploy to staging",
-                              query_type=SearchType.SKILLS, datasets=["ops"])
+results = await cognee.search(
+    "how do I deploy to staging", query_type=SearchType.SKILLS, datasets=["ops"]
+)
 
 # recall() also runs a deterministic (no-LLM) skill gate: procedural questions
 # automatically get matching skills appended, tagged source="skills"

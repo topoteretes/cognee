@@ -422,9 +422,9 @@ receives. Pass `context_format="prompt"` to get the full envelope instead:
 result = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
-    session_id="s1",                         # session_id a session hit would
-    only_context=True,                       # short-circuit it (see recall vs search)
-    context_format="prompt",                 # default: "context"
+    session_id="s1",  # session_id a session hit would
+    only_context=True,  # short-circuit it (see recall vs search)
+    context_format="prompt",  # default: "context"
 )
 ```
 
@@ -714,10 +714,12 @@ For production deployments, review and tighten these settings.
 ```python
 from cognee.modules.pipelines.tasks.Task import Task
 
+
 async def my_custom_task(data):
     # Your logic here
     processed_data = process(data)
     return processed_data
+
 
 # Use in pipeline
 task = Task(my_custom_task)
@@ -738,9 +740,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 llm_client = get_llm_client()
 response = await llm_client.acreate_structured_output(
-    text_input="Your prompt",
-    system_prompt="System instructions",
-    response_model=YourPydanticModel
+    text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
 
