@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from cognee.modules.data.models import Dataset
@@ -15,10 +14,12 @@ from cognee.modules.users.permissions.methods.has_user_management_permission imp
     has_user_management_permission,
 )
 
+from .get_all_user_permission_datasets import get_all_user_permission_datasets
+
 
 async def authorized_get_principal_datasets(
     principal_id: UUID, permission_name: str, requester_id: UUID
-) -> List[Dataset]:
+) -> list[Dataset]:
     """
         Return the datasets a principal holds a permission on, if the requester
         is allowed to ask about that principal.
@@ -74,6 +75,11 @@ async def authorized_get_principal_datasets(
     else:
         raise PermissionDeniedError(message=f"Unsupported principal type: {principal.type}")
 
-    datasets = await get_principal_datasets(principal, permission_name)
+    if principal.type == "user" and principal.id == requester_id:
+        # The plugin dataset picker needs effective write access, including
+        # tenant and role grants, rather than direct ACL rows alone.
+        datasets = await get_all_user_permission_datasets(requester, permission_name)
+    else:
+        datasets = await get_principal_datasets(principal, permission_name)
 
     return [dataset for dataset in datasets if dataset.tenant_id == tenant_id]

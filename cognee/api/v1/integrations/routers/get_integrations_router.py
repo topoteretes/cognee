@@ -40,7 +40,7 @@ from typing import Optional
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi_users.exceptions import UserAlreadyExists
 from sqlalchemy.exc import IntegrityError
@@ -367,7 +367,12 @@ def get_integrations_router():
 
     @integrations_router.post("/plugins/{plugin_key}/provision")
     async def provision_plugin(
-        plugin_key: str, user: User = Depends(get_authenticated_user)
+        plugin_key: str,
+        user: User = Depends(get_authenticated_user),
+        create_only: bool = Query(
+            False,
+            description="Create only; existing identities return 409 without key rotation.",
+        ),
     ) -> PluginProvisionDTO:
         """Provision (or re-key) a dedicated agent identity for a plugin.
 
@@ -376,6 +381,10 @@ def get_integrations_router():
         returns the same agent but rotates the key (old keys are revoked —
         re-provision *is* the rotation flow). The returned key is shown once
         and never retrievable again.
+
+        Automatic clients must use ``create_only=true``. Existing identities
+        (including concurrent first-create losers) then return 409 without
+        revoking keys. Omitting it preserves explicit legacy rotation behavior.
 
         ## Path Parameters
         - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
@@ -403,6 +412,11 @@ def get_integrations_router():
                     raise HTTPException(
                         status_code=409,
                         detail=f"Plugin agent for {plugin_key!r} exists but could not be resolved.",
+                    )
+                if create_only:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Plugin identity exists; explicit reconnect is required.",
                     )
                 api_key = await _rotate_agent_api_key(agent_user, plugin_key)
 
