@@ -106,10 +106,6 @@ def backend_access_control_enabled():
     return False
 
 
-VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "pgvector", "falkor"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["ladybug", "kuzu", "falkor", "postgres"]
-
-
 async def _get_dataset_owner_id(dataset_id: UUID) -> UUID:
     """Return the owner id of an existing dataset; raise if it does not exist.
 
