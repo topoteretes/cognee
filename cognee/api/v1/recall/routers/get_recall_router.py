@@ -23,13 +23,17 @@ from cognee.shared.utils import send_telemetry
 
 
 class RecallPayloadDTO(InDTO):
-    # Default is HYBRID_COMPLETION. Pass ``search_type: null`` explicitly
-    # to opt into auto-routing (the new ``cognee.recall`` default).
+    # Omitted or null means auto-route, matching ``cognee.recall`` and the CLI.
+    # As in the SDK, a null search_type with session_id and no datasets also
+    # lets a session hit short-circuit the graph search; pass a value to pin a
+    # strategy and disable that. See docs/recall-vs-search.md.
     search_type: Optional[SearchType] = Field(
-        default=SearchType.HYBRID_COMPLETION,
+        default=None,
         description=(
             "Search strategy, e.g. HYBRID_COMPLETION, GRAPH_COMPLETION, RAG_COMPLETION, CHUNKS. "
-            "Pass null to let cognee auto-route the query to the best strategy."
+            "Omit (or pass null) to let cognee auto-route the query (rule-based, no LLM "
+            "call, HYBRID_COMPLETION fallback; see docs/recall-vs-search.md for the rule "
+            "table). Pass a value to pin one."
         ),
     )
     datasets: Optional[list[str]] = Field(
@@ -86,7 +90,7 @@ class RecallPayloadDTO(InDTO):
         examples=[None],
         description=(
             "Session whose cached QA and trace entries should be searched. With "
-            "search_type null and no datasets, session hits short-circuit the "
+            "search_type omitted and no datasets, session hits short-circuit the "
             "graph search."
         ),
     )
@@ -209,8 +213,9 @@ def get_recall_router() -> APIRouter:
         Field names are shown camelCased in the schema (e.g. searchType, datasetIds,
         topK); both camelCase and snake_case are accepted.
 
-        - **search_type** (Optional[SearchType]): Type of search to perform
-          (default: HYBRID_COMPLETION). Pass null to enable automatic query routing.
+        - **search_type** (Optional[SearchType]): Type of search to perform. Omit
+          (default: null) to auto-route the query with the rule-based router
+          (HYBRID_COMPLETION fallback); pass a value to pin one.
         - **datasets** (Optional[List[str]]): Dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): Dataset UUIDs to search within;
           take precedence over dataset names when both are provided
@@ -260,7 +265,7 @@ def get_recall_router() -> APIRouter:
             user,
             additional_properties={
                 "endpoint": "POST /v1/recall",
-                "search_type": str(payload.search_type),
+                "search_type": str(payload.search_type.value) if payload.search_type else "auto",
                 "cognee_version": cognee_version,
             },
         )
