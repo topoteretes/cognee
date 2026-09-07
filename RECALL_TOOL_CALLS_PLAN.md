@@ -50,15 +50,15 @@ Three design lenses (minimal / extensible / security) were evaluated against the
 
 ```python
 await cognee.tools.register_sql_connection(
-    name="analytics",                       # unique per owner
+    name="analytics",  # unique per owner
     connection_string="postgresql+asyncpg://ro_user:pw@host:5432/analytics",
-    provider=None,                          # inferred; "postgres" | "sqlite" in v1
+    provider=None,  # inferred; "postgres" | "sqlite" in v1
     allowed_tables=["orders", "customers"],  # optional schema/prompt scope cap
-    max_rows=100,                            # optional per-connection override
+    max_rows=100,  # optional per-connection override
     description="Analytics warehouse (read-only role)",
-    user=None,                               # None → default user in single-user mode
+    user=None,  # None → default user in single-user mode
 )
-await cognee.tools.list_sql_connections(user=None)    # never returns the DSN
+await cognee.tools.list_sql_connections(user=None)  # never returns the DSN
 await cognee.tools.remove_sql_connection("analytics", user=None)
 ```
 
@@ -90,9 +90,9 @@ DELETE /api/v1/tools/connections/{name}
 ```python
 results = await cognee.recall(
     "What was total revenue by region last quarter?",
-    scope=["tools"],                  # or ["graph", "tools"]; never implied by None/"auto"/"all"
-    tool_connections=["analytics"],   # None → all connections visible to this user
-    session_id="s1",                  # optional: audits executed SQL into the session trace
+    scope=["tools"],  # or ["graph", "tools"]; never implied by None/"auto"/"all"
+    tool_connections=["analytics"],  # None → all connections visible to this user
+    session_id="s1",  # optional: audits executed SQL into the session trace
 )
 ```
 
@@ -107,13 +107,13 @@ One new member of the `RecallResponse` discriminated union (`cognee/modules/reca
 ```python
 class ResponseToolEntry(BaseModel):
     source: Literal["tools"]
-    tool_name: str                    # "text_to_sql" in v1; discriminates future tools
+    tool_name: str  # "text_to_sql" in v1; discriminates future tools
     question: str
-    text: str                         # rendered compact answer / row table (row-capped, never mid-row truncated)
+    text: str  # rendered compact answer / row table (row-capped, never mid-row truncated)
     success: bool = True
-    error: Optional[str] = None       # per-connection execution failure; authz failures raise instead
-    structured: Optional[dict] = None # text_to_sql: {"connection", "dialect", "sql",
-                                      #   "rows": [...JSON-safe...], "row_count", "truncated", "attempts"}
+    error: Optional[str] = None  # per-connection execution failure; authz failures raise instead
+    structured: Optional[dict] = None  # text_to_sql: {"connection", "dialect", "sql",
+    #   "rows": [...JSON-safe...], "row_count", "truncated", "attempts"}
 ```
 
 Generic by design: tool #2 (HTTP API, MCP, …) reuses this entry with its own `structured` payload — no union change, no `entries.py` change, no runner change.
