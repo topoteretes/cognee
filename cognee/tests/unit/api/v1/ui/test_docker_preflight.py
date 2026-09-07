@@ -97,6 +97,58 @@ class TestStartUiDockerIntegration:
 
     @patch("cognee.api.v1.ui.ui.prompt_user_for_download", return_value=False)
     @patch("cognee.api.v1.ui.ui.find_frontend_path", return_value=None)
+    @patch("cognee.api.v1.ui.ui._check_docker_available")
+    @patch(
+        "cognee.api.v1.ui.ui._check_required_ports",
+        side_effect=[(True, []), (False, ["MCP Server (port 8001)"])],
+    )
+    def test_skips_mcp_when_its_optional_port_is_occupied(
+        self, mock_ports, mock_docker, mock_frontend, mock_prompt
+    ):
+        """An MCP port conflict must not prevent the UI from continuing startup."""
+        from cognee.api.v1.ui.ui import start_ui
+
+        start_ui(
+            pid_callback=lambda p: None,
+            start_mcp=True,
+            start_backend=False,
+        )
+
+        assert mock_ports.call_args_list == [
+            call([(3000, "Frontend UI")]),
+            call([(8001, "MCP Server")]),
+        ]
+        mock_docker.assert_not_called()
+        mock_frontend.assert_called_once()
+        mock_prompt.assert_called_once()
+
+    @patch("cognee.api.v1.ui.ui.prompt_user_for_download")
+    @patch("cognee.api.v1.ui.ui.find_frontend_path")
+    @patch("cognee.api.v1.ui.ui._check_docker_available")
+    @patch(
+        "cognee.api.v1.ui.ui._check_required_ports",
+        return_value=(False, ["Frontend UI (port 3000)"]),
+    )
+    def test_still_aborts_when_a_required_ui_port_is_occupied(
+        self, mock_ports, mock_docker, mock_frontend, mock_prompt
+    ):
+        """Frontend and backend port conflicts remain fatal startup errors."""
+        from cognee.api.v1.ui.ui import start_ui
+
+        result = start_ui(
+            pid_callback=lambda p: None,
+            start_mcp=True,
+            start_backend=False,
+        )
+
+        assert result is None
+        mock_ports.assert_called_once_with([(3000, "Frontend UI")])
+        mock_docker.assert_not_called()
+        mock_frontend.assert_not_called()
+        mock_prompt.assert_not_called()
+
+    @patch("cognee.api.v1.ui.ui.prompt_user_for_download", return_value=False)
+    @patch("cognee.api.v1.ui.ui.find_frontend_path", return_value=None)
     @patch("cognee.api.v1.ui.ui._check_docker_available", return_value=(False, "no docker"))
     @patch("cognee.api.v1.ui.ui._check_required_ports", return_value=(True, []))
     def test_skips_mcp_docker_pull_when_docker_unavailable(
