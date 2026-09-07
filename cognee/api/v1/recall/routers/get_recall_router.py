@@ -2,14 +2,16 @@ from datetime import datetime
 from typing import List, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.recall.recall import RecallResponse
+from cognee.api.sse import SSE_MEDIA_TYPE, sse_headers, wants_event_stream
+from cognee.api.v1.recall.recall_stream import begin_recall_stream
 from cognee.exceptions import CogneeApiError
 from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
@@ -109,6 +111,15 @@ class RecallPayloadDTO(InDTO):
             "Omit to use every connection visible to the caller."
         ),
     )
+    stream: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Stream the answer as server-sent events. When omitted, the "
+            "`Accept` header decides: streaming happens only for a client that "
+            "ranks `text/event-stream` above `application/json`, so `*/*` and "
+            "the two listed together both stay on the JSON response."
+        ),
+    )
     tools_trigger: str = Field(
         default="always",
         description=(
@@ -183,7 +194,11 @@ def get_recall_router() -> APIRouter:
 
     @router.post("", response_model=list[RecallResponse])
     @log_usage(function_name="POST /v1/recall", log_type="api_endpoint")
-    async def recall(payload: RecallPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def recall(
+        payload: RecallPayloadDTO,
+        request: Request,
+        user: User = Depends(get_authenticated_user),
+    ):
         """
         Recall information from the knowledge graph.
 
@@ -211,6 +226,8 @@ def get_recall_router() -> APIRouter:
         - **verbose** (bool): Verbose output
         - **include_references** (bool): Include source/provenance references in
           completion results (default: true)
+        - **stream** (Optional[bool]): Stream the answer as server-sent events
+          (`text/event-stream`). Defaults to content negotiation on `Accept`.
         - **session_id** (Optional[str]): Session whose cached QA and trace entries
           should be searched
         - **scope** (Optional[str | List[str]]): Memory sources to include: "graph",
@@ -257,8 +274,10 @@ def get_recall_router() -> APIRouter:
             else None
         )
 
-        try:
-            results = await cognee_recall(
+        # One call, two transports: the streaming path must not build its own
+        # argument list, or the two drift the moment a parameter is added.
+        def _run_recall():
+            return cognee_recall(
                 query_text=payload.query,
                 query_type=payload.search_type,
                 user=user,
@@ -279,6 +298,26 @@ def get_recall_router() -> APIRouter:
                 tools_trigger=payload.tools_trigger,
                 code_query=payload.code_query,
             )
+
+        streaming = wants_event_stream(request.headers.get("accept"), payload.stream)
+
+        try:
+            if streaming:
+                # Negotiated inside this handler rather than on a route of its
+                # own: anything mounted separately would miss the dependencies
+                # attached to this path — on Cloud that includes the pre-flight
+                # credit guard, so a separate endpoint would answer for free.
+                #
+                # Inside the same try as the JSON path on purpose. begin_recall_stream
+                # waits for the recall to produce output or fail, and re-raises a
+                # failure unchanged, so the handlers below give a streamed request
+                # the same 402/403/409/422 the JSON one would have received.
+                started = await begin_recall_stream(_run_recall)
+                return StreamingResponse(
+                    started.frames(), media_type=SSE_MEDIA_TYPE, headers=sse_headers()
+                )
+
+            results = await _run_recall()
             return jsonable_encoder(results)
         except CogneeApiError:
             # Cognee errors carry their own status code and actionable message;

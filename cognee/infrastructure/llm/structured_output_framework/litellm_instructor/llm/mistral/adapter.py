@@ -48,6 +48,13 @@ class MistralAdapter(GenericAPIAdapter):
     - show_prompt
     """
 
+    # Declared False even though GenericAPIAdapter declares True. This class
+    # overrides acreate_structured_output without a `response_model is str`
+    # branch and defines no acreate_str_output, so a plain-text answer never
+    # reaches the parent's streaming door. Inheriting True would promote a
+    # sink, announce `stage: generating`, and then emit nothing at all.
+    supports_answer_streaming = False
+
     default_instructor_mode = get_instructor_mode("mistral")
 
     def __init__(

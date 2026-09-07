@@ -14,33 +14,37 @@ name: automation | Router Docstring Sync
 #
 # When the mechanical fix produces content identical to what is already on
 # the fix branch (tracked via the Sync-Content-Hash commit trailer), the
-# push, the Claude call, and the PR update are all skipped — so repeated
-# dev pushes with unchanged drift cost nothing and never clobber
-# previously generated descriptions.
+# push, the Claude call, and the PR update are all skipped — so a rerun
+# with unchanged drift costs nothing and never clobbers previously
+# generated descriptions.
 
 on:
   workflow_dispatch:
-  # Weekly backstop sweep (runs from the default branch, fixes dev).
+  # Weekly, Wednesday 05:00 UTC — chosen to sit just ahead of a release with a
+  # working day left to review and merge the PR. Of the last 50 stable
+  # releases, 35 went out Thursday through Sunday and Friday was the single
+  # most common day, so a Wednesday sweep is in front of roughly 70% of them.
+  # (Monday, the previous setting, was ahead of more releases but staler by
+  # several days for the ones that matter.) A release cut Monday to Wednesday
+  # is still working from the prior week's sweep — closing that gap needs a
+  # per-PR check, which is tracked separately.
+  #
+  # Paired with spec_extras_sync.yml an hour later: both make the published API
+  # reference match the code, so they land their PRs in the same review
+  # session, and the second run reuses the uv cache this one leaves warm.
+  #
+  # This ran on every push to dev touching cognee/** until it became clear how
+  # little that bought: 594 of the last 791 commits to dev would have fired it,
+  # roughly 20 runs a day, against drift that appears a handful of times a
+  # month. Worse, each run force-pushed the fix branch and rewrote the PR body,
+  # so a review in progress moved under the reviewer. The trade is that drift
+  # merged on a Thursday now waits until the following Wednesday; dispatch
+  # this manually if a release is going out before then.
   schedule:
-    - cron: "0 6 * * 1"
-  # Run whenever something lands on dev that can move the API schema:
-  # handlers and DTOs anywhere under cognee/, or dependency bumps (a
-  # FastAPI/Pydantic upgrade can change what the handlers expose).
-  push:
-    branches:
-      - dev
-    paths:
-      - "cognee/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "tools/check_router_docstrings.py"
-      - "tools/fix_router_docstrings.py"
-      - "tools/describe_router_params.py"
-      - ".github/workflows/router_docstring_sync.yml"
+    - cron: "0 5 * * 3"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 # Queue rather than cancel: a run cancelled between the branch push and the
 # PR update would leave the fix PR half-refreshed.
@@ -50,6 +54,9 @@ concurrency:
 
 jobs:
   sync-docstrings:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Detect and fix router docstring drift
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -58,25 +65,25 @@ jobs:
 
     steps:
       # The tree being fixed is always dev; the machinery (checker, fixer)
-      # comes from the triggering ref — dev itself on push runs, the default
-      # branch on schedule/dispatch runs. Credentials are never persisted
+      # comes from the triggering ref, which is the default branch for both
+      # the weekly schedule and manual dispatches. Credentials are never persisted
       # into the checkouts: this job imports the full cognee app (and its
       # dependency tree), and nothing that runs there should be able to read
       # a token off disk. The push/PR steps receive the PAT explicitly.
       - name: Check out dev
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           ref: dev
           persist-credentials: false
 
       - name: Check out sync machinery from the triggering ref
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           path: automation-src
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -198,6 +205,9 @@ jobs:
           fi
 
   describe-params:
+    permissions:
+      contents: write
+      pull-requests: write
     name: Generate missing parameter descriptions with Claude
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -224,21 +234,21 @@ jobs:
 
       - name: Check out the fix branch
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           ref: automation/fix-router-docstrings
           persist-credentials: false
 
       - name: Check out describe machinery from the triggering ref
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           path: automation-src
           persist-credentials: false
 
       - name: Install uv
         if: ${{ steps.branch.outputs.exists == 'true' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       # The script works on text and AST only — no cognee environment needed,
       # just the anthropic SDK in an ephemeral interpreter. Versions pinned:

@@ -7,7 +7,7 @@ from textwrap import dedent
 from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.infrastructure.engine import DataPoint
@@ -153,6 +153,9 @@ class Neo4jAdapter(GraphDBInterface):
     This class provides methods for querying, adding, deleting nodes and edges, as well as
     managing sessions and projecting graphs.
     """
+
+    # get_connections returns triples edge_endpoints can normalise.
+    supports_incremental_chunk_updates = True
 
     def __init__(
         self,
@@ -428,7 +431,13 @@ class Neo4jAdapter(GraphDBInterface):
                     "properties": props,
                 }
 
-        results = await self.query(query, {"nodes": list(deduped.values()), **provenance_params})
+        # A folded provenance write is a read-modify-write against the same
+        # source_ref_keys that attach/remove rewrite under the lock; without the
+        # lock a fold landing between their read and write is lost.
+        async with self._source_ref_change_lock if source_ref_key is not None else nullcontext():
+            results = await self.query(
+                query, {"nodes": list(deduped.values()), **provenance_params}
+            )
         return results
 
     async def remove_belongs_to_set_tags(
@@ -530,6 +539,25 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, params)
 
         return [_strip_provenance(result["node"]) for result in results]
+
+    async def update_chunk_index(self, chunk_indexes: dict) -> None:
+        """Set ONLY the chunk_index property on the given chunk nodes.
+
+        Neo4j stores real node properties, so the move is a genuine
+        single-property SET — nothing else on the node is touched.
+        """
+        if not chunk_indexes:
+            return
+        query = f"""
+        UNWIND $rows AS row
+        MATCH (n: `{BASE_LABEL}`{{id: row.id}})
+        SET n.chunk_index = row.chunk_index, n.updated_at = timestamp()
+        """
+        rows = [
+            {"id": node_id, "chunk_index": chunk_index}
+            for node_id, chunk_index in chunk_indexes.items()
+        ]
+        await self.query(query, {"rows": rows})
 
     async def delete_node(self, node_id: str):
         """
@@ -1034,7 +1062,7 @@ class Neo4jAdapter(GraphDBInterface):
             - bool: True if the edge exists, otherwise False.
         """
         query = f"""
-            MATCH (from_node: `{BASE_LABEL}`)-[:`{edge_label}`]->(to_node: `{BASE_LABEL}`)
+            MATCH (from_node: `{BASE_LABEL}`)-[relationship: `{edge_label}`]->(to_node: `{BASE_LABEL}`)
             WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id
             RETURN COUNT(relationship) > 0 AS edge_exists
         """
@@ -1044,8 +1072,12 @@ class Neo4jAdapter(GraphDBInterface):
             "to_node_id": str(to_node),
         }
 
-        edge_exists = await self.query(query, params)
-        return edge_exists
+        results = await self.query(query, params)
+        # The query is an aggregation and always returns exactly one row
+        # ({"edge_exists": False} when absent); returning the raw result list made
+        # every call truthy, so callers like cross_connect_entities'
+        # `if not has_edge(...)` never saw a missing edge.
+        return bool(results[0]["edge_exists"]) if results else False
 
     async def has_edges(self, edges):
         """
@@ -1238,7 +1270,11 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
         try:
-            results = await self.query(query, {"edges": edges, **provenance_params})
+            # Same serialization as add_nodes: folded refs vs attach/remove.
+            async with (
+                self._source_ref_change_lock if source_ref_key is not None else nullcontext()
+            ):
+                results = await self.query(query, {"edges": edges, **provenance_params})
             return results
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info=True)

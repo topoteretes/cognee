@@ -144,7 +144,7 @@ def test_add_rejects_label_count_mismatch(client, files, labels):
         )
 
         assert response.status_code == 400
-        assert "one label per uploaded file" in response.json()["detail"]
+        assert "one label per data item" in response.json()["detail"]
         mock_add.assert_not_awaited()
 
 
@@ -246,7 +246,7 @@ def test_remember_rejects_label_count_mismatch(client, files, labels):
         )
 
         assert response.status_code == 400
-        assert "one label per uploaded file" in response.json()["detail"]
+        assert "one label per data item" in response.json()["detail"]
         mock_remember.assert_not_awaited()
 
 
@@ -335,7 +335,7 @@ def test_add_rejects_metadata_count_mismatch(client, files, external_metadata):
         )
 
         assert response.status_code == 400
-        assert "one external_metadata entry per uploaded file" in response.json()["detail"]
+        assert "one external_metadata entry per data item" in response.json()["detail"]
         mock_add.assert_not_awaited()
 
 

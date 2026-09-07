@@ -62,11 +62,16 @@ class ChunksRetriever(BaseRetriever):
         Returns:
         --------
 
-            - List[dict]: A list of payloads of found chunks.
+            - List[dict]: A list of payloads of found chunks. Each payload carries the
+              vector search ``score`` of the chunk: the raw backend distance (cosine
+              distance for built-in adapters), where a lower value is a better match.
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+            chunk_payloads = [
+                {**(found_chunk.payload or {}), "score": found_chunk.score}
+                for found_chunk in retrieved_objects
+            ]
             return chunk_payloads
         else:
             return []

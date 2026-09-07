@@ -173,3 +173,111 @@ async def test_symlinks_are_not_followed_into_the_manifest(tmp_path):
     indexed = {p.name for p in covered} | {p.name for p in documents}
     assert "real.py" in indexed
     assert "creds.py" not in indexed, "symlink was followed into the manifest"
+
+
+@pytest.fixture
+def llm_key_set(monkeypatch):
+    """The document half of a repo partition is only emitted with an LLM key."""
+    from types import SimpleNamespace
+
+    import cognee.infrastructure.llm.config as llm_config_module
+
+    monkeypatch.setattr(
+        llm_config_module, "get_llm_config", lambda: SimpleNamespace(llm_api_key="sk-set")
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_url_is_cloned_and_resolved_like_a_project(
+    tmp_path, monkeypatch, llm_key_set
+):
+    """A GitHub URL in add() is a code project, not a web page: it is cloned and
+    then partitioned exactly like a local project directory."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    clone = tmp_path / "github.com-org-repo"
+    clone.mkdir()
+    _make_repo(clone)
+    cloned_specs = []
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        cloned_specs.append(spec)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await resolve_data_directories(
+        ["https://github.com/org/repo?tab=readme-ov-file", "plain text note"]
+    )
+
+    # git gets the normalised URL, not the browser one.
+    assert cloned_specs == ["https://github.com/org/repo"]
+    manifest_items = [item for item in resolved if isinstance(item, DataItem)]
+    assert len(manifest_items) == 1
+    manifest = manifest_items[0]
+    assert manifest.system_metadata["source"] == "code_repo"
+    assert manifest.system_metadata["repo_path"] == str(clone)
+    assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
+    assert manifest.system_metadata["file_count"] == 3
+    # The repo's documents ride along individually; unrelated items pass through.
+    string_items = [item for item in resolved if isinstance(item, str)]
+    assert {Path(item).name for item in string_items if item != "plain text note"} == {
+        "README.md",
+        "notes.txt",
+    }
+    assert "plain text note" in string_items
+
+
+@pytest.mark.asyncio
+async def test_repository_url_credentials_are_redacted_from_the_manifest(
+    tmp_path, monkeypatch, llm_key_set
+):
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    clone = _make_repo(tmp_path)
+    cloned_specs = []
+
+    async def fake_resolve_repo_source(spec, clones_dir=None, credentials=None):
+        cloned_specs.append(spec)
+        return clone
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", fake_resolve_repo_source)
+
+    resolved = await resolve_data_directories(["https://x-access-token:tok@github.com/org/repo"])
+
+    # The token reaches git and nothing else.
+    assert cloned_specs == ["https://x-access-token:tok@github.com/org/repo"]
+    manifest = next(item for item in resolved if isinstance(item, DataItem))
+    assert manifest.system_metadata["repo_url"] == "https://github.com/org/repo"
+    assert "tok" not in json.dumps(manifest.system_metadata)
+
+
+@pytest.mark.asyncio
+async def test_forge_page_urls_pass_through_to_the_web_page_path(monkeypatch):
+    """A link into a repository (blob, issue, ...) is a page: no clone is attempted."""
+    import cognee.tasks.code_graph.code_repo as code_repo_module
+    from cognee.tasks.ingestion.resolve_data_directories import resolve_data_directories
+
+    async def refuse(*_args, **_kwargs):
+        raise AssertionError("a page URL must not be cloned")
+
+    monkeypatch.setattr(code_repo_module, "resolve_repo_source", refuse)
+    urls = [
+        "https://github.com/org/repo/blob/main/README.md",
+        "https://gitlab.com/group/repo/-/issues/1",
+        "https://example.com/article",
+    ]
+
+    assert await resolve_data_directories(urls) == urls
+
+
+@pytest.mark.asyncio
+async def test_resolve_code_repository_url_rejects_non_repository_specs():
+    from cognee.tasks.code_graph.code_repo import resolve_code_repository_url
+
+    with pytest.raises(ValueError, match="not a repository URL"):
+        await resolve_code_repository_url("https://github.com/org/repo/blob/main/README.md")

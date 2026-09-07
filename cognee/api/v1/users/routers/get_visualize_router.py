@@ -484,10 +484,10 @@ def get_visualize_router() -> APIRouter:
         dataset_id: UUID = Query(
             ...,
             description=(
-                "UUID of the dataset this poll is for. Gates who may call this "
-                "endpoint (same read-permission check as every other visualize "
-                "route) — the events themselves are the caller's own, not "
-                "filtered to this dataset's graph."
+                "UUID of the dataset this poll is for. Gates who may call "
+                "this endpoint (same read-permission check as every other "
+                "visualize route) and scopes the events returned: only the "
+                "caller's own sessions attributed to this dataset contribute."
             ),
             examples=[""],
         ),
@@ -509,7 +509,7 @@ def get_visualize_router() -> APIRouter:
         come back. The filter is strict, so nothing is ever delivered twice.
 
         ## Query Parameters
-        - **dataset_id** (UUID): authorization only, see above
+        - **dataset_id** (UUID): authorization and event scope, see above
         - **since** (datetime, optional): cursor from a previous call
 
         ## Response
@@ -524,6 +524,11 @@ def get_visualize_router() -> APIRouter:
 
         ## Notes
         - User must have read permissions on the dataset
+        - Events come only from the caller's own sessions attributed to this
+          dataset. Sessions carrying no dataset attribution are not included.
+        - Attribution is per session, not per answered turn: a session id
+          reused across datasets stays with the first dataset it touched, so
+          its later turns appear on that dataset's timeline.
         """
         send_telemetry(
             "Visualize Live Events API Endpoint Invoked",
@@ -590,8 +595,8 @@ def get_visualize_router() -> APIRouter:
 
         ## Path Parameters
         - **dataset_id** (UUID): the dataset to follow. Gates the connection
-          with the same read-permission check the other visualize routes use;
-          the events themselves are the caller's own, as on `/live-events`.
+          with the same read-permission check the other visualize routes use,
+          and scopes the events to this dataset, as on `/live-events`.
 
         ## Query Parameters
         - **since** (datetime, optional): reconnect cursor

@@ -360,6 +360,34 @@ async def test_hybrid_completion_get_retriever_output_smoke():
 
 
 @pytest.mark.asyncio
+async def test_skills_retriever_registered_with_dataset():
+    import types
+    from uuid import uuid4
+
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.skills_retriever import SkillsRetriever
+
+    dataset = types.SimpleNamespace(id=uuid4())
+
+    retriever_instance = await mod.get_search_type_retriever_instance(
+        SearchType.SKILLS, query_text="how do I deploy", top_k=4, dataset=dataset
+    )
+
+    assert isinstance(retriever_instance, SkillsRetriever)
+    assert retriever_instance.top_k == 4
+    assert retriever_instance.dataset_id == str(dataset.id)
+
+
+@pytest.mark.asyncio
+async def test_skills_requires_dataset():
+    import cognee.modules.search.methods.get_search_type_retriever_instance as mod
+    from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+
+    with pytest.raises(QueryValidationError, match="exactly one explicit dataset"):
+        await mod.get_search_type_retriever_instance(SearchType.SKILLS, query_text="q")
+
+
+@pytest.mark.asyncio
 async def test_chunks_lexical_returns_bm25_retriever():
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
     from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever

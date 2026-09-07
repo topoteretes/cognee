@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 import posixpath
@@ -14,14 +15,20 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.enola import (
+    is_enola_id,
     normalize_relation,
     parse_enola_snapshot,
+    relation_target_id,
     run_enola_generate,
     snapshot_identity,
 )
 from cognee.tasks.code_graph.models import (
     ApiEndpoint,
+    CodeAssociation,
+    CodeExtractionAccount,
     CodeInsight,
+    CodeIntent,
+    CodeLintFinding,
     CodeModule,
     CodeRepository,
     CodeService,
@@ -47,7 +54,27 @@ KIND_TO_MODEL = {
     "test_ref": CodeTestReference,
     "file_ref": CodeFileReference,
     "insight": CodeInsight,
+    "intent": CodeIntent,
+    "extraction": CodeExtractionAccount,
+    "association": CodeAssociation,
+    "lint": CodeLintFinding,
 }
+
+# receipt.json fields worth keeping on the repository node. repo_path,
+# duration and generated_at-style run specifics that describe the machine
+# rather than the snapshot are left out, except generated_at itself, which
+# dates the stamped snapshot.
+_RECEIPT_PROJECTION_KEYS = (
+    "format_version",
+    "enola_version",
+    "extractor_version",
+    "generated_at",
+    "git",
+    "extractors",
+    "fact_count",
+    "insight_count",
+    "quality",
+)
 
 # Ids per delete statement when sweeping stale nodes/edges, mirroring the
 # write-side _WRITE_CHUNK_SIZE convention so no single statement can run past
@@ -126,6 +153,7 @@ def map_facts_to_data_points(
     entities: List[DataPoint] = []
     skipped_facts = 0
     duplicate_facts = 0
+    unmapped_kinds: Counter = Counter()
     seen_ids: set = set()
 
     for fact in facts:
@@ -133,9 +161,15 @@ def map_facts_to_data_points(
         name = fact.get("name")
         model = KIND_TO_MODEL.get(kind) if isinstance(kind, str) else None
 
-        if model is None or not isinstance(name, str) or not name:
+        if model is None:
+            # The contract says additive vocabulary never bumps the format
+            # version, so unknown kinds are expected over time; report what
+            # was intentionally dropped once, per kind, instead of per fact.
+            unmapped_kinds[kind if isinstance(kind, str) else repr(kind)] += 1
+            continue
+        if not isinstance(name, str) or not name:
             skipped_facts += 1
-            logger.warning("Skipping fact with unknown kind or missing name: %s", fact)
+            logger.warning("Skipping fact with missing name: %s", fact)
             continue
 
         repo = _fact_repo(fact, fallback_repo)
@@ -155,6 +189,8 @@ def map_facts_to_data_points(
             props = {}
         file_path = fact.get("file")
         line = fact.get("line")
+        end_line = fact.get("end_line")
+        enola_id = fact.get("id")
 
         fields: Dict[str, Any] = {
             "id": node_id,
@@ -162,7 +198,11 @@ def map_facts_to_data_points(
             "kind": kind,
             "file_path": file_path if isinstance(file_path, str) else None,
             "line": line if isinstance(line, int) and not isinstance(line, bool) else None,
+            "end_line": end_line
+            if isinstance(end_line, int) and not isinstance(end_line, bool)
+            else None,
             "repo": repo,
+            "enola_id": enola_id if is_enola_id(enola_id) else None,
             # Insights carry prose from the explainer; use it verbatim instead
             # of the generic "kind: k=v, ..." property summary.
             "description": props.get("description")
@@ -184,6 +224,12 @@ def map_facts_to_data_points(
 
     if skipped_facts:
         logger.warning("Skipped %d fact(s) that could not be mapped to DataPoints.", skipped_facts)
+    if unmapped_kinds:
+        logger.warning(
+            "Dropped %d fact(s) of kind(s) cognee has no graph model for: %s",
+            sum(unmapped_kinds.values()),
+            dict(sorted(unmapped_kinds.items())),
+        )
     if duplicate_facts:
         logger.info("Collapsed %d duplicate fact(s) into existing node ids.", duplicate_facts)
 
@@ -224,16 +270,20 @@ def build_code_graph_edges(
 ) -> Tuple[List[tuple], int]:
     """Resolve typed relations between facts into explicit graph edge tuples.
 
-    Relation targets are matched by fact name within the same snapshot; on
-    ambiguity same-repo targets are preferred, then the relation is skipped.
-    repo_path must be the same value given to map_facts_to_data_points so that
-    edge endpoint ids match the node ids. Returns (edges, skipped_count).
+    A relation carrying the writer's ``target_id`` (enola >= 0.4.10) resolves
+    to that fact directly — it is enola's own unambiguous answer. Otherwise
+    the target is matched by fact name within the same snapshot; on ambiguity
+    same-repo targets are preferred, then the relation is skipped rather than
+    bound to an arbitrary fact. repo_path must be the same value given to
+    map_facts_to_data_points so that edge endpoint ids match the node ids.
+    Returns (edges, skipped_count).
     """
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
     valid_facts = []
     name_index: Dict[str, set] = {}
     short_name_index: Dict[str, set] = {}
+    enola_id_index: Dict[str, Tuple[str, str, str]] = {}
     fact_index: Dict[Tuple[str, str, str], dict] = {}
     module_index: Dict[Tuple[str, str], dict] = {}
     module_path_repos: Dict[str, set[str]] = {}
@@ -247,6 +297,10 @@ def build_code_graph_edges(
         name_index.setdefault(name, set()).add((repo, kind))
         for short_form in _short_target_names(name):
             short_name_index.setdefault(short_form, set()).add((repo, kind, name))
+        fact_id = fact.get("id")
+        if is_enola_id(fact_id):
+            # Records sharing an id share (repo, kind, name, file), hence the node.
+            enola_id_index.setdefault(fact_id, (repo, kind, name))
         fact_index.setdefault((repo, kind, name), fact)
         if kind == "module":
             module_index.setdefault((repo, name), fact)
@@ -321,7 +375,10 @@ def build_code_graph_edges(
                 continue
 
             relationship_name, target_name = normalized
-            target = _resolve_target(target_name, source_repo)
+            target_id = relation_target_id(relation)
+            target = enola_id_index.get(target_id) if target_id else None
+            if target is None:
+                target = _resolve_target(target_name, source_repo)
             if target is None and relationship_name == "calls" and not name_index.get(target_name):
                 for module_path in sorted(
                     module_path_repos, key=lambda value: (-len(value), value)
@@ -476,9 +533,11 @@ async def extract_code_graph(
 
     if receipt:
         logger.info(
-            "enola snapshot provenance: version=%s snapshot_id=%s",
+            "enola snapshot provenance: version=%s format_version=%s snapshot_id=%s facts=%s",
             receipt.get("enola_version"),
+            receipt.get("format_version"),
             receipt.get("snapshot_id"),
+            receipt.get("fact_count"),
         )
 
     snapshot_id = snapshot_identity(snapshot_dir, receipt)
@@ -787,7 +846,9 @@ async def add_code_graph_edges(
 
         # Stamp last: only a load that added, swept, and got here may record
         # its snapshot id, so a crashed run can never be skipped-past later.
-        await _stamp_snapshot_identity(graph_engine, facts, repo_path, snapshot_id, delta)
+        await _stamp_snapshot_identity(
+            graph_engine, facts, repo_path, snapshot_id, delta, receipt=receipt
+        )
     finally:
         # Direct edge writes, sweeps, and ledger writes may partially succeed.
         _invalidate_code_graph_snapshot(ctx)
@@ -875,17 +936,27 @@ async def _sweep_stale_code_graph(
     return len(stale_node_ids), len(stale_edges), _delta_samples(stale_node_names)
 
 
+def receipt_projection(receipt: Optional[dict]) -> Optional[dict]:
+    """The receipt.json fields kept on the repository node (see _RECEIPT_PROJECTION_KEYS)."""
+    if not isinstance(receipt, dict):
+        return None
+    projection = {key: receipt[key] for key in _RECEIPT_PROJECTION_KEYS if key in receipt}
+    return projection or None
+
+
 async def _stamp_snapshot_identity(
     graph_engine,
     facts: List[dict],
     repo_path: Optional[Union[str, Path]],
     snapshot_id: Optional[str],
     delta: Optional[dict] = None,
+    receipt: Optional[dict] = None,
 ) -> None:
-    """Record the loaded snapshot's identity and delta on the repository nodes."""
+    """Record the loaded snapshot's identity, delta and receipt on the repository nodes."""
     if snapshot_id is None:
         return
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
+    last_receipt = receipt_projection(receipt)
     repositories = [
         CodeRepository(
             id=fact_node_id(repo, "repository", repo),
@@ -893,6 +964,7 @@ async def _stamp_snapshot_identity(
             path=str(repo_path) if repo_path and repo == fallback_repo else repo,
             last_snapshot_id=snapshot_id,
             last_delta=delta,
+            last_receipt=last_receipt,
         )
         for repo in sorted(_snapshot_repos(facts, fallback_repo))
     ]

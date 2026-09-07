@@ -1,0 +1,16 @@
+{
+  "cogx_version": "0.1",
+  "source_system": "cognee",
+  "exported_at": "2026-09-03T21:40:01.865048Z",
+  "counts": {
+    "raw_node": 28,
+    "entity": 19,
+    "fact": 86
+  },
+  "embedding_model": "openai/text-embedding-3-large",
+  "migration_revision": "rekey_fork_document_ids",
+  "notes": [
+    "Exported from Cognee dataset 'demo_archive_seed'.",
+    "Bundled cognee-cli demo archive: trimmed to graph records so the import is zero-LLM and key-free (built by tools/build_demo_archive.py)."
+  ]
+}

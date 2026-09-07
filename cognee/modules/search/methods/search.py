@@ -470,6 +470,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
                 search_result_dict.update(_prompt_preview_fields(search_result))
+                search_result_dict["evidence"] = [
+                    reference.model_dump(mode="json") for reference in search_result.evidence
+                ]
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -486,6 +489,9 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
                     **_prompt_preview_fields(search_result),
+                    "evidence": [
+                        reference.model_dump(mode="json") for reference in search_result.evidence
+                    ],
                 }
                 return_value.append(search_result_dict)
             return return_value

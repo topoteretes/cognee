@@ -18,6 +18,11 @@ class CodeRepository(DataPoint):
     path: str
     last_snapshot_id: Optional[str] = None
     last_delta: Optional[dict] = None
+    # Projection of the snapshot's receipt.json (format_version, enola version,
+    # git provenance, counts and the extraction-quality block) stamped with
+    # the snapshot id, so SearchType.CODE's delta operation can report how the
+    # graph was produced and how complete the extraction was.
+    last_receipt: Optional[dict] = None
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -26,13 +31,20 @@ class CodeGraphEntity(DataPoint):
 
     fact_hash fingerprints the derived fields, so re-ingestion can write only
     the facts whose content actually changed (delta writes).
+
+    enola_id is the writer's own fact identity (32 hex chars over repo, kind,
+    name and file; enola >= 0.4.10). Cognee's node identity stays (repo, kind,
+    name) — see fact_node_id — so several enola ids can land on one node; the
+    first occurrence's id is kept. Historical snapshots carry none.
     """
 
     name: str
     kind: str
     file_path: Optional[str] = None
     line: Optional[int] = None
+    end_line: Optional[int] = None
     repo: Optional[str] = None
+    enola_id: Optional[str] = None
     description: Optional[str] = None
     fact_properties: dict[str, Any] = Field(default_factory=dict)
     fact_hash: Optional[str] = None
@@ -47,8 +59,9 @@ class CodeModule(CodeGraphEntity):
 class CodeSymbol(CodeGraphEntity):
     """A code symbol (enola fact kind: symbol).
 
-    symbol_kind is one of: function, method, struct, interface, type, class,
-    variable, constant, enum.
+    symbol_kind is one of the contract values function, method, getter, struct,
+    interface, type, class, variable, constant, enum — plus descriptive values
+    newer extractors add (e.g. document/section for markdown pages).
     """
 
     symbol_kind: Optional[str] = None
@@ -81,9 +94,40 @@ class CodeFileReference(CodeGraphEntity):
 class CodeInsight(CodeGraphEntity):
     """An architecture finding from an enola explainer (synthesized kind: insight).
 
-    enola 0.3.x explainers (hotspots, god-class, dependency-depth, cycles,
-    layers, exported-surface, complexity-outliers, ...) emit these into
-    insights.json. Each insight is linked to the facts it cites via
-    ``evidences`` edges. The explainer name and confidence live in
-    fact_properties ("source", "confidence").
+    enola explainers (cycles, layers, hotspots, god-class, dependency-depth,
+    exported-surface, complexity-outliers, dead-methods, unused-routes, ...)
+    emit these into insights.json. Each insight is linked to the facts it
+    cites via ``evidences`` edges (resolved through the evidence's ``fact_id``
+    when the writer supplied one). The explainer name, confidence, the
+    machine-readable ``metrics`` block and the ``informational`` flag live in
+    fact_properties.
     """
+
+
+class CodeIntent(CodeGraphEntity):
+    """Architecture declared in enola-intent.yaml, not measured from source (kind: intent).
+
+    intent_kind (service, seam/consumes, layer, claim, page, ...) and the
+    declaration file live in fact_properties.
+    """
+
+
+class CodeExtractionAccount(CodeGraphEntity):
+    """An extractor's own coverage account for one repo (kind: extraction).
+
+    Named ``<extractor>:<account>`` (e.g. ``ruby:calls``); carries the
+    extractor, language, edge_coverage and unresolved_* counters, so a thin
+    graph can be told apart from a thin extraction.
+    """
+
+
+class CodeAssociation(CodeGraphEntity):
+    """A framework model relationship such as Rails has_many/belongs_to (kind: association).
+
+    Named ``Model#macro`` (or ``Child<Parent`` for an STI chain); model, macro,
+    target and through live in fact_properties.
+    """
+
+
+class CodeLintFinding(CodeGraphEntity):
+    """A finding an external linter reported through enola's provider seam (kind: lint)."""

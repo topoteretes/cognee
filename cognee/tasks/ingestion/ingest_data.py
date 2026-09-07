@@ -1,6 +1,8 @@
 import json
 import inspect
 import os
+from pathlib import Path
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 from typing import TYPE_CHECKING, Union, BinaryIO, Any, List, Optional
 
@@ -72,6 +74,42 @@ def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional
         and getattr(pipeline_dataset, "tenant_id", None) == getattr(user, "tenant_id", None)
     ):
         return pipeline_dataset
+    return None
+
+
+def _source_uri_from_input(data_item: Any) -> Optional[str]:
+    """Return an origin locator without ever treating raw text as a URI.
+
+    HTTP content is materialized into Cognee storage before metadata is read, so
+    its original URL would otherwise be lost. File and object-storage locators
+    are preserved as well; ordinary text input deliberately returns ``None``.
+    """
+    if isinstance(data_item, DataItem):
+        metadata = data_item.external_metadata
+        if isinstance(metadata, dict):
+            explicit = metadata.get("source_uri")
+            if isinstance(explicit, str) and explicit.strip():
+                return explicit.strip()
+        data_item = data_item.data
+
+    if isinstance(data_item, str):
+        parsed = urlparse(data_item)
+        if parsed.scheme.lower() in {"http", "https", "s3", "file"}:
+            return data_item
+        try:
+            path = Path(data_item)
+            if path.is_absolute() or path.is_file():
+                return path.resolve().as_uri()
+        except (OSError, ValueError):
+            return None
+        return None
+
+    filename = getattr(data_item, "filename", None) or getattr(data_item, "name", None)
+    if isinstance(filename, str) and filename and not filename.startswith("<"):
+        try:
+            return Path(filename).resolve().as_uri()
+        except (OSError, ValueError):
+            return None
     return None
 
 
@@ -166,6 +204,7 @@ async def ingest_data(
         for data_item in data:
             underlying_data = data_item.data if isinstance(data_item, DataItem) else data_item
             item_data_id = data_item.data_id if isinstance(data_item, DataItem) else None
+            source_uri = _source_uri_from_input(data_item)
 
             # The incremental wrapper already saved and hashed this item —
             # match by identity first; a path item whose string the in-chain
@@ -198,6 +237,7 @@ async def ingest_data(
                 "item_content_hash": item_content_hash,
                 "item_data_id": item_data_id,
                 "data_id": None,  # resolved below
+                "source_uri": source_uri,
             }
             unique_content_hashes.add(item_content_hash)
         logger.info(
@@ -366,6 +406,14 @@ async def ingest_data(
             # Merge DataItem.external_metadata if present
             if item_external_metadata:
                 ext_metadata.update(item_external_metadata)
+
+            source_uri = cached.get("source_uri")
+            if source_uri:
+                cognee_metadata = ext_metadata.get("_cognee")
+                if not isinstance(cognee_metadata, dict):
+                    cognee_metadata = {}
+                    ext_metadata["_cognee"] = cognee_metadata
+                cognee_metadata.setdefault("source_uri", source_uri)
 
             if node_set:
                 ext_metadata["node_set"] = node_set

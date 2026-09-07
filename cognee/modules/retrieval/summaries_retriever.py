@@ -105,11 +105,15 @@ class SummariesRetriever(BaseRetriever):
         Returns:
         --------
 
-            - List[dict]: A list of payloads of found summaries.
+            - List[dict]: A list of payloads of found summaries. Each payload carries the
+              vector search ``score`` of the summary: the raw backend distance (cosine
+              distance for built-in adapters), where a lower value is a better match.
         """
         # TODO: Do we want to generate a completion using LLM here?
         if retrieved_objects:
-            summary_payloads = [summary.payload for summary in retrieved_objects]
+            summary_payloads = [
+                {**(summary.payload or {}), "score": summary.score} for summary in retrieved_objects
+            ]
             logger.info(f"Returning {len(summary_payloads)} summary payloads")
             return summary_payloads
         else:

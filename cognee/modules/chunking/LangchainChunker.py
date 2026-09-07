@@ -18,6 +18,8 @@ class LangchainChunker(Chunker):
     a chunk if the split would result in a chunk with fewer than the given overlap tokens.
     """
 
+    chunker_id = "langchain_chunker_v1"
+
     def __init__(
         self,
         document,
@@ -45,6 +47,7 @@ class LangchainChunker(Chunker):
                 token_count = embedding_engine.tokenizer.count_tokens(chunk)
                 if token_count <= self.max_chunk_size:
                     yield DocumentChunk(
+                        chunker_id=self.chunker_id,
                         id=uuid5(NAMESPACE_OID, chunk),
                         text=chunk,
                         chunk_size=token_count,

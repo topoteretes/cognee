@@ -11,7 +11,11 @@ from .resolve_data_id import resolve_data_id
 
 
 async def get_data(
-    user_id: UUID, data_id: UUID, dataset_id: Optional[UUID] = None
+    user_id: UUID,
+    data_id: UUID,
+    dataset_id: Optional[UUID] = None,
+    *,
+    verify_owner: bool = True,
 ) -> Optional[Data]:
     """Retrieve data by ID.
 
@@ -28,6 +32,13 @@ async def get_data(
         user_id (UUID): user ID
         data_id (UUID): ID of the data to retrieve (current or pre-fork)
         dataset_id (Optional[UUID]): dataset scope for precise resolution
+        verify_owner (bool): reject a row owned by another user. Pass False
+            only when the caller has ALREADY authorized through dataset
+            permissions and scoped the lookup to that dataset — row ownership
+            is not the access rule there (``datasets.delete_data`` grants a
+            collaborator with the dataset ACL access to rows they do not own,
+            so a path that also runs on dataset permissions must not be
+            stricter).
 
     Returns:
         Optional[Data]: The requested data object if found, None otherwise
@@ -45,11 +56,11 @@ async def get_data(
             if resolved_id is None:
                 return None
             data = await session.get(Data, resolved_id)
-            _check_owner(data, user_id, data_id)
+            _check_owner(data, user_id, data_id, verify_owner)
             return data
 
         data = await session.get(Data, data_id)
-        _check_owner(data, user_id, data_id)
+        _check_owner(data, user_id, data_id, verify_owner)
 
         forks = (
             await session.execute(
@@ -76,8 +87,10 @@ async def get_data(
         raise AmbiguousDataIdError(data_id, candidates)
 
 
-def _check_owner(data: Optional[Data], user_id: UUID, data_id: UUID) -> None:
-    if data and data.owner_id != user_id:
+def _check_owner(
+    data: Optional[Data], user_id: UUID, data_id: UUID, verify_owner: bool = True
+) -> None:
+    if verify_owner and data and data.owner_id != user_id:
         raise UnauthorizedDataAccessError(
             message=f"User {user_id} is not authorized to access data {data_id}"
         )

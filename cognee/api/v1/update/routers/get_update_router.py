@@ -1,10 +1,10 @@
 from fastapi.responses import JSONResponse
 from fastapi import File, UploadFile as UF, Depends, Form, Query, status
-from typing import Optional, Annotated, Dict
+from typing import Optional, Annotated, Dict, Literal, Union
 from fastapi import APIRouter
 from typing import List
 from uuid import UUID
-from pydantic import WithJsonSchema
+from pydantic import BaseModel, WithJsonSchema
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -24,12 +24,22 @@ UploadFile = Annotated[UF, WithJsonSchema({"type": "string", "format": "binary"}
 logger = get_logger()
 
 
+class IncrementalUpdateResponse(BaseModel):
+    status: Literal["incremental", "unchanged"]
+    regions: int
+    deleted_chunks: int
+    added_chunks: int
+    reused_chunks: int
+    kept_chunks: int
+    reindexed_chunks: int
+
+
 def get_update_router() -> APIRouter:
     router = APIRouter()
 
     @router.patch(
         "",
-        response_model=Dict[UUID, PipelineRunInfo],
+        response_model=Union[IncrementalUpdateResponse, Dict[UUID, PipelineRunInfo]],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -53,15 +63,23 @@ def get_update_router() -> APIRouter:
         data: List[UploadFile] = File(
             ...,
             description=(
-                "New version of the document that replaces the existing one. The existing "
-                "document is deleted before the replacement is ingested, so always provide "
-                "a file."
+                "New version of the document that replaces the existing one. With "
+                "chunk_level_diff enabled (default) only the chunks affected by the "
+                "edit are replaced; otherwise the document is deleted and re-ingested."
             ),
         ),
         node_set: Optional[List[str]] = Form(
             default=[""],
             examples=[["user_memories"]],
             description="Node identifiers for graph organization and access control.",
+        ),
+        chunk_level_diff: bool = Query(
+            default=True,
+            description=(
+                "Diff the new content against the stored text and re-ingest only the "
+                "affected chunks. Falls back to the full delete + re-add + cognify flow "
+                "when chunk-level preconditions are not met."
+            ),
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -78,9 +96,16 @@ def get_update_router() -> APIRouter:
         - **data** (List[UploadFile]): New version of the document that replaces the existing one.
         - **node_set** (Optional[List[str]]): List of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
+        - **chunk_level_diff** (bool, query, default true): Replace only the chunks affected
+                 by the edit instead of re-ingesting the whole document.
 
         ## Response
-        Returns pipeline run information for the update (delete + re-add + cognify) operation.
+        With chunk_level_diff, a summary of the incremental operation (same keys for
+        either status):
+        `{"status": "incremental" | "unchanged", "regions": n, "deleted_chunks": n,
+        "added_chunks": n, "reused_chunks": n, "kept_chunks": n, "reindexed_chunks": n}`.
+        When the full flow runs (chunk_level_diff disabled, or its preconditions not met),
+        pipeline run information for the delete + re-add + cognify operation.
 
         ## Error Codes
         - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
@@ -88,7 +113,8 @@ def get_update_router() -> APIRouter:
         - **500 Internal Server Error**: Pipeline run errored or an unexpected error occurred during the update
 
         ## Notes
-        - The existing document is deleted and replaced by the uploaded file, then the dataset is re-cognified.
+        - Chunk-level updates keep unaffected chunks, their entities, and their summaries
+          untouched; only the edited region is re-extracted.
         """
         send_telemetry(
             "Update API Endpoint Invoked",
@@ -110,8 +136,13 @@ def get_update_router() -> APIRouter:
                 data=data,
                 dataset_id=dataset_id,
                 user=user,
-                node_set=node_set if node_set else None,
+                node_set=node_set if node_set and node_set != [""] else None,
+                chunk_level_diff=chunk_level_diff,
             )
+
+            # Chunk-level path returns its own summary dict, no pipeline runs.
+            if isinstance(update_run, dict) and "status" in update_run:
+                return update_run
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in update_run.values()):

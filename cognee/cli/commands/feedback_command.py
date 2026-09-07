@@ -51,43 +51,65 @@ Subcommands:
             fmt.error("Provide at least --text or --score.")
             raise CliCommandException("No feedback content provided", error_code=1)
 
-        async def run():
+        sid = args.session_id
+
+        async def run() -> bool:
             from cognee.api.v1.session import add_feedback
             from cognee.cli.user_resolution import resolve_cli_user
 
             user = await resolve_cli_user(getattr(args, "user_id", None))
-            sid = args.session_id
-
-            ok = await add_feedback(
+            return await add_feedback(
                 session_id=sid,
                 qa_id=args.qa_id,
                 feedback_text=args.text,
                 feedback_score=args.score,
                 user=user,
             )
-            if ok:
-                fmt.success(f"Feedback added to entry {args.qa_id} in session {sid}.")
-            else:
-                fmt.error("Failed to add feedback. Check session/qa IDs.")
 
-        asyncio.run(run())
+        ok = self._run(run(), "Error adding feedback")
+        if not ok:
+            raise CliCommandException(
+                _not_found_message("Feedback not added", args.qa_id, sid), error_code=1
+            )
+        fmt.success(f"Feedback added to entry {args.qa_id} in session {sid}.")
 
     def _delete(self, args: argparse.Namespace) -> None:
-        async def run():
+        sid = args.session_id
+
+        async def run() -> bool:
             from cognee.api.v1.session import delete_feedback
             from cognee.cli.user_resolution import resolve_cli_user
 
             user = await resolve_cli_user(getattr(args, "user_id", None))
-            sid = args.session_id
-
-            ok = await delete_feedback(
+            return await delete_feedback(
                 session_id=sid,
                 qa_id=args.qa_id,
                 user=user,
             )
-            if ok:
-                fmt.success(f"Feedback cleared from entry {args.qa_id} in session {sid}.")
-            else:
-                fmt.error("Failed to clear feedback. Check session/qa IDs.")
 
-        asyncio.run(run())
+        ok = self._run(run(), "Error clearing feedback")
+        if not ok:
+            raise CliCommandException(
+                _not_found_message("Feedback not cleared", args.qa_id, sid), error_code=1
+            )
+        fmt.success(f"Feedback cleared from entry {args.qa_id} in session {sid}.")
+
+    @staticmethod
+    def _run(coro, error_prefix: str) -> bool:
+        """Run the session call, surfacing infrastructure failures as CLI errors.
+
+        The session API raises on anything that is not a plain "not found"
+        (unreachable cache, misconfigured backend, invalid ids), so a failure
+        here is a real error and must not be reported as a missing entry.
+        """
+        try:
+            return asyncio.run(coro)
+        except Exception as e:
+            raise CliCommandException(f"{error_prefix}: {str(e)}", error_code=1) from e
+
+
+def _not_found_message(prefix: str, qa_id: str, session_id: str) -> str:
+    return (
+        f"{prefix}: no Q&A entry {qa_id} in session {session_id}, or caching is disabled. "
+        "Check the session and qa IDs and the CACHING setting."
+    )

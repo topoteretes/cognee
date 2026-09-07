@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Check out core repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -65,7 +65,7 @@ jobs:
           echo "docs_branch_name=${SAFE_DOCS_BRANCH_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
 
       - name: Install Python
         run: uv python install
@@ -74,7 +74,7 @@ jobs:
         run: uv sync --locked --all-extras
 
       - name: Check out docs repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           repository: topoteretes/cognee-docs
           token: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}

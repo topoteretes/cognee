@@ -32,6 +32,11 @@ Env:
   AWS_DEFAULT_REGION     — default: eu-west-1
   PERF_BUCKET            — default: github-runner-cognee-tests
   PERF_PREFIX            — default: performance_results
+  PERF_REFRESH_VIEWS     — 'false' skips the CREATE OR REPLACE VIEW pass and
+                           only loads new rows. The nightly sets this on the
+                           weekly main run so view definitions always come from
+                           the daily dev run: two refs running this script would
+                           otherwise make them last-writer-wins.
 """
 
 import os
@@ -71,6 +76,13 @@ VIEWS = {
                        '^(.*)_(\\d{{4}}-\\d{{2}}-\\d{{2}}_\\d{{2}}-\\d{{2}}-\\d{{2}}Z)$',
                        ['mode', 'ts']) AS s,
                    coalesce(nullif(p.backend_raw, ''), 'file_based') AS backend,
+                   -- Stamped by the perf workflows' "Stamp run provenance" step.
+                   -- Rows written before that step existed carry none of it. They
+                   -- are defaulted to 'main': the cron only ever fired on the
+                   -- default branch, so all but a handful of hand-dispatched
+                   -- validation runs really are main, and defaulting this way
+                   -- keeps main's baseline continuous.
+                   coalesce(nullif(report ->> '$.branch', ''), 'main') AS branch,
                    p.backend_raw = '' AS legacy_path
             FROM parsed
         )
@@ -82,6 +94,7 @@ VIEWS = {
             -- Callers that want a day should cast: run_ts::DATE.
             strptime(s.ts, '%Y-%m-%d_%H-%M-%SZ')            AS run_ts,
             backend,
+            branch,
             legacy_path,
             CASE WHEN backend LIKE 'rust\\_%' ESCAPE '\\' THEN 'rust' ELSE 'python' END AS sdk,
             regexp_replace(backend, '^rust_', '')           AS store,
@@ -90,12 +103,21 @@ VIEWS = {
             concat_ws('/',
                 CASE WHEN backend LIKE 'rust\\_%' ESCAPE '\\' THEN 'rust' ELSE 'python' END,
                 regexp_replace(backend, '^rust_', ''), p.label, s.mode) AS suite,
+            -- `suite` is deliberately UNCHANGED so no existing dashboard chart
+            -- breaks. `series` is the branch-qualified key; it is what
+            -- v_perf_regression partitions on and what a time-series chart
+            -- should group by once its owner migrates. Opt-in, not forced.
+            concat_ws('/', branch,
+                CASE WHEN backend LIKE 'rust\\_%' ESCAPE '\\' THEN 'rust' ELSE 'python' END,
+                regexp_replace(backend, '^rust_', ''), p.label, s.mode) AS series,
             (report ->> '$.num_runs')::INT                   AS num_runs,
             (report ->> '$.succeeded')::INT                  AS succeeded,
             (report ->> '$.failed')::INT                     AS failed,
             (report ->> '$.succeeded')::INT = (report ->> '$.num_runs')::INT AS all_passed,
             report ->> '$.git_sha'                           AS git_sha,
             report ->> '$.run_id'                            AS run_id,
+            report ->> '$.run_attempt'                       AS run_attempt,
+            report ->> '$.event'                             AS event,
             report ->> '$.config.llm_model'                  AS llm_model,
             report ->> '$.config.embedding_model'            AS embedding_model,
             report ->> '$.config.embedding_dimensions'       AS embedding_dimensions,
@@ -108,36 +130,48 @@ VIEWS = {
     # metric + stat and group by suite; this survives per-backend metric drift.
     "v_perf_metrics": """
         WITH per_metric AS (
-            SELECT r.s3_key, r.run_ts, r.suite, r.sdk, r.store, r.label, r.mode,
-                   r.git_sha, r.all_passed,
+            SELECT r.s3_key, r.run_ts, r.branch, r.series, r.suite, r.sdk, r.store,
+                   r.label, r.mode, r.git_sha, r.all_passed,
                    m.metric                            AS metric,
                    raw.report -> '$.stats' -> m.metric AS mstats
             FROM {t}.v_perf_runs r
             JOIN {t}.raw_perf_reports raw USING (s3_key),
                  UNNEST(json_keys(raw.report, '$.stats')) AS m(metric)
         )
-        SELECT s3_key, run_ts, suite, sdk, store, label, mode, git_sha, all_passed,
-               metric, st.stat AS stat, (mstats ->> st.stat)::DOUBLE AS value_s
+        SELECT s3_key, run_ts, branch, series, suite, sdk, store, label, mode, git_sha,
+               all_passed, metric, st.stat AS stat, (mstats ->> st.stat)::DOUBLE AS value_s
         FROM per_metric, UNNEST(json_keys(mstats)) AS st(stat)
     """,
-    # Latest run vs the median of the previous seven, per suite/metric/stat.
+    # Latest run vs the median of the previous seven, per series/metric/stat.
     "v_perf_regression": """
         WITH ranked AS (
             SELECT *, row_number() OVER (
-                       PARTITION BY suite, metric, stat ORDER BY run_ts DESC) AS rn
+                       -- series, not suite: without the branch in the key a
+                       -- weekly main run becomes rn=1 for a suite whose baseline
+                       -- is seven dev runs, silently.
+                       PARTITION BY series, metric, stat ORDER BY run_ts DESC) AS rn
             FROM {t}.v_perf_metrics
             WHERE stat IN ('p50', 'p90', 'p99')
+              -- A failed run's placeholder timings must never become a baseline.
+              AND all_passed
         )
-        SELECT suite, metric, stat,
+        -- `suite` is kept (functionally determined by series) so existing
+        -- queries still resolve; they now get one row per branch and should
+        -- add `WHERE branch = 'dev'`.
+        SELECT branch, series, suite, metric, stat,
                max(run_ts) FILTER (WHERE rn = 1)                   AS latest_ts,
                max(value_s) FILTER (WHERE rn = 1)                  AS latest_s,
                median(value_s) FILTER (WHERE rn BETWEEN 2 AND 8)   AS baseline_s,
+               -- "the previous 7 runs" is 7 days on the daily dev series but up
+               -- to 7 WEEKS on the weekly main series. Read the window before
+               -- trusting pct_change.
+               min(run_ts)  FILTER (WHERE rn BETWEEN 2 AND 8)      AS baseline_from_ts,
                round(100.0 * (max(value_s) FILTER (WHERE rn = 1)
                      - median(value_s) FILTER (WHERE rn BETWEEN 2 AND 8))
                      / nullif(median(value_s) FILTER (WHERE rn BETWEEN 2 AND 8), 0), 1)
                                                                    AS pct_change
         FROM ranked WHERE rn <= 8
-        GROUP BY suite, metric, stat
+        GROUP BY branch, series, suite, metric, stat
     """,
 }
 
@@ -190,6 +224,10 @@ def main() -> int:
     )
     after = con.execute(f"SELECT count(*) FROM {TGT}.raw_perf_reports").fetchone()[0]
     print(f"raw_perf_reports: {after} reports (+{after - before} new)")
+
+    if os.environ.get("PERF_REFRESH_VIEWS", "true").lower() == "false":
+        print("PERF_REFRESH_VIEWS=false — rows loaded, views left as-is.")
+        return 0
 
     failures = 0
     for name, sql in VIEWS.items():

@@ -1,10 +1,7 @@
 from typing import List
 
 from cognee import memify
-from cognee.context_global_variables import (
-    set_database_global_context_variables,
-    set_session_user_context_variable,
-)
+from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
@@ -54,20 +51,21 @@ async def apply_frequency_weights_pipeline(
             log=False,
         )
 
-    async with set_database_global_context_variables(
-        dataset_to_write[0].id, dataset_to_write[0].owner_id
-    ):
-        extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
-        enrichment_tasks = [Task(apply_frequency_weights, task_config={"batch_size": batch_size})]
+    extraction_tasks = [Task(extract_feedback_qas, session_ids=session_ids)]
+    enrichment_tasks = [Task(apply_frequency_weights, task_config={"batch_size": batch_size})]
 
-        result = await memify(
-            extraction_tasks=extraction_tasks,
-            enrichment_tasks=enrichment_tasks,
-            dataset=dataset_to_write[0].id,
-            data=[{}],
-            user=user,
-            run_in_background=run_in_background,
-        )
+    # No set_database_global_context_variables scope around memify: the pipeline
+    # enters it itself under the dataset lock. Holding the scope's queue slot
+    # while memify waits on that lock inverts the canonical order
+    # (dataset lock -> queue slot) and can deadlock the process (SDK-483).
+    result = await memify(
+        extraction_tasks=extraction_tasks,
+        enrichment_tasks=enrichment_tasks,
+        dataset=dataset_to_write[0].id,
+        data=[{}],
+        user=user,
+        run_in_background=run_in_background,
+    )
 
     logger.info(
         "Frequency weight memify pipeline completed",

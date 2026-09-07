@@ -10,6 +10,8 @@ logger = get_logger()
 
 
 class CsvChunker(Chunker):
+    chunker_id = "csv_chunker_v1"
+
     async def read(self):
         document_id = str(self.document.id)
         document_name = self.document.name or basename(self.document.raw_data_location)
@@ -20,6 +22,7 @@ class CsvChunker(Chunker):
             for chunk_data in chunk_by_row(content_text, self.max_chunk_size):
                 if chunk_data["chunk_size"] <= self.max_chunk_size:
                     yield DocumentChunk(
+                        chunker_id=self.chunker_id,
                         id=chunk_data["chunk_id"],
                         text=chunk_data["text"],
                         chunk_size=chunk_data["chunk_size"],

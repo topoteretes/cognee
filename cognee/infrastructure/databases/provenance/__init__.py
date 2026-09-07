@@ -12,7 +12,10 @@ from .source_refs import (
     get_dataset_id_from_source_ref_key,
     get_pipeline_run_id_from_source_run_ref,
     get_source_ref_key_from_source_run_ref,
+    make_chunk_source_ref_key,
     make_source_ref_key,
+    parse_source_ref_key,
+    ParsedSourceRef,
     make_source_run_ref,
 )
 from .write_context import (
@@ -35,7 +38,10 @@ __all__ = [
     "get_dataset_id_from_source_ref_key",
     "get_pipeline_run_id_from_source_run_ref",
     "get_source_ref_key_from_source_run_ref",
+    "make_chunk_source_ref_key",
     "make_source_ref_key",
+    "parse_source_ref_key",
+    "ParsedSourceRef",
     "make_source_run_ref",
     "data_item_id",
     "graph_provenance_write_kwargs",

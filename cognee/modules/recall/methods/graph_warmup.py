@@ -150,8 +150,19 @@ async def get_graph_build_status(user, dataset_ids: list[UUID] | None) -> Warmup
                 error_message=latest_errored[1],
             )
 
+        # Operation records also use pipeline_runs, but intentionally leave
+        # pipeline_name NULL. They are activity evidence, not graph readiness.
         any_run = (
-            await session.execute(select(exists().where(PipelineRun.dataset_id.in_(ids))))
+            await session.execute(
+                select(
+                    exists().where(
+                        and_(
+                            PipelineRun.dataset_id.in_(ids),
+                            PipelineRun.pipeline_name.isnot(None),
+                        )
+                    )
+                )
+            )
         ).scalar()
 
     if any_run:

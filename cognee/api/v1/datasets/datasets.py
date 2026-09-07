@@ -2,6 +2,7 @@ import asyncio
 from uuid import UUID
 from typing import Optional
 
+from cognee.api.v1.datasets.dto import DataDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.users.models import User
@@ -129,6 +130,17 @@ class datasets:
     @staticmethod
     async def list_data(dataset_id: UUID, user: Optional[User] = None):
         from cognee.modules.data.methods import get_dataset_data
+
+        # Route to the remote instance when connected via serve(): the dataset
+        # lives on the server, so the local store would report it missing.
+        # Rows are parsed through the same DTO the server serializes them
+        # with, so callers read the same attributes (``row.id`` as a UUID,
+        # ``row.mime_type`` not ``mimeType``) in both modes.
+        from cognee.api.v1.serve.state import get_remote_client
+
+        client = get_remote_client()
+        if client is not None:
+            return [DataDTO.model_validate(row) for row in await client.list_data(dataset_id)]
 
         if not user:
             user = await get_default_user()

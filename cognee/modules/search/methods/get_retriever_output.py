@@ -1,6 +1,10 @@
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.context_preview import ContextPreview, build_context_preview
 from cognee.modules.retrieval.session_aware_completion import run_session_aware_completion
+from cognee.modules.retrieval.utils.evidence import (
+    append_source_evidence_text,
+    graph_source_evidence,
+)
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
@@ -49,6 +53,19 @@ def _dataset_fields(kwargs: dict) -> dict:
     }
 
 
+def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> list:
+    """Structured evidence for the artifacts the retriever placed into context."""
+    evidence_method = getattr(retriever_instance, "get_context_evidence", None)
+    if not callable(evidence_method):
+        return []
+    dataset = kwargs.get("dataset")
+    try:
+        return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None))
+    except Exception as error:
+        logger.warning("Unable to build structured context evidence: %s", error)
+        return []
+
+
 async def get_retriever_output(
     query_type: SearchType, query_text: str, **kwargs
 ) -> SearchResultPayload:
@@ -92,10 +109,24 @@ async def get_retriever_output(
             shared_history=kwargs.get("shared_history"),
         )
 
+    evidence = []
+    if kwargs.get("include_references", False):
+        evidence = _context_evidence(retriever_instance, retrieved_objects, kwargs)
+        dataset = kwargs.get("dataset")
+        if dataset is not None and any(reference.kind == "graph_edge" for reference in evidence):
+            # Indexed relational sidecar lookup; cheap next to the LLM
+            # completion that already ran inside the session-aware door.
+            try:
+                evidence.extend(await graph_source_evidence(evidence, getattr(dataset, "id", None)))
+                completion = append_source_evidence_text(completion, evidence)
+            except Exception as error:
+                logger.warning("Unable to resolve graph source evidence: %s", error)
+
     return SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
+        evidence=evidence,
         search_type=effective_query_type,
         only_context=only_context,
         question=query_text,

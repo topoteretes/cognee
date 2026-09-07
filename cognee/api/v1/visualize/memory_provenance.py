@@ -450,8 +450,7 @@ async def _read_memory_graph_provenance(
 
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
-        get_data_id_from_source_ref_key,
-        get_dataset_id_from_source_ref_key,
+        parse_source_ref_key,
     )
     from cognee.infrastructure.databases.provenance.markers import (
         stores_provenance_in_graph,
@@ -507,13 +506,21 @@ async def _read_memory_graph_provenance(
         if node_id in internal_ids:
             continue
         for source_ref_key in refs:
-            links.append(
-                {
-                    "node_id": node_id,
-                    "data_id": str(get_data_id_from_source_ref_key(source_ref_key)),
-                    "dataset_id": str(get_dataset_id_from_source_ref_key(source_ref_key)),
-                }
-            )
+            # v1 refs are document-scoped; v2 refs additionally name the
+            # producing chunk. Foreign formats are skipped, never crash the
+            # visualization.
+            try:
+                parsed = parse_source_ref_key(source_ref_key)
+            except ValueError:
+                continue
+            link = {
+                "node_id": node_id,
+                "data_id": str(parsed.data_id),
+                "dataset_id": str(parsed.dataset_id),
+            }
+            if parsed.chunk_id is not None:
+                link["chunk_id"] = str(parsed.chunk_id)
+            links.append(link)
 
     if not nodes:
         return None

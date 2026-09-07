@@ -377,12 +377,27 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
 
 def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
     everything = getattr(args, "everything", False)
-    dataset = getattr(args, "dataset_name", None)
+    # ForgetCommand's own flag is --dataset (-> args.dataset), not --dataset-name;
+    # reading dataset_name here always returned None, silently dropping --dataset
+    # in --api-url mode.
+    dataset = getattr(args, "dataset", None)
     dataset_id = getattr(args, "dataset_id", None)
     data_id = getattr(args, "data_id", None)
+    memory_only = getattr(args, "memory_only", False)
+    if dataset and dataset_id:
+        fmt.error("Provide either --dataset or --dataset-id, not both.")
+        return
     if not everything and not dataset and not dataset_id and not data_id:
+        fmt.error("Specify --dataset or --dataset-id, --data-id with dataset, or --everything.")
+        return
+    if data_id and not dataset and not dataset_id:
+        fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+        return
+    if everything and memory_only:
         fmt.error(
-            "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
+            "--memory-only has no effect with --everything: everything deletes all "
+            "datasets and data outright. Specify --dataset or --dataset-id with "
+            "--memory-only instead."
         )
         return
     result = client.forget(
@@ -390,5 +405,6 @@ def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
         dataset_id=dataset_id,
         data_id=data_id,
         everything=everything,
+        memory_only=memory_only,
     )
     fmt.success(f"Done: {result}")

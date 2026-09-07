@@ -121,7 +121,10 @@ class SearchPayloadDTO(InDTO):
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
-            "explore, traverse, find_path, or impact_analysis."
+            "explore, traverse, find_path, impact_analysis, insights, architecture, or "
+            "delta. Add diagram='mermaid' (or 'dot', or true) to receive the result "
+            "rendered as diagram source under search_result[0].diagram; architecture "
+            "includes a Mermaid diagram unless diagram=false."
         ),
     )
 
