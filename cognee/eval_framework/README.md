@@ -41,8 +41,8 @@ Key flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--benchmark, -b` | Benchmark dataset (`HotPotQA`, `Musique`, `TwoWikiMultiHop`, `Dummy`, …). Once registered, `LongMemEval` works here too. |
-| `--engine, -e` | `direct_llm` (uses the LLM from your `.env`) or `deepeval` (requires the `eval` extra). |
+| `--benchmark, -b` | Benchmark dataset (`HotPotQA`, `Musique`, `TwoWikiMultiHop`, `BEAM`, `LoCoMo`, `Dummy`, …). Once registered, `LongMemEval` works here too. |
+| `--engine, -e` | `direct_llm` (uses the LLM from your `.env`) or `deepeval` (requires the `eval` extra). BEAM and LoCoMo also ship dedicated engines (`BeamEval`, `LocomoEval`) used by their own runners. |
 | `--limit, -n` | Number of samples in the corpus. |
 | `--seed` | Seed for deterministic corpus sampling (default: `42`). |
 | `--qa-engine` | Retriever used to answer questions (default: `cognee_graph_completion`). |
@@ -92,3 +92,10 @@ the runner and CLI with no further wiring:
 ```bash
 cognee eval --benchmark <YourBenchmark> --engine direct_llm
 ```
+
+## Conversational-memory benchmarks
+
+BEAM (`cognee/eval_framework/beam/`) and LoCoMo (`cognee/eval_framework/locomo/`, see its
+README) have dedicated ingestion + sweep runners on top of this harness. LoCoMo ingests through
+the memory API (`remember(session_id=...)` then `improve()`) and scores with token-F1 plus a
+binary LLM judge on a separate judge model.

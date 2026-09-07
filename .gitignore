@@ -213,3 +213,6 @@ rendered.yaml
 
 # enola code-graph snapshots (written into any repository enola scans)
 .enola/
+
+# Local benchmark / eval run artifacts (BEAM and LoCoMo default output dirs)
+temp/
