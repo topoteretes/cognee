@@ -472,12 +472,10 @@ async def test_get_neighborhood_edge_filter_handles_cycles(adapter):
 
 # ---------------------------------------------------------------------------
 # get_predecessors / get_successors
-# Known adapter bug: RETURN properties(m) fails with current Kuzu version.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="KuzuAdapter bug: RETURN properties(m) not supported in current Kuzu")
 async def test_predecessors_and_successors(adapter):
     kg = _load_demo_kg()
     await adapter.add_nodes(kg.nodes)
@@ -487,11 +485,18 @@ async def test_predecessors_and_successors(adapter):
 
     # Alice->Mark (knows), so Mark's predecessors with "knows" should include Alice
     predecessors = await adapter.get_predecessors("Mark", edge_label="knows")
-    assert len(predecessors) > 0
+    assert [node["id"] for node in predecessors] == ["Alice"]
+    # Custom properties are merged into the node dict, not returned as a JSON blob.
+    assert predecessors[0]["name"] == "Alice"
+    assert predecessors[0]["description"] == "Person mentioned in the text"
 
-    # Mark->Bob (had_dinner_with), so Mark's successors should include Bob
+    # Mark->Bob and Mark->Alice (had_dinner_with) are Mark's successors on that label
     successors = await adapter.get_successors("Mark", edge_label="had_dinner_with")
-    assert len(successors) > 0
+    assert sorted(node["id"] for node in successors) == ["Alice", "Bob"]
+
+    # Without an edge label every outgoing neighbour is returned.
+    unfiltered = await adapter.get_successors("Mark")
+    assert sorted(node["id"] for node in unfiltered) == ["Alice", "Bob"]
 
 
 # ---------------------------------------------------------------------------
@@ -516,12 +521,10 @@ async def test_get_graph_metrics(adapter):
 
 # ---------------------------------------------------------------------------
 # get_disconnected_nodes
-# Known adapter bug: NOT EXISTS((n)-[]-()) syntax not supported in current Kuzu.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="KuzuAdapter bug: NOT EXISTS pattern syntax unsupported")
 async def test_get_disconnected_nodes(adapter):
     kg = _load_demo_kg()
     await adapter.add_nodes(kg.nodes)
@@ -535,7 +538,7 @@ async def test_get_disconnected_nodes(adapter):
     await adapter.add_edges(edge_rows)
 
     disconnected_after = await adapter.get_disconnected_nodes()
-    assert len(disconnected_after) < len(disconnected)
+    assert disconnected_after == []
 
 
 # ---------------------------------------------------------------------------
