@@ -24,6 +24,12 @@ def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str
 
 
 class LexicalRetriever(BaseRetriever):
+    # Lexical search scores chunks locally and never calls an LLM, so the conversational
+    # session-turn analysis would add a pre-retrieval LLM round trip to an otherwise
+    # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
+    # Inherited by BM25ChunksRetriever and JaccardChunksRetriever.
+    supports_session_turn_preparation = False
+
     def __init__(
         self, tokenizer: Callable, scorer: Callable, top_k: int = 15, with_scores: bool = False
     ):

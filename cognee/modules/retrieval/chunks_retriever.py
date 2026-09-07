@@ -20,6 +20,11 @@ class ChunksRetriever(BaseRetriever):
     not given.
     """
 
+    # Chunk search returns raw payloads and never calls an LLM, so the conversational
+    # session-turn analysis would add a pre-retrieval LLM round trip to an otherwise
+    # sub-second, deterministic path. Opt out, like the other non-generative retrievers.
+    supports_session_turn_preparation = False
+
     def __init__(
         self,
         top_k: Optional[int] = 5,
