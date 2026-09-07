@@ -1,9 +1,8 @@
 import os
-import asyncio
-from typing import Any, Dict, List, Optional, Type
-from datetime import datetime
+import calendar
+from typing import Any, Dict, List, Optional, Tuple, Type
+from datetime import datetime, timezone
 
-from operator import itemgetter
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
@@ -12,25 +11,110 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
 
-from cognee.tasks.temporal_graph.models import QueryInterval
+from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
 
 logger = get_logger()
+
+# Precision ladder used to widen an upper bound to the end of the unit the user gave.
+_PRECISION_ORDER = ("year", "month", "day", "hour", "minute", "second")
+
+
+def _infer_precision(ts: Timestamp) -> str:
+    """Return the explicit ``precision`` or infer it from the default-valued fields.
+
+    The extraction model defaults month/day to 1 and the clock to 0, so a bare year
+    arrives as Jan 1 00:00:00. Without an explicit ``precision`` that is the only
+    signal we have; a genuine "January 1st" query is treated as a year, which widens
+    the window rather than narrowing it.
+    """
+    if ts.precision:
+        return ts.precision
+    if ts.second:
+        return "second"
+    if ts.minute:
+        return "minute"
+    if ts.hour:
+        return "hour"
+    if ts.day != 1:
+        return "day"
+    if ts.month != 1:
+        return "month"
+    return "year"
+
+
+def expand_to_period_end(ts: Optional[Timestamp]) -> Optional[Timestamp]:
+    """Widen an upper bound to the last second of the unit it was stated in.
+
+    "before 1996" / "between 1994 and 1996" / "in 1996" all end at 1996-12-31 23:59:59
+    instead of 1996-01-01 00:00:00, so events later in that year are not excluded.
+    """
+    if ts is None:
+        return None
+
+    precision = _infer_precision(ts)
+    values = ts.model_dump()
+    values["precision"] = precision
+
+    if precision == "year":
+        values.update(month=12, day=31, hour=23, minute=59, second=59)
+    elif precision == "month":
+        values.update(day=calendar.monthrange(ts.year, ts.month)[1], hour=23, minute=59, second=59)
+    elif precision == "day":
+        values.update(hour=23, minute=59, second=59)
+    elif precision == "hour":
+        values.update(minute=59, second=59)
+    elif precision == "minute":
+        values.update(second=59)
+
+    return Timestamp(**values)
+
+
+def _event_time_key(event: Dict[str, Any]) -> Tuple[int, int]:
+    """Chronological sort key; events without any time anchor sort last."""
+    anchor = event.get("time_at", event.get("time_from", event.get("time_to")))
+    return (0, int(anchor)) if anchor is not None else (1, 0)
+
+
+def _format_ms(value: Any) -> str:
+    try:
+        return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+    except (ValueError, TypeError, OverflowError, OSError):
+        return str(value)
+
+
+def _event_time_label(event: Dict[str, Any]) -> Optional[str]:
+    if event.get("time_at") is not None:
+        return _format_ms(event["time_at"])
+    time_from, time_to = event.get("time_from"), event.get("time_to")
+    if time_from is not None and time_to is not None:
+        return f"{_format_ms(time_from)} to {_format_ms(time_to)}"
+    if time_from is not None:
+        return f"from {_format_ms(time_from)}"
+    if time_to is not None:
+        return f"until {_format_ms(time_to)}"
+    return None
 
 
 class TemporalRetriever(GraphCompletionRetriever):
     """
-    Handles graph completion by generating responses based on a series of interactions with
-    a language model. This class extends from GraphCompletionRetriever and is designed to
-    manage the retrieval and validation process for user queries, integrating follow-up
-    questions based on reasoning. The public methods are:
+    Time-aware graph completion.
+
+    A query is first parsed into a time window (one structured LLM call). The window
+    selects ``Timestamp`` nodes, the events anchored to them are collected from the
+    graph, and those events are ranked by vector similarity to the question. The
+    top-k events, rendered chronologically, form the LLM context. With no usable
+    window (or on a backend without temporal queries) it falls back to the parent's
+    triplet search. The public methods are:
 
     - get_completion
+    - get_retrieved_objects
+    - get_context_from_objects
 
     Instance variables include:
-    - validation_system_prompt_path
-    - validation_user_prompt_path
-    - followup_system_prompt_path
-    - followup_user_prompt_path
+    - time_extraction_prompt_path
+    - wide_search_top_k (size of the vector candidate pool used for ranking)
     """
 
     def __init__(
@@ -76,13 +160,20 @@ class TemporalRetriever(GraphCompletionRetriever):
             return extract_from_temporal_dict(retrieved_objects)
         return None
 
-    def descriptions_to_string(self, results):
-        descs = []
-        for entry in results:
-            d = entry.get("description")
-            if d:
-                descs.append(d.strip())
-        return "\n#####################\n".join(descs)
+    def descriptions_to_string(self, results: List[Dict[str, Any]]) -> str:
+        """Render events chronologically, one block each, prefixed with their time."""
+        blocks = []
+        for event in sorted(results, key=_event_time_key):
+            text = (event.get("description") or event.get("name") or "").strip()
+            if not text:
+                continue
+            label = _event_time_label(event)
+            if label:
+                text = f"[{label}] {text}"
+            if event.get("location"):
+                text = f"{text} (location: {event['location']})"
+            blocks.append(text)
+        return "\n#####################\n".join(blocks)
 
     async def extract_time_from_query(self, query: str):
         prompt_path = self.time_extraction_prompt_path
@@ -102,75 +193,91 @@ class TemporalRetriever(GraphCompletionRetriever):
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
         time_from = interval.starts_at
-        time_to = interval.ends_at
+        # A year-only "1996" parses as 1996-01-01; the user meant the whole year.
+        time_to = expand_to_period_end(interval.ends_at)
 
         return time_from, time_to
 
-    async def filter_top_k_events(self, relevant_events, scored_results):
-        # Build a score lookup from vector search results.
-        # ScoredResult.id is a UUID while event["id"] arrives from the graph as a string,
-        # so both sides must be normalized to str or every lookup misses and all events
-        # collapse to float("inf"), discarding the vector-similarity ranking.
+    async def filter_top_k_events(
+        self, relevant_events: List[Dict[str, Any]], scored_results
+    ) -> List[Dict[str, Any]]:
+        """Rank the time-window events by vector similarity and keep the top k.
+
+        Events that the vector search scored come first, best (lowest distance)
+        first. Events the candidate pool did not reach are kept after them in
+        chronological order rather than dropped, so a sparse pool still yields a
+        full, deterministic top-k.
+        """
+        # ScoredResult.id is a UUID while event["id"] arrives from the graph as a
+        # string, so both sides are normalized to str or every lookup misses.
         score_lookup = {str(res.id): res.score for res in scored_results}
 
-        events_with_scores = []
-        for event in relevant_events[0]["events"]:
-            score = score_lookup.get(str(event["id"]), float("inf"))
-            events_with_scores.append({**event, "score": score})
+        scored, unscored = [], []
+        for event in relevant_events:
+            score = score_lookup.get(str(event["id"]))
+            if score is None:
+                unscored.append({**event, "score": float("inf")})
+            else:
+                scored.append({**event, "score": score})
 
-        events_with_scores.sort(key=itemgetter("score"))
+        scored.sort(key=lambda event: event["score"])
+        unscored.sort(key=_event_time_key)
 
-        return events_with_scores[: self.top_k]
+        return (scored + unscored)[: self.top_k]
 
     async def get_retrieved_objects(self, query: str) -> dict:
         time_from, time_to = await self.extract_time_from_query(query)
 
-        unified = await get_unified_engine()
-        graph_engine = unified.graph
-
-        if time_from and time_to:
-            ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
-        elif time_from:
-            ids = await graph_engine.collect_time_ids(time_from=time_from)
-        elif time_to:
-            ids = await graph_engine.collect_time_ids(time_to=time_to)
-        else:
+        if not time_from and not time_to:
             logger.info(
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
-            triplets = await self.get_triplets(query)
-            return {"triplets": triplets}
+            return {"triplets": await self.get_triplets(query)}
 
-        if ids:
-            relevant_events = await graph_engine.collect_events(ids=ids)
-        else:
+        unified = await get_unified_engine()
+        graph_engine = unified.graph
+
+        try:
+            ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
+            relevant_events = await graph_engine.collect_events(ids) if ids else []
+        except NotImplementedError as error:
+            logger.warning(
+                "%s. Falling back to triplet search for this TEMPORAL query.", str(error)
+            )
+            return {"triplets": await self.get_triplets(query)}
+
+        if not relevant_events:
             logger.info(
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
-            triplets = await self.get_triplets(query)
-            return {"triplets": triplets}
+            return {"triplets": await self.get_triplets(query)}
 
         vector_engine = unified.vector
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
+        # The candidate pool must be wider than top_k: the search runs over every
+        # event in the collection, and only the hits that fall inside the time
+        # window can be ranked. A pool of top_k would leave most window events
+        # unscored and the ranking would collapse to graph order.
+        candidate_pool = max(self.wide_search_top_k, self.top_k, len(relevant_events))
         vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=self.top_k
+            collection_name="Event_name", query_vector=query_vector, limit=candidate_pool
         )
 
         return {"relevant_events": relevant_events, "vector_search_results": vector_search_results}
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any:
         """Retrieves context based on the query."""
-        if retrieved_objects.get("relevant_events", None) and retrieved_objects.get(
-            "vector_search_results", None
-        ):
+        relevant_events = retrieved_objects.get("relevant_events")
+        if relevant_events:
             top_k_events = await self.filter_top_k_events(
-                retrieved_objects.get("relevant_events"),
-                retrieved_objects.get("vector_search_results", None),
+                relevant_events, retrieved_objects.get("vector_search_results") or []
             )
+            # Record what actually reached the prompt so provenance / feedback
+            # attribute the answer to these events, not the whole candidate pool.
+            retrieved_objects["selected_events"] = top_k_events
             return self.descriptions_to_string(top_k_events)
-        else:
-            # In case no events were found, fall back to triplet context
-            triplets = retrieved_objects.get("triplets", [])
-            context_text = await self.resolve_edges_to_text(triplets)
-            return context_text
+
+        # In case no events were found, fall back to triplet context
+        triplets = retrieved_objects.get("triplets", [])
+        return await self.resolve_edges_to_text(triplets)

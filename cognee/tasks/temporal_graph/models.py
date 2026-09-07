@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Literal, Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -14,6 +14,13 @@ class Timestamp(BaseModel):
     hour: int = Field(0, ge=0, le=23, description="If unknown, default to 0")
     minute: int = Field(0, ge=0, le=59, description="If unknown, default to 0")
     second: int = Field(0, ge=0, le=59, description="If unknown, default to 0")
+    precision: Optional[Literal["year", "month", "day", "hour", "minute", "second"]] = Field(
+        None,
+        description=(
+            "The most specific unit actually stated in the text: 'year' for '1996', "
+            "'month' for 'March 1996', 'day' for '5 March 1996'. Leave null if unsure."
+        ),
+    )
 
 
 class Interval(BaseModel):

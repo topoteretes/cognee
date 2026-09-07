@@ -11,3 +11,4 @@ Extraction rules:
 6. "Who is" and "Who was" questions: These imply a general identity or biographical inquiry without a specific temporal scope. Set both starts_at and ends_at to None.
 7. Ordering rule: Always ensure the earlier date is assigned to starts_at and the later date to ends_at.
 8. No temporal information: If no valid or inferable time reference is found, set both starts_at and ends_at to None.
+9. Precision: on every timestamp you return, set `precision` to the most specific unit the query actually states ("1996" → year, "March 1996" → month, "5 March 1996" → day). Never invent a month or day the query did not give; leave the defaults and let `precision` say how coarse the bound is.

@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from cognee.modules.retrieval.utils.used_graph_elements import (
@@ -143,3 +144,21 @@ def test_extract_from_temporal_dict_empty_returns_none():
     assert extract_from_temporal_dict({}) is None
     assert extract_from_temporal_dict({"other": []}) is None
     assert extract_from_temporal_dict({"vector_search_results": []}) is None
+
+
+def test_extract_from_temporal_dict_prefers_selected_events_over_candidate_pool():
+    """Only the events that reached the prompt count as used, not the wide vector pool."""
+    obj = {
+        "relevant_events": [{"id": "e1"}, {"id": "e2"}, {"id": "e3"}],
+        "vector_search_results": [
+            SimpleNamespace(id="e1", payload=None),
+            SimpleNamespace(id="pool-only", payload=None),
+        ],
+        "selected_events": [{"id": "e2"}, {"id": "e1"}, {"no_id": True}],
+    }
+    assert extract_from_temporal_dict(obj) == {"node_ids": ["e1", "e2"]}
+
+
+def test_extract_from_temporal_dict_falls_back_to_scored_results_without_selection():
+    obj = {"vector_search_results": [SimpleNamespace(id="e1", payload=None)]}
+    assert extract_from_temporal_dict(obj) == {"node_ids": ["e1"]}

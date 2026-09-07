@@ -1,6 +1,6 @@
 from uuid import UUID
 from abc import abstractmethod, ABC
-from typing import Optional, Dict, Any, List, Tuple, Type, Union
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, Tuple, Type, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
@@ -9,6 +9,9 @@ from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     NodeDeleteData,
 )
+
+if TYPE_CHECKING:
+    from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -727,6 +730,63 @@ class GraphDBInterface(ABC):
             - bool: True if the node existed and was updated, False if not found.
         """
         raise NotImplementedError("update_node is not implemented for this adapter")
+
+    async def collect_time_ids(
+        self,
+        time_from: Optional["Timestamp"] = None,
+        time_to: Optional["Timestamp"] = None,
+    ) -> List[str]:
+        """
+        Return the ids of ``Timestamp`` nodes whose ``time_at`` lies inside the window.
+
+        Both bounds are inclusive and optional; an open side means "unbounded". With
+        neither bound given the result is an empty list. Backs ``SearchType.TEMPORAL``
+        together with ``collect_events``.
+
+        Optional extension — implemented by LadybugAdapter and Neo4jAdapter. Adapters
+        that raise here make ``TemporalRetriever`` fall back to triplet search.
+
+        Parameters:
+        -----------
+
+            - time_from (Optional[Timestamp]): Inclusive lower bound.
+            - time_to (Optional[Timestamp]): Inclusive upper bound.
+
+        Returns:
+        --------
+
+            - List[str]: Ids of the matching ``Timestamp`` nodes.
+        """
+        raise NotImplementedError(
+            f"collect_time_ids is not implemented for {type(self).__name__}; "
+            "SearchType.TEMPORAL time filtering is unavailable on this backend"
+        )
+
+    async def collect_events(self, ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Return the ``Event`` nodes reachable within two hops of the given ``Timestamp``
+        node ids (one hop through ``at``, two hops through ``during`` -> ``Interval``).
+
+        Every event is a flat dict with ``id``, ``name`` and ``description``, plus
+        ``location`` when set and its time anchors when linked: ``time_at`` (ms epoch)
+        for point events, ``time_from`` / ``time_to`` (ms epoch) for interval events.
+
+        Optional extension — implemented by LadybugAdapter and Neo4jAdapter.
+
+        Parameters:
+        -----------
+
+            - ids (List[str]): ``Timestamp`` node ids, typically from ``collect_time_ids``.
+
+        Returns:
+        --------
+
+            - List[Dict[str, Any]]: One dict per distinct event, in no particular order.
+        """
+        raise NotImplementedError(
+            f"collect_events is not implemented for {type(self).__name__}; "
+            "SearchType.TEMPORAL time filtering is unavailable on this backend"
+        )
 
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         """

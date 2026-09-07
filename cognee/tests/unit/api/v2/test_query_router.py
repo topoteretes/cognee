@@ -128,6 +128,13 @@ class TestTemporal:
     def test_specific_year(self):
         assert route_query("What was discovered in 1915?").search_type == SearchType.TEMPORAL
 
+    def test_four_digit_number_is_not_a_year(self):
+        """Port numbers and error codes must not pull a query toward TEMPORAL."""
+        assert route_query("Why does the server listen on port 8080?").search_type != (
+            SearchType.TEMPORAL
+        )
+        assert route_query("What does error 4040 mean?").search_type != SearchType.TEMPORAL
+
 
 class TestNegation:
     def test_not_related_suppresses_graph(self):

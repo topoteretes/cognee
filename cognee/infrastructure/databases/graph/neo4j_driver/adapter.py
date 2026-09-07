@@ -2431,92 +2431,127 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
 
-    async def collect_events(self, ids: List[str]) -> Any:
+    async def collect_events(self, ids: List[str]) -> List[Dict[str, Any]]:
         """
-        Collect all Event-type nodes reachable within 1..2 hops
-        from the given node IDs.
+        Collect the Event nodes reachable within 1..2 hops of the given Timestamp ids,
+        each with its time anchors attached. See ``GraphDBInterface.collect_events``.
 
         Args:
-            graph_engine: Object exposing an async .query(str) -> Any
-            ids: List of node IDs (strings)
+            ids: Timestamp node ids (from ``collect_time_ids``).
 
         Returns:
-            List of events
+            One flat dict per distinct event: ``id``, ``name``, ``description``,
+            optional ``location``, and ``time_at`` or ``time_from`` / ``time_to``
+            in ms epoch when the event is linked to a Timestamp / Interval.
         """
+        ids = [str(uid) for uid in ids if uid]
+        if not ids:
+            return []
 
-        event_collection_cypher = """UNWIND [{quoted}] AS uid
-            MATCH (start {{id: uid}})
+        event_rows = await self.query(
+            """
+            UNWIND $ids AS uid
+            MATCH (start {id: uid})
             MATCH (start)-[*1..2]-(event)
             WHERE event.type = 'Event'
-            WITH DISTINCT event
-            RETURN collect(event) AS events;
-        """
+            RETURN DISTINCT event.id AS id, event.name AS name,
+                   event.description AS description, event.location AS location
+            """,
+            {"ids": ids},
+        )
 
-        query = event_collection_cypher.format(quoted=ids)
-        return await self.query(query)
+        events: Dict[str, Dict[str, Any]] = {}
+        for row in event_rows:
+            event: Dict[str, Any] = {
+                "id": row["id"],
+                "name": row.get("name"),
+                "description": row.get("description"),
+            }
+            if row.get("location"):
+                event["location"] = row["location"]
+            events[row["id"]] = event
+
+        if not events:
+            return []
+
+        # Time anchors: Event -[at]-> Timestamp, or Event -[during]-> Interval
+        # -[time_from|time_to]-> Timestamp. The relationship type is the
+        # relationship name, and time_at is a native property.
+        anchor_rows = await self.query(
+            """
+            UNWIND $ids AS eid
+            MATCH (event {id: eid})-[r]->(t)
+            WHERE t.type IN ['Timestamp', 'Interval']
+            RETURN event.id AS event_id, type(r) AS relationship_name,
+                   t.id AS target_id, t.type AS target_type, t.time_at AS time_at
+            """,
+            {"ids": list(events.keys())},
+        )
+
+        interval_to_event: Dict[str, str] = {}
+        for row in anchor_rows:
+            if row["target_type"] == "Timestamp":
+                if row.get("time_at") is not None:
+                    events[row["event_id"]]["time_at"] = int(row["time_at"])
+            elif row["target_type"] == "Interval":
+                interval_to_event[row["target_id"]] = row["event_id"]
+
+        if interval_to_event:
+            bound_rows = await self.query(
+                """
+                UNWIND $ids AS iid
+                MATCH (interval {id: iid})-[r]->(t)
+                WHERE t.type = 'Timestamp'
+                RETURN interval.id AS interval_id, type(r) AS relationship_name,
+                       t.time_at AS time_at
+                """,
+                {"ids": list(interval_to_event.keys())},
+            )
+            for row in bound_rows:
+                relationship_name = row["relationship_name"]
+                if relationship_name in ("time_from", "time_to") and row.get("time_at") is not None:
+                    events[interval_to_event[row["interval_id"]]][relationship_name] = int(
+                        row["time_at"]
+                    )
+
+        return list(events.values())
 
     async def collect_time_ids(
         self,
         time_from: Optional[Timestamp] = None,
         time_to: Optional[Timestamp] = None,
-    ) -> str:
+    ) -> List[str]:
         """
-        Collect IDs of Timestamp nodes between time_from and time_to.
+        Collect the ids of Timestamp nodes whose ``time_at`` lies inside the inclusive
+        window. See ``GraphDBInterface.collect_time_ids``.
 
         Args:
-            graph_engine: Object exposing an async .query(query, params) -> list[dict]
-            time_from: Lower bound int (inclusive), optional
-            time_to: Upper bound int (inclusive), optional
+            time_from: Inclusive lower bound, optional.
+            time_to: Inclusive upper bound, optional.
 
         Returns:
-            A string of quoted IDs:  "'id1', 'id2', 'id3'"
-            (ready for use in a Cypher UNWIND clause).
+            A list of Timestamp node ids; empty when no bound is given.
+        """
+        conditions = []
+        params: Dict[str, Any] = {}
+        if time_from:
+            conditions.append("n.time_at >= $time_from")
+            params["time_from"] = date_to_int(time_from)
+        if time_to:
+            conditions.append("n.time_at <= $time_to")
+            params["time_to"] = date_to_int(time_to)
+        if not conditions:
+            return []
+
+        cypher = f"""
+        MATCH (n)
+        WHERE n.type = 'Timestamp'
+          AND {" AND ".join(conditions)}
+        RETURN n.id AS id
         """
 
-        ids: List[str] = []
-
-        if time_from and time_to:
-            time_from = date_to_int(time_from)
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from, "time_to": time_to}
-
-        elif time_from:
-            time_from = date_to_int(time_from)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at >= $time_from
-            RETURN n.id AS id
-            """
-            params = {"time_from": time_from}
-
-        elif time_to:
-            time_to = date_to_int(time_to)
-
-            cypher = """
-            MATCH (n)
-            WHERE n.type = 'Timestamp'
-              AND n.time_at <= $time_to
-            RETURN n.id AS id
-            """
-            params = {"time_to": time_to}
-
-        else:
-            return ids
-
         time_nodes = await self.query(cypher, params)
-        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
-
-        return ", ".join(f"'{uid}'" for uid in time_ids_list)
+        return [row["id"] for row in time_nodes if row.get("id")]
 
     async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """

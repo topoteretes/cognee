@@ -135,7 +135,8 @@ _RULES: list[tuple[re.Pattern, SearchType, float]] = [
         4.0,
     ),
     (
-        re.compile(r"\b\d{4}s?\b"),
+        # Plausible years only (1000-2099), so "port 8080" or "error 4040" stay put.
+        re.compile(r"\b(1[0-9]{3}|20[0-9]{2})s?\b"),
         SearchType.TEMPORAL,
         3.0,
     ),
