@@ -4,7 +4,6 @@ from typing import Literal, Optional
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 TranslationProviderType = Literal["llm", "google", "azure"]
 
 
@@ -99,7 +98,7 @@ class TranslationConfig(BaseSettings):
         }
 
 
-@lru_cache()
+@lru_cache
 def get_translation_config() -> TranslationConfig:
     """Get the translation configuration singleton."""
     return TranslationConfig()

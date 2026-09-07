@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
@@ -11,10 +12,10 @@ from cognee.modules.engine.models import Triplet
 from cognee.modules.graph.utils import ensure_default_edge_properties
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.tasks.storage.add_data_points import (
-    add_data_points,
     InvalidDataPointsInAddDataPointsError,
-    _extract_embeddable_text_from_datapoint,
     _create_triplets_from_graph,
+    _extract_embeddable_text_from_datapoint,
+    add_data_points,
 )
 
 adp_module = sys.modules["cognee.tasks.storage.add_data_points"]
@@ -260,11 +261,11 @@ async def test_add_data_points_graph_provenance_folds_provenance_and_skips_ledge
     mock_upsert_edges,
 ):
     from cognee.infrastructure.databases.provenance import (
-        make_source_ref_key,
         GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
         GRAPH_DELETE_MODE_KEY,
         GRAPH_PROVENANCE_VERSION,
         GRAPH_PROVENANCE_VERSION_KEY,
+        make_source_ref_key,
     )
 
     dp1 = SimplePoint(text="first")
@@ -434,12 +435,12 @@ async def test_add_data_points_graph_provenance_hybrid_attaches_after_write(
     """A hybrid backend cannot fold provenance into its combined node+vector
     write, so it stamps via the separate attach pass (the retained fallback)."""
     from cognee.infrastructure.databases.provenance import (
-        EdgeIdentity,
-        make_source_ref_key,
         GRAPH_DELETE_MODE_GRAPH_PROVENANCE,
         GRAPH_DELETE_MODE_KEY,
         GRAPH_PROVENANCE_VERSION,
         GRAPH_PROVENANCE_VERSION_KEY,
+        EdgeIdentity,
+        make_source_ref_key,
     )
     from cognee.infrastructure.databases.unified.capabilities import EngineCapability
 

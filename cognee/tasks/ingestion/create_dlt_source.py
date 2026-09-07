@@ -47,8 +47,8 @@ def create_dlt_source_from_connection_string(
     query: Optional[str] = None,
 ):
     """Auto-generate a dlt source from a database connection string with optional SQL query filtering."""
-    from dlt.sources.sql_database import sql_database
     import sqlalchemy
+    from dlt.sources.sql_database import sql_database
 
     # SQLite paths must be absolute for SQLAlchemy to find the file.
     # sqlite:/// = relative, sqlite://// = absolute

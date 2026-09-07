@@ -1,11 +1,11 @@
 import json
-from cognee.shared.logging_utils import get_logger
 import os
 import re
-from typing import Dict, List, Pattern, Any
+from typing import Any, Dict, List, Pattern
 
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.root_dir import get_absolute_path
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("regex_entity_config")
 
@@ -34,8 +34,8 @@ class RegexEntityConfig:
         try:
             return re.compile(pattern)
         except re.error as e:
-            logger.error(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
-            raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
+            logger.error(f"Invalid regex pattern for entity '{entity_name}': {e!s}")
+            raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {e!s}")
 
     def _load_config(self) -> None:
         """Load and process the configuration from the JSON file."""
@@ -46,8 +46,8 @@ class RegexEntityConfig:
             logger.error(f"Config file not found: {self.config_path}")
             raise
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in config file {self.config_path}: {str(e)}")
-            raise ValueError(f"Invalid JSON in config file: {str(e)}")
+            logger.error(f"Invalid JSON in config file {self.config_path}: {e!s}")
+            raise ValueError(f"Invalid JSON in config file: {e!s}")
 
         for config in config_list:
             self._validate_config_fields(config)

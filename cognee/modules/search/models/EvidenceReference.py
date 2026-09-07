@@ -3,7 +3,6 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-
 EvidenceKind = Literal["segment", "graph_node", "graph_edge", "triplet"]
 EvidenceRole = Literal["used_as_context", "supports_assertion"]
 

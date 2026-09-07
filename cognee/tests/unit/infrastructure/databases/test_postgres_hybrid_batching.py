@@ -7,19 +7,19 @@ and add_edges_with_vectors must chunk by embedding_engine.get_batch_size()
 before calling embed_data, mirroring index_data_points.
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
-import json
 
 import pytest
 
 pytest.importorskip("asyncpg", reason="PostgresHybridAdapter requires the postgres extra")
 pytest.importorskip("pgvector", reason="PostgresHybridAdapter requires the postgres extra")
 
-from cognee.infrastructure.engine import DataPoint  # noqa: E402
 from cognee.infrastructure.databases.hybrid.postgres.adapter import (  # noqa: E402
     PostgresHybridAdapter,
 )
+from cognee.infrastructure.engine import DataPoint  # noqa: E402
 
 
 class _Node(DataPoint):

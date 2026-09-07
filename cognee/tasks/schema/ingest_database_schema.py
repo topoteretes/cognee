@@ -1,14 +1,16 @@
 import json
-from typing import List, Dict
-from uuid import uuid5, NAMESPACE_OID
-from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from datetime import datetime, timezone
+from typing import Dict, List
+from uuid import NAMESPACE_OID, uuid5
+
 from sqlalchemy import text
-from cognee.tasks.schema.models import DatabaseSchema, SchemaTable, SchemaRelationship
+
+from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
     get_migration_relational_engine,
 )
-from cognee.infrastructure.databases.relational.config import get_migration_config
-from datetime import datetime, timezone
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.tasks.schema.models import DatabaseSchema, SchemaRelationship, SchemaTable
 
 
 async def ingest_database_schema(

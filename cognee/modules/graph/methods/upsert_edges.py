@@ -1,13 +1,14 @@
-from uuid import UUID, uuid5, NAMESPACE_OID
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi.encoders import jsonable_encoder
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert
-from cognee.modules.engine.utils import generate_edge_id
+from uuid import NAMESPACE_OID, UUID, uuid5
 
-from cognee.modules.graph.models.Edge import Edge
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from cognee.infrastructure.databases.relational.with_async_session import with_async_session
+from cognee.modules.engine.utils import generate_edge_id
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+from cognee.modules.graph.models.Edge import Edge
 
 UPSERT_BATCH_SIZE = 1000
 

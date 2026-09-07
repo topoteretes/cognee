@@ -1,8 +1,9 @@
 import asyncio
-import os
 import logging
 import math
+import os
 from typing import List, Optional
+
 import numpy as np
 
 try:
@@ -15,25 +16,25 @@ except ImportError:
 
 import litellm
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_not_exception_type,
     stop_after_delay,
     wait_exponential_jitter,
-    retry_if_not_exception_type,
-    before_sleep_log,
 )
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.utils import (
-    sanitize_embedding_text_inputs,
     handle_embedding_response,
+    sanitize_embedding_text_inputs,
 )
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
@@ -168,7 +169,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
                 return handle_embedding_response(original_texts, embeddings, self.dimensions)
 
-            logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
+            logger.error(f"Embedding error in FastembedEmbeddingEngine: {error!s}")
             raise EmbeddingException(
                 f"Failed to index data points using model {self.model}"
             ) from error

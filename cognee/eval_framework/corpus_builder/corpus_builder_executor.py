@@ -1,11 +1,11 @@
-import cognee
-from cognee.shared.logging_utils import get_logger, ERROR
-from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
+import cognee
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.shared.logging_utils import ERROR, get_logger
 
 logger = get_logger(level=ERROR)
 

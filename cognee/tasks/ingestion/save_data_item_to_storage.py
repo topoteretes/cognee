@@ -1,19 +1,18 @@
 import os
 from pathlib import Path
+from typing import Any, BinaryIO, Union
 from urllib.parse import urlparse
 from urllib.request import url2pathname
-from typing import Union, BinaryIO, Any
 
-from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
-from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
-from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from cognee.tasks.web_scraper.utils import fetch_page_content
-from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
+from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
-
+from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.tasks.web_scraper.utils import fetch_page_content
 
 logger = get_logger()
 

@@ -108,9 +108,7 @@ import psutil  # noqa: E402
 
 import cognee  # noqa: E402
 from cognee.modules.search.types import SearchType  # noqa: E402
-
 from cognee_db_workers.harness import collect_garbage_in_all_workers  # noqa: E402
-
 
 # Twenty distinct public-domain Gutenberg books (each roughly 400 KB – 1.5 MB).
 # One is used per large-round cycle; with ``--cycles 20`` we use all of them.

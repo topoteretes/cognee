@@ -2,38 +2,38 @@ import asyncio
 from typing import Any, Dict, List, Optional, Type, Union
 
 from cognee.base_config import get_base_config
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.utils.merge_results import (
-    conversational_reserve,
-    edge_identity,
-    merge_ranked,
+from cognee.modules.retrieval.utils.completion import (
+    generate_completion,
+    generate_completion_batch,
 )
+from cognee.modules.retrieval.utils.evidence import graph_context_evidence
 from cognee.modules.retrieval.utils.global_context import (
     format_global_context_prelude,
     load_root_text,
     search_top_global_context_summaries,
 )
+from cognee.modules.retrieval.utils.merge_results import (
+    conversational_reserve,
+    edge_identity,
+    merge_ranked,
+)
 from cognee.modules.retrieval.utils.used_graph_elements import (
-    is_edge_list,
     extract_from_edges,
+    is_edge_list,
 )
-from cognee.modules.retrieval.utils.evidence import graph_context_evidence
-from cognee.modules.retrieval.utils.completion import (
-    generate_completion,
-    generate_completion_batch,
-)
-from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.user_preferences import load_preference_text, load_preference_weights
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger("GraphCompletionRetriever")
 

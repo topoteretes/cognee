@@ -1,9 +1,9 @@
 from io import StringIO
 from typing import Any, AsyncGenerator
 
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.data.exceptions import UnstructuredLibraryImportError
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
 from .Document import Document
 

@@ -36,10 +36,9 @@ def _isolated_db():
     create_relational_engine.cache_clear()
 
     async def _run():
-        from cognee.infrastructure.databases.relational import get_relational_engine
-
         import cognee.modules.data.models  # noqa: F401
         import cognee.modules.users.models  # noqa: F401
+        from cognee.infrastructure.databases.relational import get_relational_engine
 
         await get_relational_engine().create_database()
 

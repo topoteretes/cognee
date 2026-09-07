@@ -1,36 +1,36 @@
-import json
 import inspect
+import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, BinaryIO, List, Optional, Union
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
-from typing import TYPE_CHECKING, Union, BinaryIO, Any, List, Optional
 
-import cognee.modules.ingestion as ingestion
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.ingestion.identify_many import identify_many
-from cognee.modules.data.models import Data
-from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.modules import ingestion
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
-    resolve_data_id,
     load_or_create_datasets,
+    resolve_data_id,
 )
-
+from cognee.modules.data.models import Data
+from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.modules.ingestion.identify_many import identify_many
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.shared.logging_utils import get_logger
 
-from .save_data_item_to_storage import save_data_item_to_storage_detailed
 from .carried_source import find_carried_source
-from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
+from .data_item_to_text_file import data_item_to_text_file
+from .save_data_item_to_storage import save_data_item_to_storage_detailed
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this package
     from cognee.modules.pipelines.models import PipelineContext
@@ -135,7 +135,7 @@ async def ingest_data(
         user = await get_default_user()
 
     def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
-        if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
+        if hasattr(data_item, "dict") and inspect.ismethod(data_item.dict):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
             return {}

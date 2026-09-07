@@ -1,5 +1,5 @@
-from typing import Union, Callable, Any, Coroutine, Generator, AsyncGenerator
 import inspect
+from typing import Any, AsyncGenerator, Callable, Coroutine, Generator, Union
 
 from cognee.pipelines.types import _Drop
 

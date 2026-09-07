@@ -31,7 +31,6 @@ class TranslationProvider(ABC):
     @abstractmethod
     def provider_name(self) -> str:
         """Return the name of this translation provider."""
-        pass
 
     @abstractmethod
     async def translate(
@@ -51,7 +50,6 @@ class TranslationProvider(ABC):
         Returns:
             TranslationResult with translated text and metadata
         """
-        pass
 
     @abstractmethod
     async def translate_batch(
@@ -71,7 +69,6 @@ class TranslationProvider(ABC):
         Returns:
             List of TranslationResult objects
         """
-        pass
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -82,4 +79,3 @@ class TranslationProvider(ABC):
         Returns:
             True if the provider has valid credentials and is ready to use.
         """
-        pass

@@ -16,7 +16,6 @@ from cognee.modules.engine.models import Tool
 from cognee.modules.tools.errors import ToolInvocationError, ToolNotFoundError
 from cognee.shared.logging_utils import get_logger
 
-
 ToolHandler = Callable[..., Any]
 logger = get_logger("cognee.tools.registry")
 

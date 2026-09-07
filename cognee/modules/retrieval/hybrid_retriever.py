@@ -10,6 +10,8 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.hybrid.chunks import retrieve_hybrid_chunks, search_collection
 from cognee.modules.retrieval.hybrid.context import (
     extract_context_object_ids as extract_hybrid_object_ids,
+)
+from cognee.modules.retrieval.hybrid.context import (
     format_hybrid_context,
     format_hybrid_context_batch,
 )

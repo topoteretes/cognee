@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import Optional
+
 from pydantic import BaseModel
+
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.llm import get_llm_config
 

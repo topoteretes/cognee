@@ -3,6 +3,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
@@ -82,19 +83,21 @@ class InMemoryGraphWithWeights:
 def session_manager_with_backend(request):
     backend = request.param
     if backend == "fs":
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch(
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
                 "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
                 return_value={"data_root_directory": tmpdir},
-            ):
-                from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                    FSCacheAdapter,
-                )
+            ),
+        ):
+            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+                FSCacheAdapter,
+            )
 
-                adapter = FSCacheAdapter()
-                sm = SessionManager(cache_engine=adapter)
-                yield sm
-                adapter.cache.close()
+            adapter = FSCacheAdapter()
+            sm = SessionManager(cache_engine=adapter)
+            yield sm
+            adapter.cache.close()
     elif backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"

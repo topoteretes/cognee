@@ -3,8 +3,8 @@
 Minimal CLI entry point for cognee that avoids early initialization
 """
 
-import sys
 import os
+import sys
 from typing import Any, Sequence
 
 # CRITICAL: Prevent verbose logging initialization for CLI-only usage

@@ -6,12 +6,13 @@ Create Date: 2025-06-16 15:20:43.118246
 
 """
 
-from typing import Sequence, Union
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy import UUID
 from datetime import datetime, timezone
+from typing import Sequence, Union
 from uuid import uuid4
+
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy import UUID
 
 # revision identifiers, used by Alembic.
 revision: str = "ab7e313804ae"

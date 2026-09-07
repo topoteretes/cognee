@@ -1,28 +1,27 @@
 import asyncio
-from uuid import UUID
-from pydantic import Field
 from typing import Dict, List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
-from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
+from pydantic import Field
 from starlette.status import (
     WS_1000_NORMAL_CLOSURE,
     WS_1008_POLICY_VIOLATION,
     WS_1011_INTERNAL_ERROR,
 )
 
-from cognee.api.DTO import InDTO
-from cognee.modules.pipelines.methods import get_pipeline_run
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user, get_authenticated_websocket_user
+from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse, InDTO
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.graph_model_utils import graph_schema_to_graph_model
+from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
-    PipelineRunInfo,
     PipelineRunErrored,
+    PipelineRunInfo,
     PipelineRunProgress,
 )
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
@@ -30,12 +29,13 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     initialize_queue,
     remove_queue,
 )
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.modules.users.methods import get_authenticated_user, get_authenticated_websocket_user
+from cognee.modules.users.models import User
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
 from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger("api.cognify")
 
@@ -217,11 +217,12 @@ def get_cognify_router() -> APIRouter:
                     payload.ontology_key, user
                 )
 
+                from io import StringIO
+
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
-                from io import StringIO
 
                 ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {

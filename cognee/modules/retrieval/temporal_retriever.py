@@ -1,17 +1,16 @@
-import os
 import asyncio
-from typing import Any, Dict, List, Optional, Type
+import os
 from datetime import datetime
-
 from operator import itemgetter
+from typing import Any, Dict, List, Optional, Type
+
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
-
 from cognee.tasks.temporal_graph.models import QueryInterval
 
 logger = get_logger()

@@ -22,8 +22,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

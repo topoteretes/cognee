@@ -4,13 +4,13 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     ensure_ontology_usable_in_strict_mode,
 )
+from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.ontology_env_config import (
     get_ontology_env_config,
     normalize_ontology_mode,
 )
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
 
 def get_default_ontology_resolver() -> BaseOntologyResolver:
@@ -90,7 +90,7 @@ def get_ontology_resolver_from_env(
             matching_strategy=FuzzyMatchingStrategy(), ontology_file=file_paths
         )
     else:
-        raise EnvironmentError(
+        raise OSError(
             f"Unsupported ontology resolver: {ontology_resolver}. "
             f"Supported resolvers are: RdfLib with FuzzyMatchingStrategy."
         )

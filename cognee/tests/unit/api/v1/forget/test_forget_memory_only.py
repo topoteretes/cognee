@@ -10,8 +10,8 @@ Covers:
 
 import importlib
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -354,9 +354,9 @@ async def test_forget_memory_only_without_dataset_raises(monkeypatch):
         patch.object(
             forget_module, "set_database_global_context_variables", return_value=_NoOpAsyncContext()
         ),
+        pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"),
     ):
-        with pytest.raises(ValueError, match="memory_only requires dataset or dataset_id"):
-            await forget_module.forget(memory_only=True)
+        await forget_module.forget(memory_only=True)
 
 
 @pytest.mark.asyncio

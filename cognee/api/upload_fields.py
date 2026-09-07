@@ -17,7 +17,8 @@ filter blank entries out of their string-list fields. The JSON schema stays
 
 from typing import Annotated, List, Optional, Union
 
-from fastapi import HTTPException, UploadFile as UF
+from fastapi import HTTPException
+from fastapi import UploadFile as UF
 from pydantic import WithJsonSchema
 
 _BINARY_SCHEMA = {"type": "string", "format": "binary"}

@@ -1,10 +1,10 @@
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
-from cognee.modules.users.models import User
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
+from cognee.modules.users.models import User
 
 
 async def resolve_authorized_user_dataset(

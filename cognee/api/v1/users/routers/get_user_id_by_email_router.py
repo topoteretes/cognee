@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
-from cognee.api.DTO import InDTO
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import EmailStr
 
-from cognee.modules.users.models.User import User
+from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.methods.get_user_id_by_email import get_user_id_by_email
+from cognee.modules.users.models.User import User
 
 
 class UserEmailRequest(InDTO):

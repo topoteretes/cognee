@@ -8,10 +8,9 @@ from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadat
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

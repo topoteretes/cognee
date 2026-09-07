@@ -12,10 +12,10 @@ relational-ledger changes (migrations are cross-store transformations).
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.reference import SupportsCliCommand
 
 
 def _validate_revision(revision: str, keywords: tuple) -> None:

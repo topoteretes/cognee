@@ -1,21 +1,21 @@
 from uuid import UUID
 
-from sqlalchemy.future import select
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.future import select
 
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.exceptions import (
-    UserNotFoundError,
+    PermissionDeniedError,
     RoleNotFoundError,
     TenantNotFoundError,
-    PermissionDeniedError,
+    UserNotFoundError,
 )
 from cognee.modules.users.models import (
-    User,
     Role,
     Tenant,
+    User,
     UserRole,
 )
 

@@ -1,11 +1,12 @@
-import pytest
-from typing import Optional
 import sys
-from unittest.mock import patch, MagicMock
 import unittest
-import numpy as np
-from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from typing import Optional
+from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pytest
+
+from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
 
 with patch.dict(
     sys.modules,

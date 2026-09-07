@@ -10,9 +10,9 @@ Configuration via environment variables:
 """
 
 import asyncio
-import pytest
 from unittest.mock import patch
 
+import pytest
 
 # Module path for mocking the settings seam.
 DATASET_QUEUE_MODULE = "cognee.infrastructure.databases.dataset_queue"
@@ -375,9 +375,8 @@ class TestDatasetQueueEdgeCases:
 
             # Nested acquire - works because semaphore allows up to max_concurrent
             result = None
-            async with queue.acquire():
-                async with queue.acquire():
-                    result = "nested"
+            async with queue.acquire(), queue.acquire():
+                result = "nested"
 
             assert result == "nested"
 

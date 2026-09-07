@@ -11,11 +11,17 @@
 # baml-cli is available with the baml package.
 
 import typing
-from baml_py import type_builder
-from baml_py import baml_py
+
+from baml_py import baml_py, type_builder
 
 # These are exports, not used here, hence the linter is disabled
-from baml_py.baml_py import FieldType, EnumValueBuilder, EnumBuilder, ClassBuilder  # noqa: F401 # pylint: disable=unused-import
+from baml_py.baml_py import (  # noqa: F401 # pylint: disable=unused-import
+    ClassBuilder,
+    EnumBuilder,
+    EnumValueBuilder,
+    FieldType,
+)
+
 from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME
 
 

@@ -18,7 +18,6 @@ import pytest_asyncio
 from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
 
-
 # -- Session-scoped event loop so the async engine's connection pool
 #    stays on a single loop across all tests.
 

@@ -12,13 +12,13 @@ REFLECTION, so a newly added document type is covered the day it is written
 """
 
 import asyncio
-from typing import get_args, get_origin, Optional, Union
+from typing import Optional, Union, get_args, get_origin
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
 
-import cognee.modules.data.processing.document_types as document_types
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.data.processing import document_types
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity, EntityType, NodeSet
 from cognee.tasks.storage.chunk_ownership import collect_chunk_ownership

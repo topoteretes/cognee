@@ -222,8 +222,8 @@ async def _serve_cloud(
     # and nothing configured should explain how to connect, not stack-trace
     # out of the auth internals.
     if not (auth0_client_id or os.getenv("COGNEE_AUTH0_DEVICE_CLIENT_ID")):
-        from cognee.exceptions import CogneeConfigurationError
         from cognee.api.v1.serve.credentials import get_credentials_path
+        from cognee.exceptions import CogneeConfigurationError
 
         if creds and creds.service_url and creds.api_key:
             raise CogneeConfigurationError(

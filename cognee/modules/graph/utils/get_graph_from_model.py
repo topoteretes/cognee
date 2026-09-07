@@ -2,7 +2,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Tuple, List, Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.graph.utils.extract_field_relationships import EdgeTargets, iter_fields
 from cognee.modules.graph.utils.unwrap_transparent_nodes import (

@@ -21,8 +21,8 @@ and the initiating user) passes more fields and reads them back with a
 matching ``field_count``.
 """
 
-import hmac
 import hashlib
+import hmac
 import time
 from typing import Optional, Union
 from uuid import UUID

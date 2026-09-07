@@ -1,7 +1,8 @@
-import os
 import asyncio
+import os
 import pathlib
-from cognee import config, add, cognify, search, SearchType, prune, visualize_graph
+
+from cognee import SearchType, add, cognify, config, prune, search, visualize_graph
 
 
 async def main():

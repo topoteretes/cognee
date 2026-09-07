@@ -10,7 +10,6 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
 from cognee.modules.tools.errors import ToolInvocationError
 from cognee.modules.tools.registry import register_builtin_tool
 
-
 TOOL = Tool(
     name="memory_search",
     description=(

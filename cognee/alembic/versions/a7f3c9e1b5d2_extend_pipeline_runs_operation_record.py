@@ -20,9 +20,8 @@ add/drop is inspector-guarded.
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a7f3c9e1b5d2"

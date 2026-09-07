@@ -197,6 +197,8 @@ def test_update_keeps_data_id_end_to_end(update_env):
 
 
 async def _scenario():
+    from sqlalchemy import update as sql_update
+
     import cognee
     from cognee.api.v1.datasets.datasets import datasets as datasets_api
     from cognee.infrastructure.databases.graph import get_graph_engine
@@ -207,7 +209,6 @@ async def _scenario():
     from cognee.modules.data.models import Data
     from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.modules.users.methods import get_default_user
-    from sqlalchemy import update as sql_update
 
     text_v1 = _text("a", "b", "orig")
     text_v2 = _text("a", "b", "new")

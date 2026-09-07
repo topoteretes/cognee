@@ -81,17 +81,18 @@ async def get_installation(installation_id: int) -> dict[str, Any]:
     Raises ``RuntimeError`` when GitHub rejects the lookup (unknown id,
     suspended installation, bad app credentials).
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.get(
             f"{API_BASE_URL}/app/installations/{installation_id}",
             headers=_api_headers(build_app_jwt()),
-        ) as response:
-            if response.status != 200:
-                raise RuntimeError(
-                    f"GitHub installation lookup failed for {installation_id}: "
-                    f"HTTP {response.status}"
-                )
-            return await response.json()
+        ) as response,
+    ):
+        if response.status != 200:
+            raise RuntimeError(
+                f"GitHub installation lookup failed for {installation_id}: HTTP {response.status}"
+            )
+        return await response.json()
 
 
 async def mint_installation_token(installation_id: int) -> tuple[str, Optional[datetime]]:
@@ -100,17 +101,19 @@ async def mint_installation_token(installation_id: int) -> tuple[str, Optional[d
     Returns ``(token, expires_at)``. Callers use the token immediately and
     discard it — it is never written to the credential store.
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             f"{API_BASE_URL}/app/installations/{installation_id}/access_tokens",
             headers=_api_headers(build_app_jwt()),
-        ) as response:
-            if response.status != 201:
-                raise RuntimeError(
-                    f"GitHub installation token mint failed for {installation_id}: "
-                    f"HTTP {response.status}"
-                )
-            payload = await response.json()
+        ) as response,
+    ):
+        if response.status != 201:
+            raise RuntimeError(
+                f"GitHub installation token mint failed for {installation_id}: "
+                f"HTTP {response.status}"
+            )
+        payload = await response.json()
 
     expires_at = None
     expires_raw = payload.get("expires_at")

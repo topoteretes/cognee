@@ -182,7 +182,7 @@ def generate_provenance_colors(values):
     for i, name in enumerate(unique):
         hue = (i * 137.5) % 360
         r, g, b = colorsys.hls_to_rgb(hue / 360, 0.6, 0.65)
-        color_map[name] = "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+        color_map[name] = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
     return color_map
 
 
@@ -1384,9 +1384,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         if node.get("is_unnamed"):
             # A placeholder name is never worth a Key-mode label slot.
             node["label_priority"] = False
-        elif node["stage"] in _ALWAYS_LABEL_STAGES:
-            node["label_priority"] = True
-        elif node["importance"] >= threshold and threshold > 0:
+        elif node["stage"] in _ALWAYS_LABEL_STAGES or node["importance"] >= threshold > 0:
             node["label_priority"] = True
         else:
             node["label_priority"] = False

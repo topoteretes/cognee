@@ -8,7 +8,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.en
     ShippingRange,
 )
 
-
 post_office_possible_values = {
     "office_type": [office_type.label for office_type in PostOfficeType],
     "shipping_range": [shipping_range.label for shipping_range in ShippingRange],

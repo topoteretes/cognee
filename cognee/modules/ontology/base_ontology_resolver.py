@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
+from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy, MatchingStrategy
 from cognee.modules.ontology.models import AttachedOntologyNode
-from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
 
 
 class BaseOntologyResolver(ABC):
@@ -20,17 +20,14 @@ class BaseOntologyResolver(ABC):
     @abstractmethod
     def build_lookup(self) -> None:
         """Build the lookup dictionary for ontology entities."""
-        pass
 
     @abstractmethod
     def refresh_lookup(self) -> None:
         """Refresh the lookup dictionary."""
-        pass
 
     @abstractmethod
     def find_closest_match(self, name: str, category: str) -> Optional[str]:
         """Find the closest match for a given name in the specified category."""
-        pass
 
     @abstractmethod
     def get_subgraph(
@@ -39,4 +36,3 @@ class BaseOntologyResolver(ABC):
         List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]
     ]:
         """Get a subgraph for the given node."""
-        pass

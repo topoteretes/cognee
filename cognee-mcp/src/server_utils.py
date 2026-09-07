@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-
 MAX_TOP_K = 100
 COMPLETION_SEARCH_TYPES = {
     "GRAPH_COMPLETION",
@@ -76,8 +75,7 @@ def validate_file_path(
         return None
 
     path = data.strip()
-    if path.startswith("file://"):
-        path = path[7:]
+    path = path.removeprefix("file://")
 
     if path_exists(path):
         return None

@@ -9,10 +9,12 @@ import os
 from typing import List, Optional, Union
 
 import httpx
+
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
-from .default_url_crawler import DefaultUrlCrawler
+
 from .config import DefaultCrawlerConfig, KeenableConfig, TavilyConfig
+from .default_url_crawler import DefaultUrlCrawler
 
 logger = get_logger(__name__)
 
@@ -98,7 +100,7 @@ async def fetch_page_content(
             logger.info(f"Successfully fetched content from {len(results)} URL(s)")
             return results
         except Exception as e:
-            logger.error(f"Error fetching page content: {str(e)}")
+            logger.error(f"Error fetching page content: {e!s}")
             raise
         finally:
             logger.info("Closing BeautifulSoup crawler")

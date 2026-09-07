@@ -31,14 +31,14 @@ def _sanitize_value(value: Any) -> Any:
 @_sanitize_value.register(type(None))
 def _(value: None) -> None:
     """Handle None values - returns None as-is."""
-    return None
+    return
 
 
 @_sanitize_value.register(str)
 @_sanitize_value.register(int)
 @_sanitize_value.register(float)
 @_sanitize_value.register(bool)
-def _(value: str | int | float | bool) -> str | int | float | bool:
+def _(value: str | float | bool) -> str | int | float | bool:
     """Handle primitive types - returns value as-is since they're JSON-serializable."""
     return value
 
@@ -231,7 +231,7 @@ async def _log_usage_async(
         )
         logger.info(f"Successfully logged usage for {function_name} (user_id={user_id})")
     except Exception as e:
-        logger.error(f"Failed to log usage for {function_name}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to log usage for {function_name}: {e!s}", exc_info=True)
 
 
 def _is_streaming_response(result: Any) -> bool:
@@ -285,7 +285,7 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
                 await asyncio.shield(asyncio.ensure_future(emit(None, success, error)))
             except BaseException as log_error:  # noqa: BLE001
                 logger.error(
-                    f"Failed to log usage for {function_name}: {str(log_error)}",
+                    f"Failed to log usage for {function_name}: {log_error!s}",
                     exc_info=True,
                 )
 
@@ -409,7 +409,7 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
                         await _emit(result, success, error)
                     except Exception as e:
                         logger.error(
-                            f"Failed to log usage for {resolved_function_name}: {str(e)}",
+                            f"Failed to log usage for {resolved_function_name}: {e!s}",
                             exc_info=True,
                         )
 

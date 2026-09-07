@@ -1,5 +1,6 @@
 import re
 from typing import Optional
+
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("ollama_support")
@@ -26,8 +27,7 @@ def normalize_model_name(model_name: str) -> str:
         return ""
     normalized = model_name.strip().lower()
     # Remove provider prefix (e.g., "ollama/")
-    if normalized.startswith("ollama/"):
-        normalized = normalized[len("ollama/") :]
+    normalized = normalized.removeprefix("ollama/")
     return normalized
 
 

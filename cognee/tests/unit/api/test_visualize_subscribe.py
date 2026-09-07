@@ -20,9 +20,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_websocket_user
-from cognee.modules.pipelines.models import PipelineRunStatus
 
 router_module = import_module("cognee.api.v1.users.routers.get_visualize_router")
 live_updates = import_module("cognee.api.v1.visualize.live_updates")
@@ -205,9 +205,8 @@ def test_heartbeats_keep_arriving_on_an_otherwise_silent_stream(app):
 def test_an_unauthenticated_connection_is_closed_with_1008(app):
     app.dependency_overrides[get_authenticated_websocket_user] = lambda: None
 
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with _connect(app) as connection:
-            connection.receive_json()
+    with pytest.raises(WebSocketDisconnect) as closed, _connect(app) as connection:
+        connection.receive_json()
 
     assert closed.value.code == 1008
 
@@ -217,9 +216,8 @@ def test_a_dataset_the_caller_cannot_read_is_closed_with_1008(app, monkeypatch):
         router_module, "get_authorized_existing_datasets", AsyncMock(return_value=[])
     )
 
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with _connect(app) as connection:
-            connection.receive_json()
+    with pytest.raises(WebSocketDisconnect) as closed, _connect(app) as connection:
+        connection.receive_json()
 
     assert closed.value.code == 1008
 
@@ -233,10 +231,9 @@ def test_read_access_lost_mid_stream_closes_with_1008(app, monkeypatch):
         AsyncMock(side_effect=PermissionDeniedError(message="nope")),
     )
 
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with _connect(app) as connection:
-            connection.receive_json()
-            connection.receive_json()
+    with pytest.raises(WebSocketDisconnect) as closed, _connect(app) as connection:
+        connection.receive_json()
+        connection.receive_json()
 
     assert closed.value.code == 1008
 
@@ -249,10 +246,9 @@ def test_read_access_lost_before_a_graph_poll_tick_closes_with_1008(app, monkeyp
         live_updates, "get_authorized_existing_datasets", AsyncMock(return_value=[])
     )
 
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with _connect(app) as connection:
-            connection.receive_json()
-            connection.receive_json()
+    with pytest.raises(WebSocketDisconnect) as closed, _connect(app) as connection:
+        connection.receive_json()
+        connection.receive_json()
 
     assert closed.value.code == 1008
 
@@ -262,9 +258,8 @@ def test_an_unexpected_stream_failure_closes_with_1011_so_clients_retry(app, mon
         live_updates, "get_live_events", AsyncMock(side_effect=RuntimeError("db is down"))
     )
 
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with _connect(app) as connection:
-            connection.receive_json()
-            connection.receive_json()
+    with pytest.raises(WebSocketDisconnect) as closed, _connect(app) as connection:
+        connection.receive_json()
+        connection.receive_json()
 
     assert closed.value.code == 1011

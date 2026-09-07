@@ -4,8 +4,8 @@ from uuid import UUID
 from fastapi_users.exceptions import UserAlreadyExists
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.modules.users.get_user_db import get_user_db_context
+from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.modules.users.models.User import UserCreate
 
 

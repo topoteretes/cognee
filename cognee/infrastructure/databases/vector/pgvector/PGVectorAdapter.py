@@ -1,32 +1,31 @@
 import asyncio
 from typing import Any, Dict, List, Optional, get_type_hints
 from uuid import UUID
+
+from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
+from sqlalchemy import JSON, Column, MetaData, Table, delete, exc, func, select, text
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func, text
-from sqlalchemy import exc
-from sqlalchemy.exc import DBAPIError, ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-from sqlalchemy.engine import make_url
 
-from cognee.shared.logging_utils import get_logger
+from cognee.context_global_variables import backend_access_control_enabled
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.relational import get_relational_config, get_relational_engine
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+from cognee.shared.logging_utils import get_logger
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from ..models.ScoredResult import ScoredResult
-from ..exceptions import CollectionNotFoundError
-from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..exceptions import CollectionNotFoundError
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 from .serialize_data import serialize_data
 
 logger = get_logger("PGVectorAdapter")
@@ -624,8 +623,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 else:
                     filter_operator = "?|"
 
-                from sqlalchemy import cast, bindparam
-                from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
+                from sqlalchemy import bindparam, cast
+                from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TEXT
 
                 target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
                 query = (
@@ -670,7 +669,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             return []
 
         # Return backend raw cosine distance as score (lower is better)
-        for i in range(0, len(vector_list)):
+        for i in range(len(vector_list)):
             vector_list[i]["score"] = float(vector_list[i]["_distance"])
 
         # Create and return ScoredResult objects
@@ -756,10 +755,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         to collections by requiring an uppercase first character.
         """
         if not tags:
-            return None
+            return
 
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         # `get_table_names()` returns the raw SQLAlchemy reflection keys; for
         # Postgres those may be schema-qualified (`schema.table`) when the
@@ -860,7 +859,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     e,
                 )
 
-        return None
+        return
 
     async def prune(self):
         """Drop all vector collection tables and reset cached reflection metadata."""
@@ -869,4 +868,4 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def run_migrations(self):
         """Run PGVector adapter migrations (currently no-op)."""
-        return None
+        return

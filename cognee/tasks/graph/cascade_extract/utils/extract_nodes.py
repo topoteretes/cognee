@@ -1,8 +1,9 @@
 from typing import List
+
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.root_dir import get_absolute_path
 
 

@@ -19,9 +19,9 @@ from typing import Any, Optional
 
 import litellm
 
-from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.infrastructure.llm.streaming.token_sink import TokenSink
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 logger = get_logger("stream_completion")
 

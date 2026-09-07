@@ -125,7 +125,7 @@ def detect_language(
             )
 
     try:
-        from langdetect import detect_langs, LangDetectException
+        from langdetect import LangDetectException, detect_langs
     except ImportError:
         raise LanguageDetectionError(
             "langdetect is required for language detection. Install it with: pip install langdetect"

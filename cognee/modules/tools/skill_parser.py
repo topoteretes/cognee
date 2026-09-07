@@ -20,7 +20,6 @@ from cognee.modules.tools.path_safety import (
 )
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger(__name__)
 
 NAMESPACE = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")

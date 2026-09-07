@@ -1,21 +1,21 @@
 """Vector-database adapter backed by Turso / libSQL."""
 
-import json
 import asyncio
+import json
 import threading
 from typing import Any, List, Optional
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.shared.logging_utils import get_logger
 
-from ..models.ScoredResult import ScoredResult
-from ..exceptions import CollectionNotFoundError
-from ..vector_db_interface import VectorDBInterface
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..exceptions import CollectionNotFoundError
+from ..models.ScoredResult import ScoredResult
 from ..pgvector.serialize_data import serialize_data
+from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("TursoVectorAdapter")
 
@@ -430,11 +430,11 @@ class TursoVectorAdapter(VectorDBInterface):
     async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
         """Delete rows whose id is in ``data_point_ids``."""
         if not await self.has_collection(collection_name):
-            return None
+            return
 
         ids = [str(data_point_id) for data_point_id in data_point_ids]
         if not ids:
-            return None
+            return
 
         for start in range(0, len(ids), QUERY_BATCH_SIZE):
             id_batch = ids[start : start + QUERY_BATCH_SIZE]
@@ -444,7 +444,7 @@ class TursoVectorAdapter(VectorDBInterface):
                 id_batch,
                 commit=True,
             )
-        return None
+        return
 
     async def remove_belongs_to_set_tags(
         self,
@@ -458,9 +458,9 @@ class TursoVectorAdapter(VectorDBInterface):
         only PascalCase-named tables are touched.
         """
         if not tags:
-            return None
+            return
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         candidate_tables = [
             name for name in await self.get_table_names() if name and name[0].isupper()
@@ -525,7 +525,7 @@ class TursoVectorAdapter(VectorDBInterface):
                     "remove_belongs_to_set_tags failed to update '%s': %s", table_name, error
                 )
 
-        return None
+        return
 
     async def prune(self):
         """Drop every collection table and reset cached reflection state."""
@@ -535,7 +535,7 @@ class TursoVectorAdapter(VectorDBInterface):
 
     async def run_migrations(self):
         """Run Turso adapter migrations (currently no-op)."""
-        return None
+        return
 
     def reset_metadata_cache(self):
         """Reset cached collection names for this adapter instance."""

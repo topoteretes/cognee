@@ -1,6 +1,7 @@
 """Unit tests for TursoAdapter using an in-memory SQLite database."""
 
 import json
+
 import pytest
 import pytest_asyncio
 

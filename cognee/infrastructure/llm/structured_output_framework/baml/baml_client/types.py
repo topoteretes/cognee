@@ -11,14 +11,11 @@
 # baml-cli is available with the baml package.
 
 import typing
-import typing_extensions
 from enum import Enum
 
-
-from pydantic import BaseModel, ConfigDict
-
-
 import baml_py
+import typing_extensions
+from pydantic import BaseModel, ConfigDict
 
 CheckT = typing_extensions.TypeVar("CheckT")
 CheckName = typing_extensions.TypeVar("CheckName", bound=str)

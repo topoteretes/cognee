@@ -1,12 +1,13 @@
-from dotenv import load_dotenv
 import json
 import os
 from dataclasses import dataclass
-from graphrag_sdk.source import URL, STRING
-from graphrag_sdk import KnowledgeGraph, Ontology
-from graphrag_sdk.models.litellm import LiteModel
-from graphrag_sdk.model_config import KnowledgeGraphModelConfig
+
+from dotenv import load_dotenv
 from falkordb import FalkorDB
+from graphrag_sdk import KnowledgeGraph, Ontology
+from graphrag_sdk.model_config import KnowledgeGraphModelConfig
+from graphrag_sdk.models.litellm import LiteModel
+from graphrag_sdk.source import STRING, URL
 
 load_dotenv()
 
@@ -140,7 +141,7 @@ def answer_questions(
         try:
             response = chat.send_message(question)
         except Exception as e:
-            print(f"Error processing question: {str(e)}")
+            print(f"Error processing question: {e!s}")
             response = "Error: Unable to generate answer due to an internal error."
 
         result = {"question": question, "answer": response, "golden_answer": expected_answer}

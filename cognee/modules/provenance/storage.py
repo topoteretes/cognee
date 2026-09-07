@@ -295,7 +295,6 @@ async def trace_lineage(entity_id: str, max_depth: Optional[int] = None) -> List
 
 async def clear() -> int:
     """Delete every ledger row (dev/test teardown only). Returns rows removed."""
-    async with get_async_session() as session:
-        async with session.begin():
-            result = await session.execute(delete(ProvenanceEntryRow))
-            return result.rowcount or 0
+    async with get_async_session() as session, session.begin():
+        result = await session.execute(delete(ProvenanceEntryRow))
+        return result.rowcount or 0

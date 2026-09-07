@@ -11,13 +11,13 @@ import pytest_asyncio
 import cognee
 from cognee.context_global_variables import graph_db_config, vector_db_config
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.modules.agent_memory.runtime import get_current_agent_memory_context
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.infrastructure.session.session_manager import SessionManager
 
 
 async def _reset_engines_and_prune() -> None:
@@ -31,11 +31,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -78,9 +78,11 @@ def _count_document_chunks(nodes) -> int:
     document_chunk_count = 0
     for _node_id, props in nodes:
         node_type = props.get("type")
-        if isinstance(node_type, dict) and node_type.get("DocumentChunk"):
-            document_chunk_count += 1
-        elif node_type == "DocumentChunk":
+        if (
+            isinstance(node_type, dict)
+            and node_type.get("DocumentChunk")
+            or node_type == "DocumentChunk"
+        ):
             document_chunk_count += 1
     return document_chunk_count
 

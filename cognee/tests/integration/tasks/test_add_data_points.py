@@ -7,11 +7,11 @@ import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.low_level import setup
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
+from cognee.low_level import setup
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.tasks.storage.exceptions import InvalidDataPointsInAddDataPointsError
-from cognee.infrastructure.databases.graph import get_graph_engine
 
 
 class Person(DataPoint):

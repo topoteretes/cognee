@@ -10,8 +10,8 @@ Requires `ollama serve` running and the following models pulled locally:
 - `ollama pull nomic-embed-text`
 """
 
-import os
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 
@@ -34,8 +34,8 @@ os.environ["EMBEDDING_DIMENSIONS"] = "768"
 os.environ["HUGGINGFACE_TOKENIZER"] = "nomic-ai/nomic-embed-text-v1.5"
 
 import cognee  # noqa: E402
-from cognee.modules.search.types import SearchType  # noqa: E402
 from cognee.infrastructure.llm.config import get_llm_config  # noqa: E402
+from cognee.modules.search.types import SearchType  # noqa: E402
 
 # Force local embedded stack configuration
 cognee.config.set_graph_database_provider("kuzu")

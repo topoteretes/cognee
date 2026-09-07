@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import gc
 import os
-
-import pytest
-
 import sys
 
+import pytest
 
 pytest.importorskip("ladybug")
 

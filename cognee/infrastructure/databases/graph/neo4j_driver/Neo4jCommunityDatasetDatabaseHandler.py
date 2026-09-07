@@ -1,17 +1,17 @@
-import os
 import base64
 import hashlib
+import os
 import secrets
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from cryptography.fernet import Fernet
 
-from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.infrastructure.databases.dataset_database_handler import (
     DatasetDatabaseHandlerInterface,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.infrastructure.databases.graph import get_graph_config
+from cognee.modules.users.models import DatasetDatabase, User
 from cognee.shared.logging_utils import get_logger
 
 from .neo4j_community_containers import (

@@ -1,13 +1,13 @@
 import asyncio
-from typing import Optional, List, Type, Union
+from typing import List, Optional, Type, Union
 
 from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.completion import generate_completion_batch
 from cognee.modules.retrieval.utils.query_state import QueryState
 from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.utils.completion import generate_completion_batch
 
 logger = get_logger()
 

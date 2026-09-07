@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import tiktoken
+
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.Document import Document
 

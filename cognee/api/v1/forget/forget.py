@@ -1,20 +1,20 @@
+from typing import Any, Optional, Union
 from uuid import UUID
-from typing import Optional, Union, Any
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.locks import dataset_lock
-from cognee.modules.operations import record_operation
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability import (
-    new_span,
     COGNEE_DATASET_NAME,
     COGNEE_FORGET_TARGET,
     COGNEE_RESULT_COUNT,
-    MEMORY_SYSTEM,
     MEMORY_OPERATION,
-    record_operation_duration,
+    MEMORY_SYSTEM,
     increment_items_deleted,
+    new_span,
+    record_operation_duration,
 )
+from cognee.modules.operations import record_operation
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("forget")
 
@@ -68,8 +68,8 @@ async def forget(
     Returns:
         Dict with deletion summary: items removed, datasets removed.
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     dataset_ref = dataset_id or dataset
 
@@ -130,10 +130,9 @@ async def forget(
             return result
 
         async with record_operation("forget", user=user) as operation_context:
-            from cognee.modules.users.methods import get_default_user
-
             # In case there is no database, forget will fail when getting a user
             from cognee.low_level import setup
+            from cognee.modules.users.methods import get_default_user
 
             await setup()
 

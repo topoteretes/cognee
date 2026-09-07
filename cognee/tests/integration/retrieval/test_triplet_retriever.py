@@ -1,14 +1,15 @@
 import os
-import pytest
 import pathlib
-import pytest_asyncio
-import cognee
 
+import pytest
+import pytest_asyncio
+
+import cognee
 from cognee.low_level import setup
-from cognee.tasks.storage import add_data_points
+from cognee.modules.engine.models import Triplet
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.modules.engine.models import Triplet
+from cognee.tasks.storage import add_data_points
 
 
 @pytest_asyncio.fixture

@@ -26,13 +26,13 @@ from sqlalchemy import select
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup as setup_cognee
 from cognee.modules.engine.utils import generate_edge_object_id

@@ -1,12 +1,14 @@
-from uuid import UUID
 from typing import List, Tuple
+from uuid import UUID
+
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import with_async_session
-from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.models import Node
+
 from .GraphRelationshipLedger import GraphRelationshipLedger
 
 BATCH_SIZE = 1000

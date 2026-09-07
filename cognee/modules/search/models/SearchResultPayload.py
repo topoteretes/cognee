@@ -1,7 +1,9 @@
+from typing import Any, List, Optional, Union
 from uuid import UUID
-from typing import Optional, Any, List, Union
+
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from pydantic.alias_generators import to_camel
+
 from cognee.modules.search.models.EvidenceReference import EvidenceReference
 from cognee.modules.search.types.ContextFormat import ContextFormat
 from cognee.modules.search.types.SearchType import SearchType

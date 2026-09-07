@@ -1,19 +1,20 @@
 from typing import Optional
 
-from cognee.modules.observability import OtelStatusCode as StatusCode
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.models import User
-from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
-from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_PIPELINE_TASK_NAME,
-    COGNEE_RESULT_SUMMARY,
-    COGNEE_RESULT_COUNT,
-)
-from cognee.modules.pipelines.provenance_config import get_provenance_config
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.observability import (
+    COGNEE_PIPELINE_TASK_NAME,
+    COGNEE_RESULT_COUNT,
+    COGNEE_RESULT_SUMMARY,
+    new_span,
+)
+from cognee.modules.observability import OtelStatusCode as StatusCode
+from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.provenance_config import get_provenance_config
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
@@ -246,7 +247,7 @@ async def handle_task(
             span.record_exception(error)
 
             logger.error(
-                f"{task_type} task errored: `{task_name}`\n{str(error)}\n",
+                f"{task_type} task errored: `{task_name}`\n{error!s}\n",
                 exc_info=True,
             )
             send_telemetry(

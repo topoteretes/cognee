@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger("memory.entries")
 
 

@@ -23,4 +23,4 @@ def flush():
 on_log_event = DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_CTX.on_log_event
 
 
-__all__ = ["trace", "set_tags", "flush", "on_log_event"]
+__all__ = ["flush", "on_log_event", "set_tags", "trace"]

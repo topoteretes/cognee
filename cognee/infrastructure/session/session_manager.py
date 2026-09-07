@@ -19,6 +19,8 @@ from cognee.infrastructure.session.session_embeddings import (
 from cognee.infrastructure.session.session_turn import (
     SessionTurnPreparation,
     generate_session_answer,
+)
+from cognee.infrastructure.session.session_turn import (
     prepare_session_turn as _prepare_turn,
 )
 from cognee.modules.observability import (

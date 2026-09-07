@@ -12,32 +12,32 @@ us at social@cognee.ai to explore the options.
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from uuid import UUID
-from typing import Callable, Dict, Any, List, Union, Optional, Tuple, Type
 
 from sqlalchemy import NullPool, text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.databases.relational import get_relational_config
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
-)
-from cognee.infrastructure.databases.provenance.source_refs import (
-    get_dataset_id_from_source_ref_key,
-    get_pipeline_run_id_from_source_run_ref,
-    get_source_ref_key_from_source_run_ref,
 )
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     ProvenanceColumns,
     provenance_after_attach,
     provenance_after_remove,
 )
+from cognee.infrastructure.databases.provenance.source_refs import (
+    get_dataset_id_from_source_ref_key,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
+from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.methods.sanitize_relational_payload import sanitize_relational_payload
+from cognee.modules.storage.utils import JSONEncoder
 
 from .tables import _meta
 
@@ -292,10 +292,9 @@ class PostgresDemoAdapter(GraphDBInterface):
         instead of behind it. It is an optimization, not the correctness
         mechanism: the advisory lock still orders writes across processes.
         """
-        async with self._get_write_gate():
-            async with self.sessionmaker() as session:
-                await _lock_graph_writes(session)
-                yield session
+        async with self._get_write_gate(), self.sessionmaker() as session:
+            await _lock_graph_writes(session)
+            yield session
 
     async def close(self) -> None:
         """Dispose the database engine."""

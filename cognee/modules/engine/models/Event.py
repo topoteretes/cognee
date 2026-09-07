@@ -1,8 +1,10 @@
-from typing import Optional, Any
+from typing import Any, Optional
+
 from pydantic import SkipValidation
+
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.models.Timestamp import Timestamp
 from cognee.modules.engine.models.Interval import Interval
+from cognee.modules.engine.models.Timestamp import Timestamp
 
 
 class Event(DataPoint):

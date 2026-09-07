@@ -53,8 +53,8 @@ import threading
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, Set
 
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 logger = get_logger("DatasetQueue")
 
@@ -66,7 +66,7 @@ TRUE_VALUES = frozenset({"1", "true", "yes", "on", "y", "t"})
 class DatasetQueueSettings:
     """Effective runtime settings for the dataset queue."""
 
-    __slots__ = ("enabled", "max_concurrent", "idle_ttl_seconds")
+    __slots__ = ("enabled", "idle_ttl_seconds", "max_concurrent")
 
     def __init__(self, enabled: bool, max_concurrent: int, idle_ttl_seconds: float = 600.0) -> None:
         self.enabled = enabled
@@ -113,7 +113,7 @@ def _make_release(semaphore: asyncio.Semaphore) -> Callable[[], None]:
 class SlotEntry:
     """A single acquired slot with a nesting depth counter."""
 
-    __slots__ = ("release", "depth")
+    __slots__ = ("depth", "release")
 
     def __init__(self, release: Callable[[], None], depth: int = 1) -> None:
         self.release = release

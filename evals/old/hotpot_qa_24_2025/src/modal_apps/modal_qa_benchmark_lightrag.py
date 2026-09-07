@@ -5,8 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import modal
-
 from qa.qa_benchmark_lightrag import LightRAGConfig, QABenchmarkLightRAG
+
 from modal_apps.modal_image import image
 
 APP_NAME = "qa-benchmark-lightrag"

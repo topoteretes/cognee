@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.infrastructure.databases.postgres import (
     create_pg_schema_if_not_exists,
-    drop_pg_schema_if_exists,
     dataset_schema_name,
+    drop_pg_schema_if_exists,
 )
 
 
@@ -141,8 +141,8 @@ def test_dataset_schema_name_is_valid_identifier():
 async def test_pgvector_schema_isolation(two_schemas):
     """Two PGVector adapters pinned to different schemas don't see each other."""
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import (
-        PGVectorAdapter,
         IndexSchema,
+        PGVectorAdapter,
     )
 
     d = _db()
@@ -258,9 +258,9 @@ async def test_shared_handlers_create_and_delete_lifecycle():
     Requires cognee to be configured with a Postgres relational backend, since
     the shared handlers anchor to the relational configuration.
     """
+    from cognee.infrastructure.databases.graph.config import get_graph_config
     from cognee.infrastructure.databases.relational import get_relational_config
     from cognee.infrastructure.databases.vector import get_vectordb_config
-    from cognee.infrastructure.databases.graph.config import get_graph_config
 
     if get_relational_config().db_provider != "postgres":
         pytest.skip("shared handler lifecycle requires DB_PROVIDER=postgres")

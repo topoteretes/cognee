@@ -1,27 +1,26 @@
 import json
+from typing import Annotated, List, Literal, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, Depends
-from typing import List, Optional, Union, Literal, Annotated
 from pydantic import BaseModel, Field, WithJsonSchema
 
-from cognee.memory import QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry
-from cognee.modules.users.models import User
+from cognee import __version__ as cognee_version
+from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
+from cognee.exceptions import CogneeApiError
+from cognee.memory import FeedbackEntry, QAEntry, SkillRunEntry, TraceEntry
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
+from cognee.shared.utils import send_telemetry
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
     parse_labels,
 )
-from cognee.shared.utils import send_telemetry
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.exceptions import CogneeApiError
-from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 
 logger = get_logger()
 
@@ -510,8 +509,8 @@ def get_remember_router() -> APIRouter:
                 detail="Provide at least one file in 'data' or one entry in 'raw_data'.",
             )
 
-        from cognee.api.v1.remember import remember as cognee_remember
         from cognee.api.v1.ontologies.ontologies import OntologyService
+        from cognee.api.v1.remember import remember as cognee_remember
         from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 
         # Validate graph_model before the generic try/except so failures
@@ -545,11 +544,12 @@ def get_remember_router() -> APIRouter:
                 ontology_service = OntologyService()
                 ontology_contents = ontology_service.get_ontology_contents(ontology_keys, user)
 
+                from io import StringIO
+
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
-                from io import StringIO
 
                 ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {

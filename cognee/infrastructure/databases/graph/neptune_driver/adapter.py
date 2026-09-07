@@ -1,27 +1,29 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from typing import Optional, Any, List, Dict, Type, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type
 from uuid import UUID
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph.graph_db_interface import (
-    GraphDBInterface,
-    NodeData,
-    EdgeData,
-    Node,
-)
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.infrastructure.engine import DataPoint
+
 from botocore.config import Config
+
+from cognee.infrastructure.databases.graph.graph_db_interface import (
+    EdgeData,
+    GraphDBInterface,
+    Node,
+    NodeData,
+)
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
 
 from .exceptions import (
     NeptuneAnalyticsConfigurationError,
 )
 from .neptune_utils import (
-    validate_graph_id,
-    validate_aws_region,
     build_neptune_config,
     format_neptune_error,
+    validate_aws_region,
+    validate_graph_id,
 )
 
 logger = get_logger("NeptuneGraphDB")
@@ -245,7 +247,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
             result = await self.query(query, params)
             logger.debug(f"Successfully added/updated node: {node.id}")
-            logger.debug(f"Successfully added/updated node: {str(result)}")
+            logger.debug(f"Successfully added/updated node: {result!s}")
 
         except Exception as e:
             error_msg = format_neptune_error(e)
@@ -1299,7 +1301,6 @@ class NeptuneGraphDB(GraphDBInterface):
             - graph_name: The name of the graph to drop, defaults to 'myGraph'. (default
               'myGraph')
         """
-        pass
 
     async def graph_exists(self, graph_name="myGraph"):
         """
@@ -1319,7 +1320,6 @@ class NeptuneGraphDB(GraphDBInterface):
 
             True if the graph exists, otherwise False.
         """
-        pass
 
     async def project_entire_graph(self, graph_name="myGraph"):
         """
@@ -1328,7 +1328,6 @@ class NeptuneGraphDB(GraphDBInterface):
         Note: This method is currently a placeholder because GDS (Graph Data Science)
         projection is not supported in Neptune Anlaytics.
         """
-        pass
 
     async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list]]):
         """

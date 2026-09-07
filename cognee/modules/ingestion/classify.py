@@ -1,10 +1,11 @@
-from os import path
 from io import BufferedReader, BytesIO
-from typing import Union, BinaryIO
+from os import path
 from tempfile import SpooledTemporaryFile
+from typing import BinaryIO, Union
 
 from cognee.modules.ingestion.exceptions import IngestionError
-from .data_types import TextData, BinaryData, S3BinaryData
+
+from .data_types import BinaryData, S3BinaryData, TextData
 
 
 def classify(

@@ -1,23 +1,25 @@
+import json
+import logging
 import os
 import re
-import json
 import uuid
-import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
 from typing import Optional
+
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users import BaseUserManager, UUIDIDMixin, exceptions
 from fastapi_users.db import SQLAlchemyUserDatabase
 from pwdlib.exceptions import UnknownHashError
-from contextlib import asynccontextmanager
+from sqlalchemy import select
 
-from .models import User
-from .get_user_db import get_user_db
-from cognee.modules.users.models.UserApiKey import UserApiKey
-from cognee.modules.users.api_key.hash_api_key import prepare_api_key
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.api_key.hash_api_key import prepare_api_key
+from cognee.modules.users.models.UserApiKey import UserApiKey
+
+from .get_user_db import get_user_db
+from .models import User
 
 logger = logging.getLogger(__name__)
 

@@ -110,7 +110,8 @@ async def _update_ledger_references(id_map: dict, dataset_id: Optional[UUID]) ->
     """
     from sqlalchemy import update as sql_update
 
-    from cognee.modules.graph.models import Edge as LedgerEdge, Node as LedgerNode
+    from cognee.modules.graph.models import Edge as LedgerEdge
+    from cognee.modules.graph.models import Node as LedgerNode
 
     engine = get_relational_engine()
     async with engine.get_async_session() as session:

@@ -1,12 +1,8 @@
+from typing import Any, BinaryIO, Dict, List, Optional, Union
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any, Dict
 
 from pydantic import BaseModel
 
-from cognee.modules.pipelines.models import PipelineRunInfo
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
@@ -17,6 +13,10 @@ from cognee.api.v1.update.incremental import (
 )
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.pipelines.models import PipelineRunInfo
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("update")

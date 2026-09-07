@@ -2,23 +2,23 @@ import argparse
 import asyncio
 import json
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
-from cognee.cli.config import (
-    COMPLETION_SEARCH_TYPES,
-    DEFAULT_SEARCH_TYPE,
-    OUTPUT_FORMAT_CHOICES,
-    SEARCH_TYPE_CHOICES,
-)
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.code_search import (
     add_code_arguments,
     build_code_query,
     handle_diagram_out,
     print_code_results,
 )
+from cognee.cli.config import (
+    COMPLETION_SEARCH_TYPES,
+    DEFAULT_SEARCH_TYPE,
+    OUTPUT_FORMAT_CHOICES,
+    SEARCH_TYPE_CHOICES,
+)
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.hints import hint_recall_empty
+from cognee.cli.reference import SupportsCliCommand
 
 
 class RecallCommand(SupportsCliCommand):
@@ -137,7 +137,7 @@ With --query-type CODE, --code-query selects the code-graph operation and
                         results = await cognee.recall(**recall_kwargs)
                     return results
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to recall: {str(e)}") from e
+                    raise CliCommandInnerException(f"Failed to recall: {e!s}") from e
 
             results = asyncio.run(run_recall())
 
@@ -199,4 +199,4 @@ With --query-type CODE, --code-query selects the code-graph operation and
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error recalling: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Error recalling: {e!s}", error_code=1) from e

@@ -1,7 +1,7 @@
-from cognee.infrastructure.databases.graph.config import get_graph_context_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
 
 from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
@@ -38,14 +38,14 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
 
     if provider == "neptune_analytics":
         from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            NeptuneAnalyticsAdapter,
             NEPTUNE_ANALYTICS_ENDPOINT_URL,
+            NeptuneAnalyticsAdapter,
         )
         from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 
         graph_url = graph_config.get("graph_database_url", "")
         if not graph_url:
-            raise EnvironmentError("Missing Neptune endpoint.")
+            raise OSError("Missing Neptune endpoint.")
 
         if not graph_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
             raise ValueError(
@@ -82,7 +82,7 @@ async def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
     #         vector_adapter=vector_adapter,
     #     )
 
-    raise EnvironmentError(f"Unsupported hybrid provider: {provider}")
+    raise OSError(f"Unsupported hybrid provider: {provider}")
 
 
 async def get_unified_engine() -> UnifiedStoreEngine:

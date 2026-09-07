@@ -3,21 +3,11 @@ from __future__ import annotations
 from typing import Optional, Union
 from uuid import UUID
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.users.permissions.methods import give_permission_on_dataset
-from cognee.modules.data.methods import get_authorized_dataset, get_datasets_by_name
-from cognee.modules.agents.create_agent import create_agent
-from cognee.modules.agents.list_agents import list_agents
-from cognee.modules.agents.get_agent import get_agent
-from cognee.modules.agents.delete_agent import delete_agent
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.operations import (
-    RangeLiteral,
-    list_agent_connections,
-    get_agent_connection_detail,
-)
+from cognee.modules.agents.create_agent import create_agent
+from cognee.modules.agents.delete_agent import delete_agent
+from cognee.modules.agents.get_agent import get_agent
+from cognee.modules.agents.list_agents import list_agents
 from cognee.modules.agents.models import (
     AgentConnectionType,
     AgentMemoryMode,
@@ -25,6 +15,16 @@ from cognee.modules.agents.models import (
     RegisterAgentRequest,
     UnregisterAgentRequest,
 )
+from cognee.modules.agents.operations import (
+    RangeLiteral,
+    get_agent_connection_detail,
+    list_agent_connections,
+)
+from cognee.modules.data.methods import get_authorized_dataset, get_datasets_by_name
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
 
 def _display_email(email: str) -> str:

@@ -1,6 +1,8 @@
-from typing import Any, Optional, List, Union
+from typing import Any, List, Optional, Union
 from uuid import UUID
+
 from pydantic import BaseModel
+
 from cognee.modules.data.models.Data import Data
 
 
@@ -23,22 +25,18 @@ class PipelineRunInfo(BaseModel):
 
 class PipelineRunStarted(PipelineRunInfo):
     status: str = "PipelineRunStarted"
-    pass
 
 
 class PipelineRunYield(PipelineRunInfo):
     status: str = "PipelineRunYield"
-    pass
 
 
 class PipelineRunCompleted(PipelineRunInfo):
     status: str = "PipelineRunCompleted"
-    pass
 
 
 class PipelineRunAlreadyCompleted(PipelineRunInfo):
     status: str = "PipelineRunAlreadyCompleted"
-    pass
 
 
 class PipelineRunErrored(PipelineRunInfo):
@@ -50,7 +48,6 @@ class PipelineRunErrored(PipelineRunInfo):
     # repr for backward compatibility.
     error_class: Optional[str] = None
     error_message: Optional[str] = None
-    pass
 
 
 class PipelineRunProgress(PipelineRunInfo):

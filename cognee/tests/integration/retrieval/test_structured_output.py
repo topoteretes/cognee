@@ -1,23 +1,24 @@
 import asyncio
 import os
-import pytest
 import pathlib
-import pytest_asyncio
-import cognee
 
+import pytest
+import pytest_asyncio
 from pydantic import BaseModel
-from cognee.low_level import setup, DataPoint
-from cognee.tasks.storage import add_data_points
+
+import cognee
+from cognee.low_level import DataPoint, setup
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.models import Entity, EntityType
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
-from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.tasks.storage import add_data_points
 
 
 class TestAnswer(BaseModel):

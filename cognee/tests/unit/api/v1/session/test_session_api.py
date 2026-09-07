@@ -1,9 +1,9 @@
 import sys
-
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
+
+import pytest
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
@@ -106,14 +106,16 @@ class TestResolveUser:
     async def test_get_session_raises_when_default_user_fails(self, session_user_none, sm):
         from cognee.api.v1.session.session import get_session
 
-        with patch.object(
-            _session_module(),
-            "get_default_user",
-            new_callable=AsyncMock,
-            side_effect=UserNotFoundError(),
+        with (
+            patch.object(
+                _session_module(),
+                "get_default_user",
+                new_callable=AsyncMock,
+                side_effect=UserNotFoundError(),
+            ),
+            pytest.raises(CogneeValidationError) as exc_info,
         ):
-            with pytest.raises(CogneeValidationError) as exc_info:
-                await get_session(session_id="s1")
+            await get_session(session_id="s1")
         assert "Session prerequisites" in exc_info.value.message
 
     @pytest.mark.asyncio
@@ -122,14 +124,16 @@ class TestResolveUser:
     ):
         from cognee.api.v1.session.session import get_session
 
-        with patch.object(
-            _session_module(),
-            "get_default_user",
-            new_callable=AsyncMock,
-            side_effect=DatabaseNotCreatedError(),
+        with (
+            patch.object(
+                _session_module(),
+                "get_default_user",
+                new_callable=AsyncMock,
+                side_effect=DatabaseNotCreatedError(),
+            ),
+            pytest.raises(CogneeValidationError) as exc_info,
         ):
-            with pytest.raises(CogneeValidationError) as exc_info:
-                await get_session(session_id="s1")
+            await get_session(session_id="s1")
         assert "Session prerequisites" in exc_info.value.message
 
     @pytest.mark.asyncio
@@ -374,9 +378,9 @@ class TestGetSession:
                 "cognee.modules.data.methods.get_datasets_by_name",
                 AsyncMock(return_value=[]),
             ),
+            pytest.raises(CogneeValidationError, match="no main_dataset"),
         ):
-            with pytest.raises(CogneeValidationError, match="no main_dataset"):
-                await get_session()
+            await get_session()
 
         bare.get_session.assert_not_awaited()
 
@@ -425,13 +429,15 @@ class TestAddFeedback:
         from cognee.api.v1.session.session import add_feedback
         from cognee.infrastructure.databases.exceptions import CacheConnectionError
 
-        with patch.object(
-            _session_module(),
-            "get_session_manager",
-            side_effect=CacheConnectionError("bad backend"),
+        with (
+            patch.object(
+                _session_module(),
+                "get_session_manager",
+                side_effect=CacheConnectionError("bad backend"),
+            ),
+            pytest.raises(CacheConnectionError, match="bad backend"),
         ):
-            with pytest.raises(CacheConnectionError, match="bad backend"):
-                await add_feedback(session_id="s1", qa_id="q1", feedback_text="ok")
+            await add_feedback(session_id="s1", qa_id="q1", feedback_text="ok")
 
     @pytest.mark.asyncio
     async def test_passes_optional_feedback_params(self, session_user_ctx, sm):
@@ -605,7 +611,6 @@ class TestSessionNamespace:
     def test_session_qa_entry_exported(self):
         """SessionQAEntry is exported from session package."""
         from cognee.api.v1.session import SessionQAEntry as Exported
-
         from cognee.infrastructure.databases.cache.models import SessionQAEntry
 
         assert Exported is SessionQAEntry

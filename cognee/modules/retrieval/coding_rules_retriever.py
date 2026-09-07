@@ -1,8 +1,9 @@
 import asyncio
 from functools import reduce
-from typing import List, Optional, Any
-from cognee.shared.logging_utils import get_logger
+from typing import Any, List, Optional
+
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.codingagents.coding_rule_associations import get_existing_rules
 
 logger = get_logger("CodingRulesRetriever")

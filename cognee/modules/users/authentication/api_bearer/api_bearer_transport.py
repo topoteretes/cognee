@@ -1,8 +1,8 @@
 from typing import Optional
 
 from fastapi.security import OAuth2PasswordBearer
-from starlette.requests import HTTPConnection
 from fastapi_users.authentication import BearerTransport
+from starlette.requests import HTTPConnection
 
 from cognee.modules.users.authentication.websocket_query_param import (
     resolve_websocket_query_param_fallback,

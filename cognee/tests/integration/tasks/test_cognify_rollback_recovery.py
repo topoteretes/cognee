@@ -52,11 +52,11 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     system_directory_path = str(root / "system")
     data_directory_path = str(root / "data")
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -191,7 +191,8 @@ async def _mock_structured_output(
     **_kwargs,
 ):
     from cognee.shared.data_models import Edge as KGEdge
-    from cognee.shared.data_models import KnowledgeGraph, Node as KGNode, SummarizedContent
+    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+    from cognee.shared.data_models import Node as KGNode
 
     if response_model == SummarizedContent:
         return SummarizedContent(

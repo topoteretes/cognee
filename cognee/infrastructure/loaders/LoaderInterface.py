@@ -48,7 +48,6 @@ class LoaderInterface(ABC):
         Returns:
             List of extensions without the leading dot (e.g., ['txt', 'md'])
         """
-        pass
 
     @property
     @abstractmethod
@@ -59,7 +58,6 @@ class LoaderInterface(ABC):
         Returns:
             List of MIME type strings (e.g., ['text/plain', 'application/pdf'])
         """
-        pass
 
     @abstractmethod
     def can_handle(self, extension: str, mime_type: str) -> bool:
@@ -73,7 +71,6 @@ class LoaderInterface(ABC):
         Returns:
             True if this loader can process the file, False otherwise
         """
-        pass
 
     @abstractmethod
     async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
@@ -92,4 +89,3 @@ class LoaderInterface(ABC):
         Raises:
             Exception: If file cannot be processed
         """
-        pass

@@ -17,8 +17,8 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 

@@ -1,13 +1,12 @@
 import asyncio
 import re
-from typing import Any, Callable, Optional, List, Union
 from heapq import nlargest
+from typing import Any, Callable, List, Optional, Union
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.shared.logging_utils import get_logger
-
 
 logger = get_logger("LexicalRetriever")
 

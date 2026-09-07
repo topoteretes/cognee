@@ -392,8 +392,8 @@ async def _read_memory_relational(
         from sqlalchemy import select
 
         from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.graph.models.Node import Node as NodeRow
         from cognee.modules.graph.models.Edge import Edge as EdgeRow
+        from cognee.modules.graph.models.Node import Node as NodeRow
     except Exception as error:  # pragma: no cover - models unavailable
         logger.debug(f"relational memory models unavailable: {error}")
         return None

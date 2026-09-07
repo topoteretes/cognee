@@ -22,7 +22,11 @@ import aiohttp
 
 from cognee.modules.integrations.oauth_flow import (
     make_state as _make_state,
+)
+from cognee.modules.integrations.oauth_flow import (
     sign_state_payload as _sign_state_payload,
+)
+from cognee.modules.integrations.oauth_flow import (
     validate_state as _validate_state,
 )
 from cognee.modules.integrations.slack.slack_settings import require
@@ -77,8 +81,9 @@ async def exchange_code(code: str) -> dict[str, Any]:
     rejected — Slack returns HTTP 200 with ``ok: false``, so HTTP status
     alone cannot be trusted.
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             _ACCESS_URL,
             data={
                 "client_id": require("client_id"),
@@ -86,8 +91,9 @@ async def exchange_code(code: str) -> dict[str, Any]:
                 "code": code,
                 "redirect_uri": require("redirect_uri"),
             },
-        ) as response:
-            payload = await response.json()
+        ) as response,
+    ):
+        payload = await response.json()
 
     if not payload.get("ok"):
         raise RuntimeError(f"Slack oauth.v2.access failed: {payload.get('error', 'unknown')}")

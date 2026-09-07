@@ -13,25 +13,25 @@ import json
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Union, Optional, Tuple, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 from uuid import UUID
 
 from sqlalchemy import text
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
-from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import IndexSchema
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
+from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
     from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
-from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.modules.storage.utils import JSONEncoder
 
 logger = get_logger()
 

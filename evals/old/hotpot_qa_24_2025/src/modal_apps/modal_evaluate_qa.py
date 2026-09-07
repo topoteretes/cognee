@@ -1,4 +1,5 @@
 import modal
+
 from modal_apps.modal_image import image
 
 APP_NAME = "volume-reader"
@@ -62,12 +63,13 @@ def get_answers_files(benchmark_folder: str):
 )
 def calculate_qa_metrics(benchmark_folder: str, filename: str):
     """Calculate QA metrics for a JSON file using cognee evaluation framework."""
+    import asyncio
     import json
     import os
-    import asyncio
+
     import cognee
-    from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
     from cognee.eval_framework.eval_config import EvalConfig
+    from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 
     answers_folder = f"/{VOLUME_NAME}/{benchmark_folder}/answers"
     deepeval_folder = f"/{VOLUME_NAME}/{benchmark_folder}/deepeval_evaluated"

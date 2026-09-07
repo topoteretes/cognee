@@ -4,6 +4,9 @@ from time import monotonic
 from typing import Optional
 from uuid import UUID
 
+from cognee.infrastructure.databases.dataset_database_handler import (
+    DatasetDatabaseHandlerInterface,
+)
 from cognee.infrastructure.databases.exceptions import (
     DatabaseCredentialsError,
     Neo4jMultiDatabaseSupportError,
@@ -13,11 +16,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.infrastructure.databases.dataset_database_handler import (
-    DatasetDatabaseHandlerInterface,
-)
 from cognee.modules.users.models import DatasetDatabase, User
-
 
 NEO4J_DATASET_DATABASE_HANDLER = "neo4j"
 NEO4J_SYSTEM_DATABASE = "system"
@@ -223,9 +222,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         graph_database_allow_anonymous = graph_config.graph_database_allow_anonymous
 
         if not graph_database_url:
-            raise EnvironmentError(
-                "Missing required GRAPH_DATABASE_URL for local Neo4j multi-user mode."
-            )
+            raise OSError("Missing required GRAPH_DATABASE_URL for local Neo4j multi-user mode.")
 
         if graph_database_username and graph_database_password:
             pass
@@ -326,7 +323,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 ),
             )
 
-        return EnvironmentError(
+        return OSError(
             "Local Neo4j multi-user mode requires a Neo4j deployment that supports "
             "CREATE/DROP DATABASE and credentials with database-management privileges."
         )

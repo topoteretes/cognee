@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from cognee import memify
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
@@ -19,7 +20,6 @@ from cognee.tasks.memify.consolidate_entities import (
     detect_entity_duplicates,
     merge_entity_duplicates,
 )
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger("consolidate_entities_pipeline")
 

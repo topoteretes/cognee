@@ -3,8 +3,8 @@ from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
-from .base import TranslationProvider, TranslationResult
 from ..config import get_translation_config
+from .base import TranslationProvider, TranslationResult
 
 logger = get_logger(__name__)
 

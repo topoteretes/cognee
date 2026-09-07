@@ -15,7 +15,6 @@ import sys
 import tempfile
 import warnings
 
-
 # Maps the on-disk storage version code (read from catalog.kz) to a ladybug
 # release that can open that format. The code is shared across patch/minor
 # releases that keep the same on-disk format, so there is one entry per format,
@@ -210,7 +209,7 @@ def ladybug_migration(
     """
     print(f"Migrating graph database from {old_version} to {new_version}", file=sys.stderr)
     print(f"Source: {old_db}", file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
 
     # If version of old database is not provided try to determine it based on file info
     if not old_version:

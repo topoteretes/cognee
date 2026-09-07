@@ -1,17 +1,18 @@
-import os
-import aiohttp
 import asyncio
 import base64
 import hashlib
-from uuid import UUID
+import os
 from typing import Optional
 from urllib.parse import urlparse
-from cryptography.fernet import Fernet
-from aiohttp import BasicAuth
+from uuid import UUID
 
-from cognee.infrastructure.databases.graph import get_graph_config
-from cognee.modules.users.models import User, DatasetDatabase
+import aiohttp
+from aiohttp import BasicAuth
+from cryptography.fernet import Fernet
+
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
+from cognee.infrastructure.databases.graph import get_graph_config
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -195,9 +196,9 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         url = "https://api.neo4j.io/oauth/token"
         data = {"grant_type": "client_credentials"}  # sent as application/x-www-form-urlencoded
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, data=data, auth=BasicAuth(client_id, client_secret)
-            ) as resp:
-                resp.raise_for_status()
-                return await resp.json()
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(url, data=data, auth=BasicAuth(client_id, client_secret)) as resp,
+        ):
+            resp.raise_for_status()
+            return await resp.json()

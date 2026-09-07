@@ -5,13 +5,14 @@ End-to-end integration test for edge-centered payload and triplet embeddings.
 
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from cognee.modules.ontology.ontology_config import Config
 
 logger = get_logger()
 
@@ -164,6 +165,7 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     from cognee.shared.logging_utils import setup_logging
 
     setup_logging()

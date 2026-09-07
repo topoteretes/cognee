@@ -1,37 +1,37 @@
 import asyncio
 import logging
-
-from cognee.shared.logging_utils import get_logger
-from typing import List, Optional
-import numpy as np
 import math
+import os
 import re
+from typing import List, Optional
+from urllib.parse import urlparse
+
+import httpx
+import litellm
+import numpy as np
 from tenacity import (
+    before_sleep_log,
     retry,
     stop_after_delay,
     wait_exponential_jitter,
-    before_sleep_log,
 )
-import litellm
-import os
-from urllib.parse import urlparse
-import httpx
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    handle_embedding_response,
+    sanitize_embedding_text_inputs,
+)
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
-from cognee.infrastructure.databases.vector.embeddings.utils import (
-    sanitize_embedding_text_inputs,
-    handle_embedding_response,
-)
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
@@ -353,7 +353,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
         ) as e:
-            logger.error(f"Embedding error with model {self.model}: {str(e)}")
+            logger.error(f"Embedding error with model {self.model}: {e!s}")
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:

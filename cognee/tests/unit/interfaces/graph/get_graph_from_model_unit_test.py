@@ -1,9 +1,11 @@
-import pytest
-from typing import List, Any
-from cognee.infrastructure.engine import DataPoint, Edge
+from typing import Any, List
 
+import pytest
+
+from cognee.infrastructure.engine import DataPoint, Edge
+from cognee.modules.engine.models import Entity as RealEntity
+from cognee.modules.engine.models import EntityType as RealEntityType
 from cognee.modules.graph.utils import get_graph_from_model
-from cognee.modules.engine.models import Entity as RealEntity, EntityType as RealEntityType
 
 
 class Document(DataPoint):
@@ -64,7 +66,7 @@ async def test_get_graph_from_model_simple_structure():
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edges, got {len(edges)}"
 
-    edge_key = f"{str(entity.id)}_{str(entitytype.id)}_is_type"
+    edge_key = f"{entity.id!s}_{entitytype.id!s}_is_type"
     assert edge_key in added_edges, f"Edge {edge_key} not found"
 
 

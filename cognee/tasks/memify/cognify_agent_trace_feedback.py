@@ -2,7 +2,6 @@ from typing import Optional
 from uuid import UUID
 
 import cognee
-
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
 from cognee.modules.users.models import User

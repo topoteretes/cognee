@@ -26,9 +26,9 @@ import io
 import os
 import random
 import uuid
-
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 from locust import HttpUser, SequentialTaskSet, between, events, tag, task
 
 API_KEY = os.environ.get("COGNEE_API_KEY", "")

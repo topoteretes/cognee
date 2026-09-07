@@ -1,14 +1,13 @@
+import importlib
 import os
 import sys
-import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
-from types import SimpleNamespace
-import importlib
 
+import pytest
 
 from cognee.modules.users.models import User
-
 
 gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
 
@@ -99,8 +98,8 @@ class TestConditionalAuthenticationIntegration:
     async def test_conditional_authentication_function_exists(self):
         """Test that the conditional authentication function can be imported and used."""
         from cognee.modules.users.methods.get_authenticated_user import (
-            get_authenticated_user,
             REQUIRE_AUTHENTICATION,
+            get_authenticated_user,
         )
 
         # Should be callable

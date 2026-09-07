@@ -1,13 +1,14 @@
+from typing import Optional
 from uuid import UUID
+
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
-from typing import Optional
 
-from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models import Tenant
 from cognee.modules.users.methods import get_user
+from cognee.modules.users.models import Tenant
+from cognee.modules.users.models.UserTenant import UserTenant
 
 
 async def create_tenant(

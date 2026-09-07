@@ -16,7 +16,6 @@ from cognee.modules.tools.resolve_skills import find_skill_by_id, find_skill_by_
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.add_data_points import add_data_points
 
-
 logger = get_logger("cognee.skill_improvement")
 
 

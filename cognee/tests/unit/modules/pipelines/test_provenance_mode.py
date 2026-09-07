@@ -14,12 +14,11 @@ All tests are deterministic and require no real LLM calls or network access.
 """
 
 import os
-from typing import Optional, List
+from typing import List, Optional
 from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ---------------------------------------------------------------------------
 # Minimal DataPoint replica (avoids the full cognee import chain)

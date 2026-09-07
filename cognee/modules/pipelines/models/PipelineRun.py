@@ -1,7 +1,9 @@
 import enum
-from uuid import uuid4
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, Enum, Index, Integer, JSON, String, UUID
+from uuid import uuid4
+
+from sqlalchemy import JSON, UUID, Boolean, Column, DateTime, Enum, Index, Integer, String
+
 from cognee.infrastructure.databases.relational import Base
 
 

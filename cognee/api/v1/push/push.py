@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Optional, Union
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("push")
 

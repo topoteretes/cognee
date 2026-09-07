@@ -146,7 +146,7 @@ class OAuthIntegration(ABC):
         ``headers`` are lower-cased — providers put the event name in a
         header (GitHub's ``x-github-event``), not the body.
         """
-        return None
+        return
 
     async def on_installed(self, credential: IntegrationCredential) -> None:
         """Post-install hook, fired in the background after a successful connect.
@@ -156,7 +156,7 @@ class OAuthIntegration(ABC):
         Runs detached from the callback request — failures log, they never
         break the install redirect.
         """
-        return None
+        return
 
     async def revoke_remote(self, credential: IntegrationCredential) -> None:
         """Best-effort remote token revoke, called on disconnect.
@@ -166,7 +166,7 @@ class OAuthIntegration(ABC):
         revoked and the remote token stays live until it expires or the
         user removes the app from their side.
         """
-        return None
+        return
 
     async def refresh(self, credential: IntegrationCredential) -> None:
         """Refresh an expiring token in place.
@@ -175,7 +175,7 @@ class OAuthIntegration(ABC):
         and support a refresh grant; callers should not assume this rotates
         anything unless the concrete integration documents that it does.
         """
-        return None
+        return
 
 
 class WebhookVerifier(ABC):

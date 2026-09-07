@@ -1,9 +1,9 @@
 import functools
 
 from cognee.base_config import get_base_config
-from .observers import Observer
-from .exceptions import UnsupportedObserverError
 
+from .exceptions import UnsupportedObserverError
+from .observers import Observer
 
 # Cap span input/output like the DB adapters cap query text (redact_secrets(query[:500])).
 _MAX_OBSERVED_CHARS = 8000
@@ -22,8 +22,8 @@ def _set_generation_attributes(span, adapter, func, args, kwargs) -> None:
     from cognee.modules.observability.tracing import (
         GEN_AI_REQUEST_MODEL,
         GEN_AI_SYSTEM,
-        LANGFUSE_OBSERVATION_TYPE,
         LANGFUSE_OBSERVATION_INPUT,
+        LANGFUSE_OBSERVATION_TYPE,
         redact_secrets,
     )
 
@@ -50,8 +50,8 @@ def _generation_input_payload(func, args, kwargs):
     so it keeps capturing the prompt if the adapter parameters are renamed. Skips
     ``self``/``response_model`` and non-string args (the response-model type, numeric
     options, the ``**kwargs`` dict). Returns None if the call can't be interpreted."""
-    import json
     import inspect
+    import json
 
     try:
         bound = inspect.signature(func).bind(*args, **kwargs)
@@ -111,9 +111,10 @@ def _wrap_with_otel(inner_decorator):
                         return await wrapped(*args, **kwargs)
 
                     from opentelemetry.trace import SpanKind
+
                     from cognee.modules.observability.tracing import (
-                        get_tracer,
                         COGNEE_SPAN_CATEGORY,
+                        get_tracer,
                     )
 
                     tracer = get_tracer()
@@ -141,9 +142,10 @@ def _wrap_with_otel(inner_decorator):
                         return wrapped(*args, **kwargs)
 
                     from opentelemetry.trace import SpanKind
+
                     from cognee.modules.observability.tracing import (
-                        get_tracer,
                         COGNEE_SPAN_CATEGORY,
+                        get_tracer,
                     )
 
                     tracer = get_tracer()

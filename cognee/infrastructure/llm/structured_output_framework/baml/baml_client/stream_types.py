@@ -11,10 +11,10 @@
 # baml-cli is available with the baml package.
 
 import typing
-import typing_extensions
-from pydantic import BaseModel, ConfigDict
 
 import baml_py
+import typing_extensions
+from pydantic import BaseModel, ConfigDict
 
 from . import types
 

@@ -1,8 +1,9 @@
-from sqlalchemy.orm import relationship, Mapped
-from sqlalchemy import Column, String, ForeignKey, UUID
+from sqlalchemy import UUID, Column, ForeignKey, String
+from sqlalchemy.orm import Mapped, relationship
+
 from .Principal import Principal
-from .UserTenant import UserTenant
 from .Role import Role
+from .UserTenant import UserTenant
 
 
 class Tenant(Principal):

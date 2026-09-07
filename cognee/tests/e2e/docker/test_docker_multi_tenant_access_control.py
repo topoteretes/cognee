@@ -30,7 +30,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-
 PASSWORD = "securepassword123!"
 
 _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(

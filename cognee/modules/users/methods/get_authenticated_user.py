@@ -1,12 +1,14 @@
 import os
 from typing import Optional
+
 from fastapi import Depends, HTTPException
-from ..models import User
-from ..get_fastapi_users import get_fastapi_users
-from .get_default_user import get_default_user
-from .get_user import get_user
+
 from cognee.shared.logging_utils import get_logger
 
+from ..get_fastapi_users import get_fastapi_users
+from ..models import User
+from .get_default_user import get_default_user
+from .get_user import get_user
 
 logger = get_logger("get_authenticated_user")
 
@@ -96,9 +98,9 @@ async def get_authenticated_user(
             user = await get_default_user()
         except Exception as e:
             # Convert any get_default_user failure into a proper HTTP 500 error
-            logger.error(f"Failed to create default user: {str(e)}")
+            logger.error(f"Failed to create default user: {e!s}")
             raise HTTPException(
-                status_code=500, detail=f"Failed to create default user: {str(e)}"
+                status_code=500, detail=f"Failed to create default user: {e!s}"
             ) from e
     else:
         # FastAPI Users returns a session-bound instance without eager-loaded

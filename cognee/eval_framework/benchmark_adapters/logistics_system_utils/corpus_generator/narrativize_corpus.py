@@ -6,17 +6,16 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from cognee.eval_framework.benchmark_adapters.logistics_system_utils.ontology import (
+    pretty_print_world,
+)
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.utils import (
     _entity_entries,
     _format_packages,
     _safe_filename,
     load_world,
 )
-from cognee.eval_framework.benchmark_adapters.logistics_system_utils.ontology import (
-    pretty_print_world,
-)
 from cognee.infrastructure.llm import LLMGateway
-
 
 BASE_PATH = Path(__file__).resolve().parent.parent
 WORLD_ENTITY_FOLDERS = ("carrier", "post_office", "retailer", "user")

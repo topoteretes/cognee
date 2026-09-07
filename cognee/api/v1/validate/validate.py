@@ -177,7 +177,7 @@ async def _check_vector_sync(nodes: List[Node], vector_engine) -> List[Validatio
     issues = []
     for collection_name, node_ids in ids_by_collection.items():
         found = await vector_engine.retrieve(collection_name, node_ids)
-        found_ids = {str(getattr(point, "id")) for point in found}
+        found_ids = {str(point.id) for point in found}
 
         for node_id_str in node_ids:
             if node_id_str not in found_ids:

@@ -2,10 +2,10 @@ import asyncio
 from typing import Any, List, Optional, Tuple, Type
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.llm.streaming.token_sink import answer_scope
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
-from cognee.modules.observability import new_span, COGNEE_RESULT_SUMMARY
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from cognee.infrastructure.llm.streaming.token_sink import answer_scope
+from cognee.modules.observability import COGNEE_RESULT_SUMMARY, new_span
 
 
 def build_completion_prompts(
@@ -58,20 +58,19 @@ async def generate_completion(
         conversation_history=conversation_history,
     )
 
-    with pipeline_stage("query"):
-        with new_span("cognee.llm.completion") as span:
-            span.set_attribute("cognee.llm.prompt_path", system_prompt_path)
-            span.set_attribute("cognee.llm.context_length", len(context))
-            span.set_attribute("cognee.llm.query_length", len(query))
-            result = await LLMGateway.acreate_structured_output(
-                text_input=user_prompt,
-                system_prompt=system_prompt,
-                response_model=response_model,
-            )
-            if isinstance(result, str):
-                span.set_attribute("cognee.llm.response_length", len(result))
-            span.set_attribute(COGNEE_RESULT_SUMMARY, "LLM completion generated")
-            return result
+    with pipeline_stage("query"), new_span("cognee.llm.completion") as span:
+        span.set_attribute("cognee.llm.prompt_path", system_prompt_path)
+        span.set_attribute("cognee.llm.context_length", len(context))
+        span.set_attribute("cognee.llm.query_length", len(query))
+        result = await LLMGateway.acreate_structured_output(
+            text_input=user_prompt,
+            system_prompt=system_prompt,
+            response_model=response_model,
+        )
+        if isinstance(result, str):
+            span.set_attribute("cognee.llm.response_length", len(result))
+        span.set_attribute(COGNEE_RESULT_SUMMARY, "LLM completion generated")
+        return result
 
 
 async def generate_answer(

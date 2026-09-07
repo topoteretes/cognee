@@ -19,7 +19,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pytest  # noqa: E402
-
 from compose_utils import wait_for_http_ok  # noqa: E402
 from config import CONFIG  # noqa: E402
 

@@ -1,6 +1,6 @@
-from abc import abstractmethod
-from typing import Protocol, Optional
 import argparse
+from abc import abstractmethod
+from typing import Optional, Protocol
 
 
 class SupportsCliCommand(Protocol):

@@ -1,26 +1,25 @@
-import os
-from urllib.parse import unquote
-import gc
 import asyncio
-from os import path
+import gc
+import os
 import tempfile
-from uuid import UUID
-from typing import Optional
-from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
-from sqlalchemy.orm import joinedload
-from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, event, text, select, MetaData, Table, delete, inspect, func, or_
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from os import path
+from typing import AsyncGenerator, List, Optional
+from urllib.parse import unquote
+from uuid import UUID
 
-from cognee.modules.data.models.Data import Data
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.utils.run_sync import run_sync
+from sqlalchemy import MetaData, NullPool, Table, delete, event, func, inspect, or_, select, text
+from sqlalchemy.exc import NoResultFound
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import joinedload
+
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.utils.run_sync import run_sync
+from cognee.modules.data.models.Data import Data
+from cognee.shared.logging_utils import get_logger
 
 from ..ModelBase import Base
-
 
 logger = get_logger()
 
@@ -109,7 +108,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 **(sqlite_pool_args or {"poolclass": NullPool}),
-                connect_args={**{"timeout": 120}, **final_connect_args},
+                connect_args={"timeout": 120, **final_connect_args},
             )
 
             # SQLite defaults to rollback-journal mode, where a connection that
@@ -327,7 +326,7 @@ class SQLAlchemyAdapter:
                 return result.rowcount
 
         except Exception as e:
-            logger.error(f"Insert failed: {str(e)}")
+            logger.error(f"Insert failed: {e!s}")
             raise e  # Re-raise for error handling upstream
 
     async def get_schema_list(self) -> List[str]:
@@ -410,7 +409,7 @@ class SQLAlchemyAdapter:
                 ).one()
             except (ValueError, NoResultFound) as e:
                 raise EntityNotFoundError(
-                    message=f"Data {data_id} not found in dataset {dataset_id}: {str(e)}"
+                    message=f"Data {data_id} not found in dataset {dataset_id}: {e!s}"
                 ) from e
 
             raw_data_location = data_entity.raw_data_location

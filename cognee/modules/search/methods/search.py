@@ -22,8 +22,8 @@ from cognee.modules.observability import (
     COGNEE_SEARCH_TYPE,
     new_span,
 )
-from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.retrieval.context_preview import SharedSessionHistory
+from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
