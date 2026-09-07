@@ -13,9 +13,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiohttp
+from sqlalchemy import update
 
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.base import OAuthInstallation, OAuthIntegration
-from cognee.modules.integrations.credentials import decrypt_token_payload, upsert_credential
+from cognee.modules.integrations.credentials import decrypt_token_payload
+from cognee.modules.integrations.crypto import encrypt_credentials
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 from cognee.modules.integrations.slack import oauth as _oauth
 from cognee.modules.integrations.slack.slack_settings import SlackSettings, require
@@ -104,13 +107,15 @@ class SlackIntegration(OAuthIntegration):
             return
 
         try:
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.post(
+            async with (
+                aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+                session.post(
                     _REVOKE_URL,
                     headers={"Authorization": f"Bearer {access_token}"},
-                ) as response:
-                    payload = await response.json()
-        except Exception:  # noqa: BLE001 - a failed revoke must never block disconnect
+                ) as response,
+            ):
+                payload = await response.json()
+        except Exception:
             logger.exception(
                 "Slack auth.revoke request failed for account %s", credential.provider_account_id
             )
@@ -141,8 +146,9 @@ class SlackIntegration(OAuthIntegration):
         if not refresh_token:
             return
 
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            session.post(
                 _oauth._ACCESS_URL,
                 data={
                     "client_id": require("client_id"),
@@ -150,22 +156,46 @@ class SlackIntegration(OAuthIntegration):
                     "grant_type": "refresh_token",
                     "refresh_token": refresh_token,
                 },
-            ) as response:
-                payload = await response.json()
+            ) as response,
+        ):
+            payload = await response.json()
 
         if not payload.get("ok"):
             raise RuntimeError(f"Slack token refresh failed: {payload.get('error', 'unknown')}")
 
-        # The refresh response has the same team/enterprise/token shape as
-        # the original install response, so the same parsing applies.
-        installation = self.parse_installation(payload)
-        await upsert_credential(
-            provider=self.provider,
-            user_id=credential.user_id,
-            provider_account_id=installation.provider_account_id,
-            token_payload=installation.token_payload,
-            account_label=installation.account_label or credential.account_label,
-            scopes=installation.scopes or credential.scopes,
-            provider_metadata=installation.provider_metadata,
-            token_expires_at=installation.token_expires_at,
+        # Refresh responses need not contain the installation's team/user
+        # metadata. Update token columns only, preserving channel restrictions,
+        # sync selections, installer identity and workspace ownership. A
+        # concurrent reconnect/revocation must win over an in-flight refresh.
+        if not payload.get("access_token") or not payload.get("refresh_token"):
+            raise RuntimeError("Slack token refresh returned an incomplete token response")
+        encrypted = encrypt_credentials(
+            {
+                **token_payload,
+                "access_token": payload["access_token"],
+                "refresh_token": payload["refresh_token"],
+            }
         )
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(payload["expires_in"]))
+        engine = get_relational_engine()
+        async with engine.get_async_session() as db:
+            result = await db.execute(
+                update(IntegrationCredential)
+                .where(
+                    IntegrationCredential.id == credential.id,
+                    IntegrationCredential.user_id == credential.user_id,
+                    IntegrationCredential.status == "active",
+                    IntegrationCredential.ciphertext == credential.ciphertext,
+                )
+                .values(
+                    ciphertext=encrypted[0],
+                    nonce=encrypted[1],
+                    encryption_version=encrypted[2],
+                    key_id=encrypted[3],
+                    token_expires_at=expires_at,
+                    scopes=payload.get("scope") or credential.scopes,
+                )
+            )
+            if result.rowcount != 1:
+                raise RuntimeError("Slack connection changed while refreshing its token")
+            await db.commit()

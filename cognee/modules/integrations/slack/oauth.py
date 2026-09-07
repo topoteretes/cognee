@@ -22,7 +22,11 @@ import aiohttp
 
 from cognee.modules.integrations.oauth_flow import (
     make_state as _make_state,
+)
+from cognee.modules.integrations.oauth_flow import (
     sign_state_payload as _sign_state_payload,
+)
+from cognee.modules.integrations.oauth_flow import (
     validate_state as _validate_state,
 )
 from cognee.modules.integrations.slack.slack_settings import require
@@ -30,12 +34,12 @@ from cognee.modules.integrations.slack.slack_settings import require
 _AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 _ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 
-# Bot scopes: commands, posting, DMs, and channels:read (basic public-channel
-# metadata only — name/id/is_private — so the Integrations page can offer a
-# per-channel allowlist for slash commands; see slack/channels.py). Still
-# deliberately NO channels:history — ingestion isn't built, and the 2025
-# non-Marketplace rate limits (1 req/min) make history reads unusable anyway.
-_BOT_SCOPES = "commands,chat:write,im:write,channels:read"
+# History is fetched only for explicitly selected channels. Metadata scopes
+# also let imports verify both bot and connecting-user membership. Existing
+# installations must re-authorize to grant these additional scopes.
+_BOT_SCOPES = (
+    "commands,chat:write,im:write,channels:read,channels:history,groups:read,groups:history"
+)
 
 # oauth.v2.access is a synchronous call inside the callback request — cap it so
 # a hanging Slack never ties up a worker.
@@ -53,7 +57,7 @@ def make_state(user_id: UUID) -> str:
     return _make_state(user_id, signing_secret=require("signing_secret"))
 
 
-def validate_state(state: str) -> Optional[UUID]:
+def validate_state(state: str) -> UUID | None:
     """Return the ``user_id`` for a valid, unexpired state; ``None`` otherwise.
 
     Verifies the HMAC before reading any field, so a forged or tampered state
@@ -77,8 +81,9 @@ async def exchange_code(code: str) -> dict[str, Any]:
     rejected — Slack returns HTTP 200 with ``ok: false``, so HTTP status
     alone cannot be trusted.
     """
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             _ACCESS_URL,
             data={
                 "client_id": require("client_id"),
@@ -86,8 +91,9 @@ async def exchange_code(code: str) -> dict[str, Any]:
                 "code": code,
                 "redirect_uri": require("redirect_uri"),
             },
-        ) as response:
-            payload = await response.json()
+        ) as response,
+    ):
+        payload = await response.json()
 
     if not payload.get("ok"):
         raise RuntimeError(f"Slack oauth.v2.access failed: {payload.get('error', 'unknown')}")
