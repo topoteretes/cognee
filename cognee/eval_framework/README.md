@@ -65,9 +65,9 @@ config = EvalConfig(
 )
 
 result = asyncio.run(run_eval(config))
-print(result.aggregate_metrics)     # {'correctness': {'mean': ..., 'ci_lower': ..., ...}}
-print(result.metrics_path)          # per-answer metrics artifact
-print(result.config_path)           # resolved config, saved for reproducibility
+print(result.aggregate_metrics)  # {'correctness': {'mean': ..., 'ci_lower': ..., ...}}
+print(result.metrics_path)  # per-answer metrics artifact
+print(result.config_path)  # resolved config, saved for reproducibility
 ```
 
 `run_eval` returns an `EvalResult` with the produced artifact paths and the

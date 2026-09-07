@@ -97,6 +97,7 @@ cognee-cli demo
 ### Step 2: Configure the LLM
 ```python
 import os
+
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
@@ -130,9 +131,8 @@ async def main():
     await cognee.forget(dataset="main_dataset")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-
 ```
 
 
