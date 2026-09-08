@@ -4,9 +4,9 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import ValidationError
 
-from cognee.infrastructure.engine import DataPoint, Edge, FromIdentity
+from cognee.infrastructure.engine import DataPoint, Edge, Embeddable, FromIdentity
 from cognee.modules.graph.utils import get_graph_from_model
-from cognee.shared.graph_model_utils import (
+from cognee.shared.llm_graph_model import (
     content_graph_to_data_point,
     datapoint_model_to_basemodel,
 )
@@ -337,5 +337,118 @@ async def test_from_identity_and_edge_rows_together():
     assert root.people[0].is_a.id == Role.id_for("Student")
     assert root.friends_with[0].source.id == Person.id_for("Alice")
     assert root.friends_with[0].source is not root
+    _, edges = await get_graph_from_model(root)
+    assert "friends_with" in _rel_names(edges)
+
+
+class Squad(DataPoint):
+    name: str
+    members: list[NamedPerson] = []
+    friends_with: list[Edge[NamedPerson, NamedPerson]] = []
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class Office(DataPoint):
+    name: str
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+
+class UnionGraph(DataPoint):
+    items: list[Squad | Office] = []
+
+
+class MappingGraph(DataPoint):
+    items: dict[str, Squad] = {}
+
+
+class TupleGraph(DataPoint):
+    items: tuple[Squad, Office] = None
+
+
+SQUAD_DUMP = {
+    "name": "Search",
+    "members": [{"name": "Alice"}, {"name": "Bob"}],
+    "friends_with": [{"source": "Alice", "target": "Bob"}],
+}
+
+
+@pytest.mark.asyncio
+async def test_edge_owner_under_a_union_keeps_its_rows_and_its_nodes():
+    """The forward pass asks for rows through a union, so the inverse must read them back.
+
+    Leaving them raw made ``Squad`` unvalidatable, and pydantic's union then fell back to
+    ``Office``, which ignores extra keys: the edge and both members vanished silently.
+    """
+    root = await _from_dump(UnionGraph, {"items": [SQUAD_DUMP]})
+
+    assert isinstance(root.items[0], Squad)
+    assert [person.name for person in root.items[0].members] == ["Alice", "Bob"]
+    assert len(root.items[0].friends_with) == 1
+    assert root.items[0].friends_with[0].source.id == NamedPerson.id_for("Alice")
+    assert root.items[0].friends_with[0].target.id == NamedPerson.id_for("Bob")
+    _, edges = await get_graph_from_model(root)
+    assert "friends_with" in _rel_names(edges)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model, dump",
+    [
+        (MappingGraph, {"items": {"search": SQUAD_DUMP}}),
+        (TupleGraph, {"items": [SQUAD_DUMP, {"name": "Berlin"}]}),
+    ],
+    ids=["dict", "tuple"],
+)
+async def test_edge_owner_under_a_mapping_or_tuple_validates_and_skips(model, dump, caplog):
+    """A container the storage walk does not descend into still must not fail the chunk.
+
+    The storage walk (``get_edges_from_fields``) only unwraps lists, so nodes held in a
+    dict or tuple field are never written to the graph and an endpoint cannot resolve. That is a
+    separate, older gap; what matters here is that the rows are read back, the endpoints
+    are reported unresolved, and every extracted node survives.
+    """
+    with caplog.at_level(logging.WARNING):
+        root = await _from_dump(model, dump)
+
+    squad = root.items["search"] if isinstance(root.items, dict) else root.items[0]
+    assert isinstance(squad, Squad)
+    assert [person.name for person in squad.members] == ["Alice", "Bob"]
+    assert squad.friends_with == []
+    assert "Skipping unresolved edge on friends_with" in caplog.text
+
+
+class AnnotatedGraph(DataPoint):
+    squad: Annotated[Squad, Embeddable()] | None = None
+
+
+class AnnotatedUnionGraph(DataPoint):
+    items: list[Annotated[Squad, Embeddable()] | Office] = []
+
+
+@pytest.mark.asyncio
+async def test_edge_owner_under_an_annotated_field_keeps_its_rows():
+    """``Annotated[Squad, ...] | None`` is the natural spelling for an optional marked field.
+
+    The forward pass rewrites through ``Annotated``, so the LLM answers edge rows under
+    it; the inverse has to peel the same wrapper, or the rows reach ``model_validate``
+    raw and the ``ValidationError`` sinks the whole chunk.
+    """
+    root = await _from_dump(AnnotatedGraph, {"squad": SQUAD_DUMP})
+
+    assert isinstance(root.squad, Squad)
+    assert [person.name for person in root.squad.members] == ["Alice", "Bob"]
+    assert len(root.squad.friends_with) == 1
+    assert root.squad.friends_with[0].source.id == NamedPerson.id_for("Alice")
+    assert root.squad.friends_with[0].target.id == NamedPerson.id_for("Bob")
+    _, edges = await get_graph_from_model(root)
+    assert "friends_with" in _rel_names(edges)
+
+
+@pytest.mark.asyncio
+async def test_union_member_wrapped_in_annotated_is_still_a_candidate():
+    root = await _from_dump(AnnotatedUnionGraph, {"items": [SQUAD_DUMP]})
+
+    assert isinstance(root.items[0], Squad)
+    assert len(root.items[0].friends_with) == 1
     _, edges = await get_graph_from_model(root)
     assert "friends_with" in _rel_names(edges)

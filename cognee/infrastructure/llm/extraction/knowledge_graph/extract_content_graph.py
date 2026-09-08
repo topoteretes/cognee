@@ -9,7 +9,7 @@ from cognee.infrastructure.llm.config import (
 )
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
-from cognee.shared.graph_model_utils import (
+from cognee.shared.llm_graph_model import (
     content_graph_to_data_point,
     datapoint_model_to_basemodel,
 )

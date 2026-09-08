@@ -50,24 +50,32 @@ class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
             return dict(value.__dict__)
         return value
 
-    def normalize(
+    def fill_endpoints(
         self,
         owner: DataPoint,
         field_name: str,
         target: DataPoint | None = None,
     ) -> Self:
-        """Return an Edge with source, target and relationship_type filled from context.
+        """Fill in source, target and relationship_type from the declaring field.
+
+        An ``Edge`` written on a model usually carries only metadata; what makes it
+        storable is how it is addressed, and that comes from where it sits. Those three
+        fields are exactly the ones ``to_properties`` leaves out.
 
         Source falls back to ``owner``, name to ``self.relationship_type or field_name``.
         When both ``self.target`` and the ``target`` argument are set, the argument
         wins: it is the tuple form's target at the point of use.
+
+        Returns a filled copy, or ``self`` when nothing was left to fill in.
         """
         resolved_source = self.source if self.source is not None else owner
         resolved_target = target if target is not None else self.target
         resolved_name = self.relationship_type or field_name
 
         if resolved_target is None:
-            raise ValueError("Edge.normalize requires a target: set Edge.target or pass target=...")
+            raise ValueError(
+                "Edge.fill_endpoints requires a target: set Edge.target or pass target=..."
+            )
 
         if (
             self.source is resolved_source

@@ -8,7 +8,7 @@ from cognee.low_level import DataPoint
 
 CUSTOM_PROMPT = (
     "Extract every person, the role they hold, and every group with its members. "
-    "Extract friendships, family links (married_to or sibling_of), "
+    "Extract friendships, family links (married_to or sibling_of), who reports to whom, "
     "and other named relationships between people."
 )
 
@@ -21,6 +21,10 @@ class Role(DataPoint):
 class Person(DataPoint):
     name: str
     is_a: Annotated[Role, FromIdentity()] | None = None
+    # An edge can also live on the node that owns it. Endpoints of the same type have to
+    # be named as strings here, because Person is not bound inside its own body yet.
+    # Put an edge here when one side clearly owns it, as each person has one manager.
+    reports_to: list[Edge["Person", "Person"]] = []
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
@@ -31,6 +35,8 @@ class Group(DataPoint):
 
 
 class PeopleGraph(DataPoint):
+    # Edges on the root suit a relationship with no obvious owner. Each one shows a way
+    # of naming: fixed by the field, chosen from a Literal, or free-form from the LLM.
     people: list[Person]
     groups: list[Group] = []
     friends_with: list[Edge[Person, Person]] = []
@@ -43,7 +49,8 @@ async def main():
 
     text = (
         "Maya and Owen are engineers on the Search team and are friends. "
-        "Priya is a manager and Maya's sibling. Owen mentors Maya."
+        "Priya is a manager and Maya's sibling. Owen mentors Maya. "
+        "Maya and Owen both report to Priya."
     )
 
     await remember(

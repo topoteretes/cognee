@@ -9,6 +9,10 @@ walk decides what to write.
 from typing import Any, List, Optional
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.utils.field_edges import (
+    get_edges_from_fields,
+    get_fields_without_edges,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -91,11 +95,11 @@ def unwrap_transparent(
         return []
     _active = (_active or frozenset()) | {id(data_point)}
 
-    for field_name, value in data_point.get_fields_without_edges():
+    for field_name, value in get_fields_without_edges(data_point):
         _warn_dropped_field(data_point, field_name, value)
 
     resolved: List[DataPoint] = []
-    for field_name, edge in data_point.get_edges_from_fields():
+    for field_name, edge in get_edges_from_fields(data_point):
         if field_name == "belongs_to_set":
             continue
         if edge.source is not data_point:

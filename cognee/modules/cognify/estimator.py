@@ -50,7 +50,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.session_lifecycle.usage_tracking import estimate_cost_usd
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
+from cognee.shared.llm_graph_model import datapoint_model_to_basemodel
 from cognee.tasks.documents import classify_documents
 from cognee.tasks.documents.classify_documents import EXTENSION_TO_DOCUMENT_CLASS
 from cognee.tasks.ingestion.data_item import DataItem

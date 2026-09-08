@@ -1,9 +1,15 @@
+import asyncio
 import subprocess
 import sys
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import NodeSet
+from cognee.modules.graph.utils.field_edges import (
+    get_edges_from_fields,
+    get_fields_without_edges,
+)
+from cognee.modules.storage.utils import copy_model
 
 
 class Person(DataPoint):
@@ -41,15 +47,15 @@ class Plain(DataPoint):
 
 
 def _edges_by_field(data_point):
-    return {name: edge for name, edge in data_point.get_edges_from_fields()}
+    return {name: edge for name, edge in get_edges_from_fields(data_point)}
 
 
 def _leftover_names(data_point):
-    return {name for name, _ in data_point.get_fields_without_edges()}
+    return {name for name, _ in get_fields_without_edges(data_point)}
 
 
 def _leftovers(data_point):
-    return dict(data_point.get_fields_without_edges())
+    return dict(get_fields_without_edges(data_point))
 
 
 def test_nested_datapoint_and_list_are_named_after_the_field():
@@ -111,13 +117,13 @@ def test_explicit_edge_keeps_foreign_endpoints():
 
 def test_edge_without_target_stays_a_leftover_field():
     person = Owner(name="Alice", extra=Edge(weight=0.8))
-    assert person.get_edges_from_fields() == []
+    assert get_edges_from_fields(person) == []
     assert _leftovers(person)["extra"].weight == 0.8
 
 
 def test_empty_tuple_targets_expand_to_nothing():
     person = Owner(name="Alice", empty_tuple=(Edge(weight=0.8), []))
-    assert person.get_edges_from_fields() == []
+    assert get_edges_from_fields(person) == []
     assert "empty_tuple" in _leftover_names(person)
 
 
@@ -138,7 +144,7 @@ def test_belongs_to_set_expands_to_edges_and_is_not_a_leftover():
 def test_metadata_is_on_neither_list():
     person = Owner(name="Alice")
     assert "metadata" not in _leftover_names(person)
-    assert all(name != "metadata" for name, _ in person.get_edges_from_fields())
+    assert all(name != "metadata" for name, _ in get_edges_from_fields(person))
 
 
 def test_transparent_target_stays_raw():
@@ -151,7 +157,7 @@ def test_transparent_target_stays_raw():
 
 def test_model_with_no_edges():
     plain = Plain(name="x")
-    assert plain.get_edges_from_fields() == []
+    assert get_edges_from_fields(plain) == []
     assert "name" in _leftover_names(plain)
 
 
@@ -161,6 +167,55 @@ def test_tuple_target_argument_wins():
     person = Owner(name="Alice", mixed=(Edge(target=car), other))
     edge = _edges_by_field(person)["mixed"]
     assert edge.target is other
+
+
+def test_field_edges_read_a_plain_copy_of_a_datapoint():
+    """``copy_model`` mints plain BaseModel subclasses, and those get walked too.
+
+    A chunk rebuilt from an export is one. It is not a DataPoint and may be missing
+    fields the class declares, but it still holds real DataPoint children whose edges
+    have to be emitted — classification cannot require the owner to be a DataPoint.
+    """
+    SimpleOwner = copy_model(Owner, exclude_fields=["cars"])
+    car = Car(name="Beetle")
+    owner = SimpleOwner(name="Alice", owns=car)
+
+    assert not isinstance(owner, DataPoint)
+    assert not hasattr(owner, "cars")
+
+    field_edges = get_edges_from_fields(owner)
+
+    assert [name for name, _ in field_edges] == ["owns"]
+    assert field_edges[0][1].source is owner
+    assert field_edges[0][1].target is car
+    assert "name" in {name for name, _ in get_fields_without_edges(owner)}
+    assert "owns" not in {name for name, _ in get_fields_without_edges(owner)}
+
+
+def test_every_walk_entry_point_accepts_a_plain_copy():
+    """The three callers each reached for a DataPoint method, so each could break alone.
+
+    Chunk ownership covered only ``get_graph_from_model``; the crash reached
+    ``collect_stored_data_points`` and ``unwrap_transparent`` as well.
+    """
+    from cognee.modules.graph.utils.get_graph_from_model import (
+        collect_stored_data_points,
+        get_graph_from_model,
+    )
+    from cognee.modules.graph.utils.unwrap_transparent_nodes import unwrap_transparent
+
+    SimpleOwner = copy_model(Owner, exclude_fields=["cars"])
+    car = Car(name="Beetle")
+    owner = SimpleOwner(name="Alice", owns=car)
+
+    _nodes, edges = asyncio.run(get_graph_from_model(owner))
+    assert [relationship for _s, _t, relationship, _p in edges] == ["owns"]
+
+    stored = asyncio.run(collect_stored_data_points(owner))
+    assert owner in stored
+    assert car in stored
+
+    assert unwrap_transparent(owner) == [owner]
 
 
 def test_datapoint_imports_in_a_fresh_interpreter():

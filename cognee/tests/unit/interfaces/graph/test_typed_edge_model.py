@@ -60,12 +60,12 @@ def test_bare_edge_assigned_into_parametrized_list_keeps_source_identity():
     assert graph.friends[0].source is alice
 
 
-def test_normalize_fills_source_by_identity_and_does_not_mutate():
+def test_fill_endpoints_fills_source_by_identity_and_does_not_mutate():
     alice = Person(name="Alice")
     car = Car(name="Beetle")
     original = Edge(target=car, weight=0.8)
 
-    filled = original.normalize(alice, "owns")
+    filled = original.fill_endpoints(alice, "owns")
 
     assert filled.source is alice
     assert filled.target is car
@@ -73,32 +73,32 @@ def test_normalize_fills_source_by_identity_and_does_not_mutate():
     assert original.source is None
 
 
-def test_normalize_does_not_rewrite_relationship_type():
+def test_fill_endpoints_does_not_rewrite_relationship_type():
     alice = Person(name="Alice")
     bob = Person(name="Bob")
-    filled = Edge(relationship_type="Mentors On").normalize(alice, "x", target=bob)
+    filled = Edge(relationship_type="Mentors On").fill_endpoints(alice, "x", target=bob)
     assert filled.relationship_type == "Mentors On"
 
 
-def test_normalize_returns_self_when_already_complete():
+def test_fill_endpoints_returns_self_when_already_complete():
     alice = Person(name="Alice")
     bob = Person(name="Bob")
     edge = Edge(source=alice, target=bob, relationship_type="friends_with")
-    assert edge.normalize(alice, "friends_with") is edge
+    assert edge.fill_endpoints(alice, "friends_with") is edge
 
 
-def test_normalize_target_argument_wins():
+def test_fill_endpoints_target_argument_wins():
     alice = Person(name="Alice")
     car = Car(name="Beetle")
     bob = Person(name="Bob")
-    filled = Edge(target=car).normalize(alice, "owns", target=bob)
+    filled = Edge(target=car).fill_endpoints(alice, "owns", target=bob)
     assert filled.target is bob
 
 
-def test_normalize_without_target_raises():
+def test_fill_endpoints_without_target_raises():
     alice = Person(name="Alice")
     with pytest.raises(ValueError):
-        Edge().normalize(alice, "owns")
+        Edge().fill_endpoints(alice, "owns")
 
 
 def test_to_properties_excludes_endpoints():

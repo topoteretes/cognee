@@ -5,6 +5,10 @@ from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 from cognee.infrastructure.engine import DataPoint, Edge
+from cognee.modules.graph.utils.field_edges import (
+    get_edges_from_fields,
+    get_fields_without_edges,
+)
 from cognee.modules.graph.utils.unwrap_transparent_nodes import (
     is_transparent,
     unwrap_transparent,
@@ -66,7 +70,7 @@ def _graph_node_from(data_point: DataPoint, field_edges: list[tuple[str, Edge]])
     ``belongs_to_set`` is both: names stay on the node, and it still emits edges.
     """
     node_properties = {"id": data_point.id, "type": type(data_point).__name__}
-    for field_name, value in data_point.get_fields_without_edges():
+    for field_name, value in get_fields_without_edges(data_point):
         node_properties[field_name] = value
     stripped_field_names = set()
     for field_name, _edge in field_edges:
@@ -146,7 +150,7 @@ def _walk_data_point(
     if not state.claim_node(data_point):
         return nodes, edges
 
-    field_edges = data_point.get_edges_from_fields()
+    field_edges = get_edges_from_fields(data_point)
     nodes.append(_graph_node_from(data_point, field_edges))
 
     for _field_name, edge in field_edges:
