@@ -96,21 +96,32 @@ async def test_user_principal_still_resolves(principals_engine):
 
     assert principal.type == "user"
     assert principal.id == user_id
+    # tenant_id and email are both on the `users` child table.
     assert principal.tenant_id == tenant_id
+    assert principal.email == "someone@example.com"
 
 
 @pytest.mark.asyncio
-async def test_tenant_principal_still_resolves(principals_engine):
-    tenant_id = uuid4()
+async def test_tenant_subclass_columns_readable_after_session_closes(principals_engine):
+    """Tenant has child-table columns too (`name`, `owner_id`).
+
+    The tenant branch of authorized_get_principal_datasets only compares
+    principal.id today, so this never surfaced as a 500 — but get_principal
+    was equally broken for it, and a caller reading a tenant's name would
+    have hit the same DetachedInstanceError.
+    """
+    tenant_id, owner_id = uuid4(), uuid4()
 
     async with principals_engine.get_async_session() as session:
-        session.add(Tenant(id=tenant_id, name="acme"))
+        session.add(Tenant(id=tenant_id, name="acme", owner_id=owner_id))
         await session.commit()
 
     principal = await get_principal_mod.get_principal(tenant_id)
 
     assert principal.type == "tenant"
     assert principal.id == tenant_id
+    assert principal.name == "acme"
+    assert principal.owner_id == owner_id
 
 
 @pytest.mark.asyncio
