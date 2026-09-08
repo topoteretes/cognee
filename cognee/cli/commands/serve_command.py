@@ -5,6 +5,10 @@ import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.reference import SupportsCliCommand
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 class ServeCommand(SupportsCliCommand):
     command_string = "serve"
@@ -64,6 +68,7 @@ async def _serve(url=None, api_key=None, management_url=None):
     except KeyboardInterrupt:
         fmt.warning("Authentication cancelled.")
     except Exception as e:
+        logger.debug("Ignoring exception in _serve", exc_info=True)
         fmt.error(f"Failed to connect: {e}")
 
 

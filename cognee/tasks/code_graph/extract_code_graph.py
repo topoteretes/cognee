@@ -547,7 +547,9 @@ async def extract_code_graph(
             stored_id = await _stored_snapshot_identity(fallback_repo)
         except Exception as error:
             # The skip check is an optimization; never let it break ingestion.
-            logger.warning("Could not read the stored snapshot id (%s); loading fully.", error)
+            logger.warning(
+                "Could not read the stored snapshot id (%s); loading fully.", error, exc_info=True
+            )
             stored_id = None
         if stored_id == snapshot_id:
             logger.info(

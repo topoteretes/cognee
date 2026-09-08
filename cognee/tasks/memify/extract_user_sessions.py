@@ -109,7 +109,7 @@ async def extract_user_sessions(
                         persisted_qa_count=len(qa_data),
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to extract session {session_id}: {e!s}")
+                    logger.warning(f"Failed to extract session {session_id}: {e!s}", exc_info=True)
                     continue
         else:
             logger.info(
@@ -119,5 +119,5 @@ async def extract_user_sessions(
     except CogneeSystemError:
         raise
     except Exception as e:
-        logger.error(f"Error extracting user sessions: {e!s}")
+        logger.exception("Error extracting user sessions")
         raise CogneeSystemError(message=f"Failed to extract user sessions: {e!s}", log=False)

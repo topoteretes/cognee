@@ -45,6 +45,10 @@ from cognee.eval_framework.beam.preprocessing.loaders import (
     load_beam_dataset,
 )
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parent / "prompts" / "beam_turn_compression_prompt.txt"
@@ -351,6 +355,7 @@ async def process_turn(
         )
         counts.update(compression_counts)
     except Exception as exc:
+        logger.debug("Ignoring exception in process_turn", exc_info=True)
         counts["compression_failed_count"] += 1
         counts["failed_compression_turns"] += 1
         outlier["status"] = "compression_failed"

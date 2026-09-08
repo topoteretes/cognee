@@ -266,7 +266,7 @@ class KendallTauMetric:
             return self.score
 
         except Exception as e:
-            logger.error(f"KendallTauMetric failed: {e}")
+            logger.exception("KendallTauMetric failed")
             self.score = 0.0
             self.reason = f"ERROR: {e}"
             return self.score

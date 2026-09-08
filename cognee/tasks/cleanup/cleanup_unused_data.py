@@ -159,8 +159,8 @@ async def _cleanup_via_sql(
             )
             deleted_count += 1
             logger.info(f"Deleted document {data.id} from dataset {data.dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to delete document {data.id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to delete document {data.id}")
 
     logger.info("Cleanup completed", deleted_count=deleted_count)
 

@@ -7,6 +7,10 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 _TURN_START = re.compile(
     r"^(?:\[(?P<time_anchor>.*?)\]\s*)?(?P<role>User|Assistant):\s?(?P<content>.*)$"
 )
@@ -67,7 +71,7 @@ def estimate_tokens(text: str) -> int:
         if tokenizer:
             return max(1, tokenizer.count_tokens(text) * 2)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in estimate_tokens", exc_info=True)
 
     return max(1, len(text) // 4, len(text.split()) * 2)
 

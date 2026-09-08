@@ -202,7 +202,7 @@ async def _infer_relation(
             response_model=InferredRelation,
         )
     except Exception as error:
-        logger.warning("Relation inference failed: %s", error)
+        logger.warning("Relation inference failed: %s", error, exc_info=True)
         return InferredRelation(related=False, relationship_name="", confidence=0.0)
 
 

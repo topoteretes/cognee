@@ -5,6 +5,10 @@ from typing import Any, Optional
 
 from cognee.tasks.ingestion.data_item import DataItem
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 def _normalize_filename(filename: str | None, index: int) -> str:
     if not filename:
@@ -22,7 +26,7 @@ async def _read_stream_bytes(stream: Any) -> bytes:
         try:
             stream.seek(0)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _read_stream_bytes", exc_info=True)
 
     data = stream.read()
     if inspect.isawaitable(data):

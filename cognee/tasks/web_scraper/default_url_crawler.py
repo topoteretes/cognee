@@ -124,6 +124,7 @@ class DefaultUrlCrawler:
         try:
             return urlparse(url).netloc
         except Exception:
+            logger.debug("Ignoring exception in DefaultUrlCrawler._domain_from_url", exc_info=True)
             return url
 
     @lru_cache(maxsize=1024)
@@ -205,7 +206,7 @@ class DefaultUrlCrawler:
                 resp = await self._client.get(robots_url, timeout=5.0)
                 content = resp.text if resp.status_code == 200 else ""
             except Exception as e:
-                logger.debug(f"Failed to fetch robots.txt from {domain_root}: {e}")
+                logger.debug(f"Failed to fetch robots.txt from {domain_root}: {e}", exc_info=True)
                 content = ""
 
             protego = Protego.parse(content) if content.strip() else None
@@ -253,7 +254,7 @@ class DefaultUrlCrawler:
             agent = next((v for k, v in self.headers.items() if k.lower() == "user-agent"), "*")
             return cache.protego.can_fetch(agent, url) or cache.protego.can_fetch("*", url)
         except Exception as e:
-            logger.debug(f"Error checking robots.txt for {url}: {e}")
+            logger.debug(f"Error checking robots.txt for {url}: {e}", exc_info=True)
             return True
 
     async def _get_crawl_delay(self, url: str) -> float:
@@ -275,6 +276,7 @@ class DefaultUrlCrawler:
                 cache = await self._fetch_and_cache_robots(domain_root)
             return cache.crawl_delay
         except Exception:
+            logger.debug("Ignoring exception in DefaultUrlCrawler._get_crawl_delay", exc_info=True)
             return self.crawl_delay
 
     async def _fetch_httpx(self, url: str) -> str:
@@ -442,8 +444,8 @@ class DefaultUrlCrawler:
 
                     return url, html
 
-                except Exception as e:
-                    logger.error(f"Error processing {url}: {e}")
+                except Exception:
+                    logger.exception(f"Error processing {url}")
                     return url, ""
 
         logger.info(f"Creating {len(urls)} async tasks for concurrent fetching")

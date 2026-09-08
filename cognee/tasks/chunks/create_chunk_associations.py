@@ -66,7 +66,7 @@ async def _compare_chunks(
             response_model=ChunkSimilarity,
         )
     except Exception as e:
-        logger.warning(f"LLM comparison failed: {e}")
+        logger.warning(f"LLM comparison failed: {e}", exc_info=True)
         return ChunkSimilarity(
             are_similar=False, similarity_score=0.0, reasoning="LLM error", association_type=None
         )
@@ -165,7 +165,9 @@ async def create_chunk_associations(
                 chunk_id = str(results[0].id)
                 id_to_text[chunk_id] = chunk_text
         except Exception as e:
-            logger.warning(f"Failed to find chunk ID for text: {chunk_text[:50]}... Error: {e}")
+            logger.warning(
+                f"Failed to find chunk ID for text: {chunk_text[:50]}... Error: {e}", exc_info=True
+            )
 
     logger.info(f"Found {len(id_to_text)} chunk IDs from vector search")
 
@@ -180,7 +182,9 @@ async def create_chunk_associations(
                 "DocumentChunk_text", chunk_text, limit=search_limit
             )
         except Exception as e:
-            logger.warning(f"Vector search failed for chunk: {chunk_text[:50]}... Error: {e}")
+            logger.warning(
+                f"Vector search failed for chunk: {chunk_text[:50]}... Error: {e}", exc_info=True
+            )
             continue
 
         for candidate in candidates:

@@ -214,12 +214,11 @@ async def _answer_single_fixed_retriever(
             )
             answer_text = normalize_answer_text(search_results)
         except Exception as exc:
-            logger.error(
-                "[%s][run %s] Failed to answer question_idx=%s: %s",
+            logger.exception(
+                "[%s][run %s] Failed to answer question_idx=%s",
                 retriever_name,
                 run_idx,
                 question["question_idx"],
-                exc,
             )
             answer_text = f"ERROR: {exc}"
             retrieval_context = ""

@@ -67,6 +67,6 @@ class LLMEntityExtractor(BaseEntityExtractor):
             logger.info(f"Extracted {len(response.entities)} entities")
             return response.entities
 
-        except Exception as e:
-            logger.error(f"Entity extraction failed: {e!s}")
+        except Exception:
+            logger.exception("Entity extraction failed")
             return []

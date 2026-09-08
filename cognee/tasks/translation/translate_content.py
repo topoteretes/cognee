@@ -171,8 +171,8 @@ async def translate_content(
         except TranslationError as e:
             logger.error(f"Translation failed for chunk {chunk.id}: {e}")
             processed_chunks.append(chunk)
-        except Exception as e:
-            logger.error(f"Unexpected error processing chunk {chunk.id}: {e}")
+        except Exception:
+            logger.exception(f"Unexpected error processing chunk {chunk.id}")
             processed_chunks.append(chunk)
 
     logger.info(f"Translation task completed for {len(processed_chunks)} chunks")

@@ -95,7 +95,7 @@ class StorageAwareCache:
                 cached_version = (await asyncio.to_thread(f.read)).strip()
                 return cached_version == version_or_hash
         except Exception as e:
-            logger.debug(f"Error checking cache validity: {e}")
+            logger.debug(f"Error checking cache validity: {e}", exc_info=True)
             return False
 
     async def _clear_cache(self, cache_dir: str) -> None:
@@ -103,7 +103,7 @@ class StorageAwareCache:
         try:
             await self.storage_manager.remove_all(cache_dir)
         except Exception as e:
-            logger.debug(f"Error clearing cache directory {cache_dir}: {e}")
+            logger.debug(f"Error clearing cache directory {cache_dir}: {e}", exc_info=True)
 
     async def _check_remote_content_freshness(
         self, url: str, cache_dir: str
@@ -151,7 +151,7 @@ class StorageAwareCache:
                 return False, remote_identifier
 
         except Exception as e:
-            logger.debug(f"Could not check remote freshness: {e}")
+            logger.debug(f"Could not check remote freshness: {e}", exc_info=True)
             return True, None  # Assume fresh if we can't check
 
     async def download_and_extract_zip(
@@ -273,7 +273,7 @@ class StorageAwareCache:
                 return full_paths
 
         except Exception as e:
-            logger.debug(f"Error listing files in {directory_path}: {e}")
+            logger.debug(f"Error listing files in {directory_path}: {e}", exc_info=True)
             return []
 
 

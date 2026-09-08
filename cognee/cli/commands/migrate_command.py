@@ -17,6 +17,10 @@ from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.reference import SupportsCliCommand
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 def _validate_revision(revision: str, keywords: tuple) -> None:
     """Error like alembic's "Can't locate revision" for unknown slugs."""
@@ -130,7 +134,8 @@ Examples:
 
         try:
             summaries = asyncio.run(run())
-        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+        except Exception as error:  # translated to an actionable hint
+            logger.debug("Ignoring exception in UpgradeCommand.execute", exc_info=True)
             _bookkeeping_guard(error)
         _print_summaries(
             summaries,
@@ -226,7 +231,8 @@ Examples:
 
         try:
             summaries = asyncio.run(run())
-        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+        except Exception as error:  # translated to an actionable hint
+            logger.debug("Ignoring exception in DowngradeCommand.execute", exc_info=True)
             _bookkeeping_guard(error)
         _print_summaries(
             summaries,
@@ -323,7 +329,8 @@ migration has been applied (everything pending).
 
         try:
             asyncio.run(run())
-        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+        except Exception as error:  # translated to an actionable hint
+            logger.debug("Ignoring exception in CurrentCommand.execute", exc_info=True)
             _bookkeeping_guard(error)
 
 
@@ -383,7 +390,8 @@ Examples:
 
         try:
             summaries = asyncio.run(run())
-        except Exception as error:  # noqa: BLE001 - translated to an actionable hint
+        except Exception as error:  # translated to an actionable hint
+            logger.debug("Ignoring exception in StampCommand.execute", exc_info=True)
             _bookkeeping_guard(error)
         if not summaries:
             fmt.note("No databases found — nothing stamped.")

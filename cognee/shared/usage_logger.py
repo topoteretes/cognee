@@ -25,6 +25,7 @@ def _sanitize_value(value: Any) -> Any:
             return f"<cannot be serialized: {type(value).__name__}>"
         return str_repr
     except Exception:
+        logger.debug("Ignoring exception in _sanitize_value", exc_info=True)
         return f"<cannot be serialized: {type(value).__name__}>"
 
 
@@ -87,6 +88,7 @@ def _get_param_names(func: Callable) -> list[str]:
     try:
         return list(inspect.signature(func).parameters.keys())
     except Exception:
+        logger.debug("Ignoring exception in _get_param_names", exc_info=True)
         return []
 
 
@@ -100,6 +102,7 @@ def _get_param_defaults(func: Callable) -> dict[str, Any]:
                 defaults[param_name] = param.default
         return defaults
     except Exception:
+        logger.debug("Ignoring exception in _get_param_defaults", exc_info=True)
         return {}
 
 
@@ -126,6 +129,7 @@ def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> str |
                     return str(user.id)
         return None
     except Exception:
+        logger.debug("Ignoring exception in _extract_user_id", exc_info=True)
         return None
 
 
@@ -261,7 +265,7 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
         try:
             async for chunk in inner:
                 yield chunk
-        except BaseException as streaming_error:  # noqa: BLE001 - logged, then re-raised
+        except BaseException as streaming_error:  # logged, then re-raised
             success = False
             error = str(streaming_error) or type(streaming_error).__name__
             raise
@@ -274,7 +278,7 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
             if aclose is not None:
                 try:
                     await aclose()
-                except BaseException:  # noqa: BLE001 - cleanup must not mask the outcome
+                except BaseException:  # cleanup must not mask the outcome
                     logger.debug("Failed to close streaming body", exc_info=True)
             # Shielded because the common ending is a client disconnect, which
             # cancels this scope: an unshielded await would be cancelled at its
@@ -283,7 +287,7 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
             # for the same reason — CancelledError is not an Exception.
             try:
                 await asyncio.shield(asyncio.ensure_future(emit(None, success, error)))
-            except BaseException:  # noqa: BLE001
+            except BaseException:
                 logger.exception(
                     f"Failed to log usage for {function_name}",
                 )

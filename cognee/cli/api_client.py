@@ -20,6 +20,10 @@ from urllib.parse import urljoin
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 def _import_httpx():
     """Import httpx lazily so the dependency is optional."""
@@ -100,6 +104,9 @@ class CogneeApiClient:
             try:
                 detail = resp.json()
             except Exception:
+                logger.debug(
+                    "Ignoring exception in CogneeApiClient._raise_for_status", exc_info=True
+                )
                 detail = resp.text
             raise RuntimeError(f"API error {resp.status_code}: {detail}")
 
@@ -117,6 +124,7 @@ class CogneeApiClient:
         try:
             return r.json()
         except Exception:
+            logger.debug("Ignoring exception in CogneeApiClient.health", exc_info=True)
             return {"status_code": r.status_code, "text": r.text}
 
     # -- add -------------------------------------------------------------
