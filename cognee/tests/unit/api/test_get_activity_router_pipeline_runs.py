@@ -31,6 +31,12 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 # ``from ... import get_activity_router`` yields the function, not the module
 # whose attributes these tests monkeypatch.
 router_module = importlib.import_module("cognee.api.v1.activity.routers.get_activity_router")
+# The staleness helpers live in the pipelines methods module now (SDK-591
+# follow-up), imported as an object by the router rather than the router
+# defining them itself.
+status_module = importlib.import_module(
+    "cognee.modules.pipelines.methods.get_effective_pipeline_status"
+)
 
 
 def _run(**overrides) -> PipelineRun:
@@ -549,7 +555,7 @@ def test_threshold_boundary_is_strictly_less_than(monkeypatch):
         def now(cls, tz=None):
             return now
 
-    monkeypatch.setattr(router_module, "datetime", _FrozenDatetime)
+    monkeypatch.setattr(status_module, "datetime", _FrozenDatetime)
 
     at_threshold = _run(
         user_id=user_id,
@@ -606,13 +612,13 @@ def test_negative_threshold_env_falls_back_to_default(monkeypatch):
     row as ABANDONED. Must fall back to the 1800s default instead."""
     monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "-100")
 
-    assert router_module._pipeline_run_abandon_after_seconds() == 1800
+    assert status_module._pipeline_run_abandon_after_seconds() == 1800
 
 
 def test_zero_threshold_env_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "0")
 
-    assert router_module._pipeline_run_abandon_after_seconds() == 1800
+    assert status_module._pipeline_run_abandon_after_seconds() == 1800
 
 
 def test_huge_threshold_env_falls_back_to_default_instead_of_overflowing(monkeypatch):
@@ -622,11 +628,11 @@ def test_huge_threshold_env_falls_back_to_default_instead_of_overflowing(monkeyp
     rejected before it ever reaches timedelta()."""
     monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "999999999999999999999999")
 
-    assert router_module._pipeline_run_abandon_after_seconds() == 1800
+    assert status_module._pipeline_run_abandon_after_seconds() == 1800
     # And the value that would feed timedelta() must actually stay safe.
     from datetime import timedelta
 
-    timedelta(seconds=router_module._pipeline_run_abandon_after_seconds())
+    timedelta(seconds=status_module._pipeline_run_abandon_after_seconds())
 
 
 def test_huge_threshold_env_does_not_500_the_endpoint(monkeypatch):
