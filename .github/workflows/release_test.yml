@@ -572,6 +572,11 @@ jobs:
   # and this is where the other moved suites already live.
   test-multimedia-example:
     name: Run Multimedia Example
+    # Same fork guard every other job here carries: this workflow triggers on
+    # pull_request against main, and a fork PR has no access to the provider
+    # secrets, so without this each of these is a guaranteed red job on an
+    # outside contributor's release PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     # No container: this file is not a reusable workflow, so there is no
     # ci-image input to resolve; bare runner like every job here.
@@ -594,6 +599,11 @@ jobs:
 
   test-eval-example:
     name: Run Eval Example
+    # Same fork guard every other job here carries: this workflow triggers on
+    # pull_request against main, and a fork PR has no access to the provider
+    # secrets, so without this each of these is a guaranteed red job on an
+    # outside contributor's release PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     # No container: this file is not a reusable workflow, so there is no
     # ci-image input to resolve; bare runner like every job here.
@@ -623,6 +633,11 @@ jobs:
 
   test-openrouter:
     name: Run OpenRouter Test
+    # Same fork guard every other job here carries: this workflow triggers on
+    # pull_request against main, and a fork PR has no access to the provider
+    # secrets, so without this each of these is a guaranteed red job on an
+    # outside contributor's release PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     # No container: this file is not a reusable workflow, so there is no
     # ci-image input to resolve; bare runner like every job here.
@@ -651,6 +666,11 @@ jobs:
 
   test-bedrock-api-key:
     name: Run Bedrock API Key Test
+    # Same fork guard every other job here carries: this workflow triggers on
+    # pull_request against main, and a fork PR has no access to the provider
+    # secrets, so without this each of these is a guaranteed red job on an
+    # outside contributor's release PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     # No container: this file is not a reusable workflow, so there is no
     # ci-image input to resolve; bare runner like every job here.
@@ -681,6 +701,11 @@ jobs:
 
   test-bedrock-aws-credentials:
     name: Run Bedrock AWS Credentials Test
+    # Same fork guard every other job here carries: this workflow triggers on
+    # pull_request against main, and a fork PR has no access to the provider
+    # secrets, so without this each of these is a guaranteed red job on an
+    # outside contributor's release PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     # No container: this file is not a reusable workflow, so there is no
     # ci-image input to resolve; bare runner like every job here.
@@ -711,6 +736,11 @@ jobs:
 
   test-bedrock-aws-profile:
     name: Run Bedrock AWS Profile Test
+    # Same fork guard every other job here carries: this workflow triggers on
+    # pull_request against main, and a fork PR has no access to the provider
+    # secrets, so without this each of these is a guaranteed red job on an
+    # outside contributor's release PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-22.04
     # No container: this file is not a reusable workflow, so there is no
     # ci-image input to resolve; bare runner like every job here.

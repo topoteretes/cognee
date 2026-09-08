@@ -81,7 +81,13 @@ Needs `s3:PutObject` on that bucket, which lives in AWS account `463722570299`.
 Five caller jobs in `nightly_tests.yml` — `perf-<label>-llm`, `perf-<label>-mock`,
 `perf-<label>-cloud`, `perf-rust-<label>-llm`, `perf-rust-<label>` — plus, in the
 `notify` job, seven `REPORT_KEYS` entries, seven `ARMS` lines, the `needs` list and
-the status gate. Copy the `war_and_peace` block; it is the closest template.
+the status gate. Copy the `war_and_peace` block; it is the closest template — but drop its
+`if: ${{ inputs.cadence != 'daily' }}` line unless the new corpus is also
+meant to be weekly-only. Note the counts above are the pre-restructure
+shape: `50_small_documents` was removed and there is no rust arm for
+`datasheets`, so a new corpus may need fewer than five caller jobs.
+`performance_report_rust.yml` still defaults to `50_small_documents`
+with no remaining caller; that default is orphaned, not live.
 
 Nothing is needed for MotherDuck: `motherduck_nightly_etl.py` discovers labels by
 globbing the S3 report keys, so a new label appears in `ci_analytics.nightly` by
