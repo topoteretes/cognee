@@ -85,7 +85,7 @@ class SyncOperation(Base):
     error_message = Column(Text, doc="Error message if sync failed")
     retry_count = Column(Integer, default=0, doc="Number of retry attempts")
 
-    def get_duration_seconds(self) -> Optional[float]:
+    def get_duration_seconds(self) -> float | None:
         """Get the duration of the sync operation in seconds."""
         if not self.created_at:
             return None
@@ -112,12 +112,12 @@ class SyncOperation(Base):
             "dataset_sync_hashes": self.dataset_sync_hashes or {},
         }
 
-    def _get_all_sync_hashes(self) -> List[str]:
+    def _get_all_sync_hashes(self) -> list[str]:
         """Get all content hashes for data created/modified during this sync operation."""
         all_hashes = set()
         dataset_hashes = self.dataset_sync_hashes or {}
 
-        for dataset_id, operations in dataset_hashes.items():
+        for operations in dataset_hashes.values():
             if isinstance(operations, dict):
                 all_hashes.update(operations.get("uploaded", []))
                 all_hashes.update(operations.get("downloaded", []))
@@ -129,7 +129,7 @@ class SyncOperation(Base):
         dataset_hashes = self.dataset_sync_hashes or {}
         return dataset_hashes.get(dataset_id, {"uploaded": [], "downloaded": []})
 
-    def was_data_synced(self, content_hash: str, dataset_id: str = None) -> bool:
+    def was_data_synced(self, content_hash: str, dataset_id: str | None = None) -> bool:
         """
         Check if a specific piece of data was part of this sync operation.
 

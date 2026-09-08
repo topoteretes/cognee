@@ -127,9 +127,11 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
     # id() published by the wrapper no longer matches — but the stored path
     # does, and the metadata must be reused rather than the file re-read.
     wrapper_saw = "/tmp/doc.txt"  # the string the wrapper inspected
-    # Built at runtime: a compile-time concat would be constant-folded into the
-    # same interned object, silently reintroducing the id() match.
-    task_receives = "".join(["/tmp/doc", ".txt"])
+    # Built at runtime from a variable: a literal or a compile-time concat is
+    # constant-folded into the same interned object (ruff's FLY002 rewrites a
+    # static join into exactly that), silently reintroducing the id() match.
+    path_parts = ["/tmp/doc", ".txt"]
+    task_receives = "".join(path_parts)
     assert wrapper_saw == task_receives and wrapper_saw is not task_receives
 
     ctx = SimpleNamespace(

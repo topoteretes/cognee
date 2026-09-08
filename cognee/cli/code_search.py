@@ -22,7 +22,8 @@ import json
 import os
 import shutil
 import subprocess
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any, Optional
 
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandInnerException
@@ -102,7 +103,7 @@ def add_code_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_code_query(args: argparse.Namespace, query_type: Optional[str]) -> Optional[dict]:
+def build_code_query(args: argparse.Namespace, query_type: str | None) -> dict | None:
     """Assemble ``code_query`` from --code-query/--diagram/--diagram-out, or None."""
     raw = getattr(args, "code_query", None)
     diagram = getattr(args, "diagram", None)
@@ -159,7 +160,7 @@ def iter_code_results(results: Any) -> Iterator[dict]:
             yield from iter_code_results(item)
 
 
-def first_diagram(results: Any) -> Optional[dict]:
+def first_diagram(results: Any) -> dict | None:
     for result in iter_code_results(results):
         diagram = result.get("diagram")
         if isinstance(diagram, dict) and diagram.get("source"):
@@ -279,7 +280,7 @@ def write_diagram(results: Any, path: str) -> str:
     return path
 
 
-def _mermaid_title(source: str) -> Optional[str]:
+def _mermaid_title(source: str) -> str | None:
     lines = source.splitlines()
     if len(lines) >= 3 and lines[0] == "---":
         for line in lines[1:]:

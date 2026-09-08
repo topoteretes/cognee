@@ -23,20 +23,20 @@ class Interval(BaseModel):
 
 
 class QueryInterval(BaseModel):
-    starts_at: Optional[Timestamp] = None
-    ends_at: Optional[Timestamp] = None
+    starts_at: Timestamp | None = None
+    ends_at: Timestamp | None = None
 
 
 class Event(BaseModel):
     name: str
-    description: Optional[str] = None
-    time_from: Optional[Timestamp] = None
-    time_to: Optional[Timestamp] = None
-    location: Optional[str] = None
+    description: str | None = None
+    time_from: Timestamp | None = None
+    time_to: Timestamp | None = None
+    location: str | None = None
 
 
 class EventList(BaseModel):
-    events: List[Event]
+    events: list[Event]
 
 
 class EntityAttribute(BaseModel):
@@ -47,9 +47,9 @@ class EntityAttribute(BaseModel):
 
 class EventWithEntities(BaseModel):
     event_name: str
-    description: Optional[str] = None
-    attributes: List[EntityAttribute] = []
+    description: str | None = None
+    attributes: list[EntityAttribute] = []
 
 
 class EventEntityList(BaseModel):
-    events: List[EventWithEntities]
+    events: list[EventWithEntities]

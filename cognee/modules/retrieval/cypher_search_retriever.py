@@ -28,7 +28,7 @@ class CypherSearchRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -84,7 +84,7 @@ class CypherSearchRetriever(BaseRetriever):
         return None
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
+        self, query: str, retrieved_objects: Any, context: Any | None = None
     ) -> Any:
         """
         Returns the graph connections context.

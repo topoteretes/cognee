@@ -49,13 +49,13 @@ class User(SQLAlchemyBaseUserTableUUID, Principal):
 
 # Keep these schemas in sync with User model
 class UserRead(schemas.BaseUser[uuid_UUID]):
-    tenant_id: Optional[uuid_UUID] = None
-    parent_user_id: Optional[uuid_UUID] = None
+    tenant_id: uuid_UUID | None = None
+    parent_user_id: uuid_UUID | None = None
 
 
 class UserCreate(schemas.BaseUserCreate):
     is_verified: bool = True
-    parent_user_id: Optional[uuid_UUID] = None
+    parent_user_id: uuid_UUID | None = None
 
 
 class UserUpdate(schemas.BaseUserUpdate):

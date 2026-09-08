@@ -6,8 +6,9 @@ Create Date: 2025-06-16 15:20:43.118246
 
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Sequence, Union
+from typing import Union
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -16,9 +17,9 @@ from sqlalchemy import UUID
 
 # revision identifiers, used by Alembic.
 revision: str = "ab7e313804ae"
-down_revision: Union[str, None] = "1d0bb7fede17"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "1d0bb7fede17"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _now():

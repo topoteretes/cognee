@@ -11,16 +11,17 @@ Create Date: 2026-06-10 00:00:00.000000
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d8f4a1b2c3e9"
-down_revision: Union[str, None] = "c1a2b3d4e5f9"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "c1a2b3d4e5f9"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 TABLE_NAME = "global_database_version"
 

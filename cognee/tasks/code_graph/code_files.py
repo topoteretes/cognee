@@ -135,6 +135,6 @@ async def extract_code_files_graph(
     return data_documents
 
 
-def get_code_file_tasks() -> List[Task]:
+def get_code_file_tasks() -> list[Task]:
     """The cognify CODE-route task list: one adapter task, no LLM stages."""
     return [Task(extract_code_files_graph)]

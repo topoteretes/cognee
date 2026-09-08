@@ -298,7 +298,33 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-ignore = ["F401"]
+ignore = [
+    "F401",
+    # N999: module names like LanceDBAdapter.py and DTO.py are public import paths.
+    "N999",
+    # RUF012: `metadata: dict = {...}` on DataPoint subclasses is a pydantic field
+    # default, which ruff cannot recognise because the pydantic base is indirect.
+    "RUF012",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection defaults are evaluated per request, not at import.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Package init order is load-bearing (side-effect registration, circular-import
+# avoidance); sorting these breaks `import cognee`.
+"__init__.py" = ["I001"]
 
 [tool.ty.src]
 # TODO: Gradually add more directories to include until we have type hints for all modules

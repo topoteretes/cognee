@@ -47,13 +47,13 @@ def _node_index_text(node_data: dict) -> str:
     return str(text).strip()
 
 
-def _truth_node_sets(session_ids: Optional[List[str]]) -> List[str]:
+def _truth_node_sets(session_ids: list[str] | None) -> list[str]:
     if not session_ids:
         return TRUTH_NODE_SET
     return [truth_session_node_set(session_id) for session_id in session_ids if session_id]
 
 
-async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[str]]) -> List[str]:
+async def _fetch_learning_statements(graph_engine, session_ids: list[str] | None) -> list[str]:
     """Read accepted lesson statements from the session_learnings node set.
 
     Traverses the ``session_learnings`` NodeSet to its member DocumentChunk
@@ -70,7 +70,7 @@ async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[st
         logger.warning("truth_subspace: learning lookup failed open: %s", error)
         return []
 
-    statements: List[str] = []
+    statements: list[str] = []
     seen = set()
     for _node_id, node_data in nodes or []:
         if not isinstance(node_data, dict):
@@ -85,9 +85,9 @@ async def _fetch_learning_statements(graph_engine, session_ids: Optional[List[st
     return statements
 
 
-async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[List[float]]:
+async def _embed_in_batches(embedding_engine, texts: list[str]) -> list[list[float]]:
     """Embed ``texts`` in bounded batches, preserving order. Fail-open -> []."""
-    vectors: List[List[float]] = []
+    vectors: list[list[float]] = []
     for start in range(0, len(texts), NODE_EMBED_BATCH_SIZE):
         batch = texts[start : start + NODE_EMBED_BATCH_SIZE]
         try:
@@ -99,15 +99,15 @@ async def _embed_in_batches(embedding_engine, texts: List[str]) -> List[List[flo
     return vectors
 
 
-async def _resolve_dataset(dataset: Union[str, UUID], user):
+async def _resolve_dataset(dataset: str | UUID, user):
     """Resolve a writable dataset object for ``user`` (or None)."""
     datasets = await get_authorized_existing_datasets([dataset], "write", user)
     return datasets[0] if datasets else None
 
 
 async def build_truth_subspace(
-    dataset: Union[str, UUID],
-    session_ids: Optional[List[str]],
+    dataset: str | UUID,
+    session_ids: list[str] | None,
     user=None,
     k: int = DEFAULT_K,
 ) -> dict:
@@ -229,8 +229,8 @@ async def build_truth_subspace(
 
         chunk_label = DocumentChunk.__name__
         scored: dict = {}
-        node_ids: List[str] = []
-        node_texts: List[str] = []
+        node_ids: list[str] = []
+        node_texts: list[str] = []
         for node_id, node_data in nodes:
             if not isinstance(node_data, dict) or node_data.get("type") != chunk_label:
                 continue

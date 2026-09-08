@@ -20,15 +20,13 @@ SLACK_DATASET_NAME = "slack"
 SLACK_NODE_SET = ["slack"]
 
 
-def _format_remembered_text(
-    text: str, *, channel_name: Optional[str], author_id: Optional[str]
-) -> str:
+def _format_remembered_text(text: str, *, channel_name: str | None, author_id: str | None) -> str:
     channel = f"#{channel_name}" if channel_name else "Slack"
     author = f"<@{author_id}>" if author_id else "someone"
     return f"In {channel}, {author} said: {text}"
 
 
-def _format_noted_text(text: str, *, author_id: Optional[str]) -> str:
+def _format_noted_text(text: str, *, author_id: str | None) -> str:
     """Provenance for a note nobody said in Slack — see :func:`remember_note`.
 
     Deliberately "noted", not "said": the shortcut path quotes a real
@@ -43,8 +41,8 @@ async def remember_message(
     user_id: UUID,
     *,
     text: str,
-    channel_name: Optional[str] = None,
-    author_id: Optional[str] = None,
+    channel_name: str | None = None,
+    author_id: str | None = None,
 ) -> None:
     """Store one Slack message as a Cognee memory, attributed to ``user_id``.
 
@@ -68,7 +66,7 @@ async def remember_note(
     user_id: UUID,
     *,
     text: str,
-    author_id: Optional[str] = None,
+    author_id: str | None = None,
 ) -> None:
     """Store a free-text ``/cognee-remember`` note, attributed to ``user_id``.
 

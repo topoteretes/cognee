@@ -64,7 +64,7 @@ async def main():
     assert not await vector_engine.has_collection("TextDocument_text")
 
     cognify_result: dict = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     graph_engine = await get_graph_engine()
     assert await stores_provenance_in_graph(graph_engine), (
@@ -130,7 +130,7 @@ async def main():
         f"({john_doc_person_name!r}, {john_doc_exclusive_org_name!r})."
     )
 
-    after_first_delete_node_ids = set([node[0] for node in nodes])
+    after_first_delete_node_ids = {node[0] for node in nodes}
 
     after_delete_nodes_by_vector_collection = {}
     for node in initial_nodes:

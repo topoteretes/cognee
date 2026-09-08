@@ -1,5 +1,6 @@
 import asyncio
-from typing import Collection, Literal, Optional, Union
+from collections.abc import Collection
+from typing import Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -102,27 +103,27 @@ def raise_if_cognify_errored(result) -> None:
 
 
 async def cognify(
-    datasets: Union[str, list[str], list[UUID]] = None,
+    datasets: str | list[str] | list[UUID] | None = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
-    chunks_per_batch: int = None,
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
     config: Config = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     run_in_background: bool = False,
     incremental_loading: bool = True,
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str | None = None,
     temporal_cognify: bool = False,
-    functional_relationships: Optional[Collection[str]] = None,
+    functional_relationships: Collection[str] | None = None,
     data_per_batch: int = 20,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = True,
     dry_run: bool = False,
     raise_on_error: bool = True,
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
 ):
     """
@@ -475,12 +476,12 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
+    chunk_size: int | None = None,
     config: Config = None,
-    custom_prompt: Optional[str] = None,
-    chunks_per_batch: int = None,
-    functional_relationships: Optional[Collection[str]] = None,
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    custom_prompt: str | None = None,
+    chunks_per_batch: int | None = None,
+    functional_relationships: Collection[str] | None = None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
 ) -> list[Task]:
     cognify_config = get_cognify_config()
@@ -555,7 +556,9 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     return default_tasks
 
 
-async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) -> list[Task]:
+async def get_dlt_tasks(
+    chunk_size: int | None = None, chunks_per_batch: int | None = None
+) -> list[Task]:
     """Deterministic pipeline for DLT-source manifest datasets.
 
     No LLM tasks: each manifest row becomes one DocumentChunk (vector-indexed
@@ -602,7 +605,10 @@ async def get_dlt_tasks(chunk_size: int = None, chunks_per_batch: int = None) ->
 
 
 async def get_temporal_tasks(
-    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = None
+    user: User = None,
+    chunker=TextChunker,
+    chunk_size: int | None = None,
+    chunks_per_batch: int | None = None,
 ) -> list[Task]:
     """
     Builds and returns a list of temporal processing tasks to be executed in sequence.

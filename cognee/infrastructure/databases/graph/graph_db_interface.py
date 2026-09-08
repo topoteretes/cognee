@@ -14,11 +14,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 # Type aliases for better readability
-NodeData = Dict[str, Any]
-EdgeData = Tuple[
-    str, str, str, Dict[str, Any]
+NodeData = dict[str, Any]
+EdgeData = tuple[
+    str, str, str, dict[str, Any]
 ]  # (source_id, target_id, relationship_name, properties)
-Node = Tuple[str, NodeData]  # (node_id, properties)
+Node = tuple[str, NodeData]  # (node_id, properties)
 
 
 class GraphDBInterface(ABC):
@@ -72,7 +72,7 @@ class GraphDBInterface(ABC):
         return True
 
     @abstractmethod
-    async def query(self, query: str, params: dict) -> List[Any]:
+    async def query(self, query: str, params: dict) -> list[Any]:
         """
         Execute a raw database query and return the results.
 
@@ -86,7 +86,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def add_node(
-        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+        self, node: DataPoint | str, properties: dict[str, Any] | None = None
     ) -> None:
         """
         Add a single node with specified properties to the graph.
@@ -103,9 +103,9 @@ class GraphDBInterface(ABC):
     @abstractmethod
     async def add_nodes(
         self,
-        nodes: Union[List[Node], List[DataPoint]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[Node] | list[DataPoint],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -135,7 +135,7 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         """
         Delete multiple nodes from the graph by their identifiers.
 
@@ -148,8 +148,8 @@ class GraphDBInterface(ABC):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Remove the given tag names from every node's `belongs_to_set` property
@@ -461,7 +461,7 @@ class GraphDBInterface(ABC):
         raise UnsupportedProvenanceCapability()
 
     @abstractmethod
-    async def get_node(self, node_id: str) -> Optional[NodeData]:
+    async def get_node(self, node_id: str) -> NodeData | None:
         """
         Retrieve a single node from the graph using its ID.
 
@@ -473,7 +473,7 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_nodes(self, node_ids: List[str]) -> List[NodeData]:
+    async def get_nodes(self, node_ids: list[str]) -> list[NodeData]:
         """
         Retrieve multiple nodes from the graph using their IDs.
 
@@ -490,7 +490,7 @@ class GraphDBInterface(ABC):
         source_id: str,
         target_id: str,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         """
         Create a new edge between two nodes in the graph.
@@ -510,9 +510,9 @@ class GraphDBInterface(ABC):
     @abstractmethod
     async def add_edges(
         self,
-        edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[EdgeData] | list[tuple[str, str, str, dict[str, Any] | None]],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
@@ -537,14 +537,14 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
+    async def get_graph_data(self) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve all nodes and edges within the graph.
         """
         raise NotImplementedError
 
     @abstractmethod
-    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+    async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """
         Fetch metrics and statistics of the graph, possibly including optional details.
 
@@ -571,7 +571,7 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def has_edges(self, edges: List[EdgeData]) -> List[EdgeData]:
+    async def has_edges(self, edges: list[EdgeData]) -> list[EdgeData]:
         """
         Determine the existence of multiple edges in the graph.
 
@@ -584,7 +584,7 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_edges(self, node_id: str) -> List[EdgeData]:
+    async def get_edges(self, node_id: str) -> list[EdgeData]:
         """
         Retrieve all edges that are connected to the specified node.
 
@@ -596,7 +596,7 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_neighbors(self, node_id: str) -> List[NodeData]:
+    async def get_neighbors(self, node_id: str) -> list[NodeData]:
         """
         Get all neighboring nodes connected to the specified node.
 
@@ -609,8 +609,8 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
-    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
+    ) -> tuple[list[tuple[int, dict]], list[tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
 
@@ -624,8 +624,8 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_connections(
-        self, node_id: Union[str, UUID]
-    ) -> List[Tuple[NodeData, Dict[str, Any], NodeData]]:
+        self, node_id: str | UUID
+    ) -> list[tuple[NodeData, dict[str, Any], NodeData]]:
         """
         Get all nodes connected to a specified node and their relationship details.
 
@@ -639,10 +639,10 @@ class GraphDBInterface(ABC):
     @abstractmethod
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Node], List[EdgeData]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[Node], list[EdgeData]]:
         """
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
@@ -662,8 +662,8 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_filtered_graph_data(
-        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
-    ) -> Tuple[List[Node], List[EdgeData]]:
+        self, attribute_filters: list[dict[str, list[str | int]]]
+    ) -> tuple[list[Node], list[EdgeData]]:
         """
         Retrieve nodes and edges filtered by the provided attribute criteria.
 
@@ -675,7 +675,7 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
-    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+    async def get_node_feedback_weights(self, node_ids: list[str]) -> dict[str, float]:
         """
         Retrieve node feedback weights for multiple node ids.
         Returns only found node ids.
@@ -683,15 +683,15 @@ class GraphDBInterface(ABC):
         raise NotImplementedError("get_node_feedback_weights is not implemented for this adapter")
 
     async def set_node_feedback_weights(
-        self, node_feedback_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, node_feedback_weights: dict[str, float]
+    ) -> dict[str, bool]:
         """
         Persist node feedback weights for multiple node ids.
         Returns per-id update success.
         """
         raise NotImplementedError("set_node_feedback_weights is not implemented for this adapter")
 
-    async def get_node_truth_state(self, node_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    async def get_node_truth_state(self, node_ids: list[str]) -> dict[str, dict[str, Any]]:
         """
         Retrieve node truth alignment state for multiple node ids.
         Returns only found node ids.
@@ -699,15 +699,15 @@ class GraphDBInterface(ABC):
         raise NotImplementedError("get_node_truth_state is not implemented for this adapter")
 
     async def set_node_truth_state(
-        self, node_truth_state: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, bool]:
+        self, node_truth_state: dict[str, dict[str, Any]]
+    ) -> dict[str, bool]:
         """
         Persist node truth alignment state for multiple node ids.
         Returns per-id update success.
         """
         raise NotImplementedError("set_node_truth_state is not implemented for this adapter")
 
-    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+    async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
         """
         Merge *values* into an existing node's properties, leaving every field not
         named in *values* untouched. Used to patch a single scalar (e.g. stamping
@@ -729,7 +729,7 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("update_node is not implemented for this adapter")
 
-    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+    async def get_edge_feedback_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
         """
         Retrieve edge feedback weights for multiple edge_object_ids.
         Returns only found edge ids.
@@ -737,15 +737,15 @@ class GraphDBInterface(ABC):
         raise NotImplementedError("get_edge_feedback_weights is not implemented for this adapter")
 
     async def set_edge_feedback_weights(
-        self, edge_feedback_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, edge_feedback_weights: dict[str, float]
+    ) -> dict[str, bool]:
         """
         Persist edge feedback weights for multiple edge_object_ids.
         Returns per-id update success.
         """
         raise NotImplementedError("set_edge_feedback_weights is not implemented for this adapter")
 
-    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """Retrieve a batch of triplets (source, edge, target).
 
         Optional extension — implemented by PostgresDemoAdapter, Neo4jAdapter,
@@ -759,7 +759,7 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("get_triplets_batch is not implemented for this adapter")
 
-    async def get_node_frequency_weights(self, node_ids: List[str]) -> Dict[str, float]:
+    async def get_node_frequency_weights(self, node_ids: list[str]) -> dict[str, float]:
         """
         Retrieve node frequency weights for multiple node ids.
         Returns only found node ids.
@@ -767,15 +767,15 @@ class GraphDBInterface(ABC):
         raise NotImplementedError("get_node_frequency_weights is not implemented for this adapter")
 
     async def set_node_frequency_weights(
-        self, node_frequency_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, node_frequency_weights: dict[str, float]
+    ) -> dict[str, bool]:
         """
         Persist node frequency weights for multiple node ids.
         Returns per-id update success.
         """
         raise NotImplementedError("set_node_frequency_weights is not implemented for this adapter")
 
-    async def get_edge_frequency_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+    async def get_edge_frequency_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
         """
         Retrieve edge frequency weights for multiple edge_object_ids.
         Returns only found edge ids.
@@ -783,8 +783,8 @@ class GraphDBInterface(ABC):
         raise NotImplementedError("get_edge_frequency_weights is not implemented for this adapter")
 
     async def set_edge_frequency_weights(
-        self, edge_frequency_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, edge_frequency_weights: dict[str, float]
+    ) -> dict[str, bool]:
         """
         Persist edge frequency weights for multiple edge_object_ids.
         Returns per-id update success.

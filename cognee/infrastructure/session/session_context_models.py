@@ -65,7 +65,7 @@ def normalize_content(text: str) -> str:
     return " ".join(text.strip().lower().split())
 
 
-def coerce_rating_or_none(value) -> Optional[int]:
+def coerce_rating_or_none(value) -> int | None:
     """Coerce a 1-5 answer rating to int; anything else degrades to None.
 
     Malformed values (bools, non-integral floats, non-numbers, out-of-range
@@ -338,7 +338,7 @@ AgentCandidateContextUpdateVariant = Annotated[
 class AgentContextExtraction(BaseModel):
     """LLM output for the batch pass: agent-profile lessons drawn from trace evidence."""
 
-    lessons: List[AgentCandidateContextUpdateVariant] = Field(
+    lessons: list[AgentCandidateContextUpdateVariant] = Field(
         default_factory=list,
         description=(
             "Reusable agent/tool lessons drawn from the traces. Each item must be one of the "
@@ -375,13 +375,13 @@ class SessionContextEntry(BaseModel):
     normalized_content: str = ""
     confidence: float = 0.0
     created_at: str
-    source_feedback_ids: List[str] = Field(default_factory=list)
-    source_trace_ids: List[str] = Field(default_factory=list)
+    source_feedback_ids: list[str] = Field(default_factory=list)
+    source_trace_ids: list[str] = Field(default_factory=list)
     helpful_count: int = 0
     harmful_count: int = 0
     priority: int = 0
-    last_served_at: Optional[str] = None
-    embedding: Optional[List[float]] = None
+    last_served_at: str | None = None
+    embedding: list[float] | None = None
     kind: Literal["context"] = "context"
 
     @field_validator("id")
@@ -454,7 +454,7 @@ class SessionContextEntry(BaseModel):
 
     @field_validator("source_feedback_ids", "source_trace_ids")
     @classmethod
-    def source_id_lists_only_strings(cls, v: List[str]) -> List[str]:
+    def source_id_lists_only_strings(cls, v: list[str]) -> list[str]:
         if not isinstance(v, list):
             raise ValueError("source id list must be a list")
         normalized = []
@@ -499,10 +499,10 @@ class SessionFeedbackEntry(BaseModel):
     id: str
     created_at: str
     raw_text: str
-    referenced_qa_ids: List[str] = Field(default_factory=list)
-    referenced_qa_rating: Optional[int] = None
-    influencing_context_ids: List[str] = Field(default_factory=list)
-    candidate_context_entries: List[dict] = Field(default_factory=list)
+    referenced_qa_ids: list[str] = Field(default_factory=list)
+    referenced_qa_rating: int | None = None
+    influencing_context_ids: list[str] = Field(default_factory=list)
+    candidate_context_entries: list[dict] = Field(default_factory=list)
     kind: Literal["feedback"] = "feedback"
 
     @field_validator("referenced_qa_rating", mode="before")
@@ -524,7 +524,7 @@ class SessionFeedbackEntry(BaseModel):
 
     @field_validator("referenced_qa_ids", "influencing_context_ids")
     @classmethod
-    def id_lists_only_strings(cls, v: List[str]) -> List[str]:
+    def id_lists_only_strings(cls, v: list[str]) -> list[str]:
         if not isinstance(v, list):
             raise ValueError("id list must be a list")
         normalized = []

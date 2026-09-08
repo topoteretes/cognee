@@ -47,10 +47,10 @@ def get_responses_router() -> APIRouter:
     async def call_openai_api_for_model(
         input_text: str,
         model: str,
-        tools: Optional[List[Dict[str, Any]]] = DEFAULT_TOOLS,
+        tools: list[dict[str, Any]] | None = DEFAULT_TOOLS,
         tool_choice: Any = "auto",
         temperature: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Call appropriate model API based on model name
         """

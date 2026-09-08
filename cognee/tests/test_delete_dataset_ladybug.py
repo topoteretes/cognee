@@ -140,10 +140,10 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     )
 
     cognify_result: dict = await cognee.cognify()
-    johns_dataset_id = list(cognify_result.keys())[0]
+    johns_dataset_id = next(iter(cognify_result.keys()))
 
     cognify_result: dict = await cognee.cognify(user=new_user)
-    maries_dataset_id = list(cognify_result.keys())[0]
+    maries_dataset_id = next(iter(cognify_result.keys()))
 
     # Canonical lock order (SDK-483): hold the dataset lock before the legacy
     # context call below acquires its queue slot; nested add/cognify/delete
@@ -200,7 +200,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
         query_node_ids = [
             node[0]
             for node in initial_nodes
-            if node[0] in set([node[0] for node in johns_initial_nodes])
+            if node[0] in {node[0] for node in johns_initial_nodes}
         ]
 
         if query_node_ids:

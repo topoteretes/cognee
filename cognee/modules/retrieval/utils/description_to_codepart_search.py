@@ -26,7 +26,7 @@ async def code_description_to_code_part_search(
 
 async def code_description_to_code_part(
     query: str, user: User, top_k: int, include_docs: bool = False
-) -> List[str]:
+) -> list[str]:
     """
     Maps a code description query to relevant code parts using a CodeGraph pipeline.
 

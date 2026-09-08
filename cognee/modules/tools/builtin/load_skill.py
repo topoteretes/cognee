@@ -32,7 +32,7 @@ TOOL = Tool(
 )
 
 
-async def handler(args: Dict[str, Any], **_) -> str:
+async def handler(args: dict[str, Any], **_) -> str:
     name = args.get("name")
     if not name:
         raise ToolInvocationError("load_skill requires a 'name' argument")

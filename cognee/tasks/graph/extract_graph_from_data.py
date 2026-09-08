@@ -87,15 +87,15 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
-    graph_model: Type[BaseModel],
-    ontology_resolver: Optional[BaseOntologyResolver],
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
-    pipeline_name: str = None,
-    task_name: str = None,
-    ontology_mode: Optional[str] = None,
+    graph_model: type[BaseModel],
+    ontology_resolver: BaseOntologyResolver | None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
+    pipeline_name: str | None = None,
+    task_name: str | None = None,
+    ontology_mode: str | None = None,
     ctx=None,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """Convert extracted graphs into linked data points for later storage.
 
     Graphs take the pure construction path when no ontology resolver is provided.
@@ -196,14 +196,14 @@ async def integrate_chunk_graphs(
 
 @task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
-    data_chunks: List[DocumentChunk],
-    graph_model: Type[BaseModel],
-    config: Optional[Config] = None,
-    custom_prompt: Optional[str] = None,
+    data_chunks: list[DocumentChunk],
+    graph_model: type[BaseModel],
+    config: Config | None = None,
+    custom_prompt: str | None = None,
     ctx=None,
-    chunk_attachment: Optional[Literal["direct", "all"]] = None,
+    chunk_attachment: Literal["direct", "all"] | None = None,
     **kwargs,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """

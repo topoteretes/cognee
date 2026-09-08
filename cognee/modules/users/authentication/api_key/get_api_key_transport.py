@@ -22,7 +22,7 @@ class _APIKeyHeaderOrWebSocketQueryParam(APIKeyHeader):
 
     # See the note in api_bearer_transport.py: an unannotated parameter here
     # turns every unauthenticated HTTP call into a 422 instead of a 401.
-    async def __call__(self, request: HTTPConnection) -> Optional[str]:
+    async def __call__(self, request: HTTPConnection) -> str | None:
         api_key = await super().__call__(request)
         return await resolve_websocket_query_param_fallback(request, api_key)
 
@@ -36,7 +36,7 @@ class APIKeyHeaderTransport(Transport):
         # Used in OpenAPI; not security type
         return _APIKeyHeaderOrWebSocketQueryParam(self.header_name)
 
-    async def get_authentication_token(self, request: Request) -> Optional[str]:
+    async def get_authentication_token(self, request: Request) -> str | None:
         return request.headers.get(self.header_name)
 
     async def get_login_response(self, token: str, response: Response) -> Response:
@@ -47,11 +47,11 @@ class APIKeyHeaderTransport(Transport):
         # No logout response for API key auth — just return unchanged
         return response
 
-    def get_openapi_login_responses_success(self) -> Dict[str, Dict]:
+    def get_openapi_login_responses_success(self) -> dict[str, dict]:
         # Not applicable — API key doesn't use login endpoint
         return {}
 
-    def get_openapi_logout_responses_success(self) -> Dict[str, Dict]:
+    def get_openapi_logout_responses_success(self) -> dict[str, dict]:
         # Not applicable — API key doesn't use logout endpoint
         return {}
 

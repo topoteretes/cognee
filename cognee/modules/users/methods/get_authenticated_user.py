@@ -31,7 +31,7 @@ def _resolve_auth_posture() -> tuple[bool, bool, str]:
         a warning and force auth on to keep per-user data isolated.
     """
 
-    def _read_bool(name: str) -> tuple[Optional[bool], bool]:
+    def _read_bool(name: str) -> tuple[bool | None, bool]:
         raw = os.environ.get(name)
         if raw is None or raw == "":
             return None, False
@@ -83,7 +83,7 @@ _auth_dependency = fastapi_users.current_user(active=True, optional=not REQUIRE_
 
 
 async def get_authenticated_user(
-    user: Optional[User] = Depends(_auth_dependency),
+    user: User | None = Depends(_auth_dependency),
 ) -> User:
     """
     Get authenticated user with environment-controlled behavior:

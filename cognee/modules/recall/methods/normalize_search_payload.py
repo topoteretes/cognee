@@ -69,7 +69,7 @@ def _text_from_dict(payload: dict) -> str:
         return str(payload)
 
 
-def _score_from(value: Any) -> Optional[float]:
+def _score_from(value: Any) -> float | None:
     if isinstance(value, dict):
         score = value.get("score")
         if isinstance(score, (int, float)):

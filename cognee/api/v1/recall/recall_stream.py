@@ -43,7 +43,8 @@ Three more properties are deliberate and easy to break:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, Optional
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import TypeAdapter
@@ -78,7 +79,7 @@ _STREAM_TASKS: set = set()
 _RESULTS_ADAPTER = TypeAdapter(list[RecallResponse])
 
 
-def _encode_stream_event(event: StreamEvent) -> Optional[str]:
+def _encode_stream_event(event: StreamEvent) -> str | None:
     if event.type == "delta":
         return encode_sse("delta", {"text": event.text or ""})
     if event.type == "stage":
@@ -125,7 +126,7 @@ class RecallStream:
         task: asyncio.Task,
         sink: TokenSink,
         iterator: AsyncIterator[StreamEvent],
-        first_event: Optional[StreamEvent],
+        first_event: StreamEvent | None,
     ) -> None:
         self._task = task
         self._sink = sink
@@ -271,7 +272,7 @@ async def begin_recall_stream(run_recall: Callable[[], Awaitable[Any]]) -> Recal
         requested_token_sink.reset(token)
 
     iterator = sink.__aiter__()
-    first_event: Optional[StreamEvent] = None
+    first_event: StreamEvent | None = None
     try:
         first_event = await iterator.__anext__()
     except StopAsyncIteration:

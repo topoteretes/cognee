@@ -133,7 +133,7 @@ def _extract_single_binary(archive_path: Path, destination: Path) -> None:
             binary_file.write(extracted.read())
 
 
-def install_enola(install_dir: Optional[Path] = None) -> str:
+def install_enola(install_dir: Path | None = None) -> str:
     """Install the pinned enola release and return the binary path.
 
     Idempotent: returns the existing binary without any network access when it

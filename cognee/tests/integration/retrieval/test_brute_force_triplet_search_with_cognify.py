@@ -129,11 +129,11 @@ async def test_node_feedback_does_not_modify_penalty_placeholder_in_edge_only_re
         ],
     )
 
-    search_kwargs = dict(
-        query=shared_edge_text,
-        top_k=1,
-        collections=["EdgeType_relationship_name"],
-    )
+    search_kwargs = {
+        "query": shared_edge_text,
+        "top_k": 1,
+        "collections": ["EdgeType_relationship_name"],
+    }
 
     top_with_no_feedback = await brute_force_triplet_search(**search_kwargs, feedback_influence=0.0)
     top_with_full_feedback = await brute_force_triplet_search(

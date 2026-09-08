@@ -1,7 +1,8 @@
 import json
 import os
 import re
-from typing import Any, Dict, List, Pattern
+from re import Pattern
+from typing import Any, Dict, List
 
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.root_dir import get_absolute_path
@@ -19,7 +20,7 @@ class RegexEntityConfig:
         self.entity_configs = {}
         self._load_config()
 
-    def _validate_config_fields(self, config: Dict[str, Any]) -> None:
+    def _validate_config_fields(self, config: dict[str, Any]) -> None:
         """Validate that all required fields are present in the configuration."""
         required_fields = ["entity_name", "entity_description", "regex", "description_template"]
         missing_fields = [field for field in required_fields if field not in config]
@@ -68,11 +69,11 @@ class RegexEntityConfig:
             f"Loaded {len(self.entity_configs)} entity configurations from {self.config_path}"
         )
 
-    def get_entity_names(self) -> List[str]:
+    def get_entity_names(self) -> list[str]:
         """Return a list of all configured entity names."""
         return list(self.entity_configs.keys())
 
-    def get_entity_config(self, entity_name: str) -> Dict[str, Any]:
+    def get_entity_config(self, entity_name: str) -> dict[str, Any]:
         """Get the configuration for a specific entity type."""
         if entity_name not in self.entity_configs:
             raise KeyError(f"Unknown entity type: {entity_name}")

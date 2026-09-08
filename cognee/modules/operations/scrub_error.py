@@ -40,7 +40,7 @@ _SCRUB_PATTERNS = [
 ]
 
 
-def scrub_error_message(message: Optional[object]) -> Optional[str]:
+def scrub_error_message(message: object | None) -> str | None:
     """Redact PII/secret-shaped substrings and truncate to the column bound."""
     if message is None:
         return None

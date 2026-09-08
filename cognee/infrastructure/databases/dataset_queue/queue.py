@@ -50,8 +50,9 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, Set
+from typing import Any, Dict, Set
 
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
@@ -151,10 +152,10 @@ class DatasetQueue:
         # ``slot_key`` is ``"ds:<dataset_id>"`` for ``ensure_slot`` and
         # ``"acquire:<unique>"`` for ``acquire()``. A task may hold multiple
         # entries; all are released together when the task finishes.
-        self._task_slots: Dict[int, Dict[str, SlotEntry]] = {}
+        self._task_slots: dict[int, dict[str, SlotEntry]] = {}
         # Track which tasks already have a done-callback registered so we
         # don't register multiple cleanup handlers for a single task.
-        self._registered_tasks: Set[int] = set()
+        self._registered_tasks: set[int] = set()
 
     # ------------------------------------------------------ active datasets
     def active_dataset_ids(self) -> set:

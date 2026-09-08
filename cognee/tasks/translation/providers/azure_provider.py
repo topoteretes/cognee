@@ -35,7 +35,7 @@ class AzureTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using Azure Translator API.
@@ -110,7 +110,7 @@ class AzureTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using Azure Translator API.

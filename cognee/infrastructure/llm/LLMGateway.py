@@ -25,7 +25,7 @@ def _inject_agent_memory(text_input: str) -> str:
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
-def _exact_usage_from_result(result: Any) -> tuple[Optional[int], Optional[int]]:
+def _exact_usage_from_result(result: Any) -> tuple[int | None, int | None]:
     """Real prompt/completion token counts from the raw provider response —
     (None, None) otherwise, so the caller falls back to its char-based
     estimate.

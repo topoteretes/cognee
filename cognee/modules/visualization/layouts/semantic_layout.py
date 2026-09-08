@@ -57,7 +57,7 @@ def _pca_2d(matrix: np.ndarray) -> np.ndarray:
     return centered @ components.T
 
 
-def _umap_2d(matrix: np.ndarray, seed: int) -> Optional[np.ndarray]:
+def _umap_2d(matrix: np.ndarray, seed: int) -> np.ndarray | None:
     """Optional UMAP projection. Returns None if UMAP isn't installed."""
     try:
         import umap  # lazy: umap-learn is not a cognee dependency
@@ -81,12 +81,12 @@ def _normalize(coords: np.ndarray, spread: float) -> np.ndarray:
 
 
 def _place_missing(
-    node_ids: List[str],
-    embedded_pos: Dict[str, np.ndarray],
-    adjacency: Dict[str, set],
+    node_ids: list[str],
+    embedded_pos: dict[str, np.ndarray],
+    adjacency: dict[str, set],
     spread: float,
     rng: np.random.Generator,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Position nodes without a vector.
 
     Neighbor-centroid with seeded jitter, iterated so chains of vector-less nodes
@@ -120,12 +120,12 @@ def _place_missing(
 
 
 def _deoverlap(
-    ordered_ids: List[str],
-    positioned: Dict[str, np.ndarray],
+    ordered_ids: list[str],
+    positioned: dict[str, np.ndarray],
     min_dist: float,
     rng: np.random.Generator,
     iterations: int = 40,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Deterministic seeded relaxation: push apart points closer than ``min_dist``.
 
     O(n²) per iteration — fine at ``SEMANTIC_NODE_CAP``, which bounds every
@@ -153,14 +153,14 @@ def _deoverlap(
 
 
 def compute_positions(
-    nodes: List[Dict[str, Any]],
-    links: List[Dict[str, Any]],
-    embeddings: Dict[str, List[float]],
+    nodes: list[dict[str, Any]],
+    links: list[dict[str, Any]],
+    embeddings: dict[str, list[float]],
     *,
     method: str = "pca",
     seed: int = LAYOUT_SEED,
     spread: float = SPREAD,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """Return ``{node_id: {"x": float, "y": float}}`` for every node.
 
     Deterministic given identical inputs. ``method`` is ``"pca"`` (default) or
@@ -169,7 +169,7 @@ def compute_positions(
     node_ids = sorted(str(n["id"]) for n in nodes)
     rng = np.random.default_rng(seed)
 
-    adjacency: Dict[str, set] = {nid: set() for nid in node_ids}
+    adjacency: dict[str, set] = {nid: set() for nid in node_ids}
     for link in links:
         s, t = str(link["source"]), str(link["target"])
         if s in adjacency and t in adjacency:
@@ -178,7 +178,7 @@ def compute_positions(
 
     # Embedded nodes with a consistent dimension.
     embedded_ids = [nid for nid in node_ids if nid in embeddings]
-    embedded_pos: Dict[str, np.ndarray] = {}
+    embedded_pos: dict[str, np.ndarray] = {}
     if len(embedded_ids) >= 2:
         matrix = np.array([embeddings[nid] for nid in embedded_ids], dtype=float)
         coords = None

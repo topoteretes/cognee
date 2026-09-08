@@ -55,9 +55,7 @@ class _VectorEngineHandle:
                     return False
             except Exception:
                 return False
-        if getattr(engine, "_permanently_closed", False):
-            return False
-        return True
+        return not getattr(engine, "_permanently_closed", False)
 
     def _engine(self):
         pinned = self._pinned

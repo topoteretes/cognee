@@ -16,7 +16,7 @@ logger = get_logger("apply_frequency_weights_pipeline")
 
 async def apply_frequency_weights_pipeline(
     user: User,
-    session_ids: List[str],
+    session_ids: list[str],
     dataset: str = DEFAULT_DATASET_NAME,
     batch_size: int = 100,
     run_in_background: bool = False,

@@ -104,7 +104,7 @@ def _fact_repo(fact: dict, fallback_repo: str) -> str:
     return repo if isinstance(repo, str) and repo else fallback_repo
 
 
-def _resolve_fallback_repo(facts: List[dict], repo_path: Optional[Union[str, Path]]) -> str:
+def _resolve_fallback_repo(facts: list[dict], repo_path: str | Path | None) -> str:
     """Fallback repo for facts without a 'repo' field.
 
     Must be identical for map_facts_to_data_points and build_code_graph_edges,
@@ -117,7 +117,7 @@ def _resolve_fallback_repo(facts: List[dict], repo_path: Optional[Union[str, Pat
     )
 
 
-def _describe_fact(kind: str, props: dict) -> Optional[str]:
+def _describe_fact(kind: str, props: dict) -> str | None:
     scalar_props = {
         key: value
         for key, value in (props or {}).items()
@@ -130,13 +130,13 @@ def _describe_fact(kind: str, props: dict) -> Optional[str]:
 
 
 def map_facts_to_data_points(
-    facts: List[dict],
-    repo_path: Optional[Union[str, Path]] = None,
-) -> List[DataPoint]:
+    facts: list[dict],
+    repo_path: str | Path | None = None,
+) -> list[DataPoint]:
     """Map parsed enola facts to DataPoints, prepending one CodeRepository per repo."""
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
-    repositories: Dict[str, CodeRepository] = {}
+    repositories: dict[str, CodeRepository] = {}
 
     def _get_repository(repo: str) -> CodeRepository:
         if repo not in repositories:
@@ -150,7 +150,7 @@ def map_facts_to_data_points(
     # Always create the primary repository node, even for an empty snapshot.
     _get_repository(fallback_repo)
 
-    entities: List[DataPoint] = []
+    entities: list[DataPoint] = []
     skipped_facts = 0
     duplicate_facts = 0
     unmapped_kinds: Counter = Counter()
@@ -192,7 +192,7 @@ def map_facts_to_data_points(
         end_line = fact.get("end_line")
         enola_id = fact.get("id")
 
-        fields: Dict[str, Any] = {
+        fields: dict[str, Any] = {
             "id": node_id,
             "name": name,
             "kind": kind,
@@ -236,7 +236,7 @@ def map_facts_to_data_points(
     return list(repositories.values()) + entities
 
 
-def _fact_content_hash(fields: Dict[str, Any]) -> str:
+def _fact_content_hash(fields: dict[str, Any]) -> str:
     """Fingerprint of a fact's derived fields, for delta writes on re-ingestion.
 
     Covers exactly what map_facts_to_data_points derives from the fact; the id
@@ -265,9 +265,9 @@ def _short_target_names(name: str) -> set:
 
 
 def build_code_graph_edges(
-    facts: List[dict],
-    repo_path: Optional[Union[str, Path]] = None,
-) -> Tuple[List[tuple], int]:
+    facts: list[dict],
+    repo_path: str | Path | None = None,
+) -> tuple[list[tuple], int]:
     """Resolve typed relations between facts into explicit graph edge tuples.
 
     A relation carrying the writer's ``target_id`` (enola >= 0.4.10) resolves
@@ -281,12 +281,12 @@ def build_code_graph_edges(
     fallback_repo = _resolve_fallback_repo(facts, repo_path)
 
     valid_facts = []
-    name_index: Dict[str, set] = {}
-    short_name_index: Dict[str, set] = {}
-    enola_id_index: Dict[str, Tuple[str, str, str]] = {}
-    fact_index: Dict[Tuple[str, str, str], dict] = {}
-    module_index: Dict[Tuple[str, str], dict] = {}
-    module_path_repos: Dict[str, set[str]] = {}
+    name_index: dict[str, set] = {}
+    short_name_index: dict[str, set] = {}
+    enola_id_index: dict[str, tuple[str, str, str]] = {}
+    fact_index: dict[tuple[str, str, str], dict] = {}
+    module_index: dict[tuple[str, str], dict] = {}
+    module_path_repos: dict[str, set[str]] = {}
     for fact in facts:
         kind = fact.get("kind")
         name = fact.get("name")
@@ -309,15 +309,15 @@ def build_code_graph_edges(
             if isinstance(module_path, str) and module_path:
                 module_path_repos.setdefault(module_path, set()).add(repo)
 
-    edges: List[tuple] = []
+    edges: list[tuple] = []
     seen_edges = set()
     skipped = 0
 
     def _resolve_target(
         target_name: str,
         source_repo: str,
-        allowed_repos: Optional[set[str]] = None,
-    ) -> Optional[Tuple[str, str, str]]:
+        allowed_repos: set[str] | None = None,
+    ) -> tuple[str, str, str] | None:
         candidates = {(repo, kind, target_name) for repo, kind in name_index.get(target_name, ())}
         if not candidates:
             # No fact carries this exact name; fall back to unambiguous
@@ -334,8 +334,8 @@ def build_code_graph_edges(
         return None
 
     def _add_edge(
-        source: Tuple[str, str, str],
-        target: Tuple[str, str, str],
+        source: tuple[str, str, str],
+        target: tuple[str, str, str],
         relationship_name: str,
     ) -> None:
         source_repo, source_kind, source_name = source
@@ -425,7 +425,7 @@ def build_code_graph_edges(
     # Enola's query graph connects a dependency import to the modules which
     # contain each side. Materialize the same bridge so Cognee traversals can
     # move between modules without re-reading the snapshot.
-    modules_by_name: Dict[str, list[Tuple[str, dict]]] = {}
+    modules_by_name: dict[str, list[tuple[str, dict]]] = {}
     for (repo, module_name), module_fact in module_index.items():
         modules_by_name.setdefault(module_name, []).append((repo, module_fact))
 
@@ -453,7 +453,7 @@ def build_code_graph_edges(
             if normalized is None or normalized[0] != "imports":
                 continue
             target_name = normalized[1]
-            target_module: Optional[Tuple[str, dict]] = None
+            target_module: tuple[str, dict] | None = None
             candidate_name = target_name
             while candidate_name:
                 local = module_index.get((source_repo, candidate_name))
@@ -509,10 +509,10 @@ def build_code_graph_edges(
 
 async def extract_code_graph(
     data: Any = None,
-    repo_path: Optional[Union[str, Path]] = None,
-    snapshot_dir: Optional[Union[str, Path]] = None,
+    repo_path: str | Path | None = None,
+    snapshot_dir: str | Path | None = None,
     timeout: float = 600.0,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """Run enola on repo_path (or reuse an existing snapshot) and return DataPoints.
 
     The returned list composes with the add_data_points task downstream. Typed
@@ -562,7 +562,7 @@ async def extract_code_graph(
     return data_points
 
 
-async def _stored_snapshot_identity(repo: str) -> Optional[str]:
+async def _stored_snapshot_identity(repo: str) -> str | None:
     """The snapshot id recorded on the repository node by the last full load.
 
     The marker lives on the CodeRepository node in the graph itself — not in
@@ -594,7 +594,7 @@ async def _stored_snapshot_identity(repo: str) -> Optional[str]:
     return None
 
 
-def _snapshot_repos(facts: List[dict], fallback_repo: str) -> set:
+def _snapshot_repos(facts: list[dict], fallback_repo: str) -> set:
     """Every repo this snapshot covers (multi-repo snapshots have several)."""
     repos = {fallback_repo}
     for fact in facts:
@@ -603,7 +603,7 @@ def _snapshot_repos(facts: List[dict], fallback_repo: str) -> set:
     return repos
 
 
-def _current_code_node_ids(facts: List[dict], fallback_repo: str) -> set:
+def _current_code_node_ids(facts: list[dict], fallback_repo: str) -> set:
     """String node ids the snapshot derives: every mappable fact + repository nodes."""
     ids = set()
     for fact in facts:
@@ -643,23 +643,23 @@ class _CodeGraphLoadState(list):
     add_code_graph_edges reuse the same single graph read.
     """
 
-    existing_edge_keys: Optional[set] = None
-    existing_nodes: Optional[list] = None
-    node_delta: Optional[dict] = None
+    existing_edge_keys: set | None = None
+    existing_nodes: list | None = None
+    node_delta: dict | None = None
 
 
 _DELTA_SAMPLE_LIMIT = 20
 
 
-def _delta_samples(names: List[str]) -> List[str]:
+def _delta_samples(names: list[str]) -> list[str]:
     return sorted(names)[:_DELTA_SAMPLE_LIMIT]
 
 
 async def add_code_graph_data_points(
-    data_points: List[DataPoint],
+    data_points: list[DataPoint],
     ctx: Optional["PipelineContext"] = None,
     graph_only: bool = True,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """Store code graph nodes while allowing a repository path payload.
 
     Delta writes: the graph is read once before writing and only facts whose
@@ -682,15 +682,15 @@ async def add_code_graph_data_points(
 
     graph_engine = await get_graph_engine()
     existing_nodes, existing_edges = await graph_engine.get_graph_data()
-    existing_hashes: Dict[str, Any] = {
+    existing_hashes: dict[str, Any] = {
         str(node_id): properties.get("fact_hash")
         for node_id, properties in existing_nodes
         if isinstance(properties, dict)
     }
 
-    to_write: List[DataPoint] = []
-    added: List[str] = []
-    updated: List[str] = []
+    to_write: list[DataPoint] = []
+    added: list[str] = []
+    updated: list[str] = []
     unchanged = 0
     for point in data_points:
         if isinstance(point, CodeRepository):
@@ -742,11 +742,11 @@ async def add_code_graph_data_points(
 
 
 async def add_code_graph_edges(
-    data_points: List[DataPoint],
-    repo_path: Optional[Union[str, Path]] = None,
-    snapshot_dir: Optional[Union[str, Path]] = None,
+    data_points: list[DataPoint],
+    repo_path: str | Path | None = None,
+    snapshot_dir: str | Path | None = None,
     ctx: Optional["PipelineContext"] = None,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """Insert typed relation edges (calls/imports/...) after add_data_points ran.
 
     Relation names are dynamic, so they cannot be expressed as DataPoint field
@@ -857,12 +857,12 @@ async def add_code_graph_edges(
 
 async def _sweep_stale_code_graph(
     graph_engine,
-    facts: List[dict],
-    current_edges: List[tuple],
-    repo_path: Optional[Union[str, Path]],
-    existing_nodes: List[tuple],
+    facts: list[dict],
+    current_edges: list[tuple],
+    repo_path: str | Path | None,
+    existing_nodes: list[tuple],
     existing_edge_keys: set,
-) -> Tuple[int, int, List[str]]:
+) -> tuple[int, int, list[str]]:
     """Remove code graph nodes/edges no longer derivable from the snapshot.
 
     existing_nodes/existing_edge_keys are the pre-write graph state (the same
@@ -936,7 +936,7 @@ async def _sweep_stale_code_graph(
     return len(stale_node_ids), len(stale_edges), _delta_samples(stale_node_names)
 
 
-def receipt_projection(receipt: Optional[dict]) -> Optional[dict]:
+def receipt_projection(receipt: dict | None) -> dict | None:
     """The receipt.json fields kept on the repository node (see _RECEIPT_PROJECTION_KEYS)."""
     if not isinstance(receipt, dict):
         return None
@@ -946,11 +946,11 @@ def receipt_projection(receipt: Optional[dict]) -> Optional[dict]:
 
 async def _stamp_snapshot_identity(
     graph_engine,
-    facts: List[dict],
-    repo_path: Optional[Union[str, Path]],
-    snapshot_id: Optional[str],
-    delta: Optional[dict] = None,
-    receipt: Optional[dict] = None,
+    facts: list[dict],
+    repo_path: str | Path | None,
+    snapshot_id: str | None,
+    delta: dict | None = None,
+    receipt: dict | None = None,
 ) -> None:
     """Record the loaded snapshot's identity, delta and receipt on the repository nodes."""
     if snapshot_id is None:
@@ -972,11 +972,11 @@ async def _stamp_snapshot_identity(
 
 
 def get_code_graph_tasks(
-    repo_path: Union[str, Path],
-    snapshot_dir: Optional[Union[str, Path]] = None,
+    repo_path: str | Path,
+    snapshot_dir: str | Path | None = None,
     timeout: float = 600.0,
     index_vectors: bool = False,
-) -> List[Task]:
+) -> list[Task]:
     """Build the ordered task list for the enola code graph pipeline.
 
     index_vectors is opt-in because SearchType.CODE uses graph indexes only.

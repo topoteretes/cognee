@@ -9,7 +9,7 @@ def payload(result: Any) -> dict:
     return result_payload if isinstance(result_payload, dict) else {}
 
 
-def display_value(value: Any) -> Optional[str]:
+def display_value(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, (str, int, float, bool, UUID)):
@@ -18,7 +18,7 @@ def display_value(value: Any) -> Optional[str]:
     return None
 
 
-def result_id(result: Any) -> Optional[str]:
+def result_id(result: Any) -> str | None:
     result_payload = payload(result)
     return display_value(result_payload.get("id")) or display_value(getattr(result, "id", None))
 
@@ -29,7 +29,7 @@ def empty_hybrid_result() -> dict:
 
 def payload_matches_node_filter(
     result_payload: dict,
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
 ) -> bool:
     if not node_name:
@@ -46,7 +46,7 @@ def payload_matches_node_filter(
     return bool(payload_sets & requested_sets)
 
 
-def first_display_value(*values: Any) -> Optional[str]:
+def first_display_value(*values: Any) -> str | None:
     for value in values:
         text = display_value(value)
         if text:

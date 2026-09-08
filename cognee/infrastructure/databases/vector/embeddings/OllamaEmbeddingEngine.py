@@ -63,10 +63,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "avr/sfr-embedding-mistral:latest",
-        dimensions: Optional[int] = 1024,
+        model: str | None = "avr/sfr-embedding-mistral:latest",
+        dimensions: int | None = 1024,
         max_completion_tokens: int = 512,
-        endpoint: Optional[str] = "http://localhost:11434/api/embed",
+        endpoint: str | None = "http://localhost:11434/api/embed",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
         batch_size: int = 100,
     ):
@@ -83,7 +83,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Generate embedding vectors for a list of text prompts.
 
@@ -183,7 +183,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def _get_embedding(self, prompt: str) -> List[float]:
+    async def _get_embedding(self, prompt: str) -> list[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """

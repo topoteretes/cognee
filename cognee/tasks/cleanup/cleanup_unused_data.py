@@ -27,8 +27,8 @@ logger = get_logger(__name__)
 
 
 async def cleanup_unused_data(
-    minutes_threshold: Optional[int], dry_run: bool = True, user_id: Optional[UUID] = None
-) -> Dict[str, Any]:
+    minutes_threshold: int | None, dry_run: bool = True, user_id: UUID | None = None
+) -> dict[str, Any]:
     """
     Identify and remove unused data from the memify pipeline.
 
@@ -95,8 +95,8 @@ async def cleanup_unused_data(
 
 
 async def _cleanup_via_sql(
-    cutoff_date: datetime, dry_run: bool, user_id: Optional[UUID] = None
-) -> Dict[str, Any]:
+    cutoff_date: datetime, dry_run: bool, user_id: UUID | None = None
+) -> dict[str, Any]:
     """
     SQL-based cleanup: Query Data table for unused documents and use cognee.delete().
 

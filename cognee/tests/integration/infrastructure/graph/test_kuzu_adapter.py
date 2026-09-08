@@ -290,7 +290,7 @@ async def test_get_filtered_graph_data(adapter):
     await adapter.add_edges(edge_rows)
 
     # Filter by type = "Person"
-    nodes, edges = await adapter.get_filtered_graph_data([{"type": ["Person"]}])
+    nodes, _edges = await adapter.get_filtered_graph_data([{"type": ["Person"]}])
     assert len(nodes) == len(kg.nodes)  # All nodes are Person type
 
 

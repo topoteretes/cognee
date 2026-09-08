@@ -27,11 +27,11 @@ logger = get_logger("consolidate_entities_pipeline")
 async def consolidate_entities_pipeline(
     similarity_threshold: float = 0.85,
     dry_run: bool = False,
-    protect_node_types: Optional[List[str]] = None,
+    protect_node_types: list[str] | None = None,
     name_match: bool = True,
     top_k: int = 10,
     allow_cross_type: bool = False,
-    user: Optional[User] = None,
+    user: User | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
 ):

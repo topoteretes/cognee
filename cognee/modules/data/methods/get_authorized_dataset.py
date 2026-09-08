@@ -11,7 +11,7 @@ from ..models import Dataset
 
 async def get_authorized_dataset(
     user: User, dataset_id: UUID, permission_type="read"
-) -> Optional[Dataset]:
+) -> Dataset | None:
     """
     Get a specific dataset with permissions for a user.
 

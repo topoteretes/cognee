@@ -31,7 +31,7 @@ from typing import Optional, Tuple
 # An invalid key ("authenticationerror") beats the generic missing-key row.
 # Each entry is (needles, hint); the hint fires when any needle is a
 # case-insensitive substring of the error message.
-_TABLE: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+_TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("authenticationerror", "invalid api key", "incorrect api key"),
         "The LLM provider rejected the API key. Fix: set LLM_API_KEY in "
@@ -77,7 +77,7 @@ _TABLE: Tuple[Tuple[Tuple[str, ...], str], ...] = (
 )
 
 
-def find_remediation(message: str) -> Optional[str]:
+def find_remediation(message: str) -> str | None:
     """Return the hint for the first matching pattern, or ``None``.
 
     Deliberately tolerant of a ``None`` or empty message so callers can

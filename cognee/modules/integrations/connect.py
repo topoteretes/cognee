@@ -22,7 +22,7 @@ async def complete_installation(
     *,
     code: str,
     user_id: UUID,
-    callback_params: Optional[dict[str, str]] = None,
+    callback_params: dict[str, str] | None = None,
 ) -> IntegrationCredential:
     """Exchange ``code`` for tokens and persist the resulting credential.
 

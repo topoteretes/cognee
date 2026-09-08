@@ -37,7 +37,7 @@ class PostOffice:
         shipping_range: str,
         supports_cold_chain: bool,
         supports_hazardous_materials: bool,
-    ) -> "PostOffice":
+    ) -> PostOffice:
         return cls(
             post_office_id=post_office_id,
             name=name,

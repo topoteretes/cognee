@@ -29,14 +29,14 @@ class Check(BaseModel):
 
 class Checked(BaseModel, typing.Generic[CheckT, CheckName]):
     value: CheckT
-    checks: typing.Dict[CheckName, Check]
+    checks: dict[CheckName, Check]
 
 
-def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
+def get_checks(checks: dict[CheckName, Check]) -> list[Check]:
     return list(checks.values())
 
 
-def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
+def all_succeeded(checks: dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 
 

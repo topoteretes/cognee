@@ -18,10 +18,10 @@ async def log_pipeline_run_error(
     data: Any,
     e: Exception,
     *,
-    user: Optional[User] = None,
-    started_at: Optional[datetime] = None,
-    tokens_in: Optional[int] = None,
-    tokens_out: Optional[int] = None,
+    user: User | None = None,
+    started_at: datetime | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
 ):
     data_info = summarize_run_info_data(data)
 

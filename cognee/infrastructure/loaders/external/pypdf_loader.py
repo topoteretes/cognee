@@ -30,10 +30,9 @@ class PyPdfLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(
         self, file_path: str, strict: bool = False, **kwargs: Any

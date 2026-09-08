@@ -16,7 +16,7 @@ from cognee.shared.utils import send_telemetry
 
 
 class ApiKeyCreationPayload(InDTO):
-    name: Optional[str] = None
+    name: str | None = None
 
 
 def get_api_key_management_router():

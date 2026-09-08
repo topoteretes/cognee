@@ -31,56 +31,56 @@ class ProvenanceEntry(BaseModel):
     agent_id: str = "cognee"
     agent_type: str = "software_agent"
     is_automated: bool = True
-    role: Optional[str] = None
+    role: str | None = None
 
     # audit-grade source
     source_document: str = ""
-    source_location: Optional[str] = None
-    source_quote: Optional[str] = None
-    source_ref_key: Optional[str] = None
+    source_location: str | None = None
+    source_quote: str | None = None
+    source_ref_key: str | None = None
 
     # temporal
     timestamp: str = Field(default_factory=utc_now_iso)
-    first_seen: Optional[str] = None
-    last_updated: Optional[str] = None
-    activity_started_at_time: Optional[str] = None
-    activity_ended_at_time: Optional[str] = None
-    valid_from: Optional[str] = None
-    valid_until: Optional[str] = None
+    first_seen: str | None = None
+    last_updated: str | None = None
+    activity_started_at_time: str | None = None
+    activity_ended_at_time: str | None = None
+    valid_from: str | None = None
+    valid_until: str | None = None
 
     # quality / hash chain
     confidence: float = 1.0
-    credibility: Optional[float] = None
-    checksum: Optional[str] = None
-    sequence_id: Optional[int] = None
-    previous_checksum: Optional[str] = None
+    credibility: float | None = None
+    checksum: str | None = None
+    sequence_id: int | None = None
+    previous_checksum: str | None = None
 
     # lineage
-    parent_entity_id: Optional[str] = None
-    used_entities: List[str] = Field(default_factory=list)
-    previous_version_id: Optional[str] = None
-    derived_from_id: Optional[str] = None
+    parent_entity_id: str | None = None
+    used_entities: list[str] = Field(default_factory=list)
+    previous_version_id: str | None = None
+    derived_from_id: str | None = None
 
     # governance
-    acted_on_behalf_of: Optional[str] = None
-    informed_by_activities: List[str] = Field(default_factory=list)
-    revision_type: Optional[str] = None
-    supersedes: Optional[str] = None
-    bundle_id: Optional[str] = None
+    acted_on_behalf_of: str | None = None
+    informed_by_activities: list[str] = Field(default_factory=list)
+    revision_type: str | None = None
+    supersedes: str | None = None
+    bundle_id: str | None = None
 
     # invalidation tombstone
     invalidated: bool = False
-    invalidated_at_time: Optional[str] = None
-    invalidated_by: Optional[str] = None
-    invalidation_reason: Optional[str] = None
+    invalidated_at_time: str | None = None
+    invalidated_by: str | None = None
+    invalidation_reason: str | None = None
 
     # chunk extras + free-form
-    start_index: Optional[int] = None
-    end_index: Optional[int] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    start_index: int | None = None
+    end_index: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
     version: str = "1.0"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 
     def to_row(self) -> ProvenanceEntryRow:

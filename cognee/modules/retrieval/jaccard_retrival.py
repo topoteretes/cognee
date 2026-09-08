@@ -13,7 +13,7 @@ class JaccardChunksRetriever(LexicalRetriever):
         self,
         top_k: int = 15,
         with_scores: bool = False,
-        stop_words: Optional[list[str]] = None,
+        stop_words: list[str] | None = None,
         multiset_jaccard: bool = False,
     ):
         """

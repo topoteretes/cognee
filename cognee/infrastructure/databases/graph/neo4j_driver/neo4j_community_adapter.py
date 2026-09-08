@@ -20,11 +20,11 @@ class Neo4jCommunityAdapter(Neo4jAdapter):
     def __init__(
         self,
         graph_database_url: str,
-        graph_database_username: Optional[str] = None,
-        graph_database_password: Optional[str] = None,
-        graph_database_name: Optional[str] = None,
+        graph_database_username: str | None = None,
+        graph_database_password: str | None = None,
+        graph_database_name: str | None = None,
         graph_database_allow_anonymous: bool = False,
-        driver: Optional[Any] = None,
+        driver: Any | None = None,
     ):
         super().__init__(
             graph_database_url=graph_database_url,

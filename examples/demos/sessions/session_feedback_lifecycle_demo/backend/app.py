@@ -44,7 +44,7 @@ REQUIRED_ENV_SETTINGS = {
 
 class SendPayload(BaseModel):
     question: str = Field(min_length=1)
-    session_id: Optional[str] = None
+    session_id: str | None = None
     top_k: int = Field(default=5, ge=1, le=10)
 
 
@@ -52,7 +52,7 @@ class FeedbackPayload(BaseModel):
     session_id: str = Field(min_length=1)
     qa_id: str = Field(min_length=1)
     feedback_score: int = Field(ge=1, le=5)
-    feedback_text: Optional[str] = None
+    feedback_text: str | None = None
 
 
 class MemifyPayload(BaseModel):
@@ -370,8 +370,8 @@ class DemoState:
     def __init__(self):
         self.session_id = DEFAULT_SESSION_ID
         self.dataset_name = DATASET_NAME
-        self.dataset_id: Optional[Any] = None
-        self.dataset_owner_id: Optional[Any] = None
+        self.dataset_id: Any | None = None
+        self.dataset_owner_id: Any | None = None
         self.initialized = False
         self.activity_log: list[dict[str, Any]] = []
 
@@ -451,7 +451,7 @@ async def get_graph():
 
 @app.get("/demo/session")
 async def get_session_content(
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     last_n: int = Query(default=5000, ge=1, le=5000),
 ):
     if not state.initialized:

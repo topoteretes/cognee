@@ -26,17 +26,15 @@ from cognee.modules.users.methods import get_user
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
-current_dataset_id: ContextVar[Optional[UUID]] = ContextVar("current_dataset_id", default=None)
+current_dataset_id: ContextVar[UUID | None] = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
-llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
+llm_config: ContextVar[LLMConfig | None] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
 # Labels the pipeline stage (extraction | summarization | query) whose LLM
 # config is currently active on `llm_config`, for tracing (see pipeline_stage).
-current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
-    "current_pipeline_stage", default=None
-)
+current_pipeline_stage: ContextVar[str | None] = ContextVar("current_pipeline_stage", default=None)
 
 
 async def set_session_user_context_variable(user):
@@ -156,11 +154,11 @@ class DatabaseContextManager:
 
     def __init__(
         self,
-        dataset: Optional[UUID],
-        user_id: Optional[UUID] = None,
-        llm_config: Optional[LLMConfig] = None,
-        embedding_config: Optional[EmbeddingConfig] = None,
-        permission_type: Optional[str] = None,
+        dataset: UUID | None,
+        user_id: UUID | None = None,
+        llm_config: LLMConfig | None = None,
+        embedding_config: EmbeddingConfig | None = None,
+        permission_type: str | None = None,
     ) -> None:
         self._dataset = dataset
         self._user_id = user_id
@@ -174,9 +172,9 @@ class DatabaseContextManager:
 
     async def apply_database_context_variables(
         self,
-        dataset: Optional[UUID],
-        user_id: Optional[UUID] = None,
-        permission_type: Optional[str] = None,
+        dataset: UUID | None,
+        user_id: UUID | None = None,
+        permission_type: str | None = None,
     ) -> None:
         # current_dataset_id always carries a dataset *id* (a UUID object) or
         # None. Exactly one input type: callers resolve names/strings to a UUID
@@ -369,11 +367,11 @@ class DatabaseContextManager:
 
 
 def set_database_global_context_variables(
-    dataset: Optional[UUID],
-    user_id: Optional[UUID] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-    permission_type: Optional[str] = None,
+    dataset: UUID | None,
+    user_id: UUID | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+    permission_type: str | None = None,
 ) -> "DatabaseContextManager":
     """Returns a dual-mode helper that is both awaitable and an async context manager.
 

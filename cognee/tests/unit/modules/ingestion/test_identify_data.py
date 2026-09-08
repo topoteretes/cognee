@@ -52,17 +52,17 @@ def _user(tenant_id=None):
 
 
 def _row(*, dataset_id, owner_id, content_hash, tenant_id=None, pipeline_status=None):
-    return dict(
-        id=uuid4(),
-        dataset_id=dataset_id,
-        owner_id=owner_id,
-        tenant_id=tenant_id,
-        name="doc.txt",
-        content_hash=content_hash,
-        raw_data_location="file:///tmp/doc.txt",
-        pipeline_status=pipeline_status or {},
-        token_count=-1,
-    )
+    return {
+        "id": uuid4(),
+        "dataset_id": dataset_id,
+        "owner_id": owner_id,
+        "tenant_id": tenant_id,
+        "name": "doc.txt",
+        "content_hash": content_hash,
+        "raw_data_location": "file:///tmp/doc.txt",
+        "pipeline_status": pipeline_status or {},
+        "token_count": -1,
+    }
 
 
 def _classified(content_hash: str):

@@ -452,7 +452,7 @@ def setup_logging(log_level=None, name=None) -> bool:
             if isinstance(event_dict["exc_info"], tuple):
                 exc_type, exc_value, tb = event_dict["exc_info"]
             else:
-                exc_type, exc_value, tb = sys.exc_info()
+                exc_type, exc_value, _tb = sys.exc_info()
 
             if exc_type and hasattr(exc_type, "__name__"):
                 event_dict["exception_type"] = exc_type.__name__

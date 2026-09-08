@@ -15,9 +15,10 @@ This module must stay import-light (stdlib only) so writers deep in the
 pipeline layer can import it without cycles.
 """
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator, Optional
+from typing import Optional
 
 ORIGIN_SDK = "sdk"
 ORIGIN_API = "api"
@@ -25,7 +26,7 @@ ORIGIN_CLI = "cli"
 ORIGIN_MCP = "mcp"
 ORIGIN_BACKGROUND = "background"
 
-_operation_origin: ContextVar[Optional[str]] = ContextVar("cognee_operation_origin", default=None)
+_operation_origin: ContextVar[str | None] = ContextVar("cognee_operation_origin", default=None)
 
 
 def get_operation_origin() -> str:

@@ -28,7 +28,7 @@ def get_data_file_path(file_path: str) -> str:
         if os.name == "nt":  # Windows
             # Handle Windows drive letters correctly: /C:/path -> C:/path
             if (
-                (fs_path.startswith("/") or fs_path.startswith("\\"))
+                (fs_path.startswith(("/", "\\")))
                 and len(fs_path) > 2
                 and fs_path[2] == ":"
                 and fs_path[1].isalpha()

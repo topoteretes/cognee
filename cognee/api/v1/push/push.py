@@ -34,7 +34,7 @@ class PushResult:
     num_edges: int
     remote_response: dict
     # Remote migration pipeline run id; poll it when run_in_background=True.
-    pipeline_run_id: Optional[str] = None
+    pipeline_run_id: str | None = None
 
     def __repr__(self):
         return (
@@ -45,7 +45,7 @@ class PushResult:
         )
 
 
-def _resolve_client(url: Optional[str], api_key: Optional[str]):
+def _resolve_client(url: str | None, api_key: str | None):
     """Build or reuse a CloudClient. Returns ``(client, created)``.
 
     Precedence (matching ``serve()``): explicit ``url`` argument → live
@@ -95,13 +95,13 @@ def _verify_migration_import(response: dict) -> None:
 
 
 async def push(
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     *,
-    target_dataset: Optional[str] = None,
+    target_dataset: str | None = None,
     mode: str = "preserve",
     run_in_background: bool = False,
-    url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    url: str | None = None,
+    api_key: str | None = None,
     user=None,
 ) -> PushResult:
     """Upload a local dataset's knowledge graph to a Cognee Cloud instance.

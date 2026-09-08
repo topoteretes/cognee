@@ -83,13 +83,13 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "default",
+        model: str | None = "default",
         dimensions: int = 3072,
         max_completion_tokens: int = 8191,
-        endpoint: Optional[str] = "http://localhost:8080",
-        api_key: Optional[str] = "no-key-required",
+        endpoint: str | None = "http://localhost:8080",
+        api_key: str | None = "no-key-required",
         batch_size: int = 36,
-        input_type: Optional[str] = None,
+        input_type: str | None = None,
     ):
         self.model = model or "default"
         self.dimensions = dimensions
@@ -131,7 +131,7 @@ class OpenAICompatibleEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 

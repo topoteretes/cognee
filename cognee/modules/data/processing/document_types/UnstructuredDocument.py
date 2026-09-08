@@ -1,5 +1,6 @@
+from collections.abc import AsyncGenerator
 from io import StringIO
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.chunking.Chunker import Chunker

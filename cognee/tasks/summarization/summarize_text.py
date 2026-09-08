@@ -15,7 +15,7 @@ from cognee.tasks.summarization.models import TextSummary
 
 @task_summary("Summarized {n} chunk(s)")
 async def summarize_text(
-    data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel] = None
+    data_chunks: list[DocumentChunk], summarization_model: type[BaseModel] | None = None
 ):
     """
     Summarize the text contained in the provided data chunks.

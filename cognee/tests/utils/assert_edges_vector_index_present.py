@@ -10,9 +10,9 @@ from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
 
 
 def format_relationship(
-    relationship: Tuple[UUID, UUID, str, Dict],
-    node: Dict,
-    graph_edges_by_key: Dict[Tuple[str, str, str], Dict],
+    relationship: tuple[UUID, UUID, str, dict],
+    node: dict,
+    graph_edges_by_key: dict[tuple[str, str, str], dict],
 ):
     edge_properties = graph_edges_by_key.get(
         (str(relationship[0]), str(relationship[1]), relationship[2]),
@@ -34,7 +34,7 @@ def format_relationship(
 
 
 async def assert_edges_vector_index_present(
-    relationships: List[Tuple[UUID, UUID, str, Dict]], convert_to_new_format: bool = True
+    relationships: list[tuple[UUID, UUID, str, dict]], convert_to_new_format: bool = True
 ):
     vector_engine = await get_vector_engine_async()
 
