@@ -86,6 +86,20 @@ class CloudClient:
 
     # ----- V2 Operations -----
 
+    async def search_sources(self, payload: dict) -> dict:
+        """Execute source routing on the remote server using this client's principal."""
+        session = await self._get_session()
+        async with session.post(
+            f"{self.service_url}/api/v1/datasets/source-search",
+            json=payload,
+            allow_redirects=False,
+            timeout=aiohttp.ClientTimeout(total=300, sock_connect=30),
+        ) as response:
+            if response.status >= 300:
+                response.raise_for_status()
+                raise ValueError("Unexpected source search redirect")
+            return await response.json()
+
     async def remember(self, data: Any, dataset_name: str = "main_dataset", **kwargs) -> dict:
         """POST /api/v1/remember — ingest data and build knowledge graph."""
         session = await self._get_session()

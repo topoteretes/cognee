@@ -43,3 +43,10 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# Execute discovery and retrieval through the same API from an SDK client:
+# await cognee.serve("http://localhost:8011", api_key="YOUR_AGENT_KEY")
+# result = await cognee.sources.search("How many orders arrived this week?",
+#                                     source_hint="company analytics")
+# Inspect result["routing"], result["evidence"], result["errors"]. SQL results
+# carry native query provenance; document results retain their source IDs.

@@ -69,3 +69,39 @@ metadata can make routing inconclusive. Improving ingestion metadata improves
 routing without adding provider-specific plugin logic. This first implementation
 scans current native metadata; very large archives would benefit from a native
 incremental catalog index rather than a larger per-request scan limit.
+
+## Retrieval capabilities and live databases
+
+`POST /api/v1/datasets/source-search` executes the route, not just its selection.
+The same operation is available as `await cognee.sources.search(question,
+source_hint="name or description")` and the MCP `search_sources` tool.
+`cognee.serve()` clients execute remotely with their existing API key; embedded
+callers can pass a native `user`. API callers cannot override that principal.
+
+Catalog targets advertise `retrieval_method` and `capabilities`. Document/node-set
+targets use native CHUNKS retrieval with verified document membership. Active native
+SQL connections advertise read-only SQL retrieval and are discovered from the
+caller's connection registry when `TOOL_CALLS_ENABLED=true`. Credentials and DSNs
+never enter routing metadata. SQL is executed through the existing native
+text-to-SQL engine with its table allowlist, row cap, read-only guard and timeout.
+No provider-name routing is embedded in any plugin. MotherDuck works through its
+native SQL adapter when that adapter is installed; this PR does not add a database
+adapter or grant connections to agents.
+
+A question about live counts or relational facts should select a SQL connection,
+while questions about discussions use stored documents. A schema catalog is metadata,
+not a copy of business rows. Results preserve generated SQL, bounded rows, truncation
+and query time; the operation does not ingest those rows. SQL execution errors are
+reported per source without provider details. Revoked connections fail closed.
+
+`include_connections=false` excludes live queries. Explicit `dataset_ids` always
+restricts the catalog to those datasets and excludes tool connections, even when
+that flag is true: dataset ACLs and connection permissions are independent. Without
+an explicit dataset selection, source search discovers the full readable catalog.
+This endpoint is only for explicit searches; automatic session recall is unchanged.
+
+Up to eight selected sources execute, with a 90-second per-source budget and a
+270-second overall budget. Empty selection, retrieval failure and partial coverage
+remain distinguishable. Metadata routing is not exhaustive content search, and
+unselected sources have not been queried. `browse`/`read` apply only to targets
+advertising document capabilities, not to database connections.

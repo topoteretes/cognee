@@ -12,6 +12,7 @@ from cognee.modules.data.source_catalog import (
     source_document,
     source_documents,
 )
+from cognee.modules.data.source_search import search_sources
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -24,8 +25,13 @@ class RouteSources(BaseModel):
     source_hint: str | None = Field(default=None, max_length=500)
     dataset_ids: list[UUID] | None = Field(default=None, max_length=1000)
     exclude_source_ids: list[UUID] | None = Field(default=None, max_length=2048)
+    include_connections: bool = True
     max_sources: int = Field(default=6, ge=1, le=8)
     max_catalog_entries: int = Field(default=512, ge=1, le=2048)
+
+
+class SearchSources(RouteSources):
+    top_k: int = Field(default=10, ge=1, le=100)
 
 
 def get_source_routes() -> APIRouter:
@@ -38,7 +44,9 @@ def get_source_routes() -> APIRouter:
             raise HTTPException(403, "Source or dataset unavailable.") from None
         except Exception:  # API boundary: never expose provider exception details.
             logger.exception("Source discovery failed")
-            raise HTTPException(409, "Source discovery failed; no content was searched.") from None
+            raise HTTPException(
+                409, "Source operation failed; do not treat this as an empty result."
+            ) from None
 
     @router.get("/source-catalog")
     async def catalog(
@@ -46,8 +54,11 @@ def get_source_routes() -> APIRouter:
         dataset_ids: Annotated[list[UUID] | None, Query()] = None,
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        include_connections: bool = True,
     ):
-        result = await guarded(source_catalog(user, dataset_ids))
+        result = await guarded(
+            source_catalog(user, dataset_ids, include_connections=include_connections)
+        )
         return {
             "items": result["items"][offset : offset + limit],
             "total": len(result["items"]),
@@ -58,6 +69,12 @@ def get_source_routes() -> APIRouter:
     @router.post("/source-route")
     async def route(payload: RouteSources, user: Annotated[User, Depends(get_authenticated_user)]):
         return await guarded(route_sources(user, **payload.model_dump()))
+
+    @router.post("/source-search")
+    async def search(
+        payload: SearchSources, user: Annotated[User, Depends(get_authenticated_user)]
+    ):
+        return await guarded(search_sources(user=user, **payload.model_dump()))
 
     @router.get("/source-documents/{source_id}")
     async def documents(
