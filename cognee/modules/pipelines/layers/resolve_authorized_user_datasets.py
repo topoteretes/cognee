@@ -13,8 +13,8 @@ from cognee.modules.users.models import User
 
 
 async def resolve_authorized_user_datasets(
-    datasets: Union[str, UUID, list[str], list[UUID]], user: Optional[User] = None
-) -> Tuple[User, List[Dataset]]:
+    datasets: str | UUID | list[str] | list[UUID], user: User | None = None
+) -> tuple[User, list[Dataset]]:
     """
     Function handles creation and dataset authorization if datasets already exist for Cognee.
     Verifies that provided user has necessary permission for provided Dataset.

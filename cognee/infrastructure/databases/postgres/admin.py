@@ -53,7 +53,7 @@ def _compile_drop_database_if_exists(element: DropDatabaseIfExists, compiler, **
     return "DROP DATABASE IF EXISTS " + compiler.preparer.quote(element.db_name)
 
 
-def dataset_schema_name(dataset_id: Union[UUID, str]) -> str:
+def dataset_schema_name(dataset_id: UUID | str) -> str:
     """Postgres schema name used to isolate a dataset in shared-database mode.
 
     Returns ``ds_<dataset_id_hex>`` — a valid, lower-case Postgres identifier
@@ -94,7 +94,7 @@ def _direct_host(host: str) -> str:
     return host.replace("-pooler.", ".") if host and "-pooler." in host else host
 
 
-def _build_maintenance_url(host: str, port: Union[int, str], username: str, password: str) -> URL:
+def _build_maintenance_url(host: str, port: int | str, username: str, password: str) -> URL:
     return URL.create(
         "postgresql+asyncpg",
         username=username,
@@ -105,9 +105,7 @@ def _build_maintenance_url(host: str, port: Union[int, str], username: str, pass
     )
 
 
-def _build_db_url(
-    db_name: str, host: str, port: Union[int, str], username: str, password: str
-) -> URL:
+def _build_db_url(db_name: str, host: str, port: int | str, username: str, password: str) -> URL:
     """Connection URL to a specific (already existing) database.
 
     Unlike ``_build_maintenance_url`` this targets ``db_name`` directly, since
@@ -128,7 +126,7 @@ async def create_pg_schema_if_not_exists(
     db_name: str,
     schema: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
     with_vector_extension: bool = False,
@@ -159,7 +157,7 @@ async def drop_pg_schema_if_exists(
     db_name: str,
     schema: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
 ) -> None:
@@ -183,7 +181,7 @@ async def drop_pg_schema_if_exists(
 async def create_pg_database_if_not_exists(
     db_name: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
 ) -> bool:
@@ -220,7 +218,7 @@ async def create_pg_database_if_not_exists(
 async def drop_pg_database_if_exists(
     db_name: str,
     host: str,
-    port: Union[int, str],
+    port: int | str,
     username: str,
     password: str,
 ) -> None:

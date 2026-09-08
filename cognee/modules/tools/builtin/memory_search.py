@@ -35,7 +35,7 @@ TOOL = Tool(
 )
 
 
-async def handler(args: Dict[str, Any], **_) -> str:
+async def handler(args: dict[str, Any], **_) -> str:
     query = args.get("query")
     if not query:
         raise ToolInvocationError("memory_search requires a 'query' argument")

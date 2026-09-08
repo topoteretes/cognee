@@ -150,7 +150,7 @@ def api_key():
     shutil.rmtree(root, ignore_errors=True)
 
 
-def _status_of(path: str, api_key: str = None) -> int:
+def _status_of(path: str, api_key: str | None = None) -> int:
     """Status code of a GET against the instance, optionally authenticated."""
     request = urllib.request.Request(f"{BASE_URL}{path}")
     if api_key is not None:

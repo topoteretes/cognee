@@ -14,9 +14,9 @@ def build_completion_prompts(
     context: Any,
     user_prompt_path: str,
     system_prompt_path: str,
-    system_prompt: Optional[str] = None,
-    conversation_history: Optional[str] = None,
-) -> Tuple[str, str]:
+    system_prompt: str | None = None,
+    conversation_history: str | None = None,
+) -> tuple[str, str]:
     """Assemble the exact ``(user_prompt, system_prompt)`` pair a completion sends.
 
     Pure and side-effect free. ``generate_completion`` builds its prompts here, and so
@@ -44,9 +44,9 @@ async def generate_completion(
     context: str,
     user_prompt_path: str,
     system_prompt_path: str,
-    system_prompt: Optional[str] = None,
-    conversation_history: Optional[str] = None,
-    response_model: Type = str,
+    system_prompt: str | None = None,
+    conversation_history: str | None = None,
+    response_model: type = str,
 ) -> Any:
     """Generates a completion using LLM with given context and prompts."""
     user_prompt, system_prompt = build_completion_prompts(
@@ -78,9 +78,9 @@ async def generate_answer(
     context: str,
     user_prompt_path: str,
     system_prompt_path: str,
-    system_prompt: Optional[str] = None,
-    conversation_history: Optional[str] = None,
-    response_model: Type = str,
+    system_prompt: str | None = None,
+    conversation_history: str | None = None,
+    response_model: type = str,
 ) -> Any:
     """The one completion a listening client may watch.
 
@@ -111,14 +111,14 @@ async def generate_answer(
 
 
 async def generate_completion_batch(
-    query_batch: List[str],
-    context: List[str],
+    query_batch: list[str],
+    context: list[str],
     user_prompt_path: str,
     system_prompt_path: str,
-    system_prompt: Optional[str] = None,
-    conversation_history: Optional[str] = "",
-    response_model: Type = str,
-) -> List[Any]:
+    system_prompt: str | None = None,
+    conversation_history: str | None = "",
+    response_model: type = str,
+) -> list[Any]:
     """Generates completions for a batch of queries in parallel."""
     return await asyncio.gather(
         *[
@@ -143,10 +143,10 @@ async def generate_session_completion_with_optional_summary(
     conversation_history: str,
     user_prompt_path: str,
     system_prompt_path: str,
-    system_prompt: Optional[str] = None,
-    response_model: Type = str,
+    system_prompt: str | None = None,
+    response_model: type = str,
     summarize_context: bool = False,
-) -> Tuple[Any, str, Any]:
+) -> tuple[Any, str, Any]:
     """
     Run LLM completion (and optionally summarization) for the session-manager flow.
     Returns (completion, context_to_store, feedback_result).
@@ -181,10 +181,10 @@ async def generate_session_completion_with_optional_summary(
 
 
 async def batch_llm_completion(
-    user_prompts: List[str],
+    user_prompts: list[str],
     system_prompt: str,
-    response_model: Type = str,
-) -> List[Any]:
+    response_model: type = str,
+) -> list[Any]:
     """Run a batch of pre-built prompts through the LLM in parallel."""
     return list(
         await asyncio.gather(
@@ -201,7 +201,7 @@ async def batch_llm_completion(
 async def summarize_text(
     text: str,
     system_prompt_path: str = "summarize_search_results.txt",
-    system_prompt: str = None,
+    system_prompt: str | None = None,
 ) -> str:
     """Summarizes text using LLM with the specified prompt."""
     system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)

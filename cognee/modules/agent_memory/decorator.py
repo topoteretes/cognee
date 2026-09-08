@@ -3,7 +3,8 @@ from __future__ import annotations
 import functools
 import inspect
 import uuid
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.agent_memory.runtime import (
@@ -27,23 +28,23 @@ from cognee.modules.users.models import User
 
 def agent_memory(
     *,
-    agent_session_name: Optional[str] = None,
+    agent_session_name: str | None = None,
     with_memory: bool = True,
     with_session_memory: bool = False,
     save_session_traces: bool = False,
-    memory_query_fixed: Optional[str] = None,
-    memory_query_from_method: Optional[str] = None,
-    memory_system_prompt: Optional[str] = None,
+    memory_query_fixed: str | None = None,
+    memory_query_from_method: str | None = None,
+    memory_system_prompt: str | None = None,
     memory_top_k: int = 5,
     memory_only_context: bool = False,
     session_memory_last_n: int = 5,
-    session_id: Optional[str] = None,
-    user: Optional[User] = None,
-    dataset_name: Optional[str] = None,
+    session_id: str | None = None,
+    user: User | None = None,
+    dataset_name: str | None = None,
     session_trace_summary: bool = True,
-    persist_session_trace_after: Optional[int] = None,
+    persist_session_trace_after: int | None = None,
     persist_session_trace_raw_content: bool = False,
-    persist_session_trace_node_set_name: Optional[str] = None,
+    persist_session_trace_node_set_name: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Decorate an async agent entrypoint with optional Cognee memory and trace persistence.

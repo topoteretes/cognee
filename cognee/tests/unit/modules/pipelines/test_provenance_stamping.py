@@ -19,8 +19,8 @@ class DataPoint(BaseModel):
 
     id: object = Field(default_factory=uuid4)
     version: int = 1
-    source_pipeline: Optional[str] = None
-    source_task: Optional[str] = None
+    source_pipeline: str | None = None
+    source_task: str | None = None
 
 
 class EntityDP(DataPoint):
@@ -34,7 +34,7 @@ class ChunkDP(DataPoint):
     """Simulates a DocumentChunk with nested entities."""
 
     text: str = ""
-    contains: Optional[List] = None
+    contains: list | None = None
 
 
 def _stamp_provenance(data, pipeline_name, task_name, visited=None):

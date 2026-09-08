@@ -11,7 +11,7 @@ class CognifyConfig(BaseSettings):
     classification_model: object = DefaultContentPrediction
     summarization_model: object = SummarizedContent
     triplet_embedding: bool = False
-    chunks_per_batch: Optional[int] = None
+    chunks_per_batch: int | None = None
     # Opt-in contradiction detection (issue #3699). Default OFF so the standard
     # cognify pipeline is unchanged. Tunables gate the verdict and the LLM payload.
     contradiction_detection: bool = False

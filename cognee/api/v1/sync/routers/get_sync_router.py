@@ -20,7 +20,7 @@ logger = get_logger()
 class SyncRequest(InDTO):
     """Request model for sync operations."""
 
-    dataset_ids: Optional[List[UUID]] = None
+    dataset_ids: list[UUID] | None = None
 
 
 def get_sync_router() -> APIRouter:

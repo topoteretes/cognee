@@ -60,8 +60,8 @@ def _warn_dropped_field(data_point: DataPoint, field_name: str, value: Any) -> N
 
 def unwrap_transparent(
     data_point: DataPoint,
-    _active: Optional[frozenset] = None,
-) -> List[DataPoint]:
+    _active: frozenset | None = None,
+) -> list[DataPoint]:
     """Replace a transparent node with its DataPoint children, recursively.
 
     A non-transparent node resolves to ``[data_point]`` — the same object — so callers
@@ -79,7 +79,7 @@ def unwrap_transparent(
         return []
     _active = (_active or frozenset()) | {id(data_point)}
 
-    resolved: List[DataPoint] = []
+    resolved: list[DataPoint] = []
     seen = set()
 
     # ``belongs_to_set`` is a relationship, but a wrapper's NodeSets are not its
@@ -98,7 +98,7 @@ def unwrap_transparent(
     return resolved
 
 
-def unwrap_transparent_targets(edge_targets: List[EdgeTargets]) -> List[EdgeTargets]:
+def unwrap_transparent_targets(edge_targets: list[EdgeTargets]) -> list[EdgeTargets]:
     """Replace every transparent target with its children, in place of the container.
 
     Returns the very same list object when nothing in the field is transparent, so a

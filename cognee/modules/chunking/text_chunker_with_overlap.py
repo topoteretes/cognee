@@ -19,7 +19,7 @@ class TextChunkerWithOverlap(Chunker):
         get_text: callable,
         max_chunk_size: int,
         chunk_overlap_ratio: float = 0.0,
-        get_chunk_data: callable = None,
+        get_chunk_data: callable | None = None,
     ):
         super().__init__(document, get_text, max_chunk_size)
         self.document_name = document.name or basename(document.raw_data_location)

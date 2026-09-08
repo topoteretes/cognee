@@ -1,7 +1,7 @@
 from os import listdir, path
 
 
-def discover_directory_datasets(root_dir_path: str, parent_dir: str = None):
+def discover_directory_datasets(root_dir_path: str, parent_dir: str | None = None):
     datasets = {}
 
     for file_or_dir in listdir(root_dir_path):

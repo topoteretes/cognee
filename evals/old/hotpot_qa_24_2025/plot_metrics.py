@@ -23,7 +23,7 @@ METRIC_KEYS = {
 Y_LIM = (0.0, 1.05)  # applies to all charts
 
 
-def _load(path: Path) -> List[Dict[str, Any]]:
+def _load(path: Path) -> list[dict[str, Any]]:
     """Read JSON file that may be either a list or dict{'data': …}."""
     with path.open() as f:
         obj = json.load(f)
@@ -34,7 +34,7 @@ def _load(path: Path) -> List[Dict[str, Any]]:
     raise ValueError(f"Unsupported format in {path}")
 
 
-def _extract_matrix(records: List[Dict[str, Any]]):
+def _extract_matrix(records: list[dict[str, Any]]):
     """
     Return:
         systems         -> list[str]
@@ -62,10 +62,10 @@ def _extract_matrix(records: List[Dict[str, Any]]):
 
 
 def _plot_grouped_bar(
-    systems: List[str],
-    means: Dict[str, np.ndarray],
-    err_m: Dict[str, np.ndarray],
-    err_p: Dict[str, np.ndarray],
+    systems: list[str],
+    means: dict[str, np.ndarray],
+    err_m: dict[str, np.ndarray],
+    err_p: dict[str, np.ndarray],
     title: str,
     outfile: str,
     rotate_xticks: bool = False,

@@ -36,7 +36,7 @@ class KuzuSubprocessSession(SubprocessSession):
     """
 
     @classmethod
-    def start(cls, *, max_retries: Optional[int] = None) -> "KuzuSubprocessSession":
+    def start(cls, *, max_retries: int | None = None) -> KuzuSubprocessSession:
         ctx = mp.get_context("spawn")
 
         def _spawn():
@@ -56,7 +56,7 @@ class KuzuSubprocessSession(SubprocessSession):
         # ``SUBPROCESS_MAX_RETRIES`` env var (read by
         # ``SubprocessSession.__init__``) takes effect when the caller
         # doesn't override.
-        kwargs: Dict[str, Any] = {"respawn_factory": _spawn}
+        kwargs: dict[str, Any] = {"respawn_factory": _spawn}
         if max_retries is not None:
             kwargs["max_retries"] = max_retries
         session = cls(proc, req_q, resp_q, **kwargs)
@@ -116,7 +116,7 @@ class RemoteKuzuDatabase:
         max_db_size: int,
     ) -> None:
         self._session = session
-        self._handle_id: Optional[int] = None
+        self._handle_id: int | None = None
         self._db_path = db_path
         self._open_kwargs = {
             "database_path": db_path,
@@ -143,7 +143,7 @@ class RemoteKuzuDatabase:
         resp = self._session.call(Request(op=OP_OPEN_DATABASE, kwargs=self._open_kwargs))
         self._handle_id = resp.new_handle_id
 
-    def _apply_new_db_handle(self, new_hid: int) -> Optional[int]:
+    def _apply_new_db_handle(self, new_hid: int) -> int | None:
         old = self._handle_id
         if old is None:
             # Defense-in-depth mirror of the LanceDB ``_apply_new_handle``
@@ -210,7 +210,7 @@ class RemoteKuzuConnection:
         self._session = session
         self._database = database
         resp = session.call(Request(op=OP_OPEN_CONNECTION, args=(database.handle_id,)))
-        self._handle_id: Optional[int] = resp.new_handle_id
+        self._handle_id: int | None = resp.new_handle_id
         # Tracks replay steps THIS proxy registered (one for the
         # connection itself + one per loaded extension). ``close()``
         # deregisters them all so a post-close respawn doesn't reopen a
@@ -224,7 +224,7 @@ class RemoteKuzuConnection:
             raise RuntimeError("connection handle closed")
         return self._handle_id
 
-    def _apply_new_conn_handle(self, new_hid: int) -> Optional[int]:
+    def _apply_new_conn_handle(self, new_hid: int) -> int | None:
         old = self._handle_id
         if old is None:
             # See ``_apply_new_db_handle`` for the rationale — same guard.
@@ -240,7 +240,7 @@ class RemoteKuzuConnection:
         self._session.add_replay_step(step)
         self._replay_steps.append(step)
 
-    def execute(self, query: str, params: Optional[Dict[str, Any]] = None) -> _Materialized:
+    def execute(self, query: str, params: dict[str, Any] | None = None) -> _Materialized:
         """Execute a query; return a ``QueryResult``-like iterator of fully
         materialized rows.
         """

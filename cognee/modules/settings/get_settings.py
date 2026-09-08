@@ -22,11 +22,11 @@ class ModelName(Enum):
 
 
 class LLMConfig(BaseModel):
-    api_key: Optional[str]
+    api_key: str | None
     model: str
     provider: str
-    endpoint: Optional[str]
-    api_version: Optional[str]
+    endpoint: str | None
+    api_version: str | None
     models: dict[str, list[ConfigChoice]]
     providers: list[ConfigChoice]
 

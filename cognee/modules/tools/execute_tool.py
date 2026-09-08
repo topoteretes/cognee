@@ -30,10 +30,10 @@ logger = get_logger("cognee.tools.execute_tool")
 
 async def execute_tool(
     user: User,
-    dataset_id: Optional[UUID],
+    dataset_id: UUID | None,
     tool_name: str,
-    args: Optional[Dict[str, Any]] = None,
-    allowed_tools: Optional[List[str]] = None,
+    args: dict[str, Any] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> Any:
     """
     Execute a tool call with permission and scope enforcement.

@@ -14,8 +14,8 @@ _DERIVED_KEYS = frozenset(empty_hybrid_result())
 
 
 def merge_hybrid_results(
-    primary: Optional[dict],
-    secondary: Optional[dict],
+    primary: dict | None,
+    secondary: dict | None,
     *,
     chunks_limit: int,
     entities_limit: int,

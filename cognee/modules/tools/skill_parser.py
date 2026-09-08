@@ -55,7 +55,7 @@ def _is_relative_to(path: Path, base_dir: Path) -> bool:
     return path_str == base_str or path_str.startswith(base_prefix)
 
 
-def _parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?(.*)", text, re.DOTALL)
     if not match:
         return {}, text.strip()
@@ -72,14 +72,14 @@ def _parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
     return frontmatter, match.group(2).strip()
 
 
-def _pop_first(data: Dict[str, Any], aliases: tuple[str, ...]) -> Any:
+def _pop_first(data: dict[str, Any], aliases: tuple[str, ...]) -> Any:
     for key in aliases:
         if key in data:
             return data.pop(key)
     return None
 
 
-def _extract_description(frontmatter: Dict[str, Any], body: str) -> str:
+def _extract_description(frontmatter: dict[str, Any], body: str) -> str:
     raw = _pop_first(frontmatter, _DESCRIPTION_ALIASES)
     if raw:
         return str(raw).strip()
@@ -92,7 +92,7 @@ def _extract_description(frontmatter: Dict[str, Any], body: str) -> str:
     return ""
 
 
-def _extract_tools(frontmatter: Dict[str, Any]) -> List[str]:
+def _extract_tools(frontmatter: dict[str, Any]) -> list[str]:
     raw = _pop_first(frontmatter, _TOOLS_ALIASES)
     if raw is None:
         return []
@@ -101,12 +101,12 @@ def _extract_tools(frontmatter: Dict[str, Any]) -> List[str]:
     return [tool.strip() for tool in re.split(r"[\s,]+", str(raw)) if tool.strip()]
 
 
-def _extract_str(frontmatter: Dict[str, Any], aliases: tuple[str, ...]) -> str:
+def _extract_str(frontmatter: dict[str, Any], aliases: tuple[str, ...]) -> str:
     raw = _pop_first(frontmatter, aliases)
     return str(raw).strip() if raw is not None else ""
 
 
-def _extract_list(frontmatter: Dict[str, Any], aliases: tuple[str, ...]) -> List[str]:
+def _extract_list(frontmatter: dict[str, Any], aliases: tuple[str, ...]) -> list[str]:
     raw = _pop_first(frontmatter, aliases)
     if raw is None:
         return []
@@ -126,9 +126,9 @@ def _build_search_text(name: str, description: str, procedure: str) -> str:
 def parse_skill_file(
     skill_md: Path,
     source_repo: str = "",
-    skill_key: Optional[str] = None,
-    base_dir: Optional[Path] = None,
-) -> Optional[Skill]:
+    skill_key: str | None = None,
+    base_dir: Path | None = None,
+) -> Skill | None:
     """Parse one concrete SKILL.md file into one Skill node."""
     skill_md = Path(skill_md)
     if base_dir is not None and not _is_relative_to(skill_md, base_dir):
@@ -177,15 +177,15 @@ def parse_skill_file(
 def parse_skills_folder(
     skills_root: str | Path,
     source_repo: str = "",
-    base_dir: Optional[Path] = None,
-) -> List[Skill]:
+    base_dir: Path | None = None,
+) -> list[Skill]:
     """Parse every SKILL.md under a directory. Removed files are ignored in v1."""
     skills_root = Path(skills_root)
     if not trusted_is_dir(skills_root):
         raise FileNotFoundError(f"Skills directory not found: {skills_root}")
     base_dir = Path(base_dir) if base_dir is not None else skills_root
 
-    skills: List[Skill] = []
+    skills: list[Skill] = []
     for skill_file in sorted(trusted_rglob(skills_root, "*")):
         if not trusted_is_file(skill_file) or skill_file.name.lower() != "skill.md":
             continue

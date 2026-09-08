@@ -9,8 +9,9 @@ import threading
 import time
 import webbrowser
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import requests
 
@@ -23,7 +24,7 @@ from .npm_utils import run_npm_command
 logger = get_logger()
 
 
-def _check_docker_available() -> Tuple[bool, str]:
+def _check_docker_available() -> tuple[bool, str]:
     """
     Check if the Docker daemon is reachable by running `docker info`.
 
@@ -132,7 +133,7 @@ def _is_port_available(port: int) -> bool:
         return False
 
 
-def _check_required_ports(ports_to_check: List[Tuple[int, str]]) -> Tuple[bool, List[str]]:
+def _check_required_ports(ports_to_check: list[tuple[int, str]]) -> tuple[bool, list[str]]:
     """
     Check if all required ports are available on localhost.
 
@@ -176,7 +177,7 @@ def get_frontend_cache_dir() -> Path:
     return cache_dir
 
 
-def get_frontend_download_info() -> Tuple[str, str]:
+def get_frontend_download_info() -> tuple[str, str]:
     """
     Get the download URL and version for the actual cognee-frontend source.
     Downloads the real frontend from GitHub releases, matching the installed version.
@@ -313,7 +314,7 @@ def download_frontend_assets(force: bool = False) -> bool:
         return False
 
 
-def find_frontend_path() -> Optional[Path]:
+def find_frontend_path() -> Path | None:
     """
     Find the cognee-frontend directory.
     Checks both development location and cached download location.
@@ -431,7 +432,7 @@ def start_ui(
     backend_port: int = 8000,
     start_mcp: bool = False,
     mcp_port: int = 8001,
-) -> Optional[subprocess.Popen]:
+) -> subprocess.Popen | None:
     """
     Start the cognee frontend UI server, optionally with the backend API server and MCP server.
 

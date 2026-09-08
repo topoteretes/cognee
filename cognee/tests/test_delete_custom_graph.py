@@ -54,7 +54,7 @@ async def main():
 
     class Person(DataPoint):
         name: str
-        works_for: List[Organization]
+        works_for: list[Organization]
         metadata: dict = {"index_fields": ["name"]}
 
     companyA = ForProfit(id=generate_node_id("Company A"), name="Company A")

@@ -22,7 +22,7 @@ def _resolve_existing_local_path(item: str) -> Path | None:
 
 
 async def resolve_data_directories(
-    data: Union[BinaryIO, List[BinaryIO], str, List[str]],
+    data: BinaryIO | list[BinaryIO] | str | list[str],
     include_subdirectories: bool = True,
     user=None,
     dataset_id=None,

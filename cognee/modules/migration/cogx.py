@@ -11,16 +11,17 @@ record kind. Records are Pydantic models discriminated by their ``kind`` field.
 
 import json
 import math
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, TypeAdapter
 
 COGX_VERSION = "0.1"
 
 
-def parse_timestamp(value: Any) -> Optional[datetime]:
+def parse_timestamp(value: Any) -> datetime | None:
     """Parse a timestamp from ISO strings or epoch seconds/milli/micro/nanoseconds.
 
     Always returns a timezone-aware UTC datetime, or None. Inputs that carry no
@@ -58,19 +59,19 @@ def parse_timestamp(value: Any) -> Optional[datetime]:
 class COGXScope(BaseModel):
     """Ownership scope of a memory record in the source system."""
 
-    user_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    session_id: Optional[str] = None
-    run_id: Optional[str] = None
+    user_id: str | None = None
+    agent_id: str | None = None
+    session_id: str | None = None
+    run_id: str | None = None
 
 
 class COGXRecordBase(BaseModel):
     external_system: str = "unknown"
     external_id: str
     scope: COGXScope = Field(default_factory=COGXScope)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class COGXDocument(COGXRecordBase):
@@ -78,22 +79,22 @@ class COGXDocument(COGXRecordBase):
 
     kind: Literal["document"] = "document"
     content: str
-    title: Optional[str] = None
-    mime_type: Optional[str] = None
+    title: str | None = None
+    mime_type: str | None = None
 
 
 class COGXTurn(BaseModel):
     role: str
     content: str
-    occurred_at: Optional[datetime] = None
+    occurred_at: datetime | None = None
 
 
 class COGXEpisode(COGXRecordBase):
     """A conversation episode: ordered turns with roles and timestamps."""
 
     kind: Literal["episode"] = "episode"
-    turns: List[COGXTurn] = Field(default_factory=list)
-    title: Optional[str] = None
+    turns: list[COGXTurn] = Field(default_factory=list)
+    title: str | None = None
 
 
 class COGXEntity(COGXRecordBase):
@@ -101,10 +102,10 @@ class COGXEntity(COGXRecordBase):
 
     kind: Literal["entity"] = "entity"
     name: str
-    entity_type: Optional[str] = None
-    description: Optional[str] = None
-    aliases: List[str] = Field(default_factory=list)
-    attributes: Dict[str, Any] = Field(default_factory=dict)
+    entity_type: str | None = None
+    description: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 class COGXFact(COGXRecordBase):
@@ -119,11 +120,11 @@ class COGXFact(COGXRecordBase):
     subject_ref: str
     predicate: str
     object_ref: str
-    fact_text: Optional[str] = None
-    valid_at: Optional[datetime] = None
-    invalid_at: Optional[datetime] = None
-    confidence: Optional[float] = None
-    provenance: List[str] = Field(default_factory=list)
+    fact_text: str | None = None
+    valid_at: datetime | None = None
+    invalid_at: datetime | None = None
+    confidence: float | None = None
+    provenance: list[str] = Field(default_factory=list)
 
 
 class COGXMemory(COGXRecordBase):
@@ -131,7 +132,7 @@ class COGXMemory(COGXRecordBase):
 
     kind: Literal["memory"] = "memory"
     content: str
-    categories: List[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
 
 
 class COGXMemoryBlock(COGXRecordBase):
@@ -140,7 +141,7 @@ class COGXMemoryBlock(COGXRecordBase):
     kind: Literal["memory_block"] = "memory_block"
     label: str
     value: str
-    limit: Optional[int] = None
+    limit: int | None = None
 
 
 class COGXRawNode(BaseModel):
@@ -152,7 +153,7 @@ class COGXRawNode(BaseModel):
     """
 
     kind: Literal["raw_node"] = "raw_node"
-    properties: Dict[str, Any] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 COGXRecord = Union[
@@ -167,7 +168,7 @@ COGXRecord = Union[
 
 _record_adapter: TypeAdapter = TypeAdapter(COGXRecord)
 
-RECORD_FILES: Dict[str, str] = {
+RECORD_FILES: dict[str, str] = {
     "document": "documents.jsonl",
     "episode": "episodes.jsonl",
     "entity": "entities.jsonl",
@@ -184,18 +185,18 @@ PERMISSIONS_FILE = "permissions.json"
 class COGXManifest(BaseModel):
     cogx_version: str = COGX_VERSION
     source_system: str = "unknown"
-    exported_at: Optional[datetime] = None
-    counts: Dict[str, int] = Field(default_factory=dict)
-    embedding_model: Optional[str] = None
+    exported_at: datetime | None = None
+    counts: dict[str, int] = Field(default_factory=dict)
+    embedding_model: str | None = None
     # Cognee-origin archives only: the source store's stamped data-migration
     # revision at export time. Raw nodes keep their source-store ids, so the
     # importing store must not claim a newer revision than the exported data
     # actually has (None = unknown; the import keeps its own stamp).
-    migration_revision: Optional[str] = None
-    notes: List[str] = Field(default_factory=list)
+    migration_revision: str | None = None
+    notes: list[str] = Field(default_factory=list)
 
 
-def parse_record(data: Dict[str, Any]) -> COGXRecord:
+def parse_record(data: dict[str, Any]) -> COGXRecord:
     return _record_adapter.validate_python(data)
 
 
@@ -221,17 +222,17 @@ class COGXArchiveWriter:
     re-export never appends duplicates next to a stale manifest.
     """
 
-    def __init__(self, directory: Union[str, Path], source_system: str = "cognee"):
+    def __init__(self, directory: str | Path, source_system: str = "cognee"):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         for file_name in (*RECORD_FILES.values(), RAW_NODES_FILE, MANIFEST_FILE, PERMISSIONS_FILE):
             (self.directory / file_name).unlink(missing_ok=True)
         self.source_system = source_system
-        self.counts: Dict[str, int] = {}
-        self.notes: List[str] = []
-        self.embedding_model: Optional[str] = None
-        self.migration_revision: Optional[str] = None
-        self._handles: Dict[str, Any] = {}
+        self.counts: dict[str, int] = {}
+        self.notes: list[str] = []
+        self.embedding_model: str | None = None
+        self.migration_revision: str | None = None
+        self._handles: dict[str, Any] = {}
 
     def __enter__(self) -> "COGXArchiveWriter":
         return self
@@ -248,7 +249,7 @@ class COGXArchiveWriter:
         handle.write(record.model_dump_json(exclude_none=True) + "\n")
         self.counts[record.kind] = self.counts.get(record.kind, 0) + 1
 
-    def write_raw_node(self, node: Dict[str, Any]) -> None:
+    def write_raw_node(self, node: dict[str, Any]) -> None:
         """Persist a graph node that has no typed COGX mapping (full fidelity)."""
         handle = self._handles.get(RAW_NODES_FILE)
         if handle is None:
@@ -277,7 +278,7 @@ class COGXArchiveWriter:
             manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
 
 
-def read_manifest(directory: Union[str, Path]) -> Optional[COGXManifest]:
+def read_manifest(directory: str | Path) -> COGXManifest | None:
     manifest_path = Path(directory) / MANIFEST_FILE
     if not manifest_path.exists():
         return None
@@ -286,7 +287,7 @@ def read_manifest(directory: Union[str, Path]) -> Optional[COGXManifest]:
     return manifest
 
 
-def write_social_layer(directory: Union[str, Path], payload: Dict[str, Any]) -> None:
+def write_social_layer(directory: str | Path, payload: dict[str, Any]) -> None:
     """Persist the dataset's social layer (owner + grants, WITH credentials).
 
     Written only on explicit request (``export(include_permissions=True)``):
@@ -298,14 +299,14 @@ def write_social_layer(directory: Union[str, Path], payload: Dict[str, Any]) -> 
     )
 
 
-def read_social_layer(directory: Union[str, Path]) -> Optional[Dict[str, Any]]:
+def read_social_layer(directory: str | Path) -> dict[str, Any] | None:
     permissions_path = Path(directory) / PERMISSIONS_FILE
     if not permissions_path.exists():
         return None
     return json.loads(permissions_path.read_text(encoding="utf-8"))
 
 
-def _archive_file(base: Path, file_name: str) -> Optional[Path]:
+def _archive_file(base: Path, file_name: str) -> Path | None:
     """Resolve ``base / file_name`` and confirm it stays inside ``base``.
 
     Archive record file names are fixed constants, but the archive directory
@@ -323,7 +324,7 @@ def _archive_file(base: Path, file_name: str) -> Optional[Path]:
     return candidate
 
 
-def read_archive(directory: Union[str, Path]) -> Iterator[COGXRecord]:
+def read_archive(directory: str | Path) -> Iterator[COGXRecord]:
     """Stream typed records from a COGX archive directory.
 
     Raw graph nodes (``nodes.jsonl``) are yielded as :class:`COGXRawNode`

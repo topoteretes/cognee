@@ -186,7 +186,7 @@ def test_custom_graph_model_chunks_are_walked_as_they_are():
         claim: str
 
     class CustomGraph(DataPoint):
-        facts: List[Fact]
+        facts: list[Fact]
 
     document = TextDocument(
         id=uuid4(),

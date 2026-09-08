@@ -44,8 +44,8 @@ def get_add_router() -> APIRouter:
     )
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
-        data: List[OptionalUploadFile] = File(default=None),
-        raw_data: Optional[List[EmptyExampleStr]] = Form(
+        data: list[OptionalUploadFile] = File(default=None),
+        raw_data: list[EmptyExampleStr] | None = Form(
             default=None,
             examples=[[]],
             description=(
@@ -59,7 +59,7 @@ def get_add_router() -> APIRouter:
                 "ignored."
             ),
         ),
-        labels: Optional[str] = Form(
+        labels: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -72,7 +72,7 @@ def get_add_router() -> APIRouter:
                 "returned when listing dataset data."
             ),
         ),
-        external_metadata: Optional[str] = Form(
+        external_metadata: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -84,7 +84,7 @@ def get_add_router() -> APIRouter:
                 "ones; 'node_set' is reserved) and returned when listing dataset data."
             ),
         ),
-        datasetName: Optional[str] = Form(
+        datasetName: str | None = Form(
             default=None,
             examples=["default_dataset"],
             description=(
@@ -93,15 +93,15 @@ def get_add_router() -> APIRouter:
             ),
         ),
         # Note: Literal is needed for Swagger use
-        datasetId: Union[UUID, Literal[""], None] = Form(
+        datasetId: UUID | Literal[""] | None = Form(
             default=None,
             examples=[""],
             description=(
                 "Providing dataset ID is mandatory for sharing a dataset between users. Datasets provided by name will only be resolvable by dataset owner."
             ),
         ),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
-        run_in_background: Optional[bool] = Form(default=False),
+        node_set: list[str] | None = Form(default=[""], example=[""]),
+        run_in_background: bool | None = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
         """

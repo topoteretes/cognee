@@ -173,7 +173,7 @@ def _clamp_limit(limit: int) -> int:
     return limit
 
 
-def _clean_str(value: Any) -> Optional[str]:
+def _clean_str(value: Any) -> str | None:
     """Return a stripped string, or None if the value is unusable.
 
     Missing, null, non-string, or empty/whitespace-only values are treated as
@@ -197,7 +197,7 @@ def _snippet(text: str) -> str:
     return collapsed[: _SNIPPET_MAX_CHARS - 1].rstrip() + "…"
 
 
-def _chunk_number(payload: dict) -> Optional[int]:
+def _chunk_number(payload: dict) -> int | None:
     """Resolve the 1-based display number from payload.
 
     Prefers an explicit ``chunk_number`` if present; otherwise derives it from
@@ -219,7 +219,7 @@ def _chunk_number(payload: dict) -> Optional[int]:
     return None
 
 
-def _get_payload(obj: Any) -> Optional[dict]:
+def _get_payload(obj: Any) -> dict | None:
     """Extract a payload dict from a retrieved object.
 
     Retrieved objects are ``ScoredResult`` instances exposing ``.payload`` as a
@@ -240,7 +240,7 @@ def _get_payload(obj: Any) -> Optional[dict]:
     return None
 
 
-def _provenance_suffix(data_id: Optional[str], chunk_id: Optional[str]) -> str:
+def _provenance_suffix(data_id: str | None, chunk_id: str | None) -> str:
     """Render a '(data_id: …, chunk_id: …)' annotation for whichever ids exist.
 
     Lets a reader map the citation back to the ingested data item and the exact
@@ -255,7 +255,7 @@ def _provenance_suffix(data_id: Optional[str], chunk_id: Optional[str]) -> str:
     return f" ({', '.join(parts)})" if parts else ""
 
 
-def _chunk_id(obj: Any, payload: dict) -> Optional[str]:
+def _chunk_id(obj: Any, payload: dict) -> str | None:
     """Resolve a stable chunk id for dedup, preferring the object id."""
     obj_id = getattr(obj, "id", None)
     if obj_id is not None:
@@ -268,14 +268,14 @@ def _chunk_id(obj: Any, payload: dict) -> Optional[str]:
     return None
 
 
-def _significant_terms(text: str) -> Set[str]:
+def _significant_terms(text: str) -> set[str]:
     """Lowercased alphanumeric terms of an answer, minus stopwords and stubs."""
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return {token for token in tokens if len(token) >= 3 and token not in _STOPWORDS}
 
 
 def format_chunk_references(
-    retrieved_objects: Any, answer: Optional[str] = None, limit: int = 5
+    retrieved_objects: Any, answer: str | None = None, limit: int = 5
 ) -> str:
     """Build an Evidence block from retrieved vector payloads, grounded in the answer.
 
@@ -315,7 +315,7 @@ def format_chunk_references(
     except TypeError:
         return ""
 
-    answer_terms: Optional[Set[str]] = None
+    answer_terms: set[str] | None = None
     if answer is not None:
         answer_terms = _significant_terms(answer)
         if not answer_terms:
@@ -324,7 +324,7 @@ def format_chunk_references(
             return ""
 
     # (overlap_score, document_name, number, text, data_id, chunk_id) per candidate.
-    candidates: List[Tuple[int, str, int, str, Optional[str], Optional[str]]] = []
+    candidates: list[tuple[int, str, int, str, str | None, str | None]] = []
     seen: set = set()
 
     for obj in iterator:
@@ -426,8 +426,8 @@ async def build_answer_grounded_chunk_references(
 
 
 def append_chunk_evidence(
-    completions: List[Any], retrieved_objects: Any, enabled: bool
-) -> List[Any]:
+    completions: list[Any], retrieved_objects: Any, enabled: bool
+) -> list[Any]:
     """Append an answer-grounded chunk Evidence block to string completions.
 
     Each string completion gets its own Evidence block, filtered and ranked by
@@ -438,7 +438,7 @@ def append_chunk_evidence(
     if not enabled:
         return completions
 
-    appended: List[Any] = []
+    appended: list[Any] = []
     for completion in completions:
         if not isinstance(completion, str):
             appended.append(completion)
@@ -448,7 +448,7 @@ def append_chunk_evidence(
     return appended
 
 
-async def append_answer_grounded_evidence(completions: List[Any], enabled: bool) -> List[Any]:
+async def append_answer_grounded_evidence(completions: list[Any], enabled: bool) -> list[Any]:
     """Append an answer-grounded Evidence block to string completions.
 
     Each string completion is run as a vector query against the chunk index
@@ -466,7 +466,7 @@ async def append_answer_grounded_evidence(completions: List[Any], enabled: bool)
         logger.debug(f"Unable to obtain vector engine for references: {error}")
         return completions
 
-    appended: List[Any] = []
+    appended: list[Any] = []
     for completion in completions:
         if not isinstance(completion, str):
             appended.append(completion)

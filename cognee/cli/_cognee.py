@@ -5,7 +5,8 @@ import signal
 import subprocess
 import sys
 import warnings
-from typing import Any, Dict, List, Sequence, Type, cast
+from collections.abc import Sequence
+from typing import Any, Dict, List, Type, cast
 
 import click
 
@@ -37,7 +38,7 @@ class DebugAction(argparse.Action):
         option_strings: Sequence[str],
         dest: Any = argparse.SUPPRESS,
         default: Any = argparse.SUPPRESS,
-        help: str = None,
+        help: str | None = None,
     ) -> None:
         super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
@@ -48,7 +49,7 @@ class DebugAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: str = None,
+        option_string: str | None = None,
     ) -> None:
         # Enable debug mode for stack traces
         debug.enable_debug()
@@ -61,7 +62,7 @@ class UiAction(argparse.Action):
         option_strings: Sequence[str],
         dest: Any = argparse.SUPPRESS,
         default: Any = argparse.SUPPRESS,
-        help: str = None,
+        help: str | None = None,
     ) -> None:
         super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
@@ -72,7 +73,7 @@ class UiAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: str = None,
+        option_string: str | None = None,
     ) -> None:
         # Set a flag to indicate UI should be started
         global ACTION_EXECUTED
@@ -83,7 +84,7 @@ class UiAction(argparse.Action):
 # Debug functionality is now in cognee.cli.debug module
 
 
-def _discover_commands() -> List[Type[SupportsCliCommand]]:
+def _discover_commands() -> list[type[SupportsCliCommand]]:
     """Discover all available CLI commands"""
     # Import commands dynamically to avoid early cognee initialization
     commands = []
@@ -127,7 +128,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
     return commands
 
 
-def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliCommand]]:
+def _create_parser() -> tuple[argparse.ArgumentParser, dict[str, SupportsCliCommand]]:
     parser = argparse.ArgumentParser(
         description=f"{CLI_DESCRIPTION} Further help is available at {DEFAULT_DOCS_URL}."
     )
@@ -178,7 +179,7 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
 
     # Discover and install commands
     command_classes = _discover_commands()
-    installed_commands: Dict[str, SupportsCliCommand] = {}
+    installed_commands: dict[str, SupportsCliCommand] = {}
 
     for command_class in command_classes:
         command = command_class()

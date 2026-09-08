@@ -13,9 +13,9 @@ if TYPE_CHECKING:
 
 async def extract_graph_from_code(
     data_chunks: list[DocumentChunk],
-    graph_model: Type[BaseModel],
+    graph_model: type[BaseModel],
     ctx: "PipelineContext" = None,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """
     Extracts a knowledge graph from code document chunks.
 

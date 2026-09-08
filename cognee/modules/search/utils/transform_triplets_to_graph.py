@@ -3,7 +3,7 @@ from typing import List
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
 
-def transform_triplets_to_graph(input_triplets: List[Edge]):
+def transform_triplets_to_graph(input_triplets: list[Edge]):
     nodes = {}
     edges = {}
 

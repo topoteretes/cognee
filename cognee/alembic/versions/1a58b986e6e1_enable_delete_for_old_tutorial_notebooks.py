@@ -6,16 +6,17 @@ Create Date: 2025-12-17 11:04:44.414259
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "1a58b986e6e1"
-down_revision: Union[str, None] = "e1ec1dcb50b6"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e1ec1dcb50b6"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def change_tutorial_deletable_flag(deletable: bool) -> None:

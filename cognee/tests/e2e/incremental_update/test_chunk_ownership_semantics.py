@@ -20,6 +20,7 @@ scenarios are independent — with mocked LLM and embeddings.
 
 import asyncio
 import hashlib
+import itertools
 import re
 import shutil
 import tempfile
@@ -31,7 +32,6 @@ from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
 )
-import itertools
 
 CHUNK_TOKENS = 8
 NOUN = re.compile(r"\b[A-Z][a-z]{3,}\b")

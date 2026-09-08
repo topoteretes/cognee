@@ -30,13 +30,13 @@ class Entity(DataPoint):
 class DocumentChunk(DataPoint):
     part_of: Document
     text: str
-    contains: List[Entity] = None
+    contains: list[Entity] = None
     metadata: dict = {"index_fields": ["text"]}
 
 
 class Company(DataPoint):
     name: str
-    employees: List[Any] = None  # Allow flexible edge system with tuples
+    employees: list[Any] = None  # Allow flexible edge system with tuples
     metadata: dict = {"index_fields": ["name"]}
 
 

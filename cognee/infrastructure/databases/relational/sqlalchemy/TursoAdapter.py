@@ -25,8 +25,8 @@ exercised offline.
 
 import asyncio
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,10 +43,10 @@ class TursoAdapter(SQLAlchemyAdapter):
     def __init__(
         self,
         connection_string: str,
-        connect_args: dict = None,
-        pool_args: dict = None,
-        sync_url: str = None,
-        auth_token: str = None,
+        connect_args: dict | None = None,
+        pool_args: dict | None = None,
+        sync_url: str | None = None,
+        auth_token: str | None = None,
     ):
         # aiosqlite drives the query path in both modes, so the base adapter's
         # sqlite branch builds the async engine, WAL pragmas and sessionmaker —

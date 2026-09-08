@@ -43,8 +43,8 @@ class LightweightData(DataPoint):
     """Lightweight DataPoint model for data ingestion only."""
 
     id: UUID
-    companies: List[Dict[str, Any]]
-    people: List[Dict[str, Any]]
+    companies: list[dict[str, Any]]
+    people: list[dict[str, Any]]
 
 
 def build_lightweight_data_object(data_list):
@@ -56,10 +56,10 @@ def build_lightweight_data_object(data_list):
     ]
 
 
-def ingest_files(data: List[Any]) -> List[Company]:
+def ingest_files(data: list[Any]) -> list[Company]:
     # With identity_fields, DataPoints with the same name automatically get the same UUID.
     # No manual dict-based deduplication needed — just create instances freely.
-    all_companies: List[Company] = []
+    all_companies: list[Company] = []
 
     # Single CompanyType node shared across all data items (deterministic ID via identity_fields)
     company_type = CompanyType()
@@ -69,7 +69,7 @@ def ingest_files(data: List[Any]) -> List[Company]:
         companies = data_item.companies
 
         # Build departments with their employees
-        dept_employees: Dict[str, List[Person]] = {}
+        dept_employees: dict[str, list[Person]] = {}
         for person in people:
             dept_name = person["department"]
             if dept_name not in dept_employees:

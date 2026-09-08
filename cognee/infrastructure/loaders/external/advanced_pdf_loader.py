@@ -49,7 +49,7 @@ class AdvancedPdfLoader(LoaderInterface):
 
     async def load(
         self, file_path: str, strategy: str = "auto", **kwargs: Any
-    ) -> "str | LoaderResult":
+    ) -> str | LoaderResult:
         """Load PDF file using unstructured library. If Exception occurs, fallback to PyPDFLoader.
 
         Args:
@@ -111,7 +111,7 @@ class AdvancedPdfLoader(LoaderInterface):
             logger.warning("Failed to process PDF with AdvancedPdfLoader: %s", exc)
             return await self._fallback(file_path, **kwargs)
 
-    async def _fallback(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
+    async def _fallback(self, file_path: str, **kwargs: Any) -> str | LoaderResult:
         logger.info("Falling back to PyPDF loader for %s", file_path)
         fallback_loader = PyPdfLoader()
         return await fallback_loader.load(file_path, **kwargs)

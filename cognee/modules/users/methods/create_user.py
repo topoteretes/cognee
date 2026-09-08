@@ -16,7 +16,7 @@ async def create_user(
     is_active: bool = True,
     is_verified: bool = False,
     auto_login: bool = False,
-    parent_user_id: Optional[UUID] = None,
+    parent_user_id: UUID | None = None,
 ):
     try:
         relational_engine = get_relational_engine()

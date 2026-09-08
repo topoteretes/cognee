@@ -15,7 +15,7 @@ logger = get_logger("run_tasks_with_telemetry()")
 
 
 async def run_tasks_with_telemetry(
-    tasks: list[Task], data, user: User, pipeline_name: str, ctx: Optional[PipelineContext] = None
+    tasks: list[Task], data, user: User, pipeline_name: str, ctx: PipelineContext | None = None
 ):
     config = get_current_settings()
 

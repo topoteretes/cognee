@@ -19,4 +19,4 @@ class ScoredResult(BaseModel):
 
     id: UUID
     score: float  # Lower score is better
-    payload: Optional[Dict[str, Any]] = None
+    payload: dict[str, Any] | None = None

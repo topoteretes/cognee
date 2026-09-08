@@ -2,10 +2,11 @@
 
 import asyncio
 import json
+from collections.abc import Coroutine
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from textwrap import dedent
-from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 from uuid import UUID
 
 from neo4j import AsyncGraphDatabase, AsyncSession
@@ -77,7 +78,7 @@ PROVENANCE_COLUMNS = (
 _PROVENANCE_KEY_SET = frozenset(PROVENANCE_COLUMNS)
 
 
-def _strip_provenance(properties: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _strip_provenance(properties: dict[str, Any] | None) -> dict[str, Any] | None:
     """Return ``properties`` without the four provenance list properties."""
     if not properties:
         return properties
@@ -86,7 +87,7 @@ def _strip_provenance(properties: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return properties
 
 
-def _prov_list(value: Any) -> List[str]:
+def _prov_list(value: Any) -> list[str]:
     """Normalize a native provenance list property (or None) to ``list[str]``."""
     return list(value) if value else []
 
@@ -132,7 +133,7 @@ def _provenance_fold_clause(alias: str) -> str:
             """
 
 
-def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str]) -> Dict[str, Any]:
+def _provenance_fold_params(source_ref_key: str, pipeline_run_id: str | None) -> dict[str, Any]:
     """Scalar query params consumed by :func:`_provenance_fold_clause`."""
     inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
     return {
@@ -158,11 +159,11 @@ class Neo4jAdapter(GraphDBInterface):
     def __init__(
         self,
         graph_database_url: str,
-        graph_database_username: Optional[str] = None,
-        graph_database_password: Optional[str] = None,
-        graph_database_name: Optional[str] = None,
+        graph_database_username: str | None = None,
+        graph_database_password: str | None = None,
+        graph_database_name: str | None = None,
         graph_database_allow_anonymous: bool = False,
-        driver: Optional[Any] = None,
+        driver: Any | None = None,
     ):
         """Initialize the Neo4j driver from the given connection params and optional auth."""
         # Only use auth if both username and password are provided
@@ -244,8 +245,8 @@ class Neo4jAdapter(GraphDBInterface):
     async def query(
         self,
         query: str,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Execute a Cypher query against the Neo4j database and return the result.
 
@@ -346,8 +347,8 @@ class Neo4jAdapter(GraphDBInterface):
     async def add_nodes(
         self,
         nodes: list[DataPoint],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple nodes to the database in a single query.
@@ -372,7 +373,7 @@ class Neo4jAdapter(GraphDBInterface):
         # window). The fold SET must run while `n` and `node` are still bound,
         # i.e. before the aggregating `WITH n, node.label`.
         fold_clause = ""
-        provenance_params: Dict[str, Any] = {}
+        provenance_params: dict[str, Any] = {}
         if source_ref_key is not None:
             fold_clause = _provenance_fold_clause("n")
             provenance_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
@@ -398,7 +399,7 @@ class Neo4jAdapter(GraphDBInterface):
         # overwrites the first, losing any tag only seen on the first
         # duplicate. Collapsing duplicates here (union of tags kept) avoids
         # the race and matches the batch-dedup already done in PGVector.
-        deduped: Dict[str, Dict[str, Any]] = {}
+        deduped: dict[str, dict[str, Any]] = {}
         for node in nodes:
             # Read the serializable form via model_dump() like the Ladybug/Postgres
             # adapters (fall back to dict() for non-pydantic inputs). model_dump()
@@ -440,8 +441,8 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Strip the given tag names from every node's `belongs_to_set`
@@ -489,7 +490,7 @@ class Neo4jAdapter(GraphDBInterface):
         {edge_scope_keyword} ns.name IN $tags
         DELETE r
         """
-        params: Dict[str, Any] = {"tags": list(tags)}
+        params: dict[str, Any] = {"tags": list(tags)}
         if node_ids is not None:
             params["node_ids"] = [str(nid) for nid in node_ids]
         await self.query(query, params)
@@ -513,7 +514,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return results[0] if len(results) > 0 else None
 
-    async def extract_nodes(self, node_ids: List[str]):
+    async def extract_nodes(self, node_ids: list[str]):
         """
         Retrieve multiple nodes from the database by their IDs.
 
@@ -620,7 +621,7 @@ class Neo4jAdapter(GraphDBInterface):
         return {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
 
     @staticmethod
-    def _indexed_fields_from_properties(properties: Dict[str, Any]) -> List[str]:
+    def _indexed_fields_from_properties(properties: dict[str, Any]) -> list[str]:
         """Read ``metadata.index_fields`` from a node's stored properties.
 
         ``metadata`` is stored as a JSON string (serialize_properties JSON-encodes
@@ -645,15 +646,15 @@ class Neo4jAdapter(GraphDBInterface):
         return int(value)
 
     @staticmethod
-    def _ms_to_datetime(value: Any) -> Optional[datetime]:
+    def _ms_to_datetime(value: Any) -> datetime | None:
         """Convert an edge's stored epoch-millis created_at to an aware UTC datetime."""
         if value is None:
             return None
         return datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
 
     async def _read_node_provenance(
-        self, node_ids: List[str]
-    ) -> Dict[str, Tuple[List[str], List[str]]]:
+        self, node_ids: list[str]
+    ) -> dict[str, tuple[list[str], list[str]]]:
         """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
         rows = await self.query(
             f"""
@@ -666,7 +667,7 @@ class Neo4jAdapter(GraphDBInterface):
         )
         return {row["id"]: (list(row["keys"]), list(row["run_refs"])) for row in rows}
 
-    async def _write_node_provenance(self, batch: List[dict]) -> None:
+    async def _write_node_provenance(self, batch: list[dict]) -> None:
         if not batch:
             return
         await self.query(
@@ -682,8 +683,8 @@ class Neo4jAdapter(GraphDBInterface):
         )
 
     async def _read_edge_provenance(
-        self, edges: List[EdgeIdentity]
-    ) -> Dict[EdgeIdentity, Tuple[List[str], List[str]]]:
+        self, edges: list[EdgeIdentity]
+    ) -> dict[EdgeIdentity, tuple[list[str], list[str]]]:
         """Return ``{edge: (source_ref_keys, source_run_refs)}`` for existing edges."""
         edge_params = [self._edge_identity_row(edge) for edge in edges]
         rows = await self.query(
@@ -697,7 +698,7 @@ class Neo4jAdapter(GraphDBInterface):
             """,
             {"edges": edge_params},
         )
-        result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
+        result: dict[EdgeIdentity, tuple[list[str], list[str]]] = {}
         for row in rows:
             edge = EdgeIdentity(
                 source_id=row["s"], target_id=row["t"], relationship_name=row["rel"]
@@ -705,7 +706,7 @@ class Neo4jAdapter(GraphDBInterface):
             result[edge] = (list(row["keys"]), list(row["run_refs"]))
         return result
 
-    async def _write_edge_provenance(self, batch: List[dict]) -> None:
+    async def _write_edge_provenance(self, batch: list[dict]) -> None:
         if not batch:
             return
         await self.query(
@@ -1126,7 +1127,7 @@ class Neo4jAdapter(GraphDBInterface):
         from_node: UUID,
         to_node: UUID,
         relationship_name: str,
-        edge_properties: Optional[Dict[str, Any]] = {},
+        edge_properties: dict[str, Any] | None = {},
     ):
         """
         Create a new edge between two nodes with specified properties.
@@ -1167,7 +1168,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    def _flatten_edge_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+    def _flatten_edge_properties(self, properties: dict[str, Any]) -> dict[str, Any]:
         """
         Flatten edge properties to handle nested dictionaries like weights.
 
@@ -1202,8 +1203,8 @@ class Neo4jAdapter(GraphDBInterface):
     async def add_edges(
         self,
         edges: list[tuple[str, str, str, dict[str, Any]]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple edges between nodes in a single query.
@@ -1226,7 +1227,7 @@ class Neo4jAdapter(GraphDBInterface):
         # When a source ref is supplied its provenance stamp is folded into the
         # same statement (atomic — no write-then-attach window).
         fold_clause = ""
-        provenance_params: Dict[str, Any] = {}
+        provenance_params: dict[str, Any] = {}
         if source_ref_key is not None:
             fold_clause = _provenance_fold_clause("rel")
             provenance_params = _provenance_fold_params(source_ref_key, pipeline_run_id)
@@ -1350,7 +1351,7 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query)
         return results[0]["ids"] if len(results) > 0 else []
 
-    async def get_predecessors(self, node_id: str, edge_label: str = None) -> list[str]:
+    async def get_predecessors(self, node_id: str, edge_label: str | None = None) -> list[str]:
         """
         Retrieve the predecessor nodes of a specified node based on an optional edge label.
 
@@ -1396,7 +1397,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             return [result["predecessor"] for result in results]
 
-    async def get_successors(self, node_id: str, edge_label: str = None) -> list[str]:
+    async def get_successors(self, node_id: str, edge_label: str | None = None) -> list[str]:
         """
         Retrieve the successor nodes of a specified node based on an optional edge label.
 
@@ -1443,7 +1444,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             return [result["successor"] for result in results]
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> list[dict[str, Any]]:
         """
         Get all neighbors of a specified node, including all directly connected nodes.
 
@@ -1472,7 +1473,7 @@ class Neo4jAdapter(GraphDBInterface):
             logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
             raise
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """
         Retrieve a single node based on its ID.
 
@@ -1494,7 +1495,7 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"node_id": node_id})
         return _strip_provenance(results[0]["node"]) if results else None
 
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """
         Retrieve multiple nodes based on their IDs.
 
@@ -1517,8 +1518,8 @@ class Neo4jAdapter(GraphDBInterface):
         return [_strip_provenance(result["node"]) for result in results]
 
     def _build_node_feedback_items(
-        self, node_feedback_weights: Dict[str, float]
-    ) -> List[Dict[str, Any]]:
+        self, node_feedback_weights: dict[str, float]
+    ) -> list[dict[str, Any]]:
         """Build UNWIND items for node feedback weight updates."""
         return [
             {"node_id": node_id, "feedback_weight": float(weight)}
@@ -1526,7 +1527,7 @@ class Neo4jAdapter(GraphDBInterface):
             if isinstance(node_id, str) and node_id
         ]
 
-    async def _execute_node_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+    async def _execute_node_feedback_updates(self, items: list[dict[str, Any]]) -> set[str]:
         """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
         if not items:
             return set()
@@ -1540,8 +1541,8 @@ class Neo4jAdapter(GraphDBInterface):
         return {str(r["node_id"]) for r in results if r.get("node_id") is not None}
 
     def _build_edge_feedback_items(
-        self, edge_feedback_weights: Dict[str, float]
-    ) -> List[Dict[str, Any]]:
+        self, edge_feedback_weights: dict[str, float]
+    ) -> list[dict[str, Any]]:
         """Build UNWIND items for edge feedback weight updates."""
         return [
             {"edge_object_id": edge_object_id, "feedback_weight": float(weight)}
@@ -1549,7 +1550,7 @@ class Neo4jAdapter(GraphDBInterface):
             if isinstance(edge_object_id, str) and edge_object_id
         ]
 
-    async def _execute_edge_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
+    async def _execute_edge_feedback_updates(self, items: list[dict[str, Any]]) -> set[str]:
         """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
         if not items:
             return set()
@@ -1563,7 +1564,7 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"items": items})
         return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
 
-    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+    async def get_node_feedback_weights(self, node_ids: list[str]) -> dict[str, float]:
         """Return each node's `feedback_weight` property, defaulting to 0.5 when unset."""
         if not node_ids:
             return {}
@@ -1583,8 +1584,8 @@ class Neo4jAdapter(GraphDBInterface):
         }
 
     async def set_node_feedback_weights(
-        self, node_feedback_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, node_feedback_weights: dict[str, float]
+    ) -> dict[str, bool]:
         """Persist `feedback_weight` per node; returns a map of node_id → updated bool."""
         if not node_feedback_weights:
             return {}
@@ -1595,7 +1596,7 @@ class Neo4jAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_feedback_updates(items)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
-    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+    async def get_edge_feedback_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
         """Return each edge's `feedback_weight` property, defaulting to 0.5 when unset."""
         if not edge_object_ids:
             return {}
@@ -1619,8 +1620,8 @@ class Neo4jAdapter(GraphDBInterface):
         }
 
     async def set_edge_feedback_weights(
-        self, edge_feedback_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, edge_feedback_weights: dict[str, float]
+    ) -> dict[str, bool]:
         """Persist `feedback_weight` per edge; returns a map of edge_object_id → updated bool."""
         if not edge_feedback_weights:
             return {}
@@ -1888,10 +1889,10 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
@@ -2031,8 +2032,8 @@ class Neo4jAdapter(GraphDBInterface):
             raise
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
-    ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
+    ) -> tuple[list[tuple[int, dict]], list[tuple[int, int, str, dict]]]:
         """
         Retrieve a subgraph based on specified node names and type, including their
         relationships.
@@ -2429,7 +2430,7 @@ class Neo4jAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
 
-    async def collect_events(self, ids: List[str]) -> Any:
+    async def collect_events(self, ids: list[str]) -> Any:
         """
         Collect all Event-type nodes reachable within 1..2 hops
         from the given node IDs.
@@ -2455,8 +2456,8 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def collect_time_ids(
         self,
-        time_from: Optional[Timestamp] = None,
-        time_to: Optional[Timestamp] = None,
+        time_from: Timestamp | None = None,
+        time_to: Timestamp | None = None,
     ) -> str:
         """
         Collect IDs of Timestamp nodes between time_from and time_to.
@@ -2471,7 +2472,7 @@ class Neo4jAdapter(GraphDBInterface):
             (ready for use in a Cypher UNWIND clause).
         """
 
-        ids: List[str] = []
+        ids: list[str] = []
 
         if time_from and time_to:
             time_from = date_to_int(time_from)

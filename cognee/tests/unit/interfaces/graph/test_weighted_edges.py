@@ -17,7 +17,7 @@ class Product(DataPoint):
 class Category(DataPoint):
     name: str
     description: str
-    products: List[Product] = []
+    products: list[Product] = []
     metadata: dict = {"index_fields": ["name"]}
 
 

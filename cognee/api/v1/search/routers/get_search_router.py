@@ -30,7 +30,7 @@ class SearchPayloadDTO(InDTO):
             " (auto-select), AGENTIC_COMPLETION (enables skills/tools/max_iter)."
         ),
     )
-    datasets: Optional[list[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
@@ -38,7 +38,7 @@ class SearchPayloadDTO(InDTO):
             " use dataset_ids for datasets shared with you."
         ),
     )
-    dataset_ids: Optional[list[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -51,10 +51,10 @@ class SearchPayloadDTO(InDTO):
         examples=["What is in the document?"],
         description="The question to answer. Required; there is no default query.",
     )
-    system_prompt: Optional[str] = Field(
+    system_prompt: str | None = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
-    node_name: Optional[list[str]] = Field(
+    node_name: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -62,7 +62,7 @@ class SearchPayloadDTO(InDTO):
             " (the node_set values used during add/remember)."
         ),
     )
-    top_k: Optional[int] = Field(default=15)
+    top_k: int | None = Field(default=15)
     only_context: bool = Field(default=False)
     context_format: ContextFormat = Field(
         default=ContextFormat.CONTEXT,
@@ -75,7 +75,7 @@ class SearchPayloadDTO(InDTO):
             " (the default session when omitted). Ignored unless only_context is true."
         ),
     )
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -89,7 +89,7 @@ class SearchPayloadDTO(InDTO):
             "Return detailed result information including the graph representation when available."
         ),
     )
-    skills: Optional[list[str]] = Field(
+    skills: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -97,7 +97,7 @@ class SearchPayloadDTO(InDTO):
             " Requires search_type=AGENTIC_COMPLETION; leave null otherwise."
         ),
     )
-    tools: Optional[list[str]] = Field(
+    tools: list[str] | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -105,7 +105,7 @@ class SearchPayloadDTO(InDTO):
             " Requires search_type=AGENTIC_COMPLETION."
         ),
     )
-    max_iter: Optional[int] = Field(
+    max_iter: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -117,7 +117,7 @@ class SearchPayloadDTO(InDTO):
         default=False,
         description="Attach source references to completion-type results.",
     )
-    code_query: Optional[dict[str, Any]] = Field(
+    code_query: dict[str, Any] | None = Field(
         default=None,
         description=(
             "Structured arguments for search_type=CODE. Set operation to query_facts, "
@@ -138,11 +138,11 @@ def get_search_router() -> APIRouter:
         user: str
         created_at: datetime
         # Null when the search was not scoped to a single dataset.
-        dataset_id: Optional[UUID] = None
+        dataset_id: UUID | None = None
 
     @router.get(
         "",
-        response_model=List[SearchHistoryItem],
+        response_model=list[SearchHistoryItem],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -187,7 +187,7 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[List[SearchResult], List],
+        response_model=Union[list[SearchResult], list],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},

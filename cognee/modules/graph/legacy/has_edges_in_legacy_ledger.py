@@ -10,7 +10,7 @@ from .GraphRelationshipLedger import GraphRelationshipLedger
 
 
 @with_async_session
-async def has_edges_in_legacy_ledger(edges: List[Edge], session: AsyncSession):
+async def has_edges_in_legacy_ledger(edges: list[Edge], session: AsyncSession):
     if len(edges) == 0:
         return []
 

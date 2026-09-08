@@ -41,12 +41,12 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
-    belongs_to_set: List[str] = []
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
+    belongs_to_set: list[str] = []
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -70,11 +70,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     def __init__(
         self,
         graph_id: str,
-        embedding_engine: Optional[EmbeddingEngine] = None,
-        region: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_secret_access_key: Optional[str] = None,
-        aws_session_token: Optional[str] = None,
+        embedding_engine: EmbeddingEngine | None = None,
+        region: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        aws_session_token: str | None = None,
     ):
         """
         Initialize the Neptune Analytics hybrid adapter.
@@ -145,7 +145,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema: Optional[PayloadSchema] = None,
+        payload_schema: PayloadSchema | None = None,
     ):
         """
         Neptune Analytics stores vector on a node level, so create_collection() implements interface for compliance but performs no operations when called.
@@ -165,7 +165,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         return
 
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """
         Insert new data points into the specified collection, by first inserting the node itself on the graph,
         then execute neptune.algo.vectors.upsert() to insert the corresponded embedding.
@@ -250,12 +250,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: Optional[int] = None,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = None,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -373,11 +373,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
+        query_texts: list[str],
         limit: int,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -516,7 +516,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 "Neptune Analytics requires an embedder defined to make vector operations"
             )
 
-    async def add_nodes_with_vectors(self, data_points: List[DataPoint]) -> None:
+    async def add_nodes_with_vectors(self, data_points: list[DataPoint]) -> None:
         """Add nodes to the graph and index their embeddable fields as vector data points.
 
         This is the hybrid write path for Neptune Analytics: graph nodes are inserted
@@ -534,7 +534,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         await self.add_nodes(data_points)
 
         # Group by (type_name, field_name) to build one collection per field.
-        groups: Dict[Tuple[str, str], List[DataPoint]] = {}
+        groups: dict[tuple[str, str], list[DataPoint]] = {}
         for dp in data_points:
             if not hasattr(dp, "metadata") or not dp.metadata:
                 continue
@@ -563,7 +563,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             await self.create_data_points(f"{type_name}_{field_name}", index_schemas)
 
     async def add_edges_with_vectors(
-        self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
+        self, edges: list[tuple[str, str, str, dict[str, Any]]]
     ) -> None:
         """Add edges to the graph and index unique relationship types as vector data points.
 

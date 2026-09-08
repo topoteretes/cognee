@@ -62,7 +62,7 @@ _EMBED_LENGTH_ERROR_RE = re.compile(
 _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
 
 
-def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
+def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     """Whether this engine is actually talking to NVIDIA NIM.
 
     Note: Cognee's `provider` attribute is metadata used locally (e.g. for
@@ -104,15 +104,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "openai/text-embedding-3-large",
+        model: str | None = "openai/text-embedding-3-large",
         provider: str = "openai",
-        dimensions: Optional[int] = 3072,
-        api_key: str = None,
-        endpoint: str = None,
-        api_version: str = None,
+        dimensions: int | None = 3072,
+        api_key: str | None = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
         max_completion_tokens: int = 512,
         batch_size: int = 100,
-        input_type: Optional[str] = None,
+        input_type: str | None = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -172,7 +172,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 

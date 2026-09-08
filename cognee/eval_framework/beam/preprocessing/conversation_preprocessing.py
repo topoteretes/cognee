@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-import itertools
 
 _TURN_START = re.compile(
     r"^(?:\[(?P<time_anchor>.*?)\]\s*)?(?P<role>User|Assistant):\s?(?P<content>.*)$"

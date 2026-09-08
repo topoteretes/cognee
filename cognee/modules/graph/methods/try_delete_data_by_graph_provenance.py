@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.unified.provenance_delete_planner import (
 
 async def try_delete_data_by_graph_provenance(
     dataset_id: UUID, data_id: UUID
-) -> Optional[SourceRefRemovalResult]:
+) -> SourceRefRemovalResult | None:
     """Delete a data item's graph-provenance refs when the graph is marked.
 
     Authorization belongs to the public callers. This helper only answers whether

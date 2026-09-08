@@ -15,13 +15,13 @@ logger = get_logger("serve")
 
 
 async def serve(
-    url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    url: str | None = None,
+    api_key: str | None = None,
     *,
-    management_url: Optional[str] = None,
-    auth0_domain: Optional[str] = None,
-    auth0_client_id: Optional[str] = None,
-    auth0_audience: Optional[str] = None,
+    management_url: str | None = None,
+    auth0_domain: str | None = None,
+    auth0_client_id: str | None = None,
+    auth0_audience: str | None = None,
 ) -> CloudClient:
     """Connect the local Cognee SDK to a remote or local Cognee instance.
 
@@ -136,10 +136,10 @@ async def _serve_direct(service_url: str, api_key: str = "") -> CloudClient:
 
 
 async def _serve_cloud(
-    management_url: Optional[str] = None,
-    auth0_domain: Optional[str] = None,
-    auth0_client_id: Optional[str] = None,
-    auth0_audience: Optional[str] = None,
+    management_url: str | None = None,
+    auth0_domain: str | None = None,
+    auth0_client_id: str | None = None,
+    auth0_audience: str | None = None,
 ) -> CloudClient:
     """Full cloud flow: Auth0 Device Code → tenant discovery → API key → connect."""
     from cognee.api.v1.serve.cloud_client import CloudClient

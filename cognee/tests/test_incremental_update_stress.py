@@ -45,6 +45,7 @@ a mock without them verifies nothing about either.
 
 import asyncio
 import hashlib
+import itertools
 import os
 import re
 from collections import Counter
@@ -54,7 +55,6 @@ from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
 )
-import itertools
 
 FIXTURE = Path(__file__).parent / "test_data" / "alice_in_wonderland.txt"
 PARAGRAPHS_USED = 120

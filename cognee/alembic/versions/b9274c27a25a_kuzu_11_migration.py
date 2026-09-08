@@ -7,7 +7,8 @@ Create Date: 2025-07-24 17:11:52.174737
 """
 
 import os
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import kuzu
 from cognee.infrastructure.databases.graph.kuzu.kuzu_migrate import (
@@ -17,9 +18,9 @@ from cognee.infrastructure.databases.graph.kuzu.kuzu_migrate import (
 
 # revision identifiers, used by Alembic.
 revision: str = "b9274c27a25a"
-down_revision: Union[str, None] = "e4ebee1091e7"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e4ebee1091e7"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

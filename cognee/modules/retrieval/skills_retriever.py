@@ -72,9 +72,9 @@ class SkillsRetriever(BaseRetriever):
 
     def __init__(
         self,
-        top_k: Optional[int] = 5,
-        dataset_id: Optional[Union[str, UUID]] = None,
-        session_id: Optional[str] = None,
+        top_k: int | None = 5,
+        dataset_id: str | UUID | None = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with search parameters. ``dataset_id`` is required."""
         if dataset_id is None:
@@ -154,7 +154,7 @@ class SkillsRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Returns metadata-only skill payloads; no LLM completion is generated.
 

@@ -168,7 +168,7 @@ async def setup_test_environment_complex():
     class Person(DataPoint):
         name: str
         works_for: Company
-        owns: Optional[list[Union[Car, Home]]] = None
+        owns: list[Car | Home] | None = None
 
     company1 = Company(name="Figma")
     company2 = Company(name="Canva")

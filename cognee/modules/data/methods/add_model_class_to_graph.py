@@ -8,10 +8,10 @@ from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInte
 
 
 async def add_model_class_to_graph(
-    model_class: Type[BaseModel],
+    model_class: type[BaseModel],
     graph: GraphDBInterface,
-    parent: Optional[str] = None,
-    relationship: Optional[str] = None,
+    parent: str | None = None,
+    relationship: str | None = None,
 ):
     model_name = model_class.__name__
 

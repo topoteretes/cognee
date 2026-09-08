@@ -394,17 +394,17 @@ class _Activity(DataPoint):
 
 class _Person(DataPoint):
     name: str
-    likes: Optional[List[_Activity]] = None
+    likes: list[_Activity] | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class _Directory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": []}
 
 
 class _TransparentDirectory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": [], "transparent": True}
 
 

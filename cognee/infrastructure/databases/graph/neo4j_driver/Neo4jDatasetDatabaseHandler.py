@@ -48,7 +48,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """Handler for per-dataset databases in a local/self-hosted Neo4j DBMS."""
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "neo4j":
@@ -118,7 +118,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         await cls._drop_neo4j_database(graph_db_name)
 
     @classmethod
-    def _database_name_for_dataset(cls, dataset_id: Optional[UUID]) -> str:
+    def _database_name_for_dataset(cls, dataset_id: UUID | None) -> str:
         if dataset_id is None:
             raise ValueError("dataset_id is required to create a local Neo4j dataset database.")
 
@@ -285,7 +285,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         )
 
     @classmethod
-    async def _run_system_query(cls, driver, query: str, params: Optional[dict] = None) -> list:
+    async def _run_system_query(cls, driver, query: str, params: dict | None = None) -> list:
         try:
             async with driver.session(database=NEO4J_SYSTEM_DATABASE) as session:
                 result = await session.run(query, parameters=params or {})

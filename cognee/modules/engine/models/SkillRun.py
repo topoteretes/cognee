@@ -11,8 +11,8 @@ class ToolCall(DataPoint):
     """A single tool invocation within a skill run."""
 
     tool_name: str
-    tool_input: Optional[Dict[str, Any]] = None
-    tool_output: Optional[str] = None
+    tool_input: dict[str, Any] | None = None
+    tool_output: str | None = None
     success: bool = True
     duration_ms: int = 0
     metadata: dict = {"index_fields": []}
@@ -26,7 +26,7 @@ class CandidateSkill(DataPoint):
     skill_description: str = ""
     skill_text: str = ""
     score: float = 0.0
-    signals: Optional[Dict[str, Any]] = None
+    signals: dict[str, Any] | None = None
     metadata: dict = {"index_fields": ["skill_description"]}
 
 
@@ -41,15 +41,15 @@ class SkillRun(DataPoint):
     success_score: float = UNSCORED_SKILL_RUN_SCORE  # 0.0 to 1.0
 
     # Routing decision
-    candidate_skills: List[CandidateSkill] = Field(default_factory=list)
+    candidate_skills: list[CandidateSkill] = Field(default_factory=list)
     selected_skill: Optional["Skill"] = None
     selected_skill_id: str = ""
     selected_skill_name: str = ""
-    dataset_scope: List[str] = Field(default_factory=list)
+    dataset_scope: list[str] = Field(default_factory=list)
     task_pattern_id: str = ""
     router_version: str = ""
 
-    tool_trace: List[ToolCall] = Field(default_factory=list)
+    tool_trace: list[ToolCall] = Field(default_factory=list)
 
     error_type: str = ""
     error_message: str = ""

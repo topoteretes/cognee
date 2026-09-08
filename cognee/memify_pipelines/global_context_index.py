@@ -46,7 +46,7 @@ def get_global_context_index_memify_tasks(
 
 async def global_context_index_pipeline(
     user: User,
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
     max_bucket_size: int = 20,
     placement_distance_threshold: float = 0.5,

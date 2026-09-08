@@ -16,8 +16,8 @@ class GraphitiNode(DataPoint):
     - metadata: a dictionary outlining the fields used for indexing.
     """
 
-    content: Optional[str] = None
-    name: Optional[str] = None
-    summary: Optional[str] = None
+    content: str | None = None
+    name: str | None = None
+    summary: str | None = None
 
     metadata: dict = {"index_fields": ["name", "summary", "content"]}

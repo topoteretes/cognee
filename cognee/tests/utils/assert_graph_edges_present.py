@@ -4,7 +4,7 @@ from uuid import UUID
 from cognee.infrastructure.databases.graph import get_graph_engine
 
 
-async def assert_graph_edges_present(relationships: List[Tuple[UUID, UUID, str, Dict]]):
+async def assert_graph_edges_present(relationships: list[tuple[UUID, UUID, str, dict]]):
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 

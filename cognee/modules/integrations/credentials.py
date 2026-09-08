@@ -45,12 +45,12 @@ async def upsert_credential(
     user_id: UUID,
     provider_account_id: str,
     token_payload: dict[str, Any],
-    workspace_id: Optional[UUID] = None,
-    account_label: Optional[str] = None,
+    workspace_id: UUID | None = None,
+    account_label: str | None = None,
     auth_type: str = "oauth2",
-    scopes: Optional[str] = None,
-    provider_metadata: Optional[dict[str, Any]] = None,
-    token_expires_at: Optional[datetime] = None,
+    scopes: str | None = None,
+    provider_metadata: dict[str, Any] | None = None,
+    token_expires_at: datetime | None = None,
 ) -> IntegrationCredential:
     """Insert or replace the credential for a ``(provider, provider_account_id)``.
 
@@ -123,7 +123,7 @@ async def upsert_credential(
 
 async def get_credential_by_account(
     provider: str, provider_account_id: str
-) -> Optional[IntegrationCredential]:
+) -> IntegrationCredential | None:
     """Resolve an inbound webhook's external account id back to its credential."""
     engine = get_relational_engine()
     async with engine.get_async_session() as db:
@@ -138,7 +138,7 @@ async def get_credential_by_account(
 
 async def get_active_credential_for_user(
     user_id: UUID, provider: str
-) -> Optional[IntegrationCredential]:
+) -> IntegrationCredential | None:
     """The user's active connection for a provider, for the Integrations UI.
 
     A user *can* hold more than one active connection for a provider (two
@@ -188,7 +188,7 @@ async def list_active_credentials_for_user(user_id: UUID) -> dict[str, Integrati
 
 async def get_active_credential_for_workspace(
     workspace_id: UUID, provider: str
-) -> Optional[IntegrationCredential]:
+) -> IntegrationCredential | None:
     """The workspace's active connection for a provider.
 
     Mirrors :func:`get_active_credential_for_user` for the ``workspace_id``
@@ -241,7 +241,7 @@ async def revoke_credential_by_account(provider: str, provider_account_id: str) 
 
 async def update_provider_metadata(
     provider: str, provider_account_id: str, metadata_patch: dict[str, Any]
-) -> Optional[IntegrationCredential]:
+) -> IntegrationCredential | None:
     """Merge ``metadata_patch`` into a credential's ``provider_metadata``.
 
     Deliberately separate from :func:`upsert_credential`: that function

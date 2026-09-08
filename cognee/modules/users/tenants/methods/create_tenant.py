@@ -12,7 +12,7 @@ from cognee.modules.users.models.UserTenant import UserTenant
 
 
 async def create_tenant(
-    tenant_name: str, user_id: UUID, set_as_active_tenant: Optional[bool] = True
+    tenant_name: str, user_id: UUID, set_as_active_tenant: bool | None = True
 ) -> UUID:
     """
         Create a new tenant with the given name, for the user with the given id.

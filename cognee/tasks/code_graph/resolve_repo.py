@@ -101,7 +101,7 @@ def is_remote_repo(spec) -> bool:
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
 
 
-def code_repo_clone_url(spec) -> Optional[str]:
+def code_repo_clone_url(spec) -> str | None:
     """The clone URL when an http(s) string names a whole git repository, else None.
 
     This is what lets ``add()`` treat ``https://github.com/<owner>/<repo>`` as a
@@ -143,7 +143,7 @@ def code_repo_clone_url(spec) -> Optional[str]:
     return urlunsplit((parts.scheme, parts.netloc, "/" + "/".join(segments), "", ""))
 
 
-def redact_repo_spec(spec: Union[str, Path]) -> str:
+def redact_repo_spec(spec: str | Path) -> str:
     """The spec with any URL-embedded credentials removed.
 
     Connectors pass short-lived tokens in the URL userinfo
@@ -184,7 +184,7 @@ def _credential_env(token: str) -> dict:
     }
 
 
-async def _run_git(args, cwd: Optional[Path] = None, env: Optional[dict] = None) -> tuple:
+async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
@@ -210,9 +210,9 @@ async def _run_git(args, cwd: Optional[Path] = None, env: Optional[dict] = None)
 
 
 async def resolve_repo_source(
-    spec: Union[str, Path],
-    clones_dir: Optional[Path] = None,
-    credentials: Optional[str] = None,
+    spec: str | Path,
+    clones_dir: Path | None = None,
+    credentials: str | None = None,
 ) -> Path:
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
