@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
     try:
         await run_migrations()
     except Exception:
+        logger.debug("Ignoring exception in lifespan", exc_info=True)
         db_engine = get_relational_engine()
         await db_engine.create_database()
 

@@ -72,7 +72,9 @@ async def _invalidate_sessions_for_dataset_nonfatal(dataset_id: UUID) -> None:
 
         await invalidate_sessions_for_dataset(dataset_id)
     except Exception as error:
-        logger.warning("Session invalidation after dataset delete failed (non-fatal): %s", error)
+        logger.warning(
+            "Session invalidation after dataset delete failed (non-fatal): %s", error, exc_info=True
+        )
 
 
 async def _invalidate_sessions_for_deleted_data_nonfatal(
@@ -95,7 +97,9 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
             user_id=user_id,
         )
     except Exception as error:
-        logger.warning("Session invalidation after data delete failed (non-fatal): %s", error)
+        logger.warning(
+            "Session invalidation after data delete failed (non-fatal): %s", error, exc_info=True
+        )
 
 
 class datasets:

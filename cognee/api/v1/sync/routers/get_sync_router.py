@@ -152,8 +152,8 @@ def get_sync_router() -> APIRouter:
         except ConnectionError as e:
             logger.error("Cloud service unavailable during sync: %s", e)
             return JSONResponse(status_code=409, content={"error": "Cloud service unavailable."})
-        except Exception as e:
-            logger.error(f"Cloud sync operation failed: {e!s}")
+        except Exception:
+            logger.exception("Cloud sync operation failed")
             return JSONResponse(status_code=409, content={"error": "Cloud sync operation failed."})
 
     @router.get("/status")
@@ -235,8 +235,8 @@ def get_sync_router() -> APIRouter:
 
             return response
 
-        except Exception as e:
-            logger.error(f"Failed to get sync status overview: {e!s}")
+        except Exception:
+            logger.exception("Failed to get sync status overview")
             return JSONResponse(
                 status_code=500, content={"error": "Failed to get sync status overview"}
             )

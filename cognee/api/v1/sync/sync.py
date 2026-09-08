@@ -49,7 +49,10 @@ async def _safe_update_progress(run_id: str, stage: str, **kwargs):
         logger.info(f"Sync {run_id}: Progress updated during {stage}")
     except Exception as e:
         # Log error but don't fail the sync - progress updates are nice-to-have
-        logger.warning(f"Sync {run_id}: Non-critical progress update failed during {stage}: {e!s}")
+        logger.warning(
+            f"Sync {run_id}: Non-critical progress update failed during {stage}: {e!s}",
+            exc_info=True,
+        )
         # Continue without raising - sync operation is more important than progress tracking
 
 
@@ -149,8 +152,8 @@ async def sync(
             user_id=user.id,
         )
         logger.info(f"Created sync operation record for {run_id}")
-    except Exception as e:
-        logger.error(f"Failed to create sync operation record: {e!s}")
+    except Exception:
+        logger.exception("Failed to create sync operation record")
         # Continue without database tracking if record creation fails
 
     # Start the sync operation in the background
@@ -194,10 +197,10 @@ async def _perform_background_sync(run_id: str, datasets: list[Dataset], user: U
                     dataset_sync_hashes,
                 ) = await _sync_to_cognee_cloud(datasets, user, run_id)
                 break
-            except Exception as e:
+            except Exception:
                 retry_count += 1
-                logger.error(
-                    f"Background sync {run_id}: Failed after {retry_count} retries with error: {e!s}"
+                logger.exception(
+                    f"Background sync {run_id}: Failed after {retry_count} retries with error"
                 )
                 await update_sync_operation(run_id, retry_count=retry_count)
                 await asyncio.sleep(2**retry_count)
@@ -229,7 +232,7 @@ async def _perform_background_sync(run_id: str, datasets: list[Dataset], user: U
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
 
-        logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {e!s}")
+        logger.exception(f"Background sync {run_id}: Failed after {duration}s with error")
 
         # Mark sync as failed with error message
         await mark_sync_failed(run_id, str(e))
@@ -313,9 +316,9 @@ async def _sync_to_cognee_cloud(
                     f"↑{dataset_result.records_uploaded} files ({dataset_result.bytes_uploaded} bytes), "
                     f"↓{dataset_result.records_downloaded} files ({dataset_result.bytes_downloaded} bytes)"
                 )
-            except Exception as e:
+            except Exception:
                 completed_datasets += 1
-                logger.error(f"Dataset file sync failed: {e!s}")
+                logger.exception("Dataset file sync failed")
                 # Update progress even for failed datasets
                 file_sync_progress = int((completed_datasets / len(datasets)) * 80)
                 await _safe_update_progress(
@@ -338,7 +341,7 @@ async def _sync_to_cognee_cloud(
                 )
                 logger.info("Cognify processing triggered successfully for all datasets")
             except Exception as e:
-                logger.warning(f"Failed to trigger cognify processing: {e!s}")
+                logger.warning(f"Failed to trigger cognify processing: {e!s}", exc_info=True)
                 # Don't fail the entire sync if cognify fails
         else:
             logger.info(
@@ -354,7 +357,7 @@ async def _sync_to_cognee_cloud(
                 await cognify()
                 logger.info("Local cognify processing completed successfully for all datasets")
             except Exception as e:
-                logger.warning(f"Failed to run local cognify processing: {e!s}")
+                logger.warning(f"Failed to run local cognify processing: {e!s}", exc_info=True)
                 # Don't fail the entire sync if local cognify fails
         else:
             logger.info(
@@ -374,7 +377,7 @@ async def _sync_to_cognee_cloud(
                 records_uploaded=total_records_uploaded,
             )
         except Exception as e:
-            logger.warning(f"Failed to update final sync progress: {e!s}")
+            logger.warning(f"Failed to update final sync progress: {e!s}", exc_info=True)
 
         logger.info(
             f"Multi-dataset sync completed: {len(datasets)} datasets processed, downloaded {total_records_downloaded} records/{total_bytes_downloaded} bytes, uploaded {total_records_uploaded} records/{total_bytes_uploaded} bytes"
@@ -389,7 +392,7 @@ async def _sync_to_cognee_cloud(
         )
 
     except Exception as e:
-        logger.error(f"Sync failed: {e!s}")
+        logger.exception("Sync failed")
         raise ConnectionError(f"Cloud sync failed: {e!s}")
 
 
@@ -535,7 +538,7 @@ async def _extract_local_files_with_hashes(
 
             except Exception as e:
                 skipped_count += 1
-                logger.warning(f"Failed to process file {data_entry.name}: {e!s}")
+                logger.warning(f"Failed to process file {data_entry.name}: {e!s}", exc_info=True)
                 # Continue with other entries even if one fails
                 continue
 
@@ -558,6 +561,7 @@ async def _get_file_size(file_path: str) -> int:
 
         return await file_storage.get_size(file_name)
     except Exception:
+        logger.debug("Ignoring exception in _get_file_size", exc_info=True)
         return 0
 
 
@@ -623,7 +627,7 @@ async def _check_hashes_diff(
                     )
 
     except Exception as e:
-        logger.error(f"Error checking missing hashes: {e!s}")
+        logger.exception("Error checking missing hashes")
         raise ConnectionError(f"Failed to check missing hashes: {e!s}")
 
 
@@ -689,8 +693,8 @@ async def _download_missing_files(
                         )
                         continue
 
-            except Exception as e:
-                logger.error(f"Error downloading file {file_hash}: {e!s}")
+            except Exception:
+                logger.exception(f"Error downloading file {file_hash}")
                 continue
 
     logger.info(
@@ -813,7 +817,7 @@ async def _upload_missing_files(
                         )
 
             except Exception as e:
-                logger.error(f"Error uploading file {file_info.name}: {e!s}")
+                logger.exception(f"Error uploading file {file_info.name}")
                 raise ConnectionError(f"Upload failed for {file_info.name}: {e!s}")
 
     logger.info(f"All {uploaded_count} files uploaded successfully: {total_bytes_uploaded} bytes")
@@ -853,8 +857,8 @@ async def _prune_cloud_dataset(
                     )
                     # Don't raise error for prune failures - sync partially succeeded
 
-    except Exception as e:
-        logger.error(f"Error pruning cloud dataset: {e!s}")
+    except Exception:
+        logger.exception("Error pruning cloud dataset")
         # Don't raise error for prune failures - sync partially succeeded
 
 
@@ -902,5 +906,5 @@ async def _trigger_remote_cognify(
                     # TODO: consider adding retries
 
     except Exception as e:
-        logger.warning(f"Error triggering cognify processing: {e!s}")
+        logger.warning(f"Error triggering cognify processing: {e!s}", exc_info=True)
         # TODO: consider adding retries

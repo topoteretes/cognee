@@ -68,6 +68,7 @@ class CloudClient:
             async with session.get(f"{self.service_url}/health") as resp:
                 return resp.status == 200
         except Exception:
+            logger.debug("Ignoring exception in CloudClient._health_check", exc_info=True)
             return False
 
     async def _auth_check(self) -> int | None:
@@ -82,6 +83,7 @@ class CloudClient:
             async with session.get(f"{self.service_url}/api/v1/datasets") as resp:
                 return resp.status
         except Exception:
+            logger.debug("Ignoring exception in CloudClient._auth_check", exc_info=True)
             return None
 
     # ----- V2 Operations -----

@@ -17,6 +17,10 @@ from cognee.modules.users.models import User
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
 #       To search for datasets not owned by the request sender dataset UUID is needed
@@ -177,6 +181,9 @@ def get_search_router() -> APIRouter:
 
             return history
         except Exception as error:
+            logger.debug(
+                "Ignoring exception in get_search_router.get_search_history", exc_info=True
+            )
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(
@@ -295,6 +302,7 @@ def get_search_router() -> APIRouter:
             # returns them to the caller.
             raise
         except Exception as error:
+            logger.debug("Ignoring exception in get_search_router.search", exc_info=True)
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(

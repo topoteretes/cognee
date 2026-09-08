@@ -153,7 +153,7 @@ async def _resolve_session_cache_user_id(session_id: str, caller_user_id: str | 
         owner = getattr(chosen, "user_id", None)
         return str(owner) if owner is not None else caller_user_id
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_session_cache_user_id", exc_info=True)
     return caller_user_id
 
 
@@ -265,11 +265,13 @@ async def _search_trace(
         try:
             parts.append(json.dumps(mp, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mp))
         mrv = entry.method_return_value
         try:
             parts.append(json.dumps(mrv, ensure_ascii=False))
         except Exception:
+            logger.debug("Ignoring exception in _search_trace", exc_info=True)
             parts.append(str(mrv))
 
         entry_words = _tokenize(" ".join(parts))
@@ -672,7 +674,9 @@ async def recall(
                     recall_config = get_recall_config()
                 except Exception as error:
                     logger.warning(
-                        "Recall warm-up config failed to load; skipping guard: %s", error
+                        "Recall warm-up config failed to load; skipping guard: %s",
+                        error,
+                        exc_info=True,
                     )
                 guard_active = (
                     recall_config is not None
@@ -706,6 +710,7 @@ async def recall(
                         logger.warning(
                             "Recall warm-up pre-probe authorization failed; skipping guard: %s",
                             error,
+                            exc_info=True,
                         )
                         guard_active = False
 
@@ -957,7 +962,7 @@ async def recall(
                         top_k=gate_top_k,
                     )
                 except Exception as error:
-                    logger.warning("Skill gate lookup failed (non-fatal): %s", error)
+                    logger.warning("Skill gate lookup failed (non-fatal): %s", error, exc_info=True)
                     return []
 
                 entries: list[RecallResponse] = []

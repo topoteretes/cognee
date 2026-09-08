@@ -712,8 +712,8 @@ def get_visualize_router() -> APIRouter:
             html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
             return HTMLResponse(html_visualization)
 
-        except Exception as error:
-            logger.error("Multi-user visualization request failed: %s", error)
+        except Exception:
+            logger.exception("Multi-user visualization request failed")
             return JSONResponse(
                 status_code=409, content={"error": "Unable to render visualization."}
             )

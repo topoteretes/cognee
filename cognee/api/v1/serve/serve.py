@@ -182,7 +182,7 @@ async def _serve_cloud(
                 print(f"  Connected to Cognee Cloud at {creds.service_url}")
                 return client
         except Exception as e:
-            logger.warning("Immediate health check failed: %s", e)
+            logger.warning("Immediate health check failed: %s", e, exc_info=True)
         await client.close()
 
         if not is_token_expired(creds):
@@ -215,7 +215,7 @@ async def _serve_cloud(
                     return client
                 await client.close()
             except Exception as e:
-                logger.warning("Token refresh failed, re-authenticating: %s", e)
+                logger.warning("Token refresh failed, re-authenticating: %s", e, exc_info=True)
 
     # Step 2: Device Code Flow — only possible with an Auth0 device client ID.
     # Fail loudly here rather than mid-flow: a bare serve() with nothing saved
