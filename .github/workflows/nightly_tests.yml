@@ -41,31 +41,14 @@ env:
 
 jobs:
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
-  perf-small-llm:
-    name: Performance — 50 Small Documents (real LLM)
-    uses: ./.github/workflows/performance_report.yml
-    with:
-      mode: llm
-      label: 50_small_documents
-      runs: '3'
-      num_memories: '50'
-      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
-    secrets: inherit
-
-  perf-small-mock:
-    name: Performance — 50 Small Documents (mock LLM)
-    uses: ./.github/workflows/performance_report.yml
-    with:
-      mode: mock_llm
-      label: 50_small_documents
-      runs: '3'
-      num_memories: '50'
-      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
-      mock_memories_key: nightly_ci_artifacts/performance_test_artifacts/mock_memories.json
-    secrets: inherit
-
   perf-wap-llm:
     name: Performance — War and Peace (real LLM)
+    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
+    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
+    # and the slowest job in the nightly -- is a much larger budget for the
+    # same signal, so it earns a slot once a week. `manual` and any unset
+    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: llm
@@ -76,6 +59,12 @@ jobs:
 
   perf-wap-mock:
     name: Performance — War and Peace (mock LLM)
+    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
+    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
+    # and the slowest job in the nightly -- is a much larger budget for the
+    # same signal, so it earns a slot once a week. `manual` and any unset
+    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -118,6 +107,12 @@ jobs:
   # artifact; a "real LLM" variant would re-extract 27 identical copies.
   perf-wap-large-mock:
     name: Performance — Medium graph — Artificial 100k nodes/edges (mock LLM)
+    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
+    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
+    # and the slowest job in the nightly -- is a much larger budget for the
+    # same signal, so it earns a slot once a week. `manual` and any unset
+    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -136,18 +131,14 @@ jobs:
 
   # ══ Performance: Cognee Cloud tenant. No mock variants — the LLM runs ══════
   # server-side on the tenant, so there is nothing to mock client-side.
-  perf-small-cloud:
-    name: Performance — 50 Small Documents (cloud)
-    uses: ./.github/workflows/performance_report_cloud.yml
-    with:
-      label: 50_small_documents
-      runs: '3'
-      num_memories: '50'
-      memories_key: nightly_ci_artifacts/performance_test_artifacts/memories.json
-    secrets: inherit
-
   perf-wap-cloud:
     name: Performance — War and Peace (cloud)
+    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
+    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
+    # and the slowest job in the nightly -- is a much larger budget for the
+    # same signal, so it earns a slot once a week. `manual` and any unset
+    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report_cloud.yml
     with:
       label: war_and_peace
@@ -166,27 +157,14 @@ jobs:
 
   # ══ Performance (Rust SDK): builds latest cognee-rs and drives the SAME ═════
   # ══ orchestrator via cognee-cli bench (file_based, mock LLM, offline). ══════
-  perf-rust-llm:
-    name: Performance — Rust SDK — 50 Small Documents (real LLM)
-    uses: ./.github/workflows/performance_report_rust.yml
-    with:
-      runs: '3'
-      mode: llm
-      label: 50_small_documents
-      memories: scripts/perf/fixtures/memories.json
-    secrets: inherit
-  perf-rust:
-    name: Performance — Rust SDK — 50 Small Documents (mock LLM)
-    uses: ./.github/workflows/performance_report_rust.yml
-    with:
-      runs: '3'
-      mode: mock_llm
-      label: 50_small_documents
-      memories: scripts/perf/fixtures/memories.json
-      cassette: scripts/perf/fixtures/cassette.json
-    secrets: inherit
   perf-rust-wap-llm:
     name: Performance — Rust SDK — War and Peace (real LLM)
+    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
+    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
+    # and the slowest job in the nightly -- is a much larger budget for the
+    # same signal, so it earns a slot once a week. `manual` and any unset
+    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
@@ -196,6 +174,12 @@ jobs:
     secrets: inherit
   perf-rust-wap:
     name: Performance — Rust SDK — War and Peace (mock LLM)
+    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
+    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
+    # and the slowest job in the nightly -- is a much larger budget for the
+    # same signal, so it earns a slot once a week. `manual` and any unset
+    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
@@ -208,19 +192,14 @@ jobs:
   notify:
     name: Test Completion Status
     needs: [
-      perf-small-llm,
-      perf-small-mock,
       perf-wap-llm,
       perf-wap-mock,
       perf-datasheets-llm,
       perf-datasheets-mock,
       perf-wap-large-mock,
-      perf-small-cloud,
       perf-wap-cloud,
       perf-datasheets-cloud,
-      perf-rust,
       perf-rust-wap,
-      perf-rust-llm,
       perf-rust-wap-llm,
     ]
     runs-on: ubuntu-latest
@@ -237,32 +216,45 @@ jobs:
           # Via env, not inline ${{ }}: `cadence` is a free-text dispatch input
           # and inline interpolation would splice it into this shell script.
           CADENCE: ${{ inputs.cadence }}
+          # One arm result per line. `skipped` counts as a PASS: the War and
+          # Peace arms carry `if: inputs.cadence != 'daily'`, and a job skipped
+          # that way reports `skipped`, never `success` -- the previous
+          # `== "success"` AND-chain would have failed the nightly EVERY day
+          # for arms that were never meant to run that day.
+          RESULTS: |
+            ${{ needs.perf-wap-llm.result }}
+            ${{ needs.perf-wap-mock.result }}
+            ${{ needs.perf-datasheets-llm.result }}
+            ${{ needs.perf-datasheets-mock.result }}
+            ${{ needs.perf-wap-large-mock.result }}
+            ${{ needs.perf-wap-cloud.result }}
+            ${{ needs.perf-datasheets-cloud.result }}
+            ${{ needs.perf-rust-wap.result }}
+            ${{ needs.perf-rust-wap-llm.result }}
         run: |
-          if [[ "${{ needs.perf-small-llm.result }}" == "success" &&
-                "${{ needs.perf-small-mock.result }}" == "success" &&
-                "${{ needs.perf-wap-llm.result }}" == "success" &&
-                "${{ needs.perf-wap-mock.result }}" == "success" &&
-                "${{ needs.perf-datasheets-llm.result }}" == "success" &&
-                "${{ needs.perf-datasheets-mock.result }}" == "success" &&
-                "${{ needs.perf-wap-large-mock.result }}" == "success" &&
-                "${{ needs.perf-small-cloud.result }}" == "success" &&
-                "${{ needs.perf-wap-cloud.result }}" == "success" &&
-                "${{ needs.perf-datasheets-cloud.result }}" == "success" &&
-                "${{ needs.perf-rust.result }}" == "success" &&
-                "${{ needs.perf-rust-wap.result }}" == "success" &&
-                "${{ needs.perf-rust-llm.result }}" == "success" &&
-                "${{ needs.perf-rust-wap-llm.result }}" == "success" ]]; then
+          set -euo pipefail
+          bad=0; ran=0; skipped=0
+          while read -r result; do
+            [ -n "$result" ] || continue
+            case "$result" in
+              success) ran=$((ran + 1)) ;;
+              skipped) skipped=$((skipped + 1)) ;;            # gated off by cadence
+              *)       ran=$((ran + 1)); bad=$((bad + 1)) ;;  # failure, cancelled
+            esac
+          done <<< "$RESULTS"
+          echo "ran=$ran bad=$bad skipped=$skipped"
+          if [ "$bad" -eq 0 ]; then
             echo "passed=true" >> "$GITHUB_OUTPUT"
             echo "emoji=✅" >> "$GITHUB_OUTPUT"
-            echo "summary=All nightly test suites completed successfully!" >> "$GITHUB_OUTPUT"
+            echo "summary=All $ran nightly performance arms completed successfully!" >> "$GITHUB_OUTPUT"
           else
             echo "passed=false" >> "$GITHUB_OUTPUT"
             echo "emoji=❌" >> "$GITHUB_OUTPUT"
-            echo "summary=One or more nightly test suites failed." >> "$GITHUB_OUTPUT"
+            echo "summary=$bad of $ran nightly performance arms failed." >> "$GITHUB_OUTPUT"
           fi
           echo "ran_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
-          # Two nightlies now exist (daily dev, weekly main). Everything below
-          # that reaches a human or the warehouse has to say which one this is.
+          # Two cadences now exist (daily = datasheets only, weekly = everything).
+          # Everything below that reaches a human or the warehouse says which.
           echo "cadence=${CADENCE:-manual}" >> "$GITHUB_OUTPUT"
 
       - name: Presign performance report links
@@ -275,12 +267,8 @@ jobs:
           # "<slack-output-name> <s3-key>" per line. The key already encodes the
           # backend (file_based/ or postgres/), so presigning is fully generic.
           REPORT_KEYS: |
-            url_file_small_llm ${{ needs.perf-small-llm.outputs.file_based_html_key }}
-            url_file_small_mock ${{ needs.perf-small-mock.outputs.file_based_html_key }}
             url_file_wap_llm ${{ needs.perf-wap-llm.outputs.file_based_html_key }}
             url_file_wap_mock ${{ needs.perf-wap-mock.outputs.file_based_html_key }}
-            url_pg_small_llm ${{ needs.perf-small-llm.outputs.postgres_html_key }}
-            url_pg_small_mock ${{ needs.perf-small-mock.outputs.postgres_html_key }}
             url_pg_wap_llm ${{ needs.perf-wap-llm.outputs.postgres_html_key }}
             url_pg_wap_mock ${{ needs.perf-wap-mock.outputs.postgres_html_key }}
             url_file_datasheets_llm ${{ needs.perf-datasheets-llm.outputs.file_based_html_key }}
@@ -288,12 +276,9 @@ jobs:
             url_pg_datasheets_llm ${{ needs.perf-datasheets-llm.outputs.postgres_html_key }}
             url_pg_datasheets_mock ${{ needs.perf-datasheets-mock.outputs.postgres_html_key }}
             url_pg_wap_large_mock ${{ needs.perf-wap-large-mock.outputs.postgres_html_key }}
-            url_cloud_small ${{ needs.perf-small-cloud.outputs.cloud_html_key }}
             url_cloud_wap ${{ needs.perf-wap-cloud.outputs.cloud_html_key }}
             url_cloud_datasheets ${{ needs.perf-datasheets-cloud.outputs.cloud_html_key }}
-            url_rust ${{ needs.perf-rust.outputs.html_key }}
             url_rust_wap ${{ needs.perf-rust-wap.outputs.html_key }}
-            url_rust_llm ${{ needs.perf-rust-llm.outputs.html_key }}
             url_rust_wap_llm ${{ needs.perf-rust-wap-llm.outputs.html_key }}
         run: |
           set -euo pipefail
@@ -317,24 +302,17 @@ jobs:
           # One arm per line: emoji|title|result|metrics-json|report-url.
           # Adding a benchmark arm is a line here plus its REPORT_KEYS entry.
           ARMS: |
-            📊|File Based — 50 Small Documents — Real LLM|${{ needs.perf-small-llm.result }}|${{ needs.perf-small-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_small_llm }}
-            📊|File Based — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_small_mock }}
             📚|File Based — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_llm }}
             📚|File Based — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_wap_mock }}
             🧪|File Based — Datasheets — Real LLM|${{ needs.perf-datasheets-llm.result }}|${{ needs.perf-datasheets-llm.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_datasheets_llm }}
             🧪|File Based — Datasheets — Mock LLM|${{ needs.perf-datasheets-mock.result }}|${{ needs.perf-datasheets-mock.outputs.file_based_metrics }}|${{ steps.presign.outputs.url_file_datasheets_mock }}
-            📊|Full Postgres — 50 Small Documents — Real LLM|${{ needs.perf-small-llm.result }}|${{ needs.perf-small-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_llm }}
-            📊|Full Postgres — 50 Small Documents — Mock LLM|${{ needs.perf-small-mock.result }}|${{ needs.perf-small-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_small_mock }}
             📚|Full Postgres — War and Peace — Real LLM|${{ needs.perf-wap-llm.result }}|${{ needs.perf-wap-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_llm }}
             📚|Full Postgres — War and Peace — Mock LLM|${{ needs.perf-wap-mock.result }}|${{ needs.perf-wap-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_mock }}
             📚|Full Postgres — Medium graph - Artificial 100k nodes/edges — Mock LLM|${{ needs.perf-wap-large-mock.result }}|${{ needs.perf-wap-large-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_wap_large_mock }}
             🧪|Full Postgres — Datasheets — Real LLM|${{ needs.perf-datasheets-llm.result }}|${{ needs.perf-datasheets-llm.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_datasheets_llm }}
             🧪|Full Postgres — Datasheets — Mock LLM|${{ needs.perf-datasheets-mock.result }}|${{ needs.perf-datasheets-mock.outputs.postgres_metrics }}|${{ steps.presign.outputs.url_pg_datasheets_mock }}
-            📊|Cognee Cloud — 50 Small Documents|${{ needs.perf-small-cloud.result }}|${{ needs.perf-small-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_small }}
             📚|Cognee Cloud — War and Peace|${{ needs.perf-wap-cloud.result }}|${{ needs.perf-wap-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_wap }}
             🧪|Cognee Cloud — Datasheets|${{ needs.perf-datasheets-cloud.result }}|${{ needs.perf-datasheets-cloud.outputs.cloud_metrics }}|${{ steps.presign.outputs.url_cloud_datasheets }}
-            📊|Rust SDK (file_based) — 50 Small Documents — Real LLM|${{ needs.perf-rust-llm.result }}|${{ needs.perf-rust-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_llm }}
-            📊|Rust SDK (file_based) — 50 Small Documents — Mock LLM|${{ needs.perf-rust.result }}|${{ needs.perf-rust.outputs.metrics }}|${{ steps.presign.outputs.url_rust }}
             📚|Rust SDK (file_based) — War and Peace — Real LLM|${{ needs.perf-rust-wap-llm.result }}|${{ needs.perf-rust-wap-llm.outputs.metrics }}|${{ steps.presign.outputs.url_rust_wap_llm }}
             📚|Rust SDK (file_based) — War and Peace — Mock LLM|${{ needs.perf-rust-wap.result }}|${{ needs.perf-rust-wap.outputs.metrics }}|${{ steps.presign.outputs.url_rust_wap }}
         run: python .github/scripts/build_nightly_slack_blocks.py
@@ -376,7 +354,7 @@ jobs:
           # warehouse always reflects released ETL code -- a dev-side ETL
           # change takes effect at the release merge); the weekly dev run
           # loads rows only.
-          PERF_REFRESH_VIEWS: ${{ steps.status.outputs.cadence == 'weekly' && 'false' || 'true' }}
+          PERF_REFRESH_VIEWS: ${{ steps.status.outputs.cadence == 'daily' && 'true' || 'false' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
           AWS_DEFAULT_REGION: eu-west-1

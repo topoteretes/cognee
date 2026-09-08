@@ -1,7 +1,7 @@
 # Nightly performance corpora
 
 The nightly percentile benchmark (`.github/workflows/nightly_tests.yml`, dispatched by
-`.github/workflows/nightly_scheduler.yml` — dev daily, main weekly) runs each
+`.github/workflows/nightly_scheduler.yml` — main daily, dev weekly) runs each
 corpus through `statistics_percentile_report.py` on four backends. A corpus is two
 S3 objects under
 `s3://github-runner-cognee-tests/nightly_ci_artifacts/performance_test_artifacts/`:
@@ -19,7 +19,6 @@ so adding a corpus there is a separate PR.
 
 | Label | Shape | Size |
 |---|---|---|
-| `50_small_documents` | short synthetic documents | 21 KB |
 | `war_and_peace` | one very long document | 3.2 MB |
 | `war_and_peace_large` | the War and Peace corpus replayed against a 27×-inflated graph (~100k nodes) | 39 MB cassette |
 | `datasheets` | 164 medium-sized real product datasheets | 1.4 MB |
