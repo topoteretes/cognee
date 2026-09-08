@@ -92,7 +92,7 @@ async def test_summarize_text_leaves_provenance_unset_when_capture_is_off(monkey
     assert capture.is_active() is False
     assert summary.text == f"Summary of {summary.made_from.text}"
     hashing.assert_not_called()
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_summarize_text_returns_empty_input_without_touching_capture(
     assert await summarize_text_module.summarize_text([], summarization_model=object) == []
 
     extract.assert_not_awaited()
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
 
 def test_text_summary_node_carries_no_capture_provenance():

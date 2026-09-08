@@ -163,8 +163,8 @@ async def test_sink_timeout_cuts_a_wedged_local_write(tmp_path):
     elapsed = time.monotonic() - started
 
     assert elapsed < 0.5  # the 0.05 s timeout, not the 1 s stall
-    assert hook._dropped == 1
-    assert not hook._buffer
+    assert hook._runtime.dropped == 1
+    assert not hook._runtime.buffer
     assert hook._in_flight_total() == 0
 
 

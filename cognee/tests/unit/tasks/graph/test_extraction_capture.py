@@ -146,8 +146,8 @@ async def test_capture_off_never_dumps_buffers_or_starts_a_flusher(monkeypatch, 
     await _run_extraction(chunks, graphs, resolver=_StubResolver())
 
     assert capture.is_active() is False
-    assert not capture.hook._buffer
-    assert not capture.hook._flushers
+    assert not capture.hook._runtime.buffer
+    assert not capture.hook._runtime.flushers
     # The dedup itself is unchanged: first node per id wins.
     assert [(node.id, node.name) for node in graphs[0].nodes] == [("dup", "Alice"), ("n2", "Carol")]
 
@@ -168,7 +168,7 @@ async def test_extract_content_graph_off_path_never_hashes(monkeypatch):
 
     assert isinstance(result, KnowledgeGraph)
     assert capture.current_scope() is None
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +555,7 @@ async def test_no_snapshot_is_taken_for_a_chunk_graph_the_full_buffer_would_drop
 
     assert result == chunks
     assert _CountingDumpGraph.dumps == 0
-    assert hook._dropped == 2  # both chunk graphs, accounted for, never built
+    assert hook._runtime.dropped == 2  # both chunk graphs, accounted for, never built
 
 
 @pytest.mark.asyncio

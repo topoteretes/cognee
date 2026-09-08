@@ -172,7 +172,7 @@ def test_bad_batch_size_in_env_disables_capture_instead_of_freezing(clean_captur
     # The bad knob is rejected at initialization: capture stays off and the
     # cached knobs keep their defaults, so the observed operation is unaffected.
     assert capture.is_active() is False
-    assert hook.BATCH_SIZE == 64
+    assert hook._runtime.batch_size == 64
 
 
 def test_prompt_fingerprints():

@@ -115,9 +115,9 @@ async def test_off_by_default_costs_nothing(monkeypatch, env_value):
     capture.emit(KIND_SUMMARY_GENERATED, _Explosive())
     capture.emit(KIND_SUMMARY_GENERATED, {"a": 1}, payload_kind="json")
 
-    assert not hook._buffer
-    assert not hook._flushers
-    assert hook._dropped == 0
+    assert not hook._runtime.buffer
+    assert not hook._runtime.flushers
+    assert hook._runtime.dropped == 0
     # note()/bump() are no-ops without a scope.
     capture.note("k", "v")
     capture.bump("c")
@@ -138,10 +138,10 @@ async def test_emit_before_any_is_active_never_initializes(monkeypatch):
     capture.emit(KIND_SUMMARY_GENERATED, _Explosive())
     capture.emit(KIND_RUN_MANIFEST, {"kind": "pipeline"}, payload_kind="json")
 
-    assert hook._initialized is False
-    assert hook._sink is None
-    assert not hook._buffer
-    assert not hook._flushers
+    assert hook._runtime.initialized is False
+    assert hook._runtime.sink is None
+    assert not hook._runtime.buffer
+    assert not hook._runtime.flushers
 
 
 def test_auto_registers_storage_sink_from_env(monkeypatch, tmp_path):
@@ -152,7 +152,7 @@ def test_auto_registers_storage_sink_from_env(monkeypatch, tmp_path):
     try:
         # No emit() has happened yet: is_active() itself is the initialization point.
         assert capture.is_active() is True
-        assert isinstance(hook._sink, StorageSink)
+        assert isinstance(hook._runtime.sink, StorageSink)
         assert get_capture_config().cognee_capture_dir == os.path.join(str(tmp_path), "capture")
     finally:
         get_base_config.cache_clear()
@@ -166,7 +166,7 @@ def test_initialization_failure_leaves_capture_off(monkeypatch):
     monkeypatch.setattr(hook, "logger", fake_logger)
 
     assert capture.is_active() is False
-    assert hook._initialized is True
+    assert hook._runtime.initialized is True
     fake_logger.warning.assert_called_once()
 
 
@@ -190,11 +190,11 @@ def test_register_capture_sink_keeps_the_caller_sink_but_loads_env_knobs(monkeyp
     finally:
         get_base_config.cache_clear()
 
-    assert hook._sink is sink
-    assert hook.QUEUE_SIZE == 7
-    assert hook.BATCH_SIZE == 3
-    assert hook.FLUSH_INTERVAL_S == 0.25
-    assert hook.SINK_TIMEOUT_S == 3.5
+    assert hook._runtime.sink is sink
+    assert hook._runtime.queue_size == 7
+    assert hook._runtime.batch_size == 3
+    assert hook._runtime.flush_interval_s == 0.25
+    assert hook._runtime.sink_timeout_s == 3.5
 
 
 # ---------------------------------------------------------------------------
@@ -253,8 +253,8 @@ async def test_overflow_drops_newest_and_reports_delta(fake_capture_sink):
     with capture.run_scope(uuid4(), kind="pipeline"):
         for index in range(5):
             capture.emit(KIND_SUMMARY_GENERATED, f"s{index}", payload_kind="text")
-        assert hook._dropped == 2
-        assert len(hook._buffer) == 3
+        assert hook._runtime.dropped == 2
+        assert len(hook._runtime.buffer) == 3
         await capture.drain()
     await capture.drain()
 
@@ -281,7 +281,7 @@ async def test_batch_size_wakes_flusher_without_drain(fake_capture_sink):
         await _wait_until(lambda: len(fake_capture_sink.records) >= 4)
 
     assert sorted(r["payload"] for r in fake_capture_sink.records) == ["s0", "s1", "s2", "s3"]
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     assert flusher.loop is asyncio.get_running_loop()
     assert not flusher.task.done()
 
@@ -306,7 +306,7 @@ async def test_batch_wake_is_scheduled_once_per_synchronous_burst(monkeypatch, f
 
     assert len(scheduled) == 1
     await _wait_until(lambda: len(fake_capture_sink.records) >= 40)
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     assert flusher.wake_pending is False
 
 
@@ -316,7 +316,7 @@ async def test_scope_entry_starts_a_flusher_for_worker_thread_emits(fake_capture
 
     with capture.run_scope(uuid4(), kind="pipeline"):
         # Started eagerly at scope entry — before any on-loop emit.
-        [flusher] = hook._flushers.values()
+        [flusher] = hook._runtime.flushers.values()
         assert flusher.loop is asyncio.get_running_loop()
 
         def worker():
@@ -326,7 +326,7 @@ async def test_scope_entry_starts_a_flusher_for_worker_thread_emits(fake_capture
         thread = threading.Thread(target=worker)
         thread.start()
         thread.join()
-        assert len(hook._buffer) == 5
+        assert len(hook._runtime.buffer) == 5
         # No drain, no on-loop emit: the interval tick alone delivers them.
         await _wait_until(lambda: len(fake_capture_sink.records) >= 5)
 
@@ -346,7 +346,7 @@ def test_emit_and_drain_across_asyncio_run_boundaries(fake_capture_sink):
     asyncio.run(_round("first"))
     # asyncio.run cancelled the flusher; the entry stays as a tombstone for the
     # closed loop until the next flusher start prunes it.
-    [tombstone] = hook._flushers.values()
+    [tombstone] = hook._runtime.flushers.values()
     assert tombstone.loop.is_closed()
     assert tombstone.task.cancelled()
 
@@ -354,15 +354,15 @@ def test_emit_and_drain_across_asyncio_run_boundaries(fake_capture_sink):
     # leaves a stale entry; the next emit must prune it.
     stale_loop = asyncio.new_event_loop()
     stale_loop.close()
-    stale = hook._Flusher(loop=stale_loop, wake=asyncio.Event())
+    stale = hook._Flusher(runtime=hook._runtime, loop=stale_loop, wake=asyncio.Event())
     stale.task = SimpleNamespace(done=lambda: False)
-    hook._flushers[stale_loop] = stale
+    hook._runtime.flushers[stale_loop] = stale
 
     async def _second():
         capture.emit(KIND_SUMMARY_GENERATED, "second", payload_kind="text")
         await capture.drain()
-        assert len(hook._flushers) == 1
-        [flusher] = hook._flushers.values()
+        assert len(hook._runtime.flushers) == 1
+        [flusher] = hook._runtime.flushers.values()
         assert flusher.loop is asyncio.get_running_loop()
         assert not flusher.loop.is_closed()
 
@@ -381,13 +381,13 @@ def test_drain_without_a_flusher_delivers_everything(fake_capture_sink):
     worker.start()
     worker.join()
 
-    assert len(hook._buffer) == 2
-    assert not hook._flushers
+    assert len(hook._runtime.buffer) == 2
+    assert not hook._runtime.flushers
 
     asyncio.run(capture.drain())
 
     assert sorted(r["payload"] for r in fake_capture_sink.records) == ["sync", "thread"]
-    assert not hook._buffer
+    assert not hook._runtime.buffer
 
 
 def test_emit_during_loop_teardown_starts_no_flusher_on_the_closing_loop(fake_capture_sink):
@@ -409,7 +409,7 @@ def test_emit_during_loop_teardown_starts_no_flusher_on_the_closing_loop(fake_ca
         await agen.__anext__()
         # BATCH_SIZE - 1 buffered: the manifest emitted at teardown completes a batch.
         capture.emit(KIND_SUMMARY_GENERATED, "x", payload_kind="text", run_id="run-0")
-        seen["flusher"] = hook._flushers[asyncio.get_running_loop()]
+        seen["flusher"] = hook._runtime.flushers[asyncio.get_running_loop()]
 
     asyncio.run(main())
 
@@ -418,10 +418,13 @@ def test_emit_during_loop_teardown_starts_no_flusher_on_the_closing_loop(fake_ca
     # cancelled flusher's tombstone keeps the events in the deque instead.
     flusher = seen["flusher"]
     assert flusher.task.cancelled() and flusher.loop.is_closed()
-    assert hook._flushers[flusher.loop] is flusher
-    assert [event.kind for event in hook._buffer] == [KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST]
+    assert hook._runtime.flushers[flusher.loop] is flusher
+    assert [event.kind for event in hook._runtime.buffer] == [
+        KIND_SUMMARY_GENERATED,
+        KIND_RUN_MANIFEST,
+    ]
     assert hook._in_flight_total() == 0
-    assert hook._dropped == 0
+    assert hook._runtime.dropped == 0
 
     asyncio.run(capture.drain())
 
@@ -429,8 +432,8 @@ def test_emit_during_loop_teardown_starts_no_flusher_on_the_closing_loop(fake_ca
     assert sorted(kinds) == sorted([KIND_SUMMARY_GENERATED, KIND_RUN_MANIFEST])
     [manifest] = [r for r in fake_capture_sink.records if r["kind"] == KIND_RUN_MANIFEST]
     assert manifest["run_id"] == "run-1" and manifest["dataset_id"] == "ds-1"
-    assert hook._dropped == 0
-    assert not hook._flushers  # the closed loop's tombstone was pruned by the drain
+    assert hook._runtime.dropped == 0
+    assert not hook._runtime.flushers  # the closed loop's tombstone was pruned by the drain
 
 
 # ---------------------------------------------------------------------------
@@ -441,9 +444,9 @@ def test_emit_during_loop_teardown_starts_no_flusher_on_the_closing_loop(fake_ca
 @pytest.mark.asyncio
 async def test_emit_never_serializes_on_the_hot_path(fake_capture_sink):
     capture.emit(KIND_EXTRACTION_CHUNK_GRAPH, _Explosive())
-    assert len(hook._buffer) == 1
+    assert len(hook._runtime.buffer) == 1
     # Held by reference until the flusher serializes it (off the hot path).
-    assert isinstance(hook._buffer[0].payload, _Explosive)
+    assert isinstance(hook._runtime.buffer[0].payload, _Explosive)
 
 
 @pytest.mark.asyncio
@@ -487,7 +490,7 @@ async def test_bad_payload_becomes_error_record_and_flusher_survives(fake_captur
     assert by_kind[KIND_SUMMARY_GENERATED]["payload"] == "ok"
 
     # The flusher task is still alive and keeps delivering.
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     assert not flusher.task.done()
     capture.emit(KIND_SUMMARY_GENERATED, "again", payload_kind="text")
     await capture.drain()
@@ -518,8 +521,8 @@ async def test_failing_sink_is_logged_at_debug_and_next_batch_delivered(monkeypa
     assert hook._in_flight_total() == 0
     # The event the sink rejected is gone: it must be accounted for, not hidden,
     # or the run manifest reports events_dropped = 0 while records were lost.
-    assert hook._dropped == 1
-    assert not hook._buffer
+    assert hook._runtime.dropped == 1
+    assert not hook._runtime.buffer
 
 
 @pytest.mark.asyncio
@@ -544,21 +547,21 @@ async def test_base_exception_from_a_sink_requeues_the_batch_and_the_flusher_is_
 
     capture.emit(KIND_SUMMARY_GENERATED, "a", payload_kind="text")
     capture.emit(KIND_SUMMARY_GENERATED, "b", payload_kind="text")  # BATCH_SIZE wake
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     await _wait_until(flusher.task.done)
 
     # Out of contract (sinks raise Exception subclasses only), but the batch is
     # not lost and the crash is retrieved — no "Task exception was never
     # retrieved" ERROR. A crashed (not cancelled) flusher is not a tombstone.
     assert not flusher.task.cancelled()
-    assert [event.payload for event in hook._buffer] == ["a", "b"]
-    assert hook._dropped == 0
+    assert [event.payload for event in hook._runtime.buffer] == ["a", "b"]
+    assert hook._runtime.dropped == 0
     assert hook._in_flight_total() == 0
-    assert asyncio.get_running_loop() not in hook._flushers
+    assert asyncio.get_running_loop() not in hook._runtime.flushers
     fake_logger.debug.assert_any_call("capture flusher stopped (%r)", ANY)
 
     capture.emit(KIND_SUMMARY_GENERATED, "c", payload_kind="text")
-    [replacement] = hook._flushers.values()
+    [replacement] = hook._runtime.flushers.values()
     assert replacement is not flusher and not replacement.task.done()
     await capture.drain()
     redelivered = [record["payload"] for call in calls[1:] for record in call]
@@ -585,18 +588,18 @@ async def test_cancelled_flush_requeues_popped_events(monkeypatch, fake_capture_
     monkeypatch.setattr(hook, "_serialize_batch", blocking_serialize)
     try:
         capture.emit(KIND_SUMMARY_GENERATED, "one", payload_kind="text")
-        flusher = hook._flushers[asyncio.get_running_loop()]
+        flusher = hook._runtime.flushers[asyncio.get_running_loop()]
         await _wait_until(entered.is_set)
-        assert not hook._buffer  # popped, mid-serialization in the worker thread
+        assert not hook._runtime.buffer  # popped, mid-serialization in the worker thread
 
         flusher.task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await flusher.task
 
-        assert [event.payload for event in hook._buffer] == ["one"]
+        assert [event.payload for event in hook._runtime.buffer] == ["one"]
         # The cancelled entry stays as a tombstone: a cancelled flusher means
         # its loop is going away, and no replacement is started on it.
-        assert hook._flushers[asyncio.get_running_loop()] is flusher
+        assert hook._runtime.flushers[asyncio.get_running_loop()] is flusher
         assert hook._any_live_flusher() is None
     finally:
         release.set()
@@ -610,26 +613,26 @@ async def test_cancelled_flush_requeues_popped_events(monkeypatch, fake_capture_
 @pytest.mark.asyncio
 async def test_shutdown_drains_and_stops_the_flusher(fake_capture_sink):
     capture.emit(KIND_SUMMARY_GENERATED, "last", payload_kind="text")
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
 
     await capture.shutdown()
 
     assert [r["payload"] for r in fake_capture_sink.records] == ["last"]
     assert flusher.task.cancelled()
     loop = asyncio.get_running_loop()
-    assert hook._flushers[loop] is flusher  # tombstone
+    assert hook._runtime.flushers[loop] is flusher  # tombstone
 
     # An emit after shutdown (one more request during a lifespan shutdown) does
     # not resurrect a flusher; it stays buffered for the atexit hook.
     capture.emit(KIND_SUMMARY_GENERATED, "post", payload_kind="text")
-    assert hook._flushers[loop] is flusher
-    assert [event.payload for event in hook._buffer] == ["post"]
+    assert hook._runtime.flushers[loop] is flusher
+    assert [event.payload for event in hook._runtime.buffer] == ["post"]
 
     # Registering a sink re-arms the loop: the next emit gets a fresh flusher.
     capture.register_capture_sink(fake_capture_sink)
     capture.emit(KIND_SUMMARY_GENERATED, "rearmed", payload_kind="text")
-    assert hook._flushers[loop] is not flusher
-    assert not hook._flushers[loop].task.done()
+    assert hook._runtime.flushers[loop] is not flusher
+    assert not hook._runtime.flushers[loop].task.done()
     await capture.drain()
     assert [r["payload"] for r in fake_capture_sink.records] == ["last", "post", "rearmed"]
 
@@ -680,7 +683,7 @@ async def test_bounded_wait_times_out_and_cancels_the_inner():
 async def test_flusher_cancelled_as_its_wake_lands_finishes_cancelled(fake_capture_sink):
     hook._configure(batch_size=4, flush_interval_s=60.0)
     hook.ensure_flusher()
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     await asyncio.sleep(0)
     await asyncio.sleep(0)  # parked on its interval wait
 
@@ -729,7 +732,7 @@ async def test_drain_propagates_the_callers_cancellation():
     assert caller.cancelled()
     assert [r["payload"] for r in delivered] == ["c0", "c1", "c2"]
     # The acknowledgement never ran, so the group is re-buffered: at-least-once.
-    assert [event.payload for event in hook._buffer] == ["c0", "c1", "c2"]
+    assert [event.payload for event in hook._runtime.buffer] == ["c0", "c1", "c2"]
     assert hook._in_flight_total() == 0
 
 
@@ -748,7 +751,7 @@ async def test_drain_waits_for_a_batch_the_flusher_is_serializing(
     for index in range(8):
         capture.emit(KIND_SUMMARY_GENERATED, f"e{index}", payload_kind="text")
     await _wait_until(entered.is_set)  # flusher popped 4, parked in the worker thread
-    assert len(hook._buffer) == 4
+    assert len(hook._runtime.buffer) == 4
     assert hook._in_flight_total() == 4  # counted per event, from pop to delivery
 
     async def release_later():
@@ -781,7 +784,7 @@ async def test_shutdown_recovers_a_batch_cancelled_mid_serialization(
     await capture.shutdown(timeout=0.2)
 
     assert sorted(r["payload"] for r in fake_capture_sink.records) == [f"e{i}" for i in range(8)]
-    assert not hook._buffer
+    assert not hook._runtime.buffer
     assert hook._any_live_flusher() is None
     assert hook._in_flight_total() == 0
 
@@ -834,14 +837,14 @@ async def test_hung_sink_write_times_out_and_the_flusher_recovers(monkeypatch):
     await _wait_until(lambda: hook._in_flight_total() == 0)
     fake_logger.debug.assert_any_call("capture sink timed out, %d event(s) dropped (%s)", 2, ANY)
     # The abandoned write's events are counted, not silently lost.
-    assert hook._dropped == 2
+    assert hook._runtime.dropped == 2
 
     capture.emit(KIND_SUMMARY_GENERATED, "e2", payload_kind="text")
     started = time.monotonic()
     await capture.drain(timeout=2.0)
     assert time.monotonic() - started < 1.0  # not pinned by the abandoned write
     assert [r["payload"] for r in calls[1]] == ["e2"]
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     assert not flusher.task.done()
 
 
@@ -865,8 +868,8 @@ async def test_flush_failure_before_the_sink_is_accounted_not_requeued(monkeypat
 
     # Re-queuing would pin a deterministic failure at the head of the buffer
     # forever; the batch is dropped and counted instead of vanishing silently.
-    assert not hook._buffer
-    assert hook._dropped == 1
+    assert not hook._runtime.buffer
+    assert hook._runtime.dropped == 1
     assert hook._in_flight_total() == 0
     assert delivered == []
     fake_logger.debug.assert_any_call("capture flush failed, %d event(s) dropped (%s)", 1, ANY)
@@ -881,9 +884,9 @@ async def test_events_orphaned_by_clearing_the_sink_are_counted_as_dropped(fake_
     await capture.drain()
 
     # Nothing to deliver to; the loss is accounted, not hidden.
-    assert not hook._buffer
+    assert not hook._runtime.buffer
     assert fake_capture_sink.records == []
-    assert hook._dropped == 2
+    assert hook._runtime.dropped == 2
 
 
 @pytest.mark.asyncio
@@ -939,9 +942,9 @@ async def test_drain_deadline_bounds_sink_writes_inside_a_batch():
     assert elapsed < 0.6, elapsed
     assert len(calls) == 1  # the budget ran out during the first write
     # Nothing is lost: the cut-off group and the two never started are back, in order.
-    assert [event.payload for event in hook._buffer] == ["g0", "g1", "g2"]
+    assert [event.payload for event in hook._runtime.buffer] == ["g0", "g1", "g2"]
     assert hook._in_flight_total() == 0
-    assert hook._dropped == 0
+    assert hook._runtime.dropped == 0
 
 
 def test_a_batch_stranded_on_a_dead_loop_is_recovered_not_waited_for():
@@ -958,7 +961,7 @@ def test_a_batch_stranded_on_a_dead_loop_is_recovered_not_waited_for():
 
     # run_until_complete returns with the flusher mid-write: the batch is stranded.
     stranded.run_until_complete(emit_and_return())
-    [flusher] = hook._flushers.values()
+    [flusher] = hook._runtime.flushers.values()
     assert flusher.loop is stranded and not flusher.task.done()
     assert hook._in_flight_total() == 1
 
@@ -985,9 +988,9 @@ def test_a_batch_stranded_on_a_dead_loop_is_recovered_not_waited_for():
     assert time.monotonic() - started < 0.5
     assert [record["payload"] for record in delivered] == ["stranded"]
     assert hook._in_flight_total() == 0
-    assert hook._dropped == 0
-    assert not hook._buffer
-    assert not hook._flushers
+    assert hook._runtime.dropped == 0
+    assert not hook._runtime.buffer
+    assert not hook._runtime.flushers
 
 
 def test_thread_emits_wake_a_running_loop_not_a_stopped_one():
@@ -1006,7 +1009,7 @@ def test_thread_emits_wake_a_running_loop_not_a_stopped_one():
 
     stale.run_until_complete(open_scope_only())
     # Stopped, not closed: it stays registered, first in insertion order.
-    assert next(iter(hook._flushers)) is stale
+    assert next(iter(hook._runtime.flushers)) is stale
 
     async def live_run():
         with capture.run_scope("live", kind="pipeline"):
@@ -1025,9 +1028,9 @@ def test_thread_emits_wake_a_running_loop_not_a_stopped_one():
 
     try:
         asyncio.run(live_run())
-        assert hook._flushers[stale].wake_pending is False
+        assert hook._runtime.flushers[stale].wake_pending is False
     finally:
-        stale_flusher = hook._flushers.get(stale)
+        stale_flusher = hook._runtime.flushers.get(stale)
         if stale_flusher is not None:
             hook._cancel_flusher(stale_flusher, wait=True)
         stale.close()
@@ -1036,7 +1039,7 @@ def test_thread_emits_wake_a_running_loop_not_a_stopped_one():
 def test_flusher_burst_loop_terminates_when_a_batch_pops_nothing(monkeypatch, fake_capture_sink):
     # Bypass the clamp on purpose: this is the shape a misconfigured (or raced)
     # flush takes — _flush_one_batch pops nothing and returns without suspending.
-    monkeypatch.setattr(hook, "BATCH_SIZE", 0)
+    monkeypatch.setattr(hook._runtime, "batch_size", 0)
     finished = threading.Event()
     outcome: dict = {}
 
@@ -1047,7 +1050,7 @@ def test_flusher_burst_loop_terminates_when_a_batch_pops_nothing(monkeypatch, fa
         started = time.monotonic()
         await capture.drain(timeout=0.5)
         outcome["drain_s"] = time.monotonic() - started
-        outcome["buffered"] = len(hook._buffer)
+        outcome["buffered"] = len(hook._runtime.buffer)
 
     def runner():
         try:
@@ -1065,9 +1068,9 @@ def test_flusher_burst_loop_terminates_when_a_batch_pops_nothing(monkeypatch, fa
 def test_configure_clamps_degenerate_knobs():
     hook._configure(queue_size=0, batch_size=-1, flush_interval_s=0.0)
 
-    assert hook.QUEUE_SIZE == 1
-    assert hook.BATCH_SIZE == 1
-    assert hook.FLUSH_INTERVAL_S == hook._MIN_FLUSH_INTERVAL_S
+    assert hook._runtime.queue_size == 1
+    assert hook._runtime.batch_size == 1
+    assert hook._runtime.flush_interval_s == hook._MIN_FLUSH_INTERVAL_S
 
 
 # ---------------------------------------------------------------------------
@@ -1100,7 +1103,7 @@ def test_atexit_hook_persists_leftovers_after_asyncio_run(tmp_path):
 
         asyncio.run(command())
         # 3 events + the manifest are still buffered; only the atexit hook remains.
-        assert len(hook._buffer) == 4, len(hook._buffer)
+        assert len(hook._runtime.buffer) == 4, len(hook._runtime.buffer)
         """
     )
     result = subprocess.run(
@@ -1202,16 +1205,16 @@ async def test_event_id_survives_a_requeue_and_redelivery(monkeypatch, fake_capt
     monkeypatch.setattr(hook, "_serialize_batch", blocking_serialize)
     try:
         capture.emit(KIND_SUMMARY_GENERATED, "one", payload_kind="text")
-        [event] = hook._buffer
+        [event] = hook._runtime.buffer
         seq = event.seq
-        flusher = hook._flushers[asyncio.get_running_loop()]
+        flusher = hook._runtime.flushers[asyncio.get_running_loop()]
         await _wait_until(entered.is_set)
 
         flusher.task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await flusher.task
 
-        [requeued] = hook._buffer
+        [requeued] = hook._runtime.buffer
         assert requeued is event and requeued.seq == seq
     finally:
         release.set()
@@ -1258,8 +1261,8 @@ def test_has_room_and_emit_lazy_are_no_ops_when_off():
     capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: builds.append(1))
 
     assert builds == []
-    assert not hook._buffer
-    assert hook._dropped == 0
+    assert not hook._runtime.buffer
+    assert hook._runtime.dropped == 0
 
 
 @pytest.mark.asyncio
@@ -1291,8 +1294,8 @@ async def test_emit_lazy_never_calls_the_builder_for_an_event_the_full_buffer_dr
     capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: builds.append(1))
 
     assert builds == []
-    assert hook._dropped == 2  # accounted for exactly like emit()'s drop-newest
-    assert len(hook._buffer) == 1
+    assert hook._runtime.dropped == 2  # accounted for exactly like emit()'s drop-newest
+    assert len(hook._runtime.buffer) == 1
 
 
 @pytest.mark.asyncio

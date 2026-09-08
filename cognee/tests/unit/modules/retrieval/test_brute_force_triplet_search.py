@@ -1356,7 +1356,7 @@ async def test_capture_off_builds_no_retrieval_payload(monkeypatch, capture_rese
     assert results == [edge]
     assert capture.is_active() is False
     builder.assert_not_called()
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
 
 @pytest.mark.asyncio

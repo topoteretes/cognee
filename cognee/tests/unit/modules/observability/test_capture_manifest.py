@@ -69,7 +69,7 @@ async def test_set_dataset_late_binds_already_buffered_events(fake_capture_sink)
 
     with capture.run_scope(run_id, kind="operation") as scope:
         capture.emit(KIND_SUMMARY_GENERATED, "before", payload_kind="text")
-        assert hook._buffer[0].dataset_id is None
+        assert hook._runtime.buffer[0].dataset_id is None
         scope.set_dataset(dataset_id)
 
     await capture.drain()
@@ -165,10 +165,10 @@ async def test_manifest_survives_a_full_buffer_and_reports_the_drops(fake_captur
     with capture.run_scope(run_id, uuid4(), kind="pipeline"):
         for index in range(5):
             capture.emit(KIND_SUMMARY_GENERATED, f"s{index}", payload_kind="text")
-        assert hook._dropped == 3
-        assert len(hook._buffer) == 2
+        assert hook._runtime.dropped == 3
+        assert len(hook._runtime.buffer) == 2
     # The manifest gets headroom past the bound: it is the record that reports the drops.
-    assert len(hook._buffer) == 3
+    assert len(hook._runtime.buffer) == 3
 
     await capture.drain()
 
@@ -200,7 +200,7 @@ async def test_drops_are_charged_to_the_run_that_emitted_them(fake_capture_sink)
 
     assert (outer.emitted, outer.dropped) == (1, 0)
     assert (inner.emitted, inner.dropped) == (1, 2)
-    assert hook._dropped == 2
+    assert hook._runtime.dropped == 2
 
     await capture.drain()
 
@@ -264,9 +264,9 @@ def test_manifests_are_bounded_past_queue_size(fake_capture_sink):
         with capture.run_scope(f"run-{index}", kind="pipeline"):
             pass
 
-    assert len(hook._buffer) == 2 * hook.QUEUE_SIZE
-    assert hook._dropped == 50 - 2 * hook.QUEUE_SIZE
-    assert not hook._flushers
+    assert len(hook._runtime.buffer) == 2 * hook._runtime.queue_size
+    assert hook._runtime.dropped == 50 - 2 * hook._runtime.queue_size
+    assert not hook._runtime.flushers
 
 
 @pytest.mark.asyncio

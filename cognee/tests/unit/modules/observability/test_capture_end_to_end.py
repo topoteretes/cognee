@@ -489,7 +489,7 @@ async def test_one_pipeline_run_and_one_search_yield_every_capture_kind(
     # No event of any kind is attributed to nothing.
     assert all(record["run_id"] is not None for record in sink.records)
     assert all(record["dataset_id"] == str(fakes.dataset.id) for record in sink.records)
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
 
 @pytest.mark.asyncio
@@ -520,8 +520,8 @@ async def test_the_same_run_with_capture_off_is_a_structural_no_op(
     assert capture.is_active() is False
     assert capture.current_scope() is None
     emit_spy.assert_not_called()
-    assert not capture.hook._buffer
-    assert not capture.hook._flushers
+    assert not capture.hook._runtime.buffer
+    assert not capture.hook._runtime.flushers
     # 3 chunks x (extraction + summarization) LLM calls, same as with capture on.
     assert fakes.llm.await_count == 6
     # Stored summaries never carry capture provenance, on or off.
@@ -579,9 +579,11 @@ async def test_env_enabled_capture_persists_the_run_through_the_storage_sink(
     search_context, search_results = await _run_search(fakes.dataset.id)
     assert len(search_results) == 1
 
-    assert isinstance(capture.hook._sink, capture.StorageSink), "env did not register the sink"
+    assert isinstance(capture.hook._runtime.sink, capture.StorageSink), (
+        "env did not register the sink"
+    )
     await capture.drain()
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
     persisted = _read_capture_dir(capture_root)
     dataset = str(fakes.dataset.id)

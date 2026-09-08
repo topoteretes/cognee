@@ -59,8 +59,8 @@ async def test_record_operation_opens_no_scope_when_capture_is_off(monkeypatch, 
 
     from cognee.modules.observability.capture import hook
 
-    assert not hook._buffer
-    assert not hook._flushers
+    assert not hook._runtime.buffer
+    assert not hook._runtime.flushers
 
 
 @pytest.mark.asyncio
@@ -207,7 +207,7 @@ async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_
     assert capture.current_scope() is None
 
     # The scope's exit — after the terminal yield — did not enqueue a duplicate.
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["run_id"] == str(pipeline_run_id)
     assert manifest["dataset_id"] == str(dataset.id)
@@ -290,7 +290,7 @@ async def test_run_tasks_leaves_the_manifest_to_the_flusher_when_its_drain_did_n
 
     assert len(drains) == 1
     # Finished (so exit will not emit a duplicate) and buffered, not delivered.
-    assert [event.kind for event in capture.hook._buffer] == [KIND_RUN_MANIFEST]
+    assert [event.kind for event in capture.hook._runtime.buffer] == [KIND_RUN_MANIFEST]
     assert _manifests(fake_capture_sink) == []
 
 
@@ -325,7 +325,7 @@ async def test_run_tasks_manifest_is_in_the_sink_before_the_terminal_yield(
         manifests_at_yield.append((type(event).__name__, len(_manifests(fake_capture_sink))))
 
     assert manifests_at_yield == [("PipelineRunStarted", 0), ("PipelineRunCompleted", 1)]
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["payload"]["kind"] == "pipeline"
     # The task's event and the manifest share the run id: joinable offline.
@@ -391,16 +391,16 @@ async def test_lifespan_shutdown_flushes_capture_and_stops_the_flusher(
     async with client_module.lifespan(client_module.app):
         # One request's worth of events: buffered, not yet flushed.
         capture.emit(KIND_SUMMARY_GENERATED, "last request", payload_kind="text")
-        [flusher] = capture.hook._flushers.values()
+        [flusher] = capture.hook._runtime.flushers.values()
         assert not fake_capture_sink.records
 
     # Delivered by the lifespan's own shutdown — not a flusher tick, not atexit.
     assert [r["payload"] for r in fake_capture_sink.records] == ["last request"]
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
     assert flusher.task.cancelled()
     # The stopped flusher stays as a tombstone: a late emit during teardown
     # must not start a fresh flusher on a loop that is going away.
-    assert capture.hook._flushers[asyncio.get_running_loop()] is flusher
+    assert capture.hook._runtime.flushers[asyncio.get_running_loop()] is flusher
 
 
 @pytest.mark.asyncio
@@ -416,4 +416,4 @@ async def test_lifespan_shutdown_skips_capture_when_off(monkeypatch, quiet_lifes
 
     assert capture.is_active() is False
     spy.assert_not_awaited()
-    assert not capture.hook._flushers
+    assert not capture.hook._runtime.flushers

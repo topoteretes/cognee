@@ -1078,7 +1078,7 @@ async def test_add_data_points_is_a_capture_no_op_when_off(
     payload_spy.assert_not_called()
     emit_spy.assert_not_called()
     bump_spy.assert_not_called()
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
 
 
 @pytest.mark.asyncio

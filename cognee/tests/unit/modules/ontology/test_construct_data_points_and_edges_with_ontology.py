@@ -428,5 +428,5 @@ def test_fuzzy_match_capture_off_collects_nothing(monkeypatch, capture_reset):
     canonicalize_extracted_graphs([_make_chunk(), _make_chunk()], graphs, _StubResolver())
 
     assert capture.is_active() is False
-    assert not capture.hook._buffer
+    assert not capture.hook._runtime.buffer
     assert graphs[0].nodes[0].name == "widget_canonical"

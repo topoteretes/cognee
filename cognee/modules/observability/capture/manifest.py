@@ -185,7 +185,7 @@ def run_scope(
         run_id=run_id,
         dataset_id=dataset_id,
         kind=kind,
-        sampled=(kind != "operation") or random.random() < hook.RETRIEVAL_SAMPLE_RATE,
+        sampled=(kind != "operation") or random.random() < hook._runtime.retrieval_sample_rate,
         started_at=time.time(),
         parent=hook._current_scope.get(),
     )
