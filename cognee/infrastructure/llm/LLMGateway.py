@@ -7,9 +7,7 @@ from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.config import get_llm_context_config
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.retry_config import raise_if_quota_error
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
-    TranscriptionReturnType,
-)
+from cognee.infrastructure.llm.types import TranscriptionReturnType
 from cognee.shared.logging_utils import get_logger
 
 T = TypeVar("T", bound="BaseModel | str")
@@ -32,10 +30,10 @@ def _exact_usage_from_result(result: Any) -> tuple[Optional[int], Optional[int]]
 
     The structured-output adapters attach the raw litellm response to the
     parsed model as ``_raw_response``: litellm_native (the default) does it
-    explicitly (``_attach_raw_response``), and instructor does it internally
-    (``instructor.processing.response.process_response``). That raw response
-    carries ``.usage`` with the provider-billed counts, including hidden
-    reasoning tokens no text estimate can see.
+    explicitly (``_attach_raw_response``), and the legacy framework does it
+    internally while post-processing the response. That raw response carries
+    ``.usage`` with the provider-billed counts, including hidden reasoning
+    tokens no text estimate can see.
 
     Returns (None, None) for the plain-string path (returns a bare ``str``,
     nothing to attach to) and for BAML, which doesn't go through litellm.
@@ -88,10 +86,11 @@ async def _fail_fast_on_quota(coro: Coroutine) -> T:
     so it is provider- and framework-agnostic.
 
     Budget exhaustion is checked first, and here rather than only in the
-    adapters: each instructor adapter catches ``InstructorRetryException`` in a
-    clause that precedes its own budget handler, and the plain-text path
-    (``response_model is str``) bypasses those handlers altogether. Classifying
-    at this choke point gives every adapter and both paths the same 402.
+    adapters: the legacy adapters catch their framework's retry-exhausted
+    wrapper in a clause that precedes their own budget handler, and the
+    plain-text path (``response_model is str``) bypasses those handlers
+    altogether. Classifying at this choke point gives every adapter and both
+    paths the same 402.
     """
     try:
         return await coro
@@ -190,12 +189,31 @@ class LLMGateway:
             return False
 
     @staticmethod
-    def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:
+    def _transcription_client():
+        """Client for the audio/image transcription entry points.
+
+        Follows the same framework dispatch as ``acreate_structured_output`` so
+        the default (``litellm_native``) path never builds the legacy client.
+        BAML has no transcription support of its own and keeps using the
+        legacy client, as it always has.
+        """
+        llm_config = get_llm_config()
+        if llm_config.structured_output_framework.upper() == "LITELLM_NATIVE":
+            from cognee.infrastructure.llm.structured_output_framework.litellm_native.get_native_client import (
+                get_native_client,
+            )
+
+            return get_native_client()
+
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
-        llm_client = get_llm_client()
+        return get_llm_client()
+
+    @staticmethod
+    def create_transcript(input, **kwargs) -> Coroutine[Any, Any, TranscriptionReturnType | None]:
+        llm_client = LLMGateway._transcription_client()
         return llm_client.create_transcript(input=input, **kwargs)
 
     @staticmethod
@@ -205,11 +223,7 @@ class LLMGateway:
         max_completion_tokens: int | None = None,
         reasoning_effort: str | None = None,
     ) -> Coroutine[Any, Any, Any]:
-        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-            get_llm_client,
-        )
-
-        llm_client = get_llm_client()
+        llm_client = LLMGateway._transcription_client()
         return llm_client.transcribe_image(
             input=input,
             prompt=prompt,

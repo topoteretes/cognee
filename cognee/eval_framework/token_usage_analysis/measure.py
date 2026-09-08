@@ -81,7 +81,7 @@ def _configure_llm_model(llm_model: str) -> None:
 
 
 def _usage(result) -> tuple[int, int]:
-    """Read (prompt, completion) tokens from an instructor result's raw response.
+    """Read (prompt, completion) tokens from a structured-output result's raw response.
 
     litellm names them prompt_tokens/completion_tokens; the Anthropic client names
     them input_tokens/output_tokens.
