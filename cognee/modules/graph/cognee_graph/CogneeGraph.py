@@ -238,7 +238,7 @@ class CogneeGraph(CogneeAbstractGraph):
         directed=True,
         node_dimension=1,
         edge_dimension=1,
-        memory_fragment_filter=[],
+        memory_fragment_filter=None,
         node_type: type | None = None,
         node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
@@ -246,6 +246,8 @@ class CogneeGraph(CogneeAbstractGraph):
         triplet_distance_penalty: float = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
     ) -> None:
+        if memory_fragment_filter is None:
+            memory_fragment_filter = []
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
