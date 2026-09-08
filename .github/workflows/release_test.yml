@@ -560,3 +560,188 @@ jobs:
           # phase-2 script also drops any inherited MOCK_EMBEDDING switch).
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: uv run python cognee/tests/release_migration/phase2_verify_large.py
+
+  # ── Real-model jobs moved off the PR gate (SDK-533 cost pass) ─────────────
+  # These make real paid model calls whose value does not need to gate every
+  # push: multimedia and the eval example need REAL model output
+  # (transcription / evaluation) so unlike the other example jobs they cannot
+  # run mocked; the Bedrock auth trio and OpenRouter differ from the gate's
+  # remaining provider canaries (Gemini, Anthropic, Fastembed) only in
+  # credential plumbing. Landed here rather than in nightly_tests.yml per
+  # Igor's review on #4970 -- the nightly Slack report needs to stay small,
+  # and this is where the other moved suites already live.
+  test-multimedia-example:
+    name: Run Multimedia Example
+    runs-on: ubuntu-22.04
+    # No container: this file is not a reusable workflow, so there is no
+    # ci-image input to resolve; bare runner like every job here.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Multimedia Example
+        env:
+          ENV: 'dev'
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run python ./examples/guides/multimedia_audio_image_processing_example.py
+
+  test-eval-example:
+    name: Run Eval Example
+    runs-on: ubuntu-22.04
+    # No container: this file is not a reusable workflow, so there is no
+    # ci-image input to resolve; bare runner like every job here.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "deepeval"
+
+      - name: Run Evaluation Framework Example
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+        run: uv run python ./cognee/eval_framework/run_eval.py
+
+  test-openrouter:
+    name: Run OpenRouter Test
+    runs-on: ubuntu-22.04
+    # No container: this file is not a reusable workflow, so there is no
+    # ci-image input to resolve; bare runner like every job here.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run OpenRouter Simple Example
+        env:
+          LLM_PROVIDER: "custom"
+          LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_MODEL: "openrouter/x-ai/grok-4.3"
+          LLM_ENDPOINT: "https://openrouter.ai/api/v1"
+          EMBEDDING_PROVIDER: "openai"
+          EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_DIMENSIONS: "3072"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/guides/simple_cognee_example.py
+
+  test-bedrock-api-key:
+    name: Run Bedrock API Key Test
+    runs-on: ubuntu-22.04
+    # No container: this file is not a reusable workflow, so there is no
+    # ci-image input to resolve; bare runner like every job here.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Run Bedrock API Key Simple Example
+        env:
+          LLM_PROVIDER: "bedrock"
+          LLM_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
+          AWS_REGION_NAME: "eu-west-1"
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/guides/simple_cognee_example.py
+
+  test-bedrock-aws-credentials:
+    name: Run Bedrock AWS Credentials Test
+    runs-on: ubuntu-22.04
+    # No container: this file is not a reusable workflow, so there is no
+    # ci-image input to resolve; bare runner like every job here.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Run Bedrock AWS Credentials Simple Example
+        env:
+          LLM_PROVIDER: "bedrock"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
+          AWS_REGION_NAME: "eu-west-1"
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/guides/simple_cognee_example.py
+
+  test-bedrock-aws-profile:
+    name: Run Bedrock AWS Profile Test
+    runs-on: ubuntu-22.04
+    # No container: this file is not a reusable workflow, so there is no
+    # ci-image input to resolve; bare runner like every job here.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Configure AWS Profile
+        run: |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials << EOF
+          [bedrock-test]
+          aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EOF
+
+      - name: Run Bedrock AWS Profile Simple Example
+        env:
+          LLM_PROVIDER: "bedrock"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
+          AWS_PROFILE_NAME: "bedrock-test"
+          AWS_REGION_NAME: "eu-west-1"
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/guides/simple_cognee_example.py
