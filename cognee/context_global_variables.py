@@ -26,17 +26,15 @@ from cognee.modules.users.methods import get_user
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
-current_dataset_id: ContextVar[Optional[UUID]] = ContextVar("current_dataset_id", default=None)
+current_dataset_id: ContextVar[UUID | None] = ContextVar("current_dataset_id", default=None)
 # Note: same mechanism for LLM and embedding configs so that the LiteLLM client
 #       and the embedding engine can use per-context (e.g. per-request) configs.
-llm_config: ContextVar[Optional[LLMConfig]] = ContextVar("llm_config", default=None)
+llm_config: ContextVar[LLMConfig | None] = ContextVar("llm_config", default=None)
 embedding_config = ContextVar("embedding_config", default=None)
 session_user = ContextVar("session_user", default=None)
 # Labels the pipeline stage (extraction | summarization | query) whose LLM
 # config is currently active on `llm_config`, for tracing (see pipeline_stage).
-current_pipeline_stage: ContextVar[Optional[str]] = ContextVar(
-    "current_pipeline_stage", default=None
-)
+current_pipeline_stage: ContextVar[str | None] = ContextVar("current_pipeline_stage", default=None)
 
 
 async def set_session_user_context_variable(user):
@@ -156,11 +154,11 @@ class DatabaseContextManager:
 
     def __init__(
         self,
-        dataset: Optional[UUID],
-        user_id: Optional[UUID] = None,
-        llm_config: Optional[LLMConfig] = None,
-        embedding_config: Optional[EmbeddingConfig] = None,
-        permission_type: Optional[str] = None,
+        dataset: UUID | None,
+        user_id: UUID | None = None,
+        llm_config: LLMConfig | None = None,
+        embedding_config: EmbeddingConfig | None = None,
+        permission_type: str | None = None,
     ) -> None:
         self._dataset = dataset
         self._user_id = user_id
@@ -174,9 +172,9 @@ class DatabaseContextManager:
 
     async def apply_database_context_variables(
         self,
-        dataset: Optional[UUID],
-        user_id: Optional[UUID] = None,
-        permission_type: Optional[str] = None,
+        dataset: UUID | None,
+        user_id: UUID | None = None,
+        permission_type: str | None = None,
     ) -> None:
         # current_dataset_id always carries a dataset *id* (a UUID object) or
         # None. Exactly one input type: callers resolve names/strings to a UUID
@@ -214,6 +212,32 @@ class DatabaseContextManager:
 
         await dataset_queue().ensure_slot(dataset)
 
+        try:
+            await self._bind_dataset_databases(dataset, user_id, permission_type)
+        except BaseException:
+            # The slot is taken above, but everything below it can still raise
+            # (a deleted dataset owner, a provisioning or connection failure).
+            # When it does, __aenter__ never returns, so __aexit__ never runs
+            # and nothing hands the slot back. In a request task the queue's
+            # task-end cleanup eventually does; in the API lifespan task, which
+            # ends only with the process, it never does, and
+            # DATASET_QUEUE_MAX_CONCURRENT leaked slots wedge every later
+            # ensure_slot. Releasing here is the missing half of the pair.
+            #
+            # Only reachable once ensure_slot has returned, so this never
+            # releases a slot that was not acquired -- which is what keeps a
+            # re-entrant inner apply from dropping the permit its outer scope
+            # still holds.
+            await dataset_queue().release_slot_for(dataset)
+            raise
+
+    async def _bind_dataset_databases(
+        self,
+        dataset: UUID,
+        user_id: Optional[UUID],
+        permission_type: Optional[str],
+    ) -> None:
+        """Resolve and bind the dataset's own databases. Runs holding a queue slot."""
         # Optional permission gate: checked only when the caller asked for it
         # by passing a permission_type — callers that already authorized at the
         # API layer pass nothing and no check is performed here.
@@ -369,11 +393,11 @@ class DatabaseContextManager:
 
 
 def set_database_global_context_variables(
-    dataset: Optional[UUID],
-    user_id: Optional[UUID] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-    permission_type: Optional[str] = None,
+    dataset: UUID | None,
+    user_id: UUID | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+    permission_type: str | None = None,
 ) -> "DatabaseContextManager":
     """Returns a dual-mode helper that is both awaitable and an async context manager.
 
