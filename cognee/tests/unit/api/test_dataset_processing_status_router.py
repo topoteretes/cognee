@@ -2,8 +2,8 @@
 
 Covers what a router-level test actually exercises: the real auth dependency
 is enforced, the dataset permission check gates the response, the ``pipeline``
-query param reaches the helper, and the ``{total, completed, pending}`` body
-reaches the client unchanged. Counting semantics live in
+query param reaches the helper, and the ``{total, completed, pending, items}``
+body reaches the client unchanged. Counting semantics live in
 tests/unit/modules/data/test_get_dataset_processing_status.py.
 """
 
@@ -74,24 +74,7 @@ def test_processing_status_requires_authentication(test_client):
     assert response.status_code in (401, 403)
 
 
-def test_processing_status_returns_counts(authenticated_client, monkeypatch):
-    dataset_id = uuid.uuid4()
-    _authorize_datasets(monkeypatch, [SimpleNamespace(id=dataset_id)])
-
-    helper = AsyncMock(return_value={"total": 10, "completed": 7, "pending": 3})
-    _patch_status_helper(monkeypatch, helper)
-
-    response = authenticated_client.get(f"/api/v1/datasets/{dataset_id}/processing-status")
-
-    assert response.status_code == 200
-    # Exactly the three counts: the optional items field must not leak as null.
-    assert response.json() == {"total": 10, "completed": 7, "pending": 3}
-    helper.assert_awaited_once_with(
-        dataset_id, pipeline_name="cognify_pipeline", include_items=False
-    )
-
-
-def test_processing_status_include_items_returns_breakdown(authenticated_client, monkeypatch):
+def test_processing_status_returns_counts_and_items(authenticated_client, monkeypatch):
     dataset_id = uuid.uuid4()
     done_id, pending_id = uuid.uuid4(), uuid.uuid4()
     _authorize_datasets(monkeypatch, [SimpleNamespace(id=dataset_id)])
@@ -109,10 +92,7 @@ def test_processing_status_include_items_returns_breakdown(authenticated_client,
     )
     _patch_status_helper(monkeypatch, helper)
 
-    response = authenticated_client.get(
-        f"/api/v1/datasets/{dataset_id}/processing-status",
-        params={"include_items": "true"},
-    )
+    response = authenticated_client.get(f"/api/v1/datasets/{dataset_id}/processing-status")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -124,29 +104,28 @@ def test_processing_status_include_items_returns_breakdown(authenticated_client,
             {"id": str(pending_id), "name": "fresh.md", "completed": False},
         ],
     }
-    helper.assert_awaited_once_with(
-        dataset_id, pipeline_name="cognify_pipeline", include_items=True
-    )
+    helper.assert_awaited_once_with(dataset_id, pipeline_name="cognify_pipeline")
 
 
 def test_processing_status_empty_dataset(authenticated_client, monkeypatch):
     dataset_id = uuid.uuid4()
     _authorize_datasets(monkeypatch, [SimpleNamespace(id=dataset_id)])
     _patch_status_helper(
-        monkeypatch, AsyncMock(return_value={"total": 0, "completed": 0, "pending": 0})
+        monkeypatch,
+        AsyncMock(return_value={"total": 0, "completed": 0, "pending": 0, "items": []}),
     )
 
     response = authenticated_client.get(f"/api/v1/datasets/{dataset_id}/processing-status")
 
     assert response.status_code == 200
-    assert response.json() == {"total": 0, "completed": 0, "pending": 0}
+    assert response.json() == {"total": 0, "completed": 0, "pending": 0, "items": []}
 
 
 def test_processing_status_forwards_pipeline_query_param(authenticated_client, monkeypatch):
     dataset_id = uuid.uuid4()
     _authorize_datasets(monkeypatch, [SimpleNamespace(id=dataset_id)])
 
-    helper = AsyncMock(return_value={"total": 2, "completed": 2, "pending": 0})
+    helper = AsyncMock(return_value={"total": 0, "completed": 0, "pending": 0, "items": []})
     _patch_status_helper(monkeypatch, helper)
 
     response = authenticated_client.get(
@@ -155,7 +134,7 @@ def test_processing_status_forwards_pipeline_query_param(authenticated_client, m
     )
 
     assert response.status_code == 200
-    helper.assert_awaited_once_with(dataset_id, pipeline_name="add_pipeline", include_items=False)
+    helper.assert_awaited_once_with(dataset_id, pipeline_name="add_pipeline")
 
 
 def test_processing_status_unknown_or_unauthorized_dataset_is_404(

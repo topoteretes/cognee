@@ -91,10 +91,8 @@ class DatasetProcessingStatusDTO(OutDTO):
     total: int = Field(description="Number of data items in the dataset")
     completed: int = Field(description="Items carrying the per-item completion stamp")
     pending: int = Field(description="Items without the stamp (total - completed)")
-    # Only present when the caller asks for it (include_items=true); the route
-    # excludes None so the default body stays the bare three counts.
-    items: Optional[List[DataItemProcessingStatusDTO]] = Field(
-        default=None, description="Per-item breakdown, present only with include_items=true"
+    items: list[DataItemProcessingStatusDTO] = Field(
+        description="One entry per data item, in the same order as GET /datasets/{id}/data"
     )
 
 
@@ -465,7 +463,6 @@ def get_datasets_router() -> APIRouter:
     @router.get(
         "/{dataset_id}/processing-status",
         response_model=DatasetProcessingStatusDTO,
-        response_model_exclude_none=True,
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def get_dataset_processing_status(
@@ -481,13 +478,6 @@ def get_datasets_router() -> APIRouter:
             ),
             examples=["cognify_pipeline"],
         ),
-        include_items: bool = Query(
-            False,
-            description=(
-                "Also list every item with its id, name and completed flag."
-                " Off by default so the response stays the bare counts."
-            ),
-        ),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -495,8 +485,8 @@ def get_datasets_router() -> APIRouter:
 
         `GET /status` reports whether a pipeline *run* is in progress or done for a
         dataset. This endpoint answers the finer question operators need when
-        triaging incremental loads: how many of the dataset's data items carry the
-        per-item completion stamp for a pipeline, and how many are still pending.
+        triaging incremental loads: which of the dataset's data items carry the
+        per-item completion stamp for a pipeline, and which are still pending.
 
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset
@@ -504,16 +494,15 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
           `cognify_pipeline`.
-        - **include_items** (bool, optional): Add a per-item breakdown. Defaults to
-          `false`.
 
         ## Response
         - **total**: Number of data items in the dataset
         - **completed**: Items whose per-item status for the pipeline is completed
           (both the legacy string and the dict status representation are recognised)
         - **pending**: `total - completed`
-        - **items** (only with `include_items=true`): `[{id, name, completed}]`, one
-          entry per data item, in the same order as `GET /datasets/{id}/data`
+        - **items**: `[{id, name, completed}]`, one entry per data item, in the same
+          order as `GET /datasets/{id}/data`. `id` is the data_id accepted by
+          `DELETE /datasets/{id}/data/{data_id}` and `forget(data_id=...)`
 
         Per-item errored state is not persisted, so it is not reported: a pending
         item may be untouched, in progress, or failed.
@@ -529,7 +518,6 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"GET /v1/datasets/{dataset_id!s}/processing-status",
                 "dataset_id": str(dataset_id),
                 "pipeline": pipeline,
-                "include_items": include_items,
                 "cognee_version": cognee_version,
             },
         )
@@ -548,9 +536,7 @@ def get_datasets_router() -> APIRouter:
             )
 
         try:
-            return await get_dataset_processing_status(
-                dataset[0].id, pipeline_name=pipeline, include_items=include_items
-            )
+            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
         except Exception as error:
             logger.error("Error retrieving dataset processing status: %s", error)
             return JSONResponse(

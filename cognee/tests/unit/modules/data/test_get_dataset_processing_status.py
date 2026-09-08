@@ -1,8 +1,7 @@
-"""Counting semantics of get_dataset_processing_status (SDK-23).
+"""Counting and per-item semantics of get_dataset_processing_status (SDK-23).
 
-Rows are stand-ins with only the ``pipeline_status`` attribute the helper
-reads; ``get_dataset_data`` is patched on the helper's module so no database
-is involved.
+Rows are stand-ins with only the attributes the helper reads; ``get_dataset_data``
+is patched on the helper's module so no database is involved.
 """
 
 import importlib
@@ -25,24 +24,29 @@ def _row(pipeline_status, name="doc.txt"):
     return SimpleNamespace(id=uuid.uuid4(), name=name, pipeline_status=pipeline_status)
 
 
-def _completed_row(dataset_id, pipeline="cognify_pipeline", value=COMPLETED):
-    return _row({pipeline: {str(dataset_id): value}})
+def _completed_row(dataset_id, pipeline="cognify_pipeline", value=COMPLETED, name="doc.txt"):
+    return _row({pipeline: {str(dataset_id): value}}, name=name)
 
 
 def _patch_rows(monkeypatch, rows):
     monkeypatch.setattr(module, "get_dataset_data", AsyncMock(return_value=rows))
 
 
+def _counts(result):
+    return {key: result[key] for key in ("total", "completed", "pending")}
+
+
+def _completed_flags(result):
+    return [item["completed"] for item in result["items"]]
+
+
 @pytest.mark.asyncio
 async def test_empty_dataset(monkeypatch):
-    dataset_id = uuid.uuid4()
     _patch_rows(monkeypatch, [])
 
-    assert await get_dataset_processing_status(dataset_id) == {
-        "total": 0,
-        "completed": 0,
-        "pending": 0,
-    }
+    result = await get_dataset_processing_status(uuid.uuid4())
+
+    assert result == {"total": 0, "completed": 0, "pending": 0, "items": []}
 
 
 @pytest.mark.asyncio
@@ -50,11 +54,10 @@ async def test_fully_completed_dataset(monkeypatch):
     dataset_id = uuid.uuid4()
     _patch_rows(monkeypatch, [_completed_row(dataset_id) for _ in range(3)])
 
-    assert await get_dataset_processing_status(dataset_id) == {
-        "total": 3,
-        "completed": 3,
-        "pending": 0,
-    }
+    result = await get_dataset_processing_status(dataset_id)
+
+    assert _counts(result) == {"total": 3, "completed": 3, "pending": 0}
+    assert _completed_flags(result) == [True, True, True]
 
 
 @pytest.mark.asyncio
@@ -71,11 +74,10 @@ async def test_mixed_statuses(monkeypatch):
         ],
     )
 
-    assert await get_dataset_processing_status(dataset_id) == {
-        "total": 5,
-        "completed": 2,
-        "pending": 3,
-    }
+    result = await get_dataset_processing_status(dataset_id)
+
+    assert _counts(result) == {"total": 5, "completed": 2, "pending": 3}
+    assert _completed_flags(result) == [True, False, False, False, True]
 
 
 @pytest.mark.asyncio
@@ -92,11 +94,10 @@ async def test_legacy_string_and_dict_format_both_count(monkeypatch):
         ],
     )
 
-    assert await get_dataset_processing_status(dataset_id) == {
-        "total": 4,
-        "completed": 2,
-        "pending": 2,
-    }
+    result = await get_dataset_processing_status(dataset_id)
+
+    assert _counts(result) == {"total": 4, "completed": 2, "pending": 2}
+    assert _completed_flags(result) == [True, True, False, False]
 
 
 @pytest.mark.asyncio
@@ -111,11 +112,10 @@ async def test_stamp_for_other_dataset_or_pipeline_is_pending(monkeypatch):
         ],
     )
 
-    assert await get_dataset_processing_status(dataset_id) == {
-        "total": 2,
-        "completed": 0,
-        "pending": 2,
-    }
+    result = await get_dataset_processing_status(dataset_id)
+
+    assert _counts(result) == {"total": 2, "completed": 0, "pending": 2}
+    assert _completed_flags(result) == [False, False]
 
 
 @pytest.mark.asyncio
@@ -131,29 +131,20 @@ async def test_pipeline_name_override(monkeypatch):
 
     result = await get_dataset_processing_status(dataset_id, pipeline_name="add_pipeline")
 
-    assert result == {"total": 2, "completed": 1, "pending": 1}
+    assert _counts(result) == {"total": 2, "completed": 1, "pending": 1}
+    assert _completed_flags(result) == [True, False]
     module.get_dataset_data.assert_awaited_once_with(dataset_id)
 
 
 @pytest.mark.asyncio
-async def test_counts_only_by_default_has_no_items_key(monkeypatch):
+async def test_items_carry_data_id_and_name_in_storage_order(monkeypatch):
     dataset_id = uuid.uuid4()
-    _patch_rows(monkeypatch, [_completed_row(dataset_id)])
-
-    result = await get_dataset_processing_status(dataset_id)
-
-    assert "items" not in result
-
-
-@pytest.mark.asyncio
-async def test_include_items_lists_each_row_in_storage_order(monkeypatch):
-    dataset_id = uuid.uuid4()
-    done = _row({"cognify_pipeline": {str(dataset_id): COMPLETED}}, name="done.pdf")
+    done = _completed_row(dataset_id, name="done.pdf")
     fresh = _row({}, name="fresh.md")
     legacy_null = _row(None, name="legacy.txt")
     _patch_rows(monkeypatch, [done, fresh, legacy_null])
 
-    result = await get_dataset_processing_status(dataset_id, include_items=True)
+    result = await get_dataset_processing_status(dataset_id)
 
     assert result == {
         "total": 3,
@@ -165,12 +156,3 @@ async def test_include_items_lists_each_row_in_storage_order(monkeypatch):
             {"id": legacy_null.id, "name": "legacy.txt", "completed": False},
         ],
     }
-
-
-@pytest.mark.asyncio
-async def test_include_items_on_empty_dataset(monkeypatch):
-    _patch_rows(monkeypatch, [])
-
-    result = await get_dataset_processing_status(uuid.uuid4(), include_items=True)
-
-    assert result == {"total": 0, "completed": 0, "pending": 0, "items": []}
