@@ -1,0 +1,104 @@
+name: automation | Triage GitHub Docs Issues
+
+# Hand-dispatched triage of GitHub issues that may really be docs.cognee.ai
+# problems. Select one open issue by number, or every open issue created in a
+# UTC date range, and run tools/docs_issue_triage.py over the selection.
+#
+# Phase 1 (current): read-only. A cheap, LLM-free filter (the `documentation`
+# label, then the whole words "docs"/"documentation" in the title, then the body)
+# sorts issues into `pending_docs_check` or `skipped_*`, and the result lands in
+# the run summary plus a JSON artifact. Nothing is posted to any issue.
+#
+# Later phases add: a public-docs check that may leave one auto-generated
+# comment asking the author to close, a cognee source check, a human-review
+# email, and a draft PR on topoteretes/cognee-docs. `dry_run` (default true)
+# is accepted now so those phases keep the same dispatch form.
+#
+# Deliberately no `schedule` and no `on: issues` trigger. Manual runs come
+# first so a human can watch the backlog in phases; automatic triggers are a
+# separate decision once those runs look right.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Single open GitHub issue number (ignores since/until)
+        required: false
+        default: ""
+        type: string
+      since:
+        description: UTC start date YYYY-MM-DD (issue created_at)
+        required: false
+        default: ""
+        type: string
+      until:
+        description: UTC end date YYYY-MM-DD (issue created_at, inclusive)
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: No comments and no docs PRs (phase 1 never writes either way)
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      has_gaps: ${{ steps.run.outputs.has_gaps }}
+      matrix: ${{ steps.run.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7.6.0
+
+      - name: Install workflow dependencies
+        run: uv sync --locked
+
+      # The CLI exits 2 before any GitHub request when neither selector is
+      # given, so an empty dispatch fails here and the artifact step is skipped.
+      # workflow_dispatch booleans arrive as the strings "true"/"false".
+      - name: Triage selected issues
+        id: run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          INPUT_SINCE: ${{ github.event.inputs.since }}
+          INPUT_UNTIL: ${{ github.event.inputs.until }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --repo "${{ github.repository }}"
+            --issue-number "${INPUT_ISSUE_NUMBER}"
+            --since "${INPUT_SINCE}"
+            --until "${INPUT_UNTIL}"
+            --results-json triage-results.json
+          )
+          if [ "${INPUT_DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+
+          uv run python tools/docs_issue_triage.py "${args[@]}"
+
+      - name: Upload triage results
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: triage-results
+          path: triage-results.json
