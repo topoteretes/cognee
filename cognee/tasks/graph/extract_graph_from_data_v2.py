@@ -17,11 +17,11 @@ from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 @task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
-    data_chunks: List[DocumentChunk],
+    data_chunks: list[DocumentChunk],
     n_rounds: int = 2,
     ontology_resolver: BaseOntologyResolver = None,
     ctx=None,
-) -> List[DocumentChunk]:
+) -> list[DocumentChunk]:
     """Extract and update graph data from document chunks using cascade extraction.
 
     This function performs multi-step graph extraction from document chunks,

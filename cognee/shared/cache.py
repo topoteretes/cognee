@@ -174,7 +174,7 @@ class StorageAwareCache:
         # Check if already cached and valid
         if not force and await self._is_cache_valid(cache_dir, version_or_hash):
             # Also check if remote content has changed
-            is_fresh, new_identifier = await self._check_remote_content_freshness(url, cache_dir)
+            is_fresh, _new_identifier = await self._check_remote_content_freshness(url, cache_dir)
             if is_fresh:
                 logger.debug(f"Content already cached and fresh for version {version_or_hash}")
                 return cache_dir

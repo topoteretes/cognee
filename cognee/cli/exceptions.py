@@ -8,8 +8,8 @@ class CliCommandException(Exception):
         self,
         message: str,
         error_code: int = -1,
-        docs_url: Optional[str] = None,
-        raiseable_exception: Optional[Exception] = None,
+        docs_url: str | None = None,
+        raiseable_exception: Exception | None = None,
     ) -> None:
         super().__init__(message)
         self.error_code = error_code

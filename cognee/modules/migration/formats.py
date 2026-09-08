@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from xml.sax.saxutils import escape, quoteattr
 
-Node = Tuple[Any, Dict[str, Any]]
-Edge = Tuple[Any, Any, str, Dict[str, Any]]
+Node = tuple[Any, dict[str, Any]]
+Edge = tuple[Any, Any, str, dict[str, Any]]
 
 # Properties that are internal bookkeeping rather than knowledge content.
 _SKIP_EDGE_KEYS = ("source_node_id", "target_node_id")
@@ -25,7 +25,7 @@ def _scalar(value: Any) -> Any:
     return json.dumps(value, default=str)
 
 
-def write_json(nodes: List[Node], edges: List[Edge], destination: Path) -> None:
+def write_json(nodes: list[Node], edges: list[Edge], destination: Path) -> None:
     """Full-fidelity JSON: every node and edge with all properties."""
     payload = {
         "nodes": [{"id": str(node_id), **properties} for node_id, properties in nodes],
@@ -42,10 +42,10 @@ def write_json(nodes: List[Node], edges: List[Edge], destination: Path) -> None:
     destination.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
 
-def write_graphml(nodes: List[Node], edges: List[Edge], destination: Path) -> None:
+def write_graphml(nodes: list[Node], edges: list[Edge], destination: Path) -> None:
     """GraphML for Gephi/yEd/NetworkX interop. Property values become strings."""
-    node_keys: Dict[str, None] = {}
-    edge_keys: Dict[str, None] = {}
+    node_keys: dict[str, None] = {}
+    edge_keys: dict[str, None] = {}
     for _, properties in nodes:
         for key in properties or {}:
             node_keys.setdefault(key)
@@ -90,7 +90,7 @@ def write_graphml(nodes: List[Node], edges: List[Edge], destination: Path) -> No
     destination.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _cypher_props(properties: Dict[str, Any]) -> str:
+def _cypher_props(properties: dict[str, Any]) -> str:
     parts = []
     for key, value in properties.items():
         if value is None:
@@ -109,7 +109,7 @@ def _cypher_label(value: Any) -> str:
 _SHARED_LABEL = "CogneeNode"
 
 
-def write_cypher(nodes: List[Node], edges: List[Edge], destination: Path) -> None:
+def write_cypher(nodes: list[Node], edges: list[Edge], destination: Path) -> None:
     """A Cypher script of MERGE statements loadable into any Neo4j-compatible DB.
 
     Every node gets the shared ``:CogneeNode`` label (its sanitized ``type``

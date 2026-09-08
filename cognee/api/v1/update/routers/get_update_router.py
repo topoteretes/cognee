@@ -40,7 +40,7 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=Union[IncrementalUpdateResponse, Dict[UUID, PipelineRunInfo]],
+        response_model=Union[IncrementalUpdateResponse, dict[UUID, PipelineRunInfo]],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -61,7 +61,7 @@ def get_update_router() -> APIRouter:
             description="UUID of the dataset containing the document to update.",
             examples=["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
         ),
-        data: List[UploadFile] = File(
+        data: list[UploadFile] = File(
             ...,
             description=(
                 "New version of the document that replaces the existing one. With "
@@ -69,7 +69,7 @@ def get_update_router() -> APIRouter:
                 "edit are replaced; otherwise the document is deleted and re-ingested."
             ),
         ),
-        node_set: Optional[List[str]] = Form(
+        node_set: list[str] | None = Form(
             default=[""],
             examples=[["user_memories"]],
             description="Node identifiers for graph organization and access control.",

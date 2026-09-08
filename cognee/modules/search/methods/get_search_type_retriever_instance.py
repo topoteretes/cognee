@@ -1,5 +1,6 @@
 import os
-from typing import Callable, List, Optional, Tuple, Type
+from collections.abc import Callable
+from typing import List, Optional, Tuple, Type
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
@@ -94,7 +95,7 @@ async def get_search_type_retriever_instance(
     dataset = kwargs.get("dataset")
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
-    search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+    search_core_registry: dict[SearchType, tuple[BaseRetriever, dict]] = {
         SearchType.CODE: (
             CodeRetriever,
             {"config": retriever_specific_config},

@@ -15,7 +15,7 @@ logger = get_logger("persist_sessions_in_knowledge_graph")
 
 async def persist_sessions_in_knowledge_graph_pipeline(
     user: User,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     run_in_background: bool = False,
 ):

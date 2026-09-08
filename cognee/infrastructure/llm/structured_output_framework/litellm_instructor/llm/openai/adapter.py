@@ -179,9 +179,9 @@ class OpenAIAdapter(GenericAPIAdapter):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as e:
+        ):
             if not (self.fallback_model and self.fallback_api_key):
-                raise e
+                raise
             try:
                 async with llm_rate_limiter_context_manager():
                     return await self.aclient.chat.completions.create(
@@ -211,7 +211,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

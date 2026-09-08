@@ -12,7 +12,8 @@ import shutil
 import socket
 import subprocess
 import time
-from typing import AsyncIterator, Iterator, Optional
+from collections.abc import AsyncIterator, Iterator
+from typing import Optional
 
 # Port the MCP server listens on inside the container (entrypoint default).
 CONTAINER_HTTP_PORT = 8000
@@ -57,7 +58,7 @@ def wait_for_health(url: str, timeout: float = 120.0) -> None:
     import httpx
 
     deadline = time.monotonic() + timeout
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     while time.monotonic() < deadline:
         try:
             response = httpx.get(url, timeout=5)
@@ -104,7 +105,7 @@ class MCPContainer:
 def run_mcp_http_container(
     image: str,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
     health_timeout: float = 120.0,
 ) -> Iterator[MCPContainer]:
     """Start cognee-mcp with ``TRANSPORT_MODE=http``, yield it, always tear down.

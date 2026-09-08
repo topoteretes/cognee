@@ -16,7 +16,7 @@ async def create_user(
     is_active: bool = True,
     is_verified: bool = False,
     auto_login: bool = False,
-    parent_user_id: Optional[UUID] = None,
+    parent_user_id: UUID | None = None,
 ):
     try:
         relational_engine = get_relational_engine()
@@ -43,6 +43,6 @@ async def create_user(
                     _ = await user.awaitable_attrs.roles
 
                     return user
-    except UserAlreadyExists as error:
+    except UserAlreadyExists:
         print("A user with this email already exists")
-        raise error
+        raise

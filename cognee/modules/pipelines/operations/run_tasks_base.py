@@ -155,7 +155,7 @@ async def handle_task(
     leftover_tasks: list[Task],
     next_task_batch_size: int,
     user: User,
-    ctx: Optional[PipelineContext] = None,
+    ctx: PipelineContext | None = None,
 ):
     """Handle common task workflow with logging, telemetry, and error handling."""
     task_type = running_task.task_type
@@ -246,9 +246,8 @@ async def handle_task(
             span.set_status(StatusCode.ERROR, str(error))
             span.record_exception(error)
 
-            logger.error(
-                f"{task_type} task errored: `{task_name}`\n{error!s}\n",
-                exc_info=True,
+            logger.exception(
+                f"{task_type} task errored: `{task_name}`\n",
             )
             send_telemetry(
                 f"{task_type} Task Errored",
@@ -259,14 +258,14 @@ async def handle_task(
                     "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
                 },
             )
-            raise error
+            raise
 
 
 async def run_tasks_base(
     tasks: list[Task],
     data=None,
     user: User = None,
-    ctx: Optional[PipelineContext] = None,
+    ctx: PipelineContext | None = None,
 ):
     """Base function to execute tasks in a pipeline, handling task type detection and execution."""
     if len(tasks) == 0:

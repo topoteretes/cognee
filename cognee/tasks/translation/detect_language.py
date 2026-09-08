@@ -88,7 +88,7 @@ def get_language_name(language_code: str) -> str:
 def detect_language(
     text: str,
     target_language: str = "en",
-    confidence_threshold: Optional[float] = None,
+    confidence_threshold: float | None = None,
 ) -> LanguageDetectionResult:
     """
     Detect the language of the given text.
@@ -169,7 +169,7 @@ def detect_language(
 async def detect_language_async(
     text: str,
     target_language: str = "en",
-    confidence_threshold: Optional[float] = None,
+    confidence_threshold: float | None = None,
 ) -> LanguageDetectionResult:
     """
     Async wrapper for language detection.

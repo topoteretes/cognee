@@ -38,7 +38,7 @@ async def run_corpus_builder(
     chunk_size=1024,
     chunker=TextChunker,
     instance_filter=None,
-) -> List[dict]:
+) -> list[dict]:
     if params.get("building_corpus_from_scratch"):
         logger.info("Corpus Builder started...")
 

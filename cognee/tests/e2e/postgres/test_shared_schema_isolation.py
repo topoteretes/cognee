@@ -28,13 +28,13 @@ from cognee.infrastructure.databases.postgres import (
 
 
 def _db() -> dict:
-    return dict(
-        host=os.environ.get("DB_HOST", "localhost"),
-        port=os.environ.get("DB_PORT", "5432"),
-        username=os.environ.get("DB_USERNAME", "cognee"),
-        password=os.environ.get("DB_PASSWORD", "cognee"),
-        name=os.environ.get("DB_NAME", "cognee_db"),
-    )
+    return {
+        "host": os.environ.get("DB_HOST", "localhost"),
+        "port": os.environ.get("DB_PORT", "5432"),
+        "username": os.environ.get("DB_USERNAME", "cognee"),
+        "password": os.environ.get("DB_PASSWORD", "cognee"),
+        "name": os.environ.get("DB_NAME", "cognee_db"),
+    }
 
 
 def _base_url() -> str:

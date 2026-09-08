@@ -9,8 +9,8 @@ from .data_types import BinaryData, S3BinaryData, TextData
 
 
 def classify(
-    data: Union[str, BinaryIO], filename: str = None
-) -> Union[TextData, BinaryData, S3BinaryData]:
+    data: str | BinaryIO, filename: str | None = None
+) -> TextData | BinaryData | S3BinaryData:
     if isinstance(data, str):
         return TextData(data)
 

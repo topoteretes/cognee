@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping
+from typing import Any, List
 
 from cognee import SearchType, config, prune, search, visualize_graph
 from cognee.low_level import DataPoint, setup
@@ -200,7 +201,7 @@ def load_default_payload() -> list[Mapping[str, Any]]:
     return payload
 
 
-def ingest_payloads(data: List[Any] | None) -> list[Company]:
+def ingest_payloads(data: list[Any] | None) -> list[Company]:
     """Ingest payloads and build company nodes."""
     if not data or data == [None]:
         data = load_default_payload()

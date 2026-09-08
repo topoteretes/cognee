@@ -44,7 +44,7 @@ class ToolConnection(Base):
     encryption_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     key_id: Mapped[str] = mapped_column(String, nullable=False, default="1")
 
-    options: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    options: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
 

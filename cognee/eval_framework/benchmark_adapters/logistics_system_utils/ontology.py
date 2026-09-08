@@ -217,7 +217,7 @@ def build_world_and_golden_answers(
     return world
 
 
-def main(world_path: Path = None, create_new_world: bool = False) -> None:
+def main(world_path: Path | None = None, create_new_world: bool = False) -> None:
     build_world_and_golden_answers(
         world_path=world_path,
         create_new_world=create_new_world,

@@ -1,7 +1,7 @@
 """Dataset-scoped reads from the append-only edge evidence sidecar."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 from uuid import UUID
 
 from sqlalchemy import and_, exists, func, or_, select

@@ -41,7 +41,7 @@ GRAPH_POLL_TICKS = 5
 HEARTBEAT_TICKS = 15
 
 
-def _parse_cursor(value: Optional[str]) -> Optional[datetime]:
+def _parse_cursor(value: str | None) -> datetime | None:
     """A cursor string back into the datetime ``get_live_events`` expects.
 
     Cursors come from event timestamps, which are written as naive UTC ISO
@@ -57,7 +57,7 @@ def _parse_cursor(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-async def _latest_completed_run_id(dataset_id: UUID) -> Optional[UUID]:
+async def _latest_completed_run_id(dataset_id: UUID) -> UUID | None:
     """The dataset's newest cognify run id, but only once that run completed.
 
     None while a run is in flight (or when none ever ran), so the caller can
@@ -89,7 +89,7 @@ async def _latest_completed_run_id(dataset_id: UUID) -> Optional[UUID]:
 # backend it would trade this dataset's DB query for a cache-table one, not
 # remove it. It would only pay off under CACHE_BACKEND=redis, which this
 # feature does not otherwise require.
-_latest_run_cache: Dict[UUID, Tuple[float, Optional[UUID]]] = {}
+_latest_run_cache: dict[UUID, tuple[float, UUID | None]] = {}
 
 
 def _reset_latest_run_cache() -> None:
@@ -109,7 +109,7 @@ def _reset_latest_run_cache() -> None:
 _STALE_ENTRY_TTL_MULTIPLE = 10
 
 
-async def _cached_latest_completed_run_id(dataset_id: UUID) -> Optional[UUID]:
+async def _cached_latest_completed_run_id(dataset_id: UUID) -> UUID | None:
     now = time.monotonic()
     # Read module globals at call time, not module-import time, so a test
     # that speeds up TICK_SECONDS via monkeypatch also speeds up this TTL.
@@ -148,7 +148,7 @@ async def _push_updates(
     websocket: WebSocket,
     dataset_id: UUID,
     user: User,
-    cursor: Optional[datetime],
+    cursor: datetime | None,
 ) -> None:
     """Poll and push until the connection drops or a poll refuses."""
     # Uncached: this runs once per connection, not once per tick, so it
@@ -168,7 +168,7 @@ async def _push_updates(
             # endpoint serves: read access revoked mid-connection ends the
             # stream within one poll instead of at the next reconnect.
             payload = await get_live_events(dataset_id, since=cursor, user=user)
-            events: List[Dict[str, Any]] = payload["events"]
+            events: list[dict[str, Any]] = payload["events"]
             if events:
                 await websocket.send_json(
                     {"kind": "live_events", "events": events, "cursor": payload["cursor"]}
@@ -199,7 +199,7 @@ async def stream_dataset_updates(
     websocket: WebSocket,
     dataset_id: UUID,
     user: User,
-    since: Optional[datetime] = None,
+    since: datetime | None = None,
 ) -> None:
     """Push this dataset's updates over an accepted, authorized WebSocket.
 

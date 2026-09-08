@@ -27,7 +27,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
             "rubric": RubricMetric(),
         }
 
-    def _calculate_metric(self, metric: str, test_case: LLMTestCase) -> Dict[str, Any]:
+    def _calculate_metric(self, metric: str, test_case: LLMTestCase) -> dict[str, Any]:
         """Calculate a single metric for a test case with retry logic."""
         metric_to_calculate = self.g_eval_metrics[metric]
 
@@ -55,8 +55,8 @@ class DeepEvalAdapter(BaseEvalAdapter):
         }
 
     async def evaluate_answers(
-        self, answers: List[Dict[str, Any]], evaluator_metrics: List[str]
-    ) -> List[Dict[str, Any]]:
+        self, answers: list[dict[str, Any]], evaluator_metrics: list[str]
+    ) -> list[dict[str, Any]]:
         # evaluator_metrics contains all the necessary metrics that are gonna be evaluated dynamically
         for metric in evaluator_metrics:
             if metric not in self.g_eval_metrics:

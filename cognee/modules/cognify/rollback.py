@@ -21,7 +21,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("cognify.rollback")
 
 
-def _to_uuid(value: Any) -> Optional[UUID]:
+def _to_uuid(value: Any) -> UUID | None:
     if isinstance(value, UUID):
         return value
     try:

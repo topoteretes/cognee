@@ -278,7 +278,7 @@ class GenericAPIAdapter(LLMInterface):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
@@ -319,7 +319,7 @@ class GenericAPIAdapter(LLMInterface):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

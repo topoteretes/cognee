@@ -24,7 +24,7 @@ class Recipe(BaseModel):
     vegetarian: bool
     difficulty: Difficulty
     ingredients: list[Ingredient]
-    notes: Optional[str] = None
+    notes: str | None = None
     kind: Literal["starter", "main", "dessert"] = "main"
 
 

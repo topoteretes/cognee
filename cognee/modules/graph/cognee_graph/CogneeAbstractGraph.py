@@ -24,7 +24,7 @@ class CogneeAbstractGraph(ABC):
         """Retrieve a node by its ID."""
 
     @abstractmethod
-    def get_edges(self, node_id: str) -> List[Edge]:
+    def get_edges(self, node_id: str) -> list[Edge]:
         """Retrieve edges connected to a specific node."""
 
     @abstractmethod

@@ -528,7 +528,7 @@ class TestRefreshPreferenceText:
             _context_entry("e1", "harmful", "t1", harmful=1),
             _context_entry("e2", "low confidence", "t2", confidence=0.5),
         ]
-        text, watermark, added = refresh_preference_text("", "", entries)
+        _text, _watermark, added = refresh_preference_text("", "", entries)
         assert added == 0
 
     def test_newest_first_and_repeats_kept(self):
@@ -556,7 +556,7 @@ class TestRefreshPreferenceText:
 
     def test_rerun_with_no_new_rows_is_byte_identical(self):
         entries = [_context_entry("e1", "line", "2026-01-01T00:00:00")]
-        text, watermark, added = refresh_preference_text("", "", entries)
+        text, watermark, _added = refresh_preference_text("", "", entries)
         text2, watermark2, added2 = refresh_preference_text(text, watermark, entries)
         assert (text2, watermark2, added2) == (text, watermark, 0)
 
@@ -566,7 +566,7 @@ class TestRefreshPreferenceText:
         old_text = "\n".join(old_lines)
         assert len(old_text) > MAX_PREFERENCE_TEXT_CHARS - len("newest line\n")
         entries = [_context_entry("e1", "newest line", "2026-01-05T00:00:00")]
-        text, watermark, added = refresh_preference_text(old_text, "", entries)
+        text, _watermark, added = refresh_preference_text(old_text, "", entries)
         assert len(text) <= MAX_PREFERENCE_TEXT_CHARS
         assert text.startswith("newest line\n")
         assert added == 1

@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -9,7 +9,6 @@ from fastapi import Path as PathParam
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
-from typing_extensions import Annotated
 
 from cognee import __version__ as cognee_version
 from cognee import datasets
@@ -42,7 +41,7 @@ class ErrorResponseDTO(BaseModel):
 # dataset/pipeline selection, so the query param definitions (alias,
 # description, examples) live here once instead of twice.
 StatusDatasetIdsQuery = Annotated[
-    List[UUID],
+    list[UUID],
     Query(
         alias="dataset",
         description=(
@@ -54,7 +53,7 @@ StatusDatasetIdsQuery = Annotated[
 ]
 
 StatusPipelineNamesQuery = Annotated[
-    List[str],
+    list[str],
     Query(
         alias="pipeline",
         description=(
@@ -72,7 +71,7 @@ class PipelineRunStatusWithProgress(BaseModel):
     # Present only once a run has emitted at least one progress tick (see
     # log_pipeline_run_progress); None before that or for terminal runs that
     # predate this field.
-    progress: Optional[Dict[str, Any]] = Field(
+    progress: dict[str, Any] | None = Field(
         default=None,
         examples=[{"completed_items": 3, "total_items": 10, "current_stage": "extract_graph"}],
     )
@@ -103,18 +102,18 @@ class DatasetDTO(OutDTO):
     id: UUID
     name: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     owner_id: UUID
 
 
 class DatasetGraphSummaryDTO(OutDTO):
     dataset_id: UUID
-    pipeline_run_id: Optional[UUID] = None
+    pipeline_run_id: UUID | None = None
     num_nodes: int
     num_edges: int
     # None while pipeline_run_id is set means the last count attempt degraded
     # (graph store unavailable) and wasn't cached — retried on the next poll.
-    computed_at: Optional[datetime] = None
+    computed_at: datetime | None = None
 
 
 class GraphNodeDTO(OutDTO):
@@ -131,8 +130,8 @@ class GraphEdgeDTO(OutDTO):
 
 
 class GraphDTO(OutDTO):
-    nodes: List[GraphNodeDTO]
-    edges: List[GraphEdgeDTO]
+    nodes: list[GraphNodeDTO]
+    edges: list[GraphEdgeDTO]
 
 
 class DatasetCreationPayload(InDTO):
@@ -146,8 +145,8 @@ class DatasetCreationPayload(InDTO):
 
 
 class DatasetSchemaPayloadDTO(InDTO):
-    graph_schema: Optional[Dict[str, Any]] = None
-    custom_prompt: Optional[str] = None
+    graph_schema: dict[str, Any] | None = None
+    custom_prompt: str | None = None
 
 
 def get_datasets_router() -> APIRouter:
@@ -707,10 +706,10 @@ def get_datasets_router() -> APIRouter:
                 content={"error": "Unable to retrieve dataset progress."},
             )
 
-    @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
+    @router.get("/graph-summary", response_model=list[DatasetGraphSummaryDTO])
     async def get_datasets_graph_summary(
         dataset_ids: Annotated[
-            List[UUID],
+            list[UUID],
             Query(
                 alias="dataset_ids",
                 description=(

@@ -111,7 +111,7 @@ async def test_max_concurrent_one_does_not_accumulate_slots(mock_llm):
 
         # ---- cognify ----------------------------------------------------
         cognify_result = await cognee.cognify()
-        dataset_id = list(cognify_result.keys())[0]
+        dataset_id = next(iter(cognify_result.keys()))
         _assert_queue_empty(queue, "cognify")
 
         # ---- get_formatted_graph_data -----------------------------------

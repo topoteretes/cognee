@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import Role, UserRole
 
 
-async def get_user_role_names_in_tenant(user_id: UUID, tenant_id: UUID) -> List[str]:
+async def get_user_role_names_in_tenant(user_id: UUID, tenant_id: UUID) -> list[str]:
     """
     Return the names of all roles the user has in the given tenant.
 

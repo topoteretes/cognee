@@ -35,11 +35,11 @@ logger = get_logger("user_preferences.lookup")
 # called before the lane fan-out in ``session_aware_completion``. A read that
 # happens inside one lane without warming is NOT free for the other lane.
 _active_preferences_cache: ContextVar[
-    Optional[Tuple[Tuple[str, str], Tuple[str, Dict[str, float]]]]
+    tuple[tuple[str, str], tuple[str, dict[str, float]]] | None
 ] = ContextVar("active_preferences_cache", default=None)
 
 
-async def _load_raw_preferences() -> Tuple[str, Dict[str, float]]:
+async def _load_raw_preferences() -> tuple[str, dict[str, float]]:
     """Load and memoize the raw node text and decayed weights; fail-open -> ("", {})."""
     try:
         config = get_base_config()
@@ -70,7 +70,7 @@ async def _load_raw_preferences() -> Tuple[str, Dict[str, float]]:
                 cache_key[0],
                 cache_key[1],
             )
-            result: Tuple[str, Dict[str, float]] = ("", {})
+            result: tuple[str, dict[str, float]] = ("", {})
         else:
             turn_counter = int(node.get("turn_counter", 0) or 0)
             weights = {
@@ -115,7 +115,7 @@ async def load_preference_text() -> str:
     return PREFERENCE_RENDER_HEADER + "\n" + text if text.strip() else ""
 
 
-async def load_preference_weights() -> Dict[str, float]:
+async def load_preference_weights() -> dict[str, float]:
     """Load the active user's decayed prefers weight map for ranking.
 
     Returns the weights for the (``session_user``, ``current_dataset_id``)
@@ -127,7 +127,7 @@ async def load_preference_weights() -> Dict[str, float]:
     return weights
 
 
-async def load_active_preference_lines() -> List[str]:
+async def load_active_preference_lines() -> list[str]:
     """The node's stated-preference lines, newest first, unrendered.
 
     For callers that feed the lines into an existing guidance block (the

@@ -118,8 +118,8 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
         )
         return
 
-    channel_name: Optional[str] = (payload.get("channel") or {}).get("name")
-    author_id: Optional[str] = message.get("user")
+    channel_name: str | None = (payload.get("channel") or {}).get("name")
+    author_id: str | None = message.get("user")
 
     try:
         await remember_message(

@@ -930,7 +930,13 @@ class TestFeedbackCommand:
     different failures, and both must exit non-zero."""
 
     def _add_args(self, **overrides):
-        base = dict(feedback_action="add", session_id="s1", qa_id="q1", text="good", score=None)
+        base = {
+            "feedback_action": "add",
+            "session_id": "s1",
+            "qa_id": "q1",
+            "text": "good",
+            "score": None,
+        }
         base.update(overrides)
         return argparse.Namespace(**base)
 

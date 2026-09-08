@@ -31,7 +31,7 @@ class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
         self.fail_every_n_requests = fail_every_n_requests
         self.add_delay = add_delay
 
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Mock implementation that returns fixed embeddings and can
         simulate failures and delays based on configuration.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -229,7 +230,7 @@ def _add_previous_overlap(
         return parts
 
     overlapped_parts = [parts[0]]
-    for previous, current in zip(parts, parts[1:]):
+    for previous, current in itertools.pairwise(parts):
         available_tokens = max_chunk_tokens - estimate_tokens(current) - 1
         overlap = _tail_text(previous, min(overlap_tokens, available_tokens))
         if overlap:

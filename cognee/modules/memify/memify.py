@@ -1,4 +1,5 @@
-from typing import Any, List, Optional, Sequence, Type, Union
+from collections.abc import Sequence
+from typing import Any, List, Optional, Type, Union
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -24,15 +25,15 @@ logger = get_logger("memify")
 
 
 async def memify(
-    extraction_tasks: Optional[Sequence[Union[Task, str]]] = None,
-    enrichment_tasks: Optional[Sequence[Union[Task, str]]] = None,
-    data: Optional[Any] = None,
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    extraction_tasks: Sequence[Task | str] | None = None,
+    enrichment_tasks: Sequence[Task | str] | None = None,
+    data: Any | None = None,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     user: User = None,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
-    vector_db_config: Optional[dict] = None,
-    graph_db_config: Optional[dict] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     run_in_background: bool = False,
 ):
     """

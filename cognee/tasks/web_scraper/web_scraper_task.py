@@ -43,10 +43,10 @@ def get_scheduler():
 
 
 async def cron_web_scraper_task(
-    url: Union[str, List[str]],
+    url: str | list[str],
     *,
-    schedule: str = None,
-    extraction_rules: dict = None,
+    schedule: str | None = None,
+    extraction_rules: dict | None = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
@@ -125,15 +125,15 @@ async def cron_web_scraper_task(
 
 
 async def web_scraper_task(
-    url: Union[str, List[str]],
+    url: str | list[str],
     *,
-    schedule: str = None,
-    extraction_rules: dict = None,
+    schedule: str | None = None,
+    extraction_rules: dict | None = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
     soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     keenable_config: KeenableConfig = None,
-    job_name: str = None,
+    job_name: str | None = None,
     ctx=None,
 ):
     """Scrape URLs and store data points in a Graph database.

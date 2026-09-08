@@ -19,6 +19,6 @@ async def authenticate_user(email: str, password: str):
                     if user is None or not user.is_active:
                         return None
                     return user
-    except UserNotExists as error:
+    except UserNotExists:
         print(f"User {email} doesn't exist")
-        raise error
+        raise

@@ -20,11 +20,11 @@ logger = get_logger(__name__)
 
 
 async def fetch_page_content(
-    urls: Union[str, List[str]],
-    preferred_tool: Optional[str] = None,
-    tavily_config: Optional[TavilyConfig] = None,
-    keenable_config: Optional[KeenableConfig] = None,
-    soup_crawler_config: Optional[DefaultCrawlerConfig] = None,
+    urls: str | list[str],
+    preferred_tool: str | None = None,
+    tavily_config: TavilyConfig | None = None,
+    keenable_config: KeenableConfig | None = None,
+    soup_crawler_config: DefaultCrawlerConfig | None = None,
 ) -> UrlsToHtmls:
     """Fetch content from one or more URLs using the specified tool.
 
@@ -113,7 +113,7 @@ async def fetch_page_content(
 
 
 async def fetch_with_tavily(
-    urls: Union[str, List[str]], tavily_config: Optional[TavilyConfig] = None
+    urls: str | list[str], tavily_config: TavilyConfig | None = None
 ) -> UrlsToHtmls:
     """Fetch content from URLs using the Tavily API.
 
@@ -173,7 +173,7 @@ async def fetch_with_tavily(
 
 
 async def fetch_with_keenable(
-    urls: Union[str, List[str]], keenable_config: Optional[KeenableConfig] = None
+    urls: str | list[str], keenable_config: KeenableConfig | None = None
 ) -> UrlsToHtmls:
     """Fetch content from URLs using the Keenable API.
 

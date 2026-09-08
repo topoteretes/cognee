@@ -18,7 +18,7 @@ class TranslationOutput(BaseModel):
 
     translated_text: str
     detected_source_language: str
-    translation_notes: Optional[str] = None
+    translation_notes: str | None = None
 
 
 class LLMTranslationProvider(TranslationProvider):
@@ -44,7 +44,7 @@ class LLMTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using the configured LLM.
@@ -107,7 +107,7 @@ class LLMTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
         max_concurrent: int = 5,
     ) -> list[TranslationResult]:
         """

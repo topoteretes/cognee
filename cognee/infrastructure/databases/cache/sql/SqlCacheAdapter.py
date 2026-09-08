@@ -124,7 +124,7 @@ class SqlCacheAdapter(CacheDBInterface):
         connection_string: str,
         lock_key: str = "default_lock",
         log_key: str = "usage_logs",
-        session_ttl_seconds: Optional[int] = 604800,
+        session_ttl_seconds: int | None = 604800,
         agentic_lock_expire: int = 240,
         agentic_lock_timeout: int = 300,
         purge_interval_seconds: int = 900,
@@ -219,7 +219,7 @@ class SqlCacheAdapter(CacheDBInterface):
         """Whether session-scoped sliding TTL is active."""
         return bool(self.session_ttl_seconds and self.session_ttl_seconds > 0)
 
-    def _session_expiry(self) -> Optional[datetime]:
+    def _session_expiry(self) -> datetime | None:
         """Expiry timestamp for session-scoped rows, or None when TTL is disabled."""
         if not self._ttl_enabled():
             return None
@@ -334,12 +334,12 @@ class SqlCacheAdapter(CacheDBInterface):
         question: str,
         context: str,
         answer: str,
-        qa_id: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        qa_id: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Serialize one QA entry into the normalized cache payload shape."""
         entry = SessionQAEntry(
@@ -363,7 +363,7 @@ class SqlCacheAdapter(CacheDBInterface):
         status: str,
         memory_query: str = "",
         memory_context: str = "",
-        method_params: Optional[dict] = None,
+        method_params: dict | None = None,
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
@@ -385,14 +385,14 @@ class SqlCacheAdapter(CacheDBInterface):
     @staticmethod
     def _merge_entry_update(
         entry: dict,
-        question: Optional[str] = None,
-        context: Optional[str] = None,
-        answer: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> dict:
         """Merge partial QA updates into an existing payload; None preserves values."""
         merged = {**entry}
@@ -509,12 +509,12 @@ class SqlCacheAdapter(CacheDBInterface):
         question: str,
         context: str,
         answer: str,
-        qa_id: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        qa_id: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> None:
         """Append one QA entry to the session. Creates the session if it doesn't exist."""
         await self._ensure_initialized()
@@ -551,7 +551,7 @@ class SqlCacheAdapter(CacheDBInterface):
 
     async def get_latest_qa_entries(
         self, user_id: str, session_id: str, last_n: int = 5
-    ) -> List[SessionQAEntry]:
+    ) -> list[SessionQAEntry]:
         """Return the most recent QA entries (chronological); [] when none, for all last_n."""
         await self._ensure_initialized()
         try:
@@ -572,7 +572,7 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
-    async def get_all_qa_entries(self, user_id: str, session_id: str) -> List[SessionQAEntry]:
+    async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """Return all QA entries stored for the given session, oldest first."""
         await self._ensure_initialized()
         try:
@@ -596,8 +596,8 @@ class SqlCacheAdapter(CacheDBInterface):
         self,
         user_id: str,
         session_id: str,
-        qa_ids: List[str],
-    ) -> List[SessionQAEntry]:
+        qa_ids: list[str],
+    ) -> list[SessionQAEntry]:
         """Return matching QA entries for the given session, oldest first."""
         if not qa_ids:
             return []
@@ -663,14 +663,14 @@ class SqlCacheAdapter(CacheDBInterface):
         user_id: str,
         session_id: str,
         qa_id: str,
-        question: Optional[str] = None,
-        context: Optional[str] = None,
-        answer: Optional[str] = None,
-        feedback_text: Optional[str] = None,
-        feedback_score: Optional[int] = None,
-        used_graph_element_ids: Optional[dict] = None,
-        memify_metadata: Optional[dict] = None,
-        used_session_context_ids: Optional[list] = None,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
+        memify_metadata: dict | None = None,
+        used_session_context_ids: list | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -781,7 +781,7 @@ class SqlCacheAdapter(CacheDBInterface):
         status: str,
         memory_query: str = "",
         memory_context: str = "",
-        method_params: Optional[dict] = None,
+        method_params: dict | None = None,
         method_return_value=None,
         error_message: str = "",
         session_feedback: str = "",
@@ -819,8 +819,8 @@ class SqlCacheAdapter(CacheDBInterface):
         await self._maybe_purge_expired()
 
     async def get_agent_trace_session(
-        self, user_id: str, session_id: str, last_n: Optional[int] = None
-    ) -> List[SessionAgentTraceEntry]:
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[SessionAgentTraceEntry]:
         """Retrieve stored trace steps for the given session (reads don't refresh TTL)."""
         await self._ensure_initialized()
         try:
@@ -844,8 +844,8 @@ class SqlCacheAdapter(CacheDBInterface):
             raise CacheConnectionError(error_msg) from error
 
     async def get_agent_trace_feedback(
-        self, user_id: str, session_id: str, last_n: Optional[int] = None
-    ) -> List[str]:
+        self, user_id: str, session_id: str, last_n: int | None = None
+    ) -> list[str]:
         """Retrieve ordered per-step feedback for the given trace session."""
         entries = await self.get_agent_trace_session(user_id, session_id, last_n=last_n)
         return [entry.session_feedback for entry in entries]
@@ -1049,7 +1049,7 @@ class SqlCacheAdapter(CacheDBInterface):
         self,
         user_id: str,
         log_entry: dict,
-        ttl: Optional[int] = 604800,
+        ttl: int | None = 604800,
     ):
         """
         Log usage information (API endpoint calls, MCP tool invocations) to SQL cache.
@@ -1135,7 +1135,7 @@ class SqlCacheAdapter(CacheDBInterface):
     # Key/value storage (small exact-key cache values)
     # --------------------------------------------------------------------- #
 
-    async def get_value(self, key: str) -> Optional[str]:
+    async def get_value(self, key: str) -> str | None:
         """Return the string value stored under key, or None if absent/expired."""
         await self._ensure_initialized()
         try:
@@ -1151,7 +1151,7 @@ class SqlCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from error
 
-    async def set_value(self, key: str, value: str, ttl: Optional[int] = None) -> None:
+    async def set_value(self, key: str, value: str, ttl: int | None = None) -> None:
         """Upsert a string value under key; ttl=None stores it without expiry."""
         await self._ensure_initialized()
         try:

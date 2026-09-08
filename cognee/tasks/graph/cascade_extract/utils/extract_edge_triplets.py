@@ -7,7 +7,7 @@ from cognee.shared.data_models import KnowledgeGraph
 
 
 async def extract_edge_triplets(
-    content: str, nodes: List[str], relationship_names: List[str], n_rounds: int = 2
+    content: str, nodes: list[str], relationship_names: list[str], n_rounds: int = 2
 ) -> KnowledgeGraph:
     """Creates a knowledge graph by identifying relationships between the provided nodes."""
     final_graph = KnowledgeGraph(nodes=[], edges=[])

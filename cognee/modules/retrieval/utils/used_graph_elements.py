@@ -15,7 +15,7 @@ def is_edge_list(obj: Any) -> bool:
     )
 
 
-def extract_from_edges(edges: List[Any]) -> Optional[Dict[str, List[str]]]:
+def extract_from_edges(edges: list[Any]) -> dict[str, list[str]] | None:
     """
     From a list of Edge-like objects, collect node_ids and edge_ids.
     edge_ids only from attributes["edge_object_id"] when present (no fallback).
@@ -37,7 +37,7 @@ def extract_from_edges(edges: List[Any]) -> Optional[Dict[str, List[str]]]:
                 edge_ids.add(str(eid))
         except (TypeError, AttributeError):
             continue
-    result: Dict[str, List[str]] = {}
+    result: dict[str, list[str]] = {}
     if node_ids:
         result["node_ids"] = sorted(node_ids)
     if edge_ids:
@@ -45,7 +45,7 @@ def extract_from_edges(edges: List[Any]) -> Optional[Dict[str, List[str]]]:
     return result if result else None
 
 
-def extract_from_scored_results(results: List[Any]) -> Optional[Dict[str, List[str]]]:
+def extract_from_scored_results(results: list[Any]) -> dict[str, list[str]] | None:
     """
     From ScoredResult-like list: node_ids from payload["id"] if present, else .id.
     No edge_ids. Returns None if nothing extracted.
@@ -67,7 +67,7 @@ def extract_from_scored_results(results: List[Any]) -> Optional[Dict[str, List[s
     return {"node_ids": sorted(node_ids)}
 
 
-def extract_from_temporal_dict(obj: Dict[str, Any]) -> Optional[Dict[str, List[str]]]:
+def extract_from_temporal_dict(obj: dict[str, Any]) -> dict[str, list[str]] | None:
     """
     From temporal retriever dict: triplets -> extract_from_edges; events path -> extract_from_scored_results.
     Returns None if nothing extracted.

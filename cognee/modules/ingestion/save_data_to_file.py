@@ -25,10 +25,10 @@ class StoredFile:
     """
 
     file_path: str
-    metadata: Optional[FileMetadata] = None
+    metadata: FileMetadata | None = None
 
 
-def _storage_key(file_name: str, content_hash: Optional[str], is_text: bool) -> str:
+def _storage_key(file_name: str, content_hash: str | None, is_text: bool) -> str:
     """The object key a payload is stored under: ``<content-md5>/<filename>``.
 
     Keying on the caller's filename alone meant two different uploads that
@@ -53,9 +53,9 @@ def _storage_key(file_name: str, content_hash: Optional[str], is_text: bool) -> 
 
 
 async def save_data_to_file_detailed(
-    data: Union[str, BinaryIO],
-    filename: str = None,
-    file_extension: Optional[str] = None,
+    data: str | BinaryIO,
+    filename: str | None = None,
+    file_extension: str | None = None,
 ) -> StoredFile:
     """Save ``data`` to cognee storage and describe what was saved.
 
@@ -104,7 +104,7 @@ async def save_data_to_file_detailed(
 
 
 async def save_data_to_file(
-    data: Union[str, BinaryIO], filename: str = None, file_extension: Optional[str] = None
+    data: str | BinaryIO, filename: str | None = None, file_extension: str | None = None
 ) -> str:
     """Save ``data`` to cognee storage and return its path.
 

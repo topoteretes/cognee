@@ -20,8 +20,8 @@ class LoaderResult:
     """
 
     file_path: str
-    data_id: Optional[UUID] = None
-    system_metadata: Optional[dict] = None
+    data_id: UUID | None = None
+    system_metadata: dict | None = None
     # Metadata for the stored derived text, computed from the content while the
     # loader still had it. Lets ingestion build the Data row without re-reading
     # the file it just wrote. None means "read it back to find out".

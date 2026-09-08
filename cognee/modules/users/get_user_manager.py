@@ -36,24 +36,22 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
 
     async def on_after_login(
-        self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
+        self, user: User, request: Request | None = None, response: Response | None = None
     ):
         logger.info("User %s has logged in.", user.id)
 
-    async def on_after_register(self, user: User, request: Optional[Request] = None):
+    async def on_after_register(self, user: User, request: Request | None = None):
         logger.info("User %s has registered.", user.id)
 
     async def on_after_forgot_password(
-        self, user: User, token: str, request: Optional[Request] = None
+        self, user: User, token: str, request: Request | None = None
     ):
         logger.info("User %s has forgot their password. Reset token: %s", user.id, token)
 
-    async def on_after_request_verify(
-        self, user: User, token: str, request: Optional[Request] = None
-    ):
+    async def on_after_request_verify(self, user: User, token: str, request: Request | None = None):
         logger.info("Verification requested for user %s. Verification token: %s", user.id, token)
 
-    async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> Optional[User]:
+    async def authenticate(self, credentials: OAuth2PasswordRequestForm) -> User | None:
         try:
             user = await self.get_by_email(credentials.username)
         except exceptions.UserNotExists:
@@ -78,7 +76,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
 
         return user
 
-    async def get_by_token(self, token: str) -> Optional[User]:
+    async def get_by_token(self, token: str) -> User | None:
         relational_engine = get_relational_engine()
         prepared_api_key = prepare_api_key(token)
 

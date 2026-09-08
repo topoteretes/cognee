@@ -101,10 +101,10 @@ async def register_tool_connection(
     name: str,
     connection_string: str,
     *,
-    provider: Optional[str] = None,
-    allowed_tables: Optional[list[str]] = None,
-    max_rows: Optional[int] = None,
-    description: Optional[str] = None,
+    provider: str | None = None,
+    allowed_tables: list[str] | None = None,
+    max_rows: int | None = None,
+    description: str | None = None,
     allow_writes: bool = False,
 ) -> dict[str, Any]:
     """Insert or replace the caller's connection under ``name``.

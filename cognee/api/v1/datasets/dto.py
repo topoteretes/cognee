@@ -17,10 +17,10 @@ class DataDTO(OutDTO):
     id: UUID
     name: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     extension: str
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
-    label: Optional[str] = None
-    external_metadata: Optional[dict] = None
+    label: str | None = None
+    external_metadata: dict | None = None

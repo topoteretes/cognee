@@ -64,8 +64,8 @@ def run_lightrag_benchmark(config_params: dict, dir_suffix: str):
 @app.local_entrypoint()
 async def main(
     runs: int = 45,
-    corpus_limit: int = None,
-    qa_limit: int = None,
+    corpus_limit: int | None = None,
+    qa_limit: int | None = None,
     query_mode: str = "hybrid",
     print_results: bool = True,
 ):

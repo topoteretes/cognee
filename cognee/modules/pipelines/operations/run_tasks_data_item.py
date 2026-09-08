@@ -6,7 +6,8 @@ within pipeline operations, supporting both incremental and regular processing m
 """
 
 import os
-from typing import Any, AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from typing import Any, Dict, Optional
 
 from sqlalchemy import select
 
@@ -43,10 +44,10 @@ logger = get_logger("run_tasks_data_item")
 
 def _push_stage_progress(
     yielded: PipelineRunYield,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     tasks: list[Task],
     pipeline_run_id: str,
-    progress_state: Optional[Dict[str, Any]] = None,
+    progress_state: dict[str, Any] | None = None,
 ) -> None:
     """Turn one intermediate PipelineRunYield into a PipelineRunProgress event
     and push it to this run's queue, so backgrounded runs surface per-stage
@@ -86,11 +87,11 @@ def _push_stage_progress(
 
 async def _drain_item_events(
     events: AsyncGenerator[Any, None],
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     tasks: list[Task],
     pipeline_run_id: str,
-    progress_state: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    progress_state: dict[str, Any] | None,
+) -> dict[str, Any] | None:
     """Consume one run_tasks_data_item_incremental/_regular generator to its end.
 
     Every intermediate ``PipelineRunYield`` is forwarded to stage-progress
@@ -113,9 +114,9 @@ async def run_tasks_data_item_incremental(
     pipeline_name: str,
     pipeline_id: str,
     pipeline_run_id: str,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     user: User,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
 
@@ -278,7 +279,7 @@ async def run_tasks_data_item_incremental(
         }
 
         if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
-            raise error
+            raise
 
 
 async def run_tasks_data_item_regular(
@@ -287,9 +288,9 @@ async def run_tasks_data_item_regular(
     tasks: list[Task],
     pipeline_id: str,
     pipeline_run_id: str,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     user: User,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any], None]:
     """
     Process a single data item in regular (non-incremental) mode.
 
@@ -339,12 +340,12 @@ async def run_tasks_data_item(
     pipeline_name: str,
     pipeline_id: str,
     pipeline_run_id: str,
-    ctx: Optional[PipelineContext],
+    ctx: PipelineContext | None,
     user: User,
     incremental_loading: bool,
     data_cache: bool,
-    progress_state: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    progress_state: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """
     Process a single data item, choosing between incremental and regular processing.
 
@@ -402,11 +403,9 @@ async def run_tasks_data_item(
         # edge evidence also fails; rollback still has graph-native run refs.
         try:
             await flush_context_provenance(ctx)
-        except Exception as provenance_error:
-            logger.error(
-                "Failed to persist provenance for an errored data item: %s",
-                provenance_error,
-                exc_info=True,
+        except Exception:
+            logger.exception(
+                "Failed to persist provenance for an errored data item",
             )
         raise
 

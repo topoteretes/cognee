@@ -9,7 +9,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import PipelineRun
 
 
-def _latest_run_per_dataset_query(dataset_ids: Optional[List[UUID]], pipeline_name: str):
+def _latest_run_per_dataset_query(dataset_ids: list[UUID] | None, pipeline_name: str):
     """The newest PipelineRun row per dataset, ranked by created_at desc.
 
     dataset_ids=None means every dataset, not none of them.
@@ -41,8 +41,8 @@ async def get_pipeline_run_by_dataset(dataset_id: UUID, pipeline_name: str):
 
 
 async def get_latest_pipeline_runs_by_datasets(
-    dataset_ids: Optional[List[UUID]], pipeline_name: str
-) -> Dict[UUID, PipelineRun]:
+    dataset_ids: list[UUID] | None, pipeline_name: str
+) -> dict[UUID, PipelineRun]:
     """The batched sibling of get_pipeline_run_by_dataset: the newest run per
     dataset, in one query, keyed by dataset_id.
 

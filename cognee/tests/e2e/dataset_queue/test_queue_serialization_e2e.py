@@ -47,10 +47,10 @@ logger = get_logger("cognee.tests.dataset_queue_e2e")
 # Each recorded event is (label, kind, timestamp).
 #   label: the asyncio task name (we encode which dataset it's processing)
 #   kind : "wait_start" | "enter" | "exit"
-Event = Tuple[str, str, float]
+Event = tuple[str, str, float]
 
 
-def _install_queue_tracing(events: List[Event]) -> None:
+def _install_queue_tracing(events: list[Event]) -> None:
     """Hook the queue's underlying semaphore to record every real slot take/release.
 
     The queue has two entry points (``acquire`` and ``ensure_slot``) and both
@@ -105,7 +105,7 @@ def _install_queue_tracing(events: List[Event]) -> None:
     sem.release = _traced_semaphore_release  # type: ignore[method-assign]
 
 
-def _max_observed_concurrency(events: List[Event]) -> int:
+def _max_observed_concurrency(events: list[Event]) -> int:
     """Given a list of traced events, compute the max concurrent slot holders."""
     timeline = sorted(events, key=lambda e: e[2])
     in_flight = 0
@@ -120,7 +120,7 @@ def _max_observed_concurrency(events: List[Event]) -> int:
 
 
 def _assert_serialized(
-    events: List[Event],
+    events: list[Event],
     *,
     phase: str,
     min_expected_enters: int,
@@ -144,7 +144,7 @@ def _assert_serialized(
 
 
 def _assert_capacity_reached_and_waited(
-    events: List[Event],
+    events: list[Event],
     *,
     phase: str,
     expected_capacity: int,
@@ -189,7 +189,7 @@ def _assert_capacity_reached_and_waited(
     )
 
 
-def _summarise(events: List[Event]) -> str:
+def _summarise(events: list[Event]) -> str:
     """Human-readable timeline for debug output."""
     if not events:
         return "(no events)"
@@ -239,7 +239,7 @@ async def main() -> None:
     # ====================================================================
     # PHASE 1: concurrent cognee.add on 3 different datasets
     # ====================================================================
-    events: List[Event] = []
+    events: list[Event] = []
     _install_queue_tracing(events)
 
     add_tasks = [
@@ -341,7 +341,7 @@ async def main() -> None:
 
     # Install tracing on the NEW singleton's semaphore (the previous tracer
     # was wired to the previous semaphore instance which is now discarded).
-    events_p4: List[Event] = []
+    events_p4: list[Event] = []
     _install_queue_tracing(events_p4)
 
     cap2_dataset_names = [f"queue_e2e_ds_cap2_{i}" for i in range(4)]

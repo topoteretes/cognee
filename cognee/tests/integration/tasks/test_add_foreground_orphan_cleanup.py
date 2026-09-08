@@ -107,7 +107,7 @@ async def _dlt_page_ids(user):
 @pytest.mark.asyncio
 async def test_foreground_add_runs_deferred_orphan_cleanup(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="merge", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "merge", "max_rows_per_table": 0}
 
     # Backfill two rows via the real (foreground) add pipeline.
     await cognee.add(

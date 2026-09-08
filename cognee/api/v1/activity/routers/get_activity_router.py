@@ -30,14 +30,14 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/pipeline-runs")
     async def get_pipeline_runs(
-        dataset_id: Optional[UUID] = Query(
+        dataset_id: UUID | None = Query(
             None,
             description=(
                 "Restrict the feed to a single dataset. When given, a missing read "
                 "permission on that dataset is a 403 rather than an empty list."
             ),
         ),
-        pipeline_name: Optional[str] = Query(
+        pipeline_name: str | None = Query(
             None,
             description=(
                 "Return only rows whose pipeline_name matches exactly. Operation "

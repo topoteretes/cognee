@@ -5,7 +5,7 @@ from cognee.modules.data.exceptions import DatasetTypeError
 from cognee.modules.data.methods import get_datasets
 
 
-async def get_dataset_ids(datasets: Union[list[str], list[UUID]], user):
+async def get_dataset_ids(datasets: list[str] | list[UUID], user):
     """
     Function returns dataset IDs necessary based on provided input.
     It transforms raw strings into real dataset_ids with keeping write permissions in mind.

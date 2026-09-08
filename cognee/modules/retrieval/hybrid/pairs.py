@@ -15,7 +15,7 @@ logger = get_logger("HybridRetriever")
 def chunk_summary_pairs(
     vector_chunks: list[Any],
     summary_hits: list[Any],
-    node_name: Optional[list[str]] = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
 ) -> list[dict]:
     pairs = []
@@ -82,7 +82,7 @@ def summary_text_by_chunk_id(pairs: list[dict]) -> dict[str, str]:
     return summaries
 
 
-def summary_id_for_chunk(chunk_id: str) -> Optional[str]:
+def summary_id_for_chunk(chunk_id: str) -> str | None:
     try:
         chunk_uuid = UUID(chunk_id)
     except (TypeError, ValueError):
@@ -98,9 +98,9 @@ def set_pair_chunk(pair: dict, chunk: Any) -> None:
 
 def _find_chunk_summary_pair(
     pairs: list[dict],
-    chunk_id: Optional[str],
-    chunk_text: Optional[str],
-) -> Optional[dict]:
+    chunk_id: str | None,
+    chunk_text: str | None,
+) -> dict | None:
     for pair in pairs:
         if chunk_id and pair["chunk_id"] == chunk_id:
             return pair
@@ -110,8 +110,8 @@ def _find_chunk_summary_pair(
 
 
 def _new_chunk_summary_pair(
-    chunk_id: Optional[str] = None,
-    chunk_text: Optional[str] = None,
+    chunk_id: str | None = None,
+    chunk_text: str | None = None,
 ) -> dict:
     return {
         "chunk_id": chunk_id,

@@ -31,8 +31,8 @@ async def get_all_entity_nodes(graph_engine):
 
 
 async def get_entity_neighborhood(
-    node_id: str, props: Dict[str, Any], graph_engine
-) -> Dict[str, Any]:
+    node_id: str, props: dict[str, Any], graph_engine
+) -> dict[str, Any]:
     """Fetch and format data for a single entity node."""
     edges, neighbors = await asyncio.gather(
         graph_engine.get_edges(node_id),
@@ -49,15 +49,15 @@ async def get_entity_neighborhood(
 
 
 def get_entity_properties(
-    props: Dict[str, Any], properties: Optional[Set[str]] = None
-) -> Dict[str, Any]:
+    props: dict[str, Any], properties: set[str] | None = None
+) -> dict[str, Any]:
     """Keep only relevant entity properties."""
     if properties is None:
         properties = {"id", "description", "name"}
     return {k: v for k, v in props.items() if k in properties}
 
 
-def format_edges(edges: List[Any]) -> Dict[str, str]:
+def format_edges(edges: list[Any]) -> dict[str, str]:
     """Map target node IDs to relationship names.
 
     Handles multiple graph adapter edge tuple formats:
@@ -93,14 +93,14 @@ def format_edges(edges: List[Any]) -> Dict[str, str]:
 
 
 def format_neighbors(
-    neighbors: List[Dict[str, Any]], node_fields: Optional[Set[str]] = None
-) -> tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    neighbors: list[dict[str, Any]], node_fields: set[str] | None = None
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Filter neighbor fields and exclude those with only an ID, returning EntityType separately."""
     if node_fields is None:
         node_fields = {"id", "name", "description", "text", "type"}
 
     entity_type = None
-    filtered_neighbors: List[Dict[str, Any]] = []
+    filtered_neighbors: list[dict[str, Any]] = []
     for neighbor in neighbors:
         if neighbor.get("type") == "EntityType":
             entity_type = neighbor
@@ -113,7 +113,7 @@ def format_neighbors(
 # endregion
 
 
-async def get_entities_with_neighborhood(args) -> List[Dict[str, Any]]:
+async def get_entities_with_neighborhood(args) -> list[dict[str, Any]]:
     """Iterate through all Entity nodes and fetch their edges and neighbor nodes."""
     graph_engine = await get_graph_engine()
     entity_nodes = await get_all_entity_nodes(graph_engine)
@@ -126,7 +126,7 @@ async def get_entities_with_neighborhood(args) -> List[Dict[str, Any]]:
 
 
 # region consolidate_entity_descriptions helper functions
-def load_metadata_to_dict(value: Any) -> Dict[str, Any]:
+def load_metadata_to_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         try:
             return json.loads(value)
@@ -199,7 +199,7 @@ async def generate_consolidated_entity(node, system_prompt) -> Entity:
 # endregion
 
 
-async def generate_consolidated_entities(nodes) -> List[DataPoint]:
+async def generate_consolidated_entities(nodes) -> list[DataPoint]:
     system_prompt = render_prompt(prompt_name, {})
 
     consolidate_entity_descriptions_tasks = (

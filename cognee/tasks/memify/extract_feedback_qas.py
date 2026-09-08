@@ -42,7 +42,7 @@ def _is_eligible(entry: SessionQAEntry) -> bool:
     return has_node_ids or has_edge_ids
 
 
-async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):
+async def extract_feedback_qas(data, session_ids: list[str] | None = None):
     """
     Read provided sessions and yield feedback QAs eligible for graph weight updates.
     """

@@ -17,16 +17,16 @@ class Node(BaseModel):
     """
 
     id: str
-    attributes: Dict[str, Any]
-    skeleton_neighbours: List["Node"]
-    skeleton_edges: List["Edge"]
+    attributes: dict[str, Any]
+    skeleton_neighbours: list["Node"]
+    skeleton_edges: list["Edge"]
     status: np.ndarray
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(
         self,
         node_id: str,
-        attributes: Optional[Dict[str, Any]] = None,
+        attributes: dict[str, Any] | None = None,
         dimension: int = 1,
         node_penalty: float = 6.5,
     ):
@@ -43,23 +43,23 @@ class Node(BaseModel):
         )
 
     @field_serializer("status")
-    def serialize_status(self, status: np.ndarray, _info) -> List[int]:
+    def serialize_status(self, status: np.ndarray, _info) -> list[int]:
         return status.tolist()
 
     @field_serializer("skeleton_neighbours")
     def serialize_skeleton_neighbours(
-        self, neighbours: List["Node"], _info
-    ) -> List[Dict[str, Any]]:
+        self, neighbours: list["Node"], _info
+    ) -> list[dict[str, Any]]:
         return [n.to_json() for n in neighbours]
 
     @field_serializer("skeleton_edges")
-    def serialize_skeleton_edges(self, edges: List["Edge"], _info) -> List[Dict[str, Any]]:
+    def serialize_skeleton_edges(self, edges: list["Edge"], _info) -> list[dict[str, Any]]:
         return [e.to_json() for e in edges]
 
     def reset_vector_distances(self, query_count: int, default_penalty: float) -> None:
         self.attributes["vector_distance"] = [default_penalty] * query_count
 
-    def ensure_vector_distance_list(self, query_count: int, default_penalty: float) -> List[float]:
+    def ensure_vector_distance_list(self, query_count: int, default_penalty: float) -> list[float]:
         distances = self.attributes.get("vector_distance")
         if not isinstance(distances, list) or len(distances) != query_count:
             distances = [default_penalty] * query_count
@@ -108,7 +108,7 @@ class Node(BaseModel):
     def add_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
 
-    def get_attribute(self, key: str) -> Union[str, int, float]:
+    def get_attribute(self, key: str) -> str | int | float:
         return self.attributes[key]
 
     def get_skeleton_edges(self):
@@ -117,7 +117,7 @@ class Node(BaseModel):
     def get_skeleton_neighbours(self):
         return self.skeleton_neighbours
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         return {
             "node_id": self.id,
             "node_attributes": self.attributes,
@@ -145,7 +145,7 @@ class Edge(BaseModel):
 
     node1: "Node"
     node2: "Node"
-    attributes: Dict[str, Any]
+    attributes: dict[str, Any]
     directed: bool
     status: np.ndarray
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -154,7 +154,7 @@ class Edge(BaseModel):
         self,
         node1: "Node",
         node2: "Node",
-        attributes: Optional[Dict[str, Any]] = None,
+        attributes: dict[str, Any] | None = None,
         directed: bool = True,
         dimension: int = 1,
         edge_penalty: float = 6.5,
@@ -172,14 +172,14 @@ class Edge(BaseModel):
         )
 
     @field_serializer("status")
-    def serialize_status(self, status: np.ndarray, _info) -> List[int]:
+    def serialize_status(self, status: np.ndarray, _info) -> list[int]:
         return status.tolist()
 
     @field_serializer("node1", "node2")
-    def serialize_node(self, node: "Node", _info) -> Dict[str, Any]:
+    def serialize_node(self, node: "Node", _info) -> dict[str, Any]:
         return node.to_json()
 
-    def get_distance_key(self) -> Optional[str]:
+    def get_distance_key(self) -> str | None:
         key = self.attributes.get("edge_type_id")
         if key is None:
             return None
@@ -188,7 +188,7 @@ class Edge(BaseModel):
     def reset_vector_distances(self, query_count: int, default_penalty: float) -> None:
         self.attributes["vector_distance"] = [default_penalty] * query_count
 
-    def ensure_vector_distance_list(self, query_count: int, default_penalty: float) -> List[float]:
+    def ensure_vector_distance_list(self, query_count: int, default_penalty: float) -> list[float]:
         distances = self.attributes.get("vector_distance")
         if not isinstance(distances, list) or len(distances) != query_count:
             distances = [default_penalty] * query_count
@@ -213,7 +213,7 @@ class Edge(BaseModel):
     def add_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
 
-    def get_attribute(self, key: str) -> Optional[Union[str, int, float]]:
+    def get_attribute(self, key: str) -> str | int | float | None:
         return self.attributes.get(key)
 
     def get_source_node(self):
@@ -222,7 +222,7 @@ class Edge(BaseModel):
     def get_destination_node(self):
         return self.node2
 
-    def to_json(self) -> Dict[str, Any]:
+    def to_json(self) -> dict[str, Any]:
         return {
             "source_node_id": self.node1.id,
             "target_node_id": self.node2.id,

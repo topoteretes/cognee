@@ -26,10 +26,10 @@ def _get_remaining_edge_retrieval_text(edge) -> str:
 
 
 async def delete_from_graph_and_vector(
-    affected_nodes: List[Node],
-    affected_edges: List[Edge],
-    is_legacy_node: List[bool],
-    is_legacy_edge: List[bool],
+    affected_nodes: list[Node],
+    affected_edges: list[Edge],
+    is_legacy_node: list[bool],
+    is_legacy_edge: list[bool],
 ) -> None:
     """Delete non-legacy nodes/edges from graph DB, vector DB, and mark ledger entries.
 
@@ -70,7 +70,7 @@ async def delete_from_graph_and_vector(
         await graph_engine.delete_nodes([str(node.slug) for node in unique_nodes])
 
     # Delete from vector DB - group by collection
-    affected_vector_collections: Dict[str, List[Node]] = {}
+    affected_vector_collections: dict[str, list[Node]] = {}
     for node in unique_nodes:
         for indexed_field in node.indexed_fields:
             collection_name = f"{node.type}_{indexed_field}"

@@ -15,7 +15,7 @@ load_dotenv()
 
 
 async def load_corpus_to_graphiti(
-    graphiti: Graphiti, corpus_file: str = "hotpot_50_corpus.json", limit: int = None
+    graphiti: Graphiti, corpus_file: str = "hotpot_50_corpus.json", limit: int | None = None
 ):
     """Loads corpus data into graphiti."""
     print(f"Loading corpus from {corpus_file}...")
@@ -52,8 +52,8 @@ async def answer_questions(
     model_name: str = "gpt-5-mini",
     qa_pairs_file: str = "hotpot_50_qa_pairs.json",
     print_results: bool = True,
-    output_file: str = None,
-    limit: int = None,
+    output_file: str | None = None,
+    limit: int | None = None,
 ):
     """Answer questions using graphiti retrieval with direct LLM calls."""
     print(f"Loading QA pairs from {qa_pairs_file}...")

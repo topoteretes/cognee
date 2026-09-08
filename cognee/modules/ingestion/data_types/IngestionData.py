@@ -2,7 +2,7 @@ from typing import BinaryIO, Protocol, Union
 
 
 class IngestionData(Protocol):
-    data: Union[str, BinaryIO] = None
+    data: str | BinaryIO = None
 
     def get_data(self):
         raise NotImplementedError("Subclasses must implement get_data()")

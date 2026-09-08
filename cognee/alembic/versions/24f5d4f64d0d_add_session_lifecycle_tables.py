@@ -6,15 +6,16 @@ Create Date: 2026-04-24 16:30:00.000000
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "24f5d4f64d0d"
-down_revision: Union[str, None] = "7c5d4e2f8a91"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "7c5d4e2f8a91"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 SESSION_RECORDS_TABLE = "session_records"
 SESSION_MODEL_USAGE_TABLE = "session_model_usage"

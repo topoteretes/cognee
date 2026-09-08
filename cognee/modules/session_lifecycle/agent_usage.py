@@ -14,8 +14,9 @@ without spinning up FastAPI.
 """
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Iterable, Optional
+from typing import Optional
 from uuid import UUID as UUIDType
 
 from sqlalchemy import or_, select
@@ -69,8 +70,8 @@ async def build_sessions_with_agent_info_page(
     user: User,
     permitted_dataset_ids: list[UUIDType],
     visible_user_ids: list[UUIDType],
-    since: Optional[datetime],
-    status_filter: Optional[str],
+    since: datetime | None,
+    status_filter: str | None,
     limit: int,
     offset: int,
     order_by: str,
@@ -176,7 +177,7 @@ async def compute_cost_by_user_agent(
     user: User,
     visible_user_ids: list[UUIDType],
     permitted_dataset_ids: list[UUIDType],
-    since: Optional[datetime],
+    since: datetime | None,
 ) -> list[dict]:
     """Token/cost totals grouped by (user, agent type) for a spend chart.
 
@@ -251,9 +252,9 @@ async def compute_cost_by_user_agent(
 
 async def get_sessions_with_agent_info(
     *,
-    user: Optional[User] = None,
-    since: Optional[datetime],
-    status_filter: Optional[str],
+    user: User | None = None,
+    since: datetime | None,
+    status_filter: str | None,
     limit: int,
     offset: int,
     order_by: str,
@@ -289,9 +290,7 @@ async def get_sessions_with_agent_info(
     )
 
 
-async def get_cost_by_user_agent(
-    *, user: Optional[User] = None, since: Optional[datetime]
-) -> list[dict]:
+async def get_cost_by_user_agent(*, user: User | None = None, since: datetime | None) -> list[dict]:
     """SDK-usable entry point backing ``GET /sessions/cost-by-user-agent``.
 
     Resolves visibility the same way ``get_sessions_with_agent_info``

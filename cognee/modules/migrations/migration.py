@@ -15,8 +15,9 @@ renaming one orphans every stamped database (see ``pending_migrations``).
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class MigrationContext:
 
     graph_engine: Any
     vector_engine: Any
-    dataset_id: Optional[UUID] = None
+    dataset_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -68,9 +69,9 @@ class Migration:
 
     slug: str
     cognee_version: str
-    up: Callable[["MigrationContext"], Awaitable[None]]
-    down_revision: Optional[str] = None
-    down: Optional[Callable[["MigrationContext"], Awaitable[None]]] = None
+    up: Callable[[MigrationContext], Awaitable[None]]
+    down_revision: str | None = None
+    down: Callable[[MigrationContext], Awaitable[None]] | None = None
 
     @property
     def revision(self) -> str:
@@ -87,7 +88,7 @@ def order_migrations(migrations: list[Migration]) -> list[Migration]:
     if not migrations:
         return []
 
-    by_down: dict[Optional[str], Migration] = {}
+    by_down: dict[str | None, Migration] = {}
     for migration in migrations:
         if migration.down_revision in by_down:
             raise ValueError(
@@ -97,7 +98,7 @@ def order_migrations(migrations: list[Migration]) -> list[Migration]:
         by_down[migration.down_revision] = migration
 
     ordered: list[Migration] = []
-    cursor: Optional[str] = None  # the chain root has down_revision == None
+    cursor: str | None = None  # the chain root has down_revision == None
     while cursor in by_down:
         migration = by_down.pop(cursor)
         ordered.append(migration)
@@ -112,7 +113,7 @@ def order_migrations(migrations: list[Migration]) -> list[Migration]:
     return ordered
 
 
-def head_revision(migrations: list[Migration]) -> Optional[str]:
+def head_revision(migrations: list[Migration]) -> str | None:
     """Return the revision at the head of the chain (``None`` if there are none)."""
     ordered = order_migrations(migrations)
     return ordered[-1].revision if ordered else None
@@ -120,7 +121,7 @@ def head_revision(migrations: list[Migration]) -> Optional[str]:
 
 def pending_migrations(
     migrations: list[Migration],
-    stored_revision: Optional[str],
+    stored_revision: str | None,
     target_revision: str = "head",
 ) -> list[Migration]:
     """Return the migrations needed to bring ``stored_revision`` up to ``target_revision``.
@@ -171,8 +172,8 @@ def pending_migrations(
 
 def migrations_to_downgrade(
     migrations: list[Migration],
-    stored_revision: Optional[str],
-    target_revision: Optional[str] = None,
+    stored_revision: str | None,
+    target_revision: str | None = None,
 ) -> list[Migration]:
     """Return the migrations to revert (newest first) to reach ``target_revision``.
 

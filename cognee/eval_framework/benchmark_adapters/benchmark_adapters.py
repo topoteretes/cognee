@@ -19,7 +19,7 @@ class BenchmarkAdapter(Enum):
     TWOWIKIMULTIHOP = ("TwoWikiMultiHop", TwoWikiMultihopAdapter)
     BEAM = ("BEAM", BEAMAdapter)
 
-    def __new__(cls, adapter_name: str, adapter_class: Type):
+    def __new__(cls, adapter_name: str, adapter_class: type):
         obj = object.__new__(cls)
         obj._value_ = adapter_name
         obj.adapter_class = adapter_class

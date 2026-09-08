@@ -117,7 +117,7 @@ async def _row_texts():
 @pytest.mark.asyncio
 async def test_changed_row_reprocesses_without_vanishing(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="replace", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "replace", "max_rows_per_table": 0}
 
     await cognee.add(
         _dlt_source(
@@ -129,7 +129,7 @@ async def test_changed_row_reprocesses_without_vanishing(clean_env):
         dataset_name=DATASET,
         **kwargs,
     )
-    dataset, records = await _manifest_record(user)
+    _dataset, records = await _manifest_record(user)
     assert len(records) == 1
     manifest_id = records[0].id
     first_hash = records[0].content_hash
@@ -180,7 +180,7 @@ async def test_changed_row_reprocesses_without_vanishing(clean_env):
 @pytest.mark.asyncio
 async def test_unchanged_readd_keeps_the_fast_skip(clean_env):
     user = await get_default_user()
-    kwargs = dict(primary_key="id", write_disposition="replace", max_rows_per_table=0)
+    kwargs = {"primary_key": "id", "write_disposition": "replace", "max_rows_per_table": 0}
     rows = [{"id": "1", "status": "active"}]
 
     await cognee.add(_dlt_source(rows, name="gizmos"), dataset_name=DATASET_SKIP, **kwargs)

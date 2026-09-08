@@ -56,7 +56,7 @@ class GoogleTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using Google Translate API.
@@ -105,7 +105,7 @@ class GoogleTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using Google Translate API.

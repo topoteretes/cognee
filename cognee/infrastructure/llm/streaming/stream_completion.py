@@ -32,9 +32,9 @@ async def stream_text_completion(
     model: str,
     system_prompt: str,
     text_input: str,
-    api_key: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    api_version: Optional[str] = None,
+    api_key: str | None = None,
+    endpoint: str | None = None,
+    api_version: str | None = None,
     adapter_name: str = "LLM",
     **merged_kwargs: Any,
 ) -> str:

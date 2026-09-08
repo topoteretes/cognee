@@ -47,10 +47,10 @@ def get_responses_router() -> APIRouter:
     async def call_openai_api_for_model(
         input_text: str,
         model: str,
-        tools: Optional[List[Dict[str, Any]]] = DEFAULT_TOOLS,
+        tools: list[dict[str, Any]] | None = DEFAULT_TOOLS,
         tool_choice: Any = "auto",
         temperature: float = 1.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Call appropriate model API based on model name
         """
@@ -146,7 +146,7 @@ def get_responses_router() -> APIRouter:
                     function_result = await dispatch_function(tool_call)
                     output_status = "success"
                 except Exception as e:
-                    logger.exception(f"Error executing function {function_name}: {e}")
+                    logger.exception(f"Error executing function {function_name}")
                     function_result = f"Error executing {function_name}: {e!s}"
                     output_status = "error"
 

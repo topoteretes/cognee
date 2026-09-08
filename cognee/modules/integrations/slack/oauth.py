@@ -57,7 +57,7 @@ def make_state(user_id: UUID) -> str:
     return _make_state(user_id, signing_secret=require("signing_secret"))
 
 
-def validate_state(state: str) -> Optional[UUID]:
+def validate_state(state: str) -> UUID | None:
     """Return the ``user_id`` for a valid, unexpired state; ``None`` otherwise.
 
     Verifies the HMAC before reading any field, so a forged or tampered state
