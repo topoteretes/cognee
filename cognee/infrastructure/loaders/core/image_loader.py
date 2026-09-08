@@ -254,7 +254,10 @@ class ImageLoader(LoaderInterface):
 
         try:
             with Image.open(file_path) as img:
-                exif_data = img._getexif()  # ty:ignore[unresolved-attribute]
+                # _getexif exists only on the JPEG plugin; other formats fall through to None
+                # exactly as the AttributeError did before.
+                get_exif = getattr(img, "_getexif", None)
+                exif_data = get_exif() if callable(get_exif) else None
         except Exception:
             logger.debug(
                 "Falling back to None after error in ImageLoader._extract_exif_metadata",
@@ -356,7 +359,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     """
     from PIL import Image  # ty: ignore[unresolved-import]
 
-    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)  # ty:ignore[unresolved-attribute]
+    image = image.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.LANCZOS)
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
     bits: list[str] = []
