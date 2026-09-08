@@ -110,8 +110,8 @@ async def get_memory_fragment(
             )
     except EntityNotFoundError:
         pass
-    except Exception as e:
-        logger.error(f"Error during memory fragment creation: {e!s}")
+    except Exception:
+        logger.exception("Error during memory fragment creation")
 
     return memory_fragment
 

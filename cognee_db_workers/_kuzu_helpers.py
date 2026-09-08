@@ -15,10 +15,13 @@ avoids surprising contributors.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import tempfile
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_close(obj) -> None:
@@ -27,7 +30,7 @@ def _safe_close(obj) -> None:
     try:
         obj.close()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _safe_close", exc_info=True)
 
 
 def install_json_extension_local(
@@ -72,6 +75,7 @@ def install_json_extension_local(
                 # the live connection), but say why it failed — a silent
                 # swallow here made "has not been installed" errors at LOAD
                 # time impossible to diagnose from CI logs.
+                logger.debug("Ignoring exception in install_json_extension_local", exc_info=True)
                 print(
                     f"[ladybug worker] warm-up INSTALL JSON failed: {error!r}",
                     file=sys.stderr,
@@ -79,6 +83,7 @@ def install_json_extension_local(
         except Exception as error:
             # Best-effort install: missing/incompatible JSON extension and
             # init failures all surface here. The cleanup below still runs.
+            logger.debug("Ignoring exception in install_json_extension_local", exc_info=True)
             print(
                 f"[ladybug worker] warm-up JSON install setup failed: {error!r}",
                 file=sys.stderr,

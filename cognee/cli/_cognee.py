@@ -23,6 +23,9 @@ from cognee.cli import DEFAULT_DOCS_URL, SupportsCliCommand, debug
 from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.remediation import find_remediation
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 ACTION_EXECUTED = False
 
@@ -297,7 +300,7 @@ def main() -> int:
                         ["docker", "rm", "-f", docker_container], capture_output=True, check=False
                     )
                 except Exception:
-                    pass
+                    logger.debug("Ignoring exception in main.signal_handler", exc_info=True)
 
             # Then, stop regular processes
             for pid in spawned_pids:
@@ -436,7 +439,7 @@ def main() -> int:
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 
             if debug.is_debug_enabled() and raiseable_exception:
-                raise raiseable_exception
+                raise raiseable_exception from ex
 
             return error_code
     else:

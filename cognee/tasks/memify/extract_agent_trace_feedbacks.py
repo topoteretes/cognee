@@ -117,6 +117,7 @@ async def extract_agent_trace_feedbacks(
                         content_label,
                         session_id,
                         error,
+                        exc_info=True,
                     )
                     continue
         else:
@@ -127,7 +128,7 @@ async def extract_agent_trace_feedbacks(
     except CogneeSystemError:
         raise
     except Exception as error:
-        logger.error("Error extracting agent trace feedbacks: %s", error)
+        logger.exception("Error extracting agent trace feedbacks")
         raise CogneeSystemError(
             message=f"Failed to extract agent trace feedbacks: {error}",
             log=False,

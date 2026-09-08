@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def convert_metrics_file(json_path: str, metrics: list[str] | None = None) -> dict[str, Any]:
@@ -71,6 +74,7 @@ def process_multiple_files(
             results.append(converted)
             print(f"Processed: {json_path}")
         except Exception as e:
+            logger.debug("Ignoring exception in process_multiple_files", exc_info=True)
             print(f"Error processing {json_path}: {e}")
 
     # Save JSON results

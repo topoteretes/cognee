@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 from typing import List
@@ -15,6 +16,8 @@ from cognee.modules.engine.models import Entity
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentChunkWithEntities(DataPoint):
@@ -96,7 +99,9 @@ async def setup_test_environment_with_chunks_simple():
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug(
+            "Ignoring exception in setup_test_environment_with_chunks_simple", exc_info=True
+        )
 
 
 @pytest_asyncio.fixture
@@ -199,7 +204,9 @@ async def setup_test_environment_with_chunks_complex():
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug(
+            "Ignoring exception in setup_test_environment_with_chunks_complex", exc_info=True
+        )
 
 
 @pytest_asyncio.fixture
@@ -247,7 +254,7 @@ async def setup_test_environment_empty():
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

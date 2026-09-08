@@ -546,6 +546,9 @@ class LadybugAdapter(GraphDBInterface):
                 # miss it when offline, or when it cached to a different path).
                 # Try installing + loading directly on the real connection before
                 # giving up. INSTALL is idempotent and a no-op when already cached.
+                logger.debug(
+                    "Ignoring exception in LadybugAdapter._initialize_connection", exc_info=True
+                )
                 try:
                     self.connection.execute("INSTALL JSON;")
                     self.connection.execute("LOAD EXTENSION JSON;")
@@ -563,6 +566,7 @@ class LadybugAdapter(GraphDBInterface):
                         "pre-install it in your image, or run `INSTALL json; LOAD json;` "
                         "once against the database.",
                         e,
+                        exc_info=True,
                     )
 
             self._ensure_schema()
@@ -836,13 +840,13 @@ class LadybugAdapter(GraphDBInterface):
             try:
                 self.connection.close()
             except Exception as e:
-                logger.warning(f"Error closing Ladybug connection: {e}")
+                logger.warning(f"Error closing Ladybug connection: {e}", exc_info=True)
             self.connection = None
         if self.db is not None:
             try:
                 self.db.close()
             except Exception as e:
-                logger.warning(f"Error closing Ladybug database: {e}")
+                logger.warning(f"Error closing Ladybug database: {e}", exc_info=True)
             self.db = None
 
     def _rebuild_subprocess_proxies(self) -> None:
@@ -880,7 +884,7 @@ class LadybugAdapter(GraphDBInterface):
         try:
             self.connection.load_extension("JSON")
         except Exception as e:
-            logger.warning(f"Could not load JSON extension after reopen: {e}")
+            logger.warning(f"Could not load JSON extension after reopen: {e}", exc_info=True)
         # Recreate the Node/EDGE schema — ``delete_graph`` removed the
         # on-disk store, so the worker is now talking to a fresh empty
         # DB with no tables. Without this, the very next graph query
@@ -977,7 +981,7 @@ class LadybugAdapter(GraphDBInterface):
             try:
                 await asyncio.to_thread(self._session.shutdown)
             except Exception as e:
-                logger.warning(f"Error shutting down Ladybug subprocess: {e}")
+                logger.warning(f"Error shutting down Ladybug subprocess: {e}", exc_info=True)
             self._session = None
         logger.info("Ladybug database closed successfully")
 
@@ -1853,8 +1857,8 @@ class LadybugAdapter(GraphDBInterface):
                 node_data = self._parse_node(result[0][0])
                 return node_data
             return None
-        except Exception as e:
-            logger.error(f"Failed to extract node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to extract node {node_id}")
             return None
 
     async def extract_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
@@ -1891,8 +1895,8 @@ class LadybugAdapter(GraphDBInterface):
             # Parse each node using the same helper function
             nodes = [self._parse_node(row[0]) for row in results if row[0]]
             return nodes
-        except Exception as e:
-            logger.error(f"Failed to extract nodes: {e}")
+        except Exception:
+            logger.exception("Failed to extract nodes")
             return []
 
     # Edge Operations
@@ -2173,8 +2177,8 @@ class LadybugAdapter(GraphDBInterface):
                     target_node = self._parse_node_properties(row[2])
                     edges.append((source_node, row[1], target_node))
             return edges
-        except Exception as e:
-            logger.error(f"Failed to get edges for node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to get edges for node {node_id}")
             return []
 
     # Neighbor Operations
@@ -2211,8 +2215,8 @@ class LadybugAdapter(GraphDBInterface):
         try:
             result = await self.query(query_str, {"id": node_id})
             return [self._parse_node_properties(row[0]) for row in result] if result else []
-        except Exception as e:
-            logger.error(f"Failed to get neighbours for node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to get neighbours for node {node_id}")
             return []
 
     async def get_node(self, node_id: str) -> dict[str, Any] | None:
@@ -2248,8 +2252,8 @@ class LadybugAdapter(GraphDBInterface):
             if result and result[0]:
                 return self._parse_node(result[0][0])
             return None
-        except Exception as e:
-            logger.error(f"Failed to get node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to get node {node_id}")
             return None
 
     async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
@@ -2284,8 +2288,8 @@ class LadybugAdapter(GraphDBInterface):
         try:
             results = await self.query(query_str, {"node_ids": node_ids})
             return [self._parse_node(row[0]) for row in results if row[0]]
-        except Exception as e:
-            logger.error(f"Failed to get nodes: {e}")
+        except Exception:
+            logger.exception("Failed to get nodes")
             return []
 
     def _rows_to_dicts(self, rows: list, column_names: list[str]) -> list[dict[str, Any]]:
@@ -2674,8 +2678,8 @@ class LadybugAdapter(GraphDBInterface):
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
             return [self._parse_node_properties(row[0]) for row in result] if result else []
-        except Exception as e:
-            logger.error(f"Failed to get predecessors for node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to get predecessors for node {node_id}")
             return []
 
     async def get_successors(
@@ -2728,8 +2732,8 @@ class LadybugAdapter(GraphDBInterface):
                 params = {"id": str(node_id)}
             result = await self.query(query_str, params)
             return [self._parse_node_properties(row[0]) for row in result] if result else []
-        except Exception as e:
-            logger.error(f"Failed to get successors for node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to get successors for node {node_id}")
             return []
 
     async def get_connections(
@@ -2794,8 +2798,8 @@ class LadybugAdapter(GraphDBInterface):
                         processed_rows.append(item)
                     edges.append(tuple(processed_rows))
             return edges if edges else []  # Always return a list, even if empty
-        except Exception as e:
-            logger.error(f"Failed to get connections for node {node_id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to get connections for node {node_id}")
             return []  # Return empty list on error
 
     async def remove_connection_to_predecessors_of(
@@ -3416,8 +3420,8 @@ class LadybugAdapter(GraphDBInterface):
 
             return {**mandatory_metrics, **optional_metrics}
 
-        except Exception as e:
-            logger.error(f"Failed to get graph metrics: {e}")
+        except Exception:
+            logger.exception("Failed to get graph metrics")
             return {
                 "num_nodes": 0,
                 "num_edges": 0,

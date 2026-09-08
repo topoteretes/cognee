@@ -277,6 +277,10 @@ def get_activity_router() -> APIRouter:
                 for u in users
             ]
         except Exception:
+            logger.debug(
+                "Falling back to [] after error in get_activity_router.get_tenant_users",
+                exc_info=True,
+            )
             return []
 
     @router.get("/agents")
@@ -447,6 +451,9 @@ def get_activity_router() -> APIRouter:
             nodes = graph.get("nodes", []) if isinstance(graph, dict) else []
             edges = graph.get("edges", []) if isinstance(graph, dict) else []
         except Exception:
+            logger.debug(
+                "Ignoring exception in get_activity_router.export_dataset_markdown", exc_info=True
+            )
             nodes, edges = [], []
 
         # Build markdown

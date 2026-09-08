@@ -85,7 +85,9 @@ async def _count_and_cache(dataset: Dataset, pipeline_run_id: UUID) -> DatasetGr
             graph_engine = await get_graph_engine()
             graph_metrics = await graph_engine.get_graph_metrics(include_optional=False) or {}
     except Exception as error:
-        logger.warning("Failed to compute graph metrics for dataset %s: %s", dataset.id, error)
+        logger.warning(
+            "Failed to compute graph metrics for dataset %s: %s", dataset.id, error, exc_info=True
+        )
         return DatasetGraphCounts(pipeline_run_id=pipeline_run_id)
 
     num_nodes = graph_metrics.get("num_nodes") or 0
@@ -122,8 +124,8 @@ async def _count_and_cache(dataset: Dataset, pipeline_run_id: UUID) -> DatasetGr
         computed_at = datetime.now(timezone.utc)
     except IntegrityError as error:
         logger.warning("Lost the caching race for dataset %s: %s", dataset.id, error)
-    except Exception as error:
-        logger.error("Failed to cache graph metrics for dataset %s: %s", dataset.id, error)
+    except Exception:
+        logger.exception("Failed to cache graph metrics for dataset %s", dataset.id)
 
     return DatasetGraphCounts(
         pipeline_run_id=pipeline_run_id,

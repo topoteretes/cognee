@@ -161,7 +161,7 @@ class BEAMRouter:
                 answer_text = search_results[0] if search_results else ""
 
             except Exception as e:
-                logger.error(f"Failed to answer '{query_text[:80]}...': {e}")
+                logger.exception(f"Failed to answer '{query_text[:80]}...'")
                 answer_text = f"ERROR: {e}"
                 retrieval_context = ""
 

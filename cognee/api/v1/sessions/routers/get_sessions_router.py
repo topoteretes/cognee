@@ -460,7 +460,9 @@ def get_sessions_router() -> APIRouter:
                     user_id=owner_user_id, session_id=session_id
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "Ignoring exception in get_sessions_router.get_session_detail", exc_info=True
+                )
 
         record = row.to_dict()
         # Label = first QA's question, else first trace's origin_function

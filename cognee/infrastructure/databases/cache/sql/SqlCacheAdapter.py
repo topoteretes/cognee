@@ -100,12 +100,12 @@ class _SqlAdvisoryLockHandle:
                 text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": self.lock_id}
             )
         except Exception as error:
-            logger.debug("Error releasing Postgres advisory lock: %s", error)
+            logger.debug("Error releasing Postgres advisory lock: %s", error, exc_info=True)
         finally:
             try:
                 self.connection.close()
             except Exception as error:
-                logger.debug("Error closing advisory lock connection: %s", error)
+                logger.debug("Error closing advisory lock connection: %s", error, exc_info=True)
 
 
 class SqlCacheAdapter(CacheDBInterface):
@@ -327,7 +327,9 @@ class SqlCacheAdapter(CacheDBInterface):
                         )
                     )
         except Exception as error:
-            logger.debug("SQL cache TTL sweep failed (will retry next interval): %s", error)
+            logger.debug(
+                "SQL cache TTL sweep failed (will retry next interval): %s", error, exc_info=True
+            )
 
     @staticmethod
     def _build_qa_entry_dump(
@@ -478,7 +480,7 @@ class SqlCacheAdapter(CacheDBInterface):
             try:
                 connection.close()
             except Exception as error:
-                logger.debug("Error closing advisory lock connection: %s", error)
+                logger.debug("Error closing advisory lock connection: %s", error, exc_info=True)
             raise
 
     def release_lock(self, lock=None):
@@ -493,7 +495,7 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             handle.release()
         except Exception as error:
-            logger.debug("Error releasing Postgres advisory lock: %s", error)
+            logger.debug("Error releasing Postgres advisory lock: %s", error, exc_info=True)
         finally:
             if handle is self.lock:
                 self.lock = None
@@ -1218,11 +1220,11 @@ class SqlCacheAdapter(CacheDBInterface):
         try:
             await self.engine.dispose(close=True)
         except Exception as error:
-            logger.debug("Error closing SQL cache async engine: %s", error)
+            logger.debug("Error closing SQL cache async engine: %s", error, exc_info=True)
         if self._sync_lock_engine is not None:
             try:
                 self._sync_lock_engine.dispose(close=True)
             except Exception as error:
-                logger.debug("Error closing SQL cache sync lock engine: %s", error)
+                logger.debug("Error closing SQL cache sync lock engine: %s", error, exc_info=True)
             self._sync_lock_engine = None
         self._initialized = False

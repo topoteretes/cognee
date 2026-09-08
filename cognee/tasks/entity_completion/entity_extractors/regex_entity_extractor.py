@@ -67,6 +67,6 @@ class RegexEntityExtractor(BaseEntityExtractor):
         try:
             logger.info(f"Extracting entities from text: {text[:100]}...")
             return self._text_to_entities(text)
-        except Exception as e:
-            logger.error(f"Entity extraction failed: {e!s}")
+        except Exception:
+            logger.exception("Entity extraction failed")
             return []

@@ -44,7 +44,7 @@ class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
 
         # Simulate failures if configured
         if self.fail_every_n_requests > 0 and self.request_count % self.fail_every_n_requests == 0:
-            raise Exception(f"Mock failure on request #{self.request_count}")
+            raise RuntimeError(f"Mock failure on request #{self.request_count}")
 
         # Return mock embeddings of the correct dimension
         async with embedding_rate_limiter_context_manager():

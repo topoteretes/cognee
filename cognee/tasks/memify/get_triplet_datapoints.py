@@ -251,7 +251,8 @@ async def get_triplet_datapoints(
                 except Exception as e:
                     logger.warning(
                         f"Error processing triplet at offset {offset + idx}: {e}. "
-                        f"Skipping this triplet and continuing."
+                        f"Skipping this triplet and continuing.",
+                        exc_info=True,
                     )
                     skipped_count += 1
                     continue

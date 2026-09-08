@@ -152,7 +152,7 @@ async def load_read_only_session_prompt(
         )
         return prompt
     except Exception as error:
-        logger.warning("Only-context session prompt failed open: %s", error)
+        logger.warning("Only-context session prompt failed open: %s", error, exc_info=True)
         return ""
 
 

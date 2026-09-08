@@ -28,8 +28,8 @@ async def delete_api_key(user: User, api_key_id: UUID):
             await session.delete(user_api_key)
 
             await session.commit()
-        except Exception as error:
-            logger.error(f"Failed to delete API key for user {user.id}: {error!s}")
+        except Exception:
+            logger.exception(f"Failed to delete API key for user {user.id}")
             await session.rollback()
 
             raise ApiKeyDeletionError(f"Failed to delete API key for user {user.id}.")

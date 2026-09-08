@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import os
 import re
 import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "No description provided in code yet."
 BULLET_RE = re.compile(
@@ -238,6 +241,7 @@ def main() -> int:
     try:
         descriptions = generate_descriptions(placeholders)
     except Exception as exc:
+        logger.debug("Exiting with status 1 after error in main", exc_info=True)
         print(f"Description generation failed: {exc}", file=sys.stderr)
         return 1
 

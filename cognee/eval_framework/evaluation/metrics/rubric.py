@@ -137,7 +137,9 @@ class RubricMetric:
                 )
 
             except Exception as e:
-                logger.warning(f"Rubric judge failed for criterion: {criterion}: {e}")
+                logger.warning(
+                    f"Rubric judge failed for criterion: {criterion}: {e}", exc_info=True
+                )
                 verdicts.append(
                     {
                         "criterion": criterion,

@@ -8,6 +8,10 @@ import sys
 from collections.abc import Sequence
 from typing import Any
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 # CRITICAL: Prevent verbose logging initialization for CLI-only usage
 # This must be set before any cognee imports to be effective
 os.environ["COGNEE_MINIMAL_LOGGING"] = "true"
@@ -33,6 +37,7 @@ def get_version() -> str:
 
         return importlib.metadata.version("cognee")
     except Exception:
+        logger.debug("Falling back after error in get_version", exc_info=True)
         return "unknown"
 
 

@@ -423,12 +423,13 @@ def _build_canonical_entity(
 
     try:
         entity = Entity.from_dict(props)
-    except Exception as error:  # noqa: BLE001 - reconstruction is best-effort
+    except Exception as error:  # reconstruction is best-effort
         logger.warning(
             "consolidate_entities: could not rebuild canonical %s (%s); "
             "leaving its properties unchanged.",
             canonical.get("id"),
             error,
+            exc_info=True,
         )
         return None
 

@@ -98,5 +98,5 @@ async def cognify_session(
             )
 
     except Exception as e:
-        logger.error(f"Error cognifying session data: {e!s}")
+        logger.exception("Error cognifying session data")
         raise CogneeSystemError(message=f"Failed to cognify session data: {e!s}", log=False)

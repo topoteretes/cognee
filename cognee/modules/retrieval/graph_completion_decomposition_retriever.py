@@ -103,7 +103,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             logger.warning(
                 "Query decomposition failed, falling back to original query: %s",
                 error,
-                exc_info=False,
+                exc_info=True,
             )
             return [query]
 

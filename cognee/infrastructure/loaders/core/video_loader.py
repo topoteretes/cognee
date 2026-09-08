@@ -232,6 +232,7 @@ class VideoLoader(LoaderInterface):
             logger.debug(
                 "Segmented transcription request failed (%s); retrying without it.",
                 error,
+                exc_info=True,
             )
             result = await LLMGateway.create_transcript(audio_path)
 

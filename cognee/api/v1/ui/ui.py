@@ -109,7 +109,9 @@ def _stream_process_output(
                     if line_text:
                         print(f"{color_code}{prefix}{reset_code} {line_text}", flush=True)
         except Exception:
-            pass
+            logger.debug(
+                "Ignoring exception in _stream_process_output.stream_reader", exc_info=True
+            )
         finally:
             if stream:
                 stream.close()
@@ -130,6 +132,7 @@ def _is_port_available(port: int) -> bool:
             result = sock.connect_ex(("localhost", port))
             return result != 0  # Port is available if connection fails
     except Exception:
+        logger.debug("Falling back to False after error in _is_port_available", exc_info=True)
         return False
 
 
@@ -231,7 +234,7 @@ def download_frontend_assets(force: bool = False) -> bool:
                 if version_file.exists():
                     version_file.unlink()
         except Exception as e:
-            logger.debug(f"Error checking cached version: {e}")
+            logger.debug(f"Error checking cached version: {e}", exc_info=True)
             # Clear potentially corrupted cache
             if frontend_dir.exists():
                 shutil.rmtree(frontend_dir)
@@ -310,7 +313,7 @@ def download_frontend_assets(force: bool = False) -> bool:
         return False
     except Exception as e:
         logger.error(f"Failed to download frontend assets: {e!s}")
-        logger.error("You can still use cognee without the UI functionality.")
+        logger.exception("You can still use cognee without the UI functionality.")
         return False
 
 
@@ -370,8 +373,8 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
     except subprocess.TimeoutExpired:
         logger.error("Timeout installing frontend dependencies")
         return False
-    except Exception as e:
-        logger.error(f"Error installing frontend dependencies: {e!s}")
+    except Exception:
+        logger.exception("Error installing frontend dependencies")
         return False
 
 
@@ -395,6 +398,7 @@ def is_development_frontend(frontend_path: Path) -> bool:
 
         return "next" in dependencies or "next" in dev_dependencies
     except Exception:
+        logger.debug("Falling back to False after error in is_development_frontend", exc_info=True)
         return False
 
 
@@ -581,8 +585,8 @@ def start_ui(
             logger.info(
                 f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse ({mode_info})"
             )
-        except Exception as e:
-            logger.error(f"Failed to start MCP server with Docker: {e!s}")
+        except Exception:
+            logger.exception("Failed to start MCP server with Docker")
     # Start backend server if requested
     if start_backend:
         logger.info("Starting cognee backend API server...")
@@ -620,8 +624,8 @@ def start_ui(
 
             logger.info(f"✓ Backend API started at http://localhost:{backend_port}")
 
-        except Exception as e:
-            logger.error(f"Failed to start backend server: {e!s}")
+        except Exception:
+            logger.exception("Failed to start backend server")
             return None
 
     # Find frontend directory
@@ -744,7 +748,7 @@ def start_ui(
                 try:
                     webbrowser.open(f"http://localhost:{port}")
                 except Exception as e:
-                    logger.warning(f"Could not open browser automatically: {e}")
+                    logger.warning(f"Could not open browser automatically: {e}", exc_info=True)
 
             browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
             browser_thread.start()
@@ -759,7 +763,7 @@ def start_ui(
         logger.error(f"Failed to start frontend server: {e!s}")
         # Clean up backend process if it was started
         if backend_process:
-            logger.info("Cleaning up backend process due to frontend failure...")
+            logger.info("Cleaning up backend process due to frontend failure...", exc_info=True)
             try:
                 backend_process.terminate()
                 backend_process.wait(timeout=5)

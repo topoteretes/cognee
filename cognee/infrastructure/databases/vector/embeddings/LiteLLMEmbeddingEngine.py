@@ -140,6 +140,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             try:
                 parsed = urlparse(self.endpoint)
             except Exception:
+                logger.debug("Ignoring exception in LiteLLMEmbeddingEngine.__init__", exc_info=True)
                 parsed = None
             if not parsed or parsed.scheme not in ("http", "https") or not parsed.netloc:
                 logger.error(

@@ -12,6 +12,7 @@ Postgres relational backend (DB_PROVIDER=postgres), since the shared handlers
 anchor to the relational configuration; it skips otherwise.
 """
 
+import logging
 import os
 import uuid
 
@@ -25,6 +26,8 @@ from cognee.infrastructure.databases.postgres import (
     dataset_schema_name,
     drop_pg_schema_if_exists,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _db() -> dict:
@@ -69,6 +72,7 @@ async def _postgres_reachable() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:
+        logger.debug("Falling back to False after error in _postgres_reachable", exc_info=True)
         return False
     finally:
         await engine.dispose()

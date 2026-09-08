@@ -12,6 +12,8 @@ os.environ.setdefault("CACHE_BACKEND", "fs")
 os.environ.setdefault("AUTO_FEEDBACK", "true")
 os.environ.setdefault("ENV", "dev")
 
+import logging
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -25,6 +27,8 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -234,6 +238,7 @@ async def _safe_search(question: str, session_id: str, top_k: int = 5) -> str:
             if results:
                 break
         except Exception:
+            logger.debug("Skipping item after error in _safe_search", exc_info=True)
             continue
 
     if not results:

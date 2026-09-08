@@ -50,5 +50,6 @@ async def delete_edge_evidence(dataset_id: UUID, data_id: UUID | None = None) ->
             dataset_id,
             data_id,
             error,
+            exc_info=True,
         )
         return 0

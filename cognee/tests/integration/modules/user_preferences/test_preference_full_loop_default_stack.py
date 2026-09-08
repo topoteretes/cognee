@@ -11,6 +11,7 @@ when ``LLM_API_KEY`` is not set.
 
 from __future__ import annotations
 
+import logging
 import os
 import pathlib
 from uuid import uuid4
@@ -29,6 +30,8 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.user_preferences.constants import NEUTRAL_WEIGHT, PREFERS_RELATIONSHIP
 from cognee.modules.user_preferences.store import preference_node_id
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 try:
     import ladybug  # noqa: F401
@@ -112,7 +115,7 @@ async def default_stack_env(request, tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in default_stack_env", exc_info=True)
     _clear_engine_caches()
     get_base_config.cache_clear()
 

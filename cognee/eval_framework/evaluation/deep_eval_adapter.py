@@ -45,7 +45,7 @@ class DeepEvalAdapter(BaseEvalAdapter):
                 if attempt < self.n_retries - 1:
                     time.sleep(2**attempt)  # Exponential backoff
                 else:
-                    logger.error(
+                    logger.exception(
                         f"All {self.n_retries} attempts failed for metric '{metric}'. Returning None values."
                     )
 

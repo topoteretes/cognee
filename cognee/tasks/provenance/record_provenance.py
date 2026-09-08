@@ -275,6 +275,8 @@ async def record_provenance(
 
         await batch.commit()
     except Exception as error:
-        logger.warning("Provenance recording failed; ingestion unaffected: %s", error)
+        logger.warning(
+            "Provenance recording failed; ingestion unaffected: %s", error, exc_info=True
+        )
 
     return data_points

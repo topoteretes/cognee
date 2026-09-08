@@ -125,4 +125,4 @@ class UnstructuredLoader(LoaderInterface):
 
         except Exception as e:
             logger.error(f"Failed to process document {file_path}: {e}")
-            raise Exception(f"Document processing failed: {e}") from e
+            raise RuntimeError(f"Document processing failed: {e}") from e

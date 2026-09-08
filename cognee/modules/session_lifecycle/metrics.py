@@ -57,6 +57,7 @@ def _dialect_name(bind) -> str:
     try:
         return bind.dialect.name
     except Exception:
+        logger.debug("Falling back to  after error in _dialect_name", exc_info=True)
         return ""
 
 
@@ -584,4 +585,4 @@ async def record_session_activity(
                 exc,
             )
         else:
-            logger.debug("session_records write failed (%s)", exc)
+            logger.debug("session_records write failed (%s)", exc, exc_info=True)

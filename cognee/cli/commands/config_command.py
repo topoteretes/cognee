@@ -7,6 +7,9 @@ from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.cli.reference import SupportsCliCommand
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class ConfigCommand(SupportsCliCommand):
@@ -103,6 +106,7 @@ Configuration changes will affect how cognee processes and stores data.
                     fmt.error(f"Configuration key '{args.key}' not found")
                     fmt.note("Use 'cognee config get' to see all available keys")
                 except Exception:
+                    logger.debug("Ignoring exception in ConfigCommand._handle_get", exc_info=True)
                     fmt.error(f"Configuration key '{args.key}' not found or retrieval failed")
             else:
                 # Get all configuration
@@ -135,6 +139,7 @@ Configuration changes will affect how cognee processes and stores data.
                         fmt.note(f"Created new .env file at {persist_info['path']}")
                     fmt.note(f"Persisted {persist_info['env_var']} to {persist_info['path']}")
             except Exception:
+                logger.debug("Ignoring exception in ConfigCommand._handle_set", exc_info=True)
                 fmt.error(f"Failed to set configuration key '{args.key}'")
 
         except Exception as e:
@@ -176,6 +181,7 @@ Configuration changes will affect how cognee processes and stores data.
                     cognee.config.set(args.key, default_value, persist=True)
                     fmt.success(f"Unset {args.key} (reset to default: {default_value})")
                 except Exception as e:
+                    logger.debug("Ignoring exception in ConfigCommand._handle_unset", exc_info=True)
                     fmt.error(f"Failed to unset '{args.key}': {e!s}")
             else:
                 fmt.error(f"Unknown configuration key '{args.key}'")

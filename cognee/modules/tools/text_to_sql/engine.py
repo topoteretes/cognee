@@ -130,7 +130,7 @@ async def run_text_to_sql(
             max_tables=config.text_to_sql_max_schema_tables,
         )
     except Exception as error:
-        logger.error("Schema introspection failed for '%s': %s", connection_name, error)
+        logger.exception("Schema introspection failed for '%s'", connection_name)
         result.error = f"Could not read the database schema: {error}"
         return result
 
@@ -152,7 +152,7 @@ async def run_text_to_sql(
             continue
         except Exception as error:
             previous_attempts += f"Query: <not generated> -> Error: {error}\n"
-            logger.error("SQL generation failed on attempt %d: %s", attempt, error)
+            logger.exception("SQL generation failed on attempt %d", attempt)
             result.error = f"SQL generation failed: {error}"
             continue
 
@@ -161,7 +161,7 @@ async def run_text_to_sql(
             rows, truncated = await execute_readonly(engine, sql, max_rows)
         except Exception as error:
             previous_attempts += f"Query: {sql} -> Executed with error: {error}\n"
-            logger.warning("SQL execution failed on attempt %d: %s", attempt, error)
+            logger.warning("SQL execution failed on attempt %d: %s", attempt, error, exc_info=True)
             result.error = f"SQL execution failed: {error}"
             continue
 

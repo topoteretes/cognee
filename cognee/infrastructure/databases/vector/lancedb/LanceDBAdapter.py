@@ -260,6 +260,7 @@ class LanceDBAdapter(VectorDBInterface):
                             logger.warning(
                                 "Error shutting down LanceDB subprocess after connect failure: %s",
                                 teardown_err,
+                                exc_info=True,
                             )
                     raise
             # Re-check the closed flag after the await — a concurrent
@@ -302,7 +303,7 @@ class LanceDBAdapter(VectorDBInterface):
         try:
             await stale.close()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in LanceDBAdapter.get_connection", exc_info=True)
         if winner is None:
             raise RuntimeError(
                 "LanceDBAdapter is closed; a new adapter must be created "
@@ -469,6 +470,7 @@ class LanceDBAdapter(VectorDBInterface):
                             "belongs_to_set merge lookup failed for '%s': %s",
                             collection_name,
                             e,
+                            exc_info=True,
                         )
 
                 def create_lance_data_point(data_point: DataPoint, vector: list[float]):
@@ -658,6 +660,7 @@ class LanceDBAdapter(VectorDBInterface):
                     "Skipping row %s during migration (validation failed): %s",
                     row_id,
                     e,
+                    exc_info=True,
                 )
                 skipped += 1
                 failed_rows.append((row_id, str(e)))
@@ -952,6 +955,7 @@ class LanceDBAdapter(VectorDBInterface):
                     "_coerce_rows_to_typed_payload: validation fell back for id=%s: %s",
                     row.get("id"),
                     e,
+                    exc_info=True,
                 )
                 coerced.append(row)
                 continue
@@ -1254,6 +1258,7 @@ class LanceDBAdapter(VectorDBInterface):
                     "remove_belongs_to_set_tags: schema read failed for '%s': %s",
                     collection_name,
                     e,
+                    exc_info=True,
                 )
                 continue
 
@@ -1298,6 +1303,7 @@ class LanceDBAdapter(VectorDBInterface):
                         "remove_belongs_to_set_tags: row scan failed for '%s': %s",
                         collection_name,
                         e,
+                        exc_info=True,
                     )
                     continue
 
@@ -1522,7 +1528,7 @@ class LanceDBAdapter(VectorDBInterface):
                 if inspect.isawaitable(close_result):
                     await close_result
             except Exception as e:
-                logger.warning("Error closing LanceDB connection: %s", e)
+                logger.warning("Error closing LanceDB connection: %s", e, exc_info=True)
         if session is not None:
             # ``session.shutdown()`` is sync and joins/terminates/kills the
             # worker process — can take seconds. Offload to a worker thread
@@ -1530,4 +1536,4 @@ class LanceDBAdapter(VectorDBInterface):
             try:
                 await asyncio.to_thread(session.shutdown)
             except Exception as e:
-                logger.warning("Error shutting down LanceDB subprocess: %s", e)
+                logger.warning("Error shutting down LanceDB subprocess: %s", e, exc_info=True)

@@ -582,7 +582,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                     if "does not exist" in error_msg or "relation" in error_msg:
                         logger.debug("Triplet_text table not found, skipping: %s", e)
                     else:
-                        logger.warning("Unexpected error deleting from Triplet_text: %s", e)
+                        logger.warning(
+                            "Unexpected error deleting from Triplet_text: %s", e, exc_info=True
+                        )
 
             await session.commit()
 

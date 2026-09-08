@@ -62,6 +62,7 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
                 session_id,
                 user_id,
                 error,
+                exc_info=True,
             )
 
     if sessions:
@@ -128,6 +129,7 @@ async def invalidate_sessions_for_deleted_data(
                 session_id,
                 user_id,
                 error,
+                exc_info=True,
             )
 
     if totals["qa_entries_deleted"] or totals["context_entries_deleted"]:

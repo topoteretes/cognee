@@ -49,7 +49,7 @@ class GoogleTranslationProvider(TranslationProvider):
             self._get_client()
             return True
         except Exception as e:
-            logger.debug(f"Google Translate not available: {e}")
+            logger.debug(f"Google Translate not available: {e}", exc_info=True)
             return False
 
     async def translate(

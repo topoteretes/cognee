@@ -238,6 +238,6 @@ async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[
             logger.info("Flagged %s contradiction(s) in the graph.", len(contradiction_edges))
     except Exception as error:
         # Contradiction detection is auxiliary and must never break ingestion.
-        logger.warning("Contradiction detection skipped due to an error: %s", error)
+        logger.warning("Contradiction detection skipped due to an error: %s", error, exc_info=True)
 
     return data_points

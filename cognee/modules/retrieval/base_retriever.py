@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 if TYPE_CHECKING:
     from cognee.modules.search.models.EvidenceReference import EvidenceReference
 
@@ -134,6 +138,10 @@ class BaseRetriever(ABC):
                 query=query,
             )
         except Exception:
+            logger.debug(
+                "Falling back after error in BaseRetriever.prepare_session_turn_for_retrieval",
+                exc_info=True,
+            )
             from cognee.infrastructure.session.session_manager import SessionTurnPreparation
 
             return SessionTurnPreparation(should_answer=True, effective_query=query or "")

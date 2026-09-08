@@ -11,6 +11,7 @@ Real add + cognify against local stores; the DLT route is LLM-free, and
 embeddings are mocked so the vector store works offline.
 """
 
+import logging
 import pathlib
 from unittest.mock import patch
 
@@ -26,6 +27,8 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 DATASET = "gadgets_ds"
 # Separate identity for the second test: dlt keeps process-global pipeline
@@ -75,7 +78,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _dlt_source(rows, name="gadgets"):

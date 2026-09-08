@@ -74,6 +74,7 @@ def _fastembed_hf_repo(model: str | None) -> str | None:
     except Exception:
         # fastembed not installed here (e.g. CI unit tests): best-effort treat a
         # namespaced id as an HF repo, otherwise give up so the caller warns.
+        logger.debug("Falling back after error in _fastembed_hf_repo", exc_info=True)
         return model if "/" in model else None
 
     bare = _bare_model(model)
@@ -109,6 +110,7 @@ def _load_or_tiktoken_fallback(
             context,
             error,
             _MISMATCH_HINT,
+            exc_info=True,
         )
         return TikTokenTokenizer(model=None, max_completion_tokens=max_completion_tokens)
 

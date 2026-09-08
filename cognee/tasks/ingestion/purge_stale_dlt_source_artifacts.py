@@ -66,7 +66,9 @@ async def purge_stale_dlt_source_artifacts(
                 user_id=ctx.user.id,
             )
         except Exception as error:
-            logger.warning("Session invalidation after DLT purge failed (non-fatal): %s", error)
+            logger.warning(
+                "Session invalidation after DLT purge failed (non-fatal): %s", error, exc_info=True
+            )
         logger.info(
             "Purged prior derived artifacts of DLT source data item %s before re-emission.",
             doc.id,

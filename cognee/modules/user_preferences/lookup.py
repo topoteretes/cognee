@@ -87,7 +87,7 @@ async def _load_raw_preferences() -> tuple[str, dict[str, float]]:
         _active_preferences_cache.set((cache_key, result))
         return result
     except Exception as error:
-        logger.debug("Preference lookup failed open: %s", error)
+        logger.debug("Preference lookup failed open: %s", error, exc_info=True)
         return "", {}
 
 

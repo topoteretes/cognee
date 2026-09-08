@@ -213,6 +213,10 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             try:
                 self._client.query(query_string, params)
             except Exception as e:
+                logger.debug(
+                    "Ignoring exception in NeptuneAnalyticsAdapter.create_data_points",
+                    exc_info=True,
+                )
                 self._na_exception_handler(e, query_string)
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
@@ -245,6 +249,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 for item in result
             ]
         except Exception as e:
+            logger.debug("Ignoring exception in NeptuneAnalyticsAdapter.retrieve", exc_info=True)
             self._na_exception_handler(e, query_string)
 
     async def search(
@@ -368,6 +373,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 )
             return results
         except Exception as e:
+            logger.debug("Ignoring exception in NeptuneAnalyticsAdapter.search", exc_info=True)
             self._na_exception_handler(e, query_string)
 
     async def batch_search(
@@ -436,6 +442,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         try:
             self._client.query(query_string, params)
         except Exception as e:
+            logger.debug(
+                "Ignoring exception in NeptuneAnalyticsAdapter.delete_data_points", exc_info=True
+            )
             self._na_exception_handler(e, query_string)
 
     async def create_vector_index(self, index_name: str, index_property_name: str):

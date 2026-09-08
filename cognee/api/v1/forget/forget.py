@@ -215,7 +215,7 @@ async def _forget_everything(user: Any) -> dict:
             if cache_engine is not None:
                 await cache_engine.prune()
     except Exception as e:
-        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e)
+        logger.warning("forget: session cache cleanup failed (non-fatal): %s", e, exc_info=True)
 
     logger.info("forget: deleted all data for user=%s (%d datasets)", user.id, count)
     return {"datasets_removed": count, "status": "success"}
@@ -324,6 +324,7 @@ async def _forget_dataset_memory(dataset_ref: str | UUID, user: Any) -> dict:
                 "forget: session invalidation failed for dataset %s (non-fatal): %s",
                 dataset_id,
                 error,
+                exc_info=True,
             )
 
         # 1c. The edges are gone, so the evidence rows describing them are stale;
@@ -430,6 +431,7 @@ async def _forget_data_memory(data_id: UUID, dataset_ref: str | UUID, user: Any)
                 data_id,
                 dataset_id,
                 error,
+                exc_info=True,
             )
 
         # 1c. Drop this item's edge evidence with its edges (non-fatal).
