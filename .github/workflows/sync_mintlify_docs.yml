@@ -48,7 +48,13 @@ jobs:
             TAG="test-sync-${REF_NAME}-${COMMIT_SHA::7}"
             RELEASE_LINK="${SERVER_URL}/${REPOSITORY}/commit/${COMMIT_SHA}"
             PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            DOCS_BRANCH_NAME="${REF_NAME}"
+            # Namespace the branch under automation/ instead of reusing the ref
+            # name verbatim. The old value made a dispatch from main check out
+            # `main` inside docs-repo and then force-push cognee-docs' own main,
+            # which is what failed run 24552485386 at "Push docs branch". The
+            # sha keeps repeated dispatches from the same ref on separate
+            # branches instead of overwriting one another.
+            DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             printf "%s\n\n- Source commit: \`%s\`\n- Workflow event: \`%s\`\n- Commit URL: %s\n" \
               "Automated docs sync test run from branch \`${REF_NAME}\`." \
               "${COMMIT_SHA}" \
@@ -114,7 +120,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
-          git push --force-with-lease origin "${{ steps.commit_docs.outputs.branch_name }}"
+          BRANCH_NAME="${{ steps.commit_docs.outputs.branch_name }}"
+          # This step force-pushes, so a branch name that ever resolves to a
+          # long-lived docs branch has to fail loudly rather than land.
+          case "${BRANCH_NAME}" in
+            ""|main|master|HEAD)
+              echo "::error::Refusing to force-push cognee-docs '${BRANCH_NAME}'."
+              exit 1
+              ;;
+          esac
+          git push --force-with-lease origin "${BRANCH_NAME}"
 
       - name: Create or update docs pull request
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}
