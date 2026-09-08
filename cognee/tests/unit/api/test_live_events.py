@@ -60,7 +60,8 @@ async def test_since_filters_strictly_greater_so_the_cursor_event_never_repeats(
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
         result = await visualize_module.get_live_events(
-            DATASET_ID, since=datetime(2026, 8, 3, 9, 0, 5)
+            DATASET_ID,
+            since=datetime(2026, 8, 3, 9, 0, 5),  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
         )
 
     # The event AT the cursor is excluded — only strictly newer ones return.
@@ -71,7 +72,7 @@ async def test_since_filters_strictly_greater_so_the_cursor_event_never_repeats(
 @pytest.mark.asyncio
 async def test_nothing_new_echoes_the_given_since_back_as_cursor():
     events = [_event("2026-08-03T09:00:00.000000")]
-    since = datetime(2026, 8, 3, 9, 30, 0)
+    since = datetime(2026, 8, 3, 9, 30, 0)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
 
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
@@ -118,7 +119,8 @@ async def test_an_event_with_no_time_is_dropped_by_a_since_filter_rather_than_cr
     ctx_a, ctx_b = _patches(events)
     with ctx_a, ctx_b:
         result = await visualize_module.get_live_events(
-            DATASET_ID, since=datetime(2026, 8, 3, 9, 0, 0)
+            DATASET_ID,
+            since=datetime(2026, 8, 3, 9, 0, 0),  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
         )
 
     assert result["events"] == [_event("2026-08-03T09:00:10.000000")]

@@ -26,7 +26,7 @@ import io
 import os
 import random
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from locust import HttpUser, SequentialTaskSet, between, events, tag, task
@@ -360,7 +360,7 @@ if __name__ == "__main__":
         wait_for_server(f"{base_url}/health")
         env = {**os.environ, "COGNEE_API_KEY": api_key}
         # Timestamped results to avoid overwriting previous runs and for easier identification of test runs.
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         timestamp = now.strftime("%Y%m%d_%H%M%S")
         # Results will be saved in the `results` directory with a unique name based on the timestamp of the test run.
         result_folder = Path("results")

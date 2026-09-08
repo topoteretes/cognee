@@ -38,7 +38,7 @@ Requires a configured LLM provider (see CLAUDE.md). Wording of answers/lessons v
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Load the repo .env BEFORE importing cognee, with override=True so the real keys in
@@ -108,7 +108,9 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")
 # --------------------------------------------------------------------------- #
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_PATH = LOG_DIR / f"session_flow_stepwise_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_PATH = (
+    LOG_DIR / f"session_flow_stepwise_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.log"
+)
 VIZ_PATH = LOG_PATH.with_suffix(".html")
 
 
