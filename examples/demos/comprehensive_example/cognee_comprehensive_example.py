@@ -1,6 +1,6 @@
 # ruff: noqa: E402
-import os
 import asyncio
+import os
 from pathlib import Path
 
 # provide your OpenAI key here

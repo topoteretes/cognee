@@ -1,17 +1,16 @@
-import os
 import asyncio
-from typing import Any, Dict, List, Optional, Type
+import os
 from datetime import datetime
-
 from operator import itemgetter
+from typing import Any, Dict, List, Optional, Type
+
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
-from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
-
 from cognee.tasks.temporal_graph.models import QueryInterval
 
 logger = get_logger()
@@ -38,15 +37,15 @@ class TemporalRetriever(GraphCompletionRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         time_extraction_prompt_path: str = "extract_query_time.txt",
-        top_k: Optional[int] = 5,
-        node_type: Optional[Type] = None,
-        node_name: Optional[List[str]] = None,
+        top_k: int | None = 5,
+        node_type: type | None = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
-        triplet_distance_penalty: Optional[float] = 6.5,
+        wide_search_top_k: int | None = 100,
+        triplet_distance_penalty: float | None = 6.5,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        session_id: str | None = None,
+        response_model: type = str,
         include_references: bool = False,
     ):
         super().__init__(
@@ -70,7 +69,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         self.node_type = node_type
         self.node_name = node_name
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """Extract node_ids/edge_ids from temporal dict (triplets or relevant_events)."""
         if isinstance(retrieved_objects, dict):
             return extract_from_temporal_dict(retrieved_objects)

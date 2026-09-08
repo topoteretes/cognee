@@ -67,17 +67,17 @@ def scoped_env():
                 pass
 
     mp = pytest.MonkeyPatch()
-    for key, value in dict(
-        DB_PROVIDER="sqlite",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
-    ).items():
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "kuzu",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+    }.items():
         mp.setenv(key, value)
     clear_config_caches()
 
@@ -222,7 +222,9 @@ async def _scenario():
     # --- 5. every id ever issued keeps resolving --------------------------- #
     # Simulate a backfill-split fork: beta's row records a pre-fork original.
     from uuid import uuid4 as _mint
+
     from sqlalchemy import update as sql_update
+
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.exceptions import AmbiguousDataIdError
     from cognee.modules.data.methods import get_data, resolve_data_id
@@ -333,11 +335,12 @@ async def _scenario():
     # The same dlt row loaded into two datasets must be two id families (a
     # shared id would trip ingestion's foreign-pin guard); rows ingested
     # before ids were dataset-namespaced are adopted in their own dataset only.
+    from sqlalchemy import insert as sql_insert
+
     from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
     from cognee.modules.data.models import Data
     from cognee.tasks.ingestion.dlt_row_data import DltRowData
     from cognee.tasks.ingestion.resolve_dlt_sources import _dlt_row_identifier, _stable_row_ids
-    from sqlalchemy import insert as sql_insert
 
     dlt_row = DltRowData(
         table_name="users",

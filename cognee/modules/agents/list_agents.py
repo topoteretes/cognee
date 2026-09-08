@@ -2,16 +2,17 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import select
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models.User import User
 from cognee.modules.users.models.UserApiKey import UserApiKey
-from sqlalchemy import select
 
 
 @dataclass
 class AgentInfo:
     user: User
-    api_key_label: Optional[str]
+    api_key_label: str | None
 
 
 async def list_agents(owner_id: UUID) -> list[AgentInfo]:

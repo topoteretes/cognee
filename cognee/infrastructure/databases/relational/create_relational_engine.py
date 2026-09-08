@@ -1,7 +1,8 @@
 from functools import lru_cache
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from sqlalchemy import URL
+
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 
@@ -15,10 +16,10 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
-    database_connect_args: tuple = None,
-    pool_args: tuple = None,
-    db_turso_url: str = None,
-    db_turso_auth_token: str = None,
+    database_connect_args: tuple | None = None,
+    pool_args: tuple | None = None,
+    db_turso_url: str | None = None,
+    db_turso_auth_token: str | None = None,
 ) -> SQLAlchemyAdapter:
     """
     Create a relational database engine based on the specified parameters.

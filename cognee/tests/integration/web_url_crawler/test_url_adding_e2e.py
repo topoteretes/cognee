@@ -1,11 +1,13 @@
 import os
+from pathlib import Path
+
 import pytest
+
 import cognee
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-from cognee.infrastructure.loaders.LoaderEngine import LoaderEngine
 from cognee.infrastructure.loaders.external.beautiful_soup_loader import BeautifulSoupLoader
+from cognee.infrastructure.loaders.LoaderEngine import LoaderEngine
 from cognee.tasks.ingestion import save_data_item_to_storage
-from pathlib import Path
 
 
 @pytest.mark.asyncio

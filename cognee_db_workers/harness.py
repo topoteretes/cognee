@@ -22,16 +22,16 @@ import threading
 import time
 import traceback
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Dict, Optional
-
+from typing import Any, Dict, Optional
 
 SHUTDOWN = "__SUBPROCESS_HARNESS_SHUTDOWN__"
 _DEFAULT_SHUTDOWN_TIMEOUT = 10.0
 _DEFAULT_INIT_TIMEOUT = 60.0
 
 
-def _env_float(name: str, default: Optional[float]) -> Optional[float]:
+def _env_float(name: str, default: float | None) -> float | None:
     """Parse a float-or-disabled env var. Empty / unset → ``default``; a
     value <= 0 disables the timeout (``None``); any other float is used.
     """
@@ -62,7 +62,7 @@ def _env_int(name: str, default: int) -> int:
 # Per-RPC deadline for subprocess calls. Guards against hung native libraries.
 # Override with ``SUBPROCESS_CALL_TIMEOUT`` env var (seconds, or <=0 to
 # disable entirely — not recommended outside benchmarks).
-_DEFAULT_CALL_TIMEOUT: Optional[float] = _env_float("SUBPROCESS_CALL_TIMEOUT", 300.0)
+_DEFAULT_CALL_TIMEOUT: float | None = _env_float("SUBPROCESS_CALL_TIMEOUT", 300.0)
 _DEFAULT_MAX_RETRIES = _env_int("SUBPROCESS_MAX_RETRIES", 2)
 # Reader-thread poll interval for the response queue and for the
 # ``_closed_event`` flag. NOTE: any caller setting an explicit
@@ -116,7 +116,7 @@ class Request:
     # and the ``_READY_SENTINEL`` response). The session assigns ids from
     # ``itertools.count(1)`` in ``_issue`` / ``_issue_async``.
     request_id: int = 0
-    handle_id: Optional[int] = None
+    handle_id: int | None = None
     args: tuple = ()
     kwargs: dict = field(default_factory=dict)
 
@@ -128,9 +128,9 @@ class Response:
     # protocol sentinels (SHUTDOWN ack, READY).
     request_id: int = 0
     result: Any = None
-    new_handle_id: Optional[int] = None
-    error: Optional[str] = None
-    exception: Optional[BaseException] = None
+    new_handle_id: int | None = None
+    error: str | None = None
+    exception: BaseException | None = None
 
 
 @dataclass
@@ -156,8 +156,8 @@ class ReplayStep:
     allocate a handle (e.g. ``OP_DB_INIT``, ``OP_LOAD_EXTENSION``).
     """
 
-    make_request: "Callable[[], Request]"
-    apply_new_handle: Optional["Callable[[int], Optional[int]]"] = None
+    make_request: Callable[[], Request]
+    apply_new_handle: Callable[[int], int | None] | None = None
 
 
 class HandleRegistry:
@@ -165,7 +165,7 @@ class HandleRegistry:
 
     def __init__(self) -> None:
         self._counter = itertools.count(1)
-        self._handles: Dict[int, Any] = {}
+        self._handles: dict[int, Any] = {}
 
     def register(self, obj: Any) -> int:
         hid = next(self._counter)
@@ -195,7 +195,7 @@ class HandleRegistry:
 # the reader to know what each signal usually means in production. Kept
 # small on purpose — only the signals we actually want to flag with extra
 # context get an entry; everything else falls back to just the signal name.
-_SIGNAL_HINTS: Dict[str, str] = {
+_SIGNAL_HINTS: dict[str, str] = {
     "SIGKILL": "likely OOM kill or `docker kill`",
     "SIGSEGV": "native crash — check faulthandler dump in worker stderr",
     "SIGABRT": "abort/assert in native code",
@@ -205,7 +205,7 @@ _SIGNAL_HINTS: Dict[str, str] = {
 }
 
 
-def _describe_exitcode(exitcode: Optional[int]) -> str:
+def _describe_exitcode(exitcode: int | None) -> str:
     """Render an exitcode for human consumption.
 
     ``None`` and non-negative codes pass through unchanged; negative codes
@@ -400,10 +400,10 @@ def _enable_faulthandler() -> None:
 
 
 def run_worker_loop(
-    dispatch: Dict[int, Dispatcher],
+    dispatch: dict[int, Dispatcher],
     req_q,
     resp_q,
-    init: Optional[Callable[[HandleRegistry], None]] = None,
+    init: Callable[[HandleRegistry], None] | None = None,
 ) -> None:
     """Concurrent worker dispatch.
 
@@ -453,7 +453,7 @@ def run_worker_loop(
         resp_q.put(Response(error=traceback.format_exc(), exception=_safe_pickle_exception(e)))
         return
 
-    pending: "set[asyncio.Task]" = set()
+    pending: set[asyncio.Task] = set()
 
     def _emit(rid: int, result: Any) -> None:
         if isinstance(result, HandleResult):
@@ -525,7 +525,7 @@ def run_worker_loop(
             pass
 
 
-def _safe_pickle_exception(e: BaseException) -> Optional[BaseException]:
+def _safe_pickle_exception(e: BaseException) -> BaseException | None:
     try:
         pickle.dumps(e)
         return e
@@ -543,7 +543,7 @@ def _op_gc_collect(_registry: HandleRegistry, _req: Request):
     return int(_gc.collect())
 
 
-DEFAULT_DISPATCH: Dict[int, Dispatcher] = {
+DEFAULT_DISPATCH: dict[int, Dispatcher] = {
     OP_GC_COLLECT: _op_gc_collect,
 }
 
@@ -552,7 +552,7 @@ DEFAULT_DISPATCH: Dict[int, Dispatcher] = {
 # so callers (e.g. benchmark scripts that want to read accurate per-child
 # RSS) can trigger ``gc.collect()`` in every worker without threading a
 # session reference through the call site.
-_all_sessions: "weakref.WeakSet[SubprocessSession]" = weakref.WeakSet()
+_all_sessions: weakref.WeakSet[SubprocessSession] = weakref.WeakSet()
 
 
 def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
@@ -624,8 +624,8 @@ class SubprocessSession:
         *,
         shutdown_timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT,
         init_timeout: float = _DEFAULT_INIT_TIMEOUT,
-        call_timeout: Optional[float] = _DEFAULT_CALL_TIMEOUT,
-        respawn_factory: Optional["Callable[[], tuple]"] = None,
+        call_timeout: float | None = _DEFAULT_CALL_TIMEOUT,
+        respawn_factory: Callable[[], tuple] | None = None,
         max_retries: int = _DEFAULT_MAX_RETRIES,
     ) -> None:
         self._proc = proc
@@ -646,8 +646,8 @@ class SubprocessSession:
         # handle ids, and retry the failed RPC.
         self._respawn_factory = respawn_factory
         self._max_retries = max(0, int(max_retries)) if respawn_factory else 0
-        self._replay_steps: "list[ReplayStep]" = []
-        self._handle_remap: "dict[int, int]" = {}
+        self._replay_steps: list[ReplayStep] = []
+        self._handle_remap: dict[int, int] = {}
         # Per-request pending registry: request_id -> concurrent.futures.Future.
         # The reader thread sets ``set_result(resp)`` on the matching future;
         # both sync and async callers wait on the same primitive (sync via
@@ -655,9 +655,9 @@ class SubprocessSession:
         # ``Future.set_result`` / ``set_exception`` are thread-safe so the
         # reader can resolve them without a ``call_soon_threadsafe`` dance.
         self._id_counter = itertools.count(1)
-        self._pending: "dict[int, concurrent.futures.Future]" = {}
+        self._pending: dict[int, concurrent.futures.Future] = {}
         self._pending_lock = threading.Lock()
-        self._reader_thread: Optional[threading.Thread] = None
+        self._reader_thread: threading.Thread | None = None
         # "No more RPCs accepted" flag. An Event (vs the previous plain
         # bool) lets the reader poll it cheaply at the top of its loop and
         # avoids a separate mutex for the closed-state read/write.
@@ -682,7 +682,7 @@ class SubprocessSession:
         self._ready = False
 
     @property
-    def pid(self) -> Optional[int]:
+    def pid(self) -> int | None:
         return self._proc.pid
 
     @property
@@ -741,7 +741,7 @@ class SubprocessSession:
     _POST_DEATH_DRAIN_TIMEOUT = 0.5
     _POST_DEATH_DRAIN_POLL = 0.02
 
-    def _drain_response_after_death(self) -> Optional[Response]:
+    def _drain_response_after_death(self) -> Response | None:
         """Try to read a Response that the worker queued just before exiting.
 
         See the caller's comment for the race this addresses: the producer's
@@ -861,7 +861,7 @@ class SubprocessSession:
         every pending future. No path that stops the reader can leak
         futures.
         """
-        transport_err: Optional[BaseException] = None
+        transport_err: BaseException | None = None
         try:
             while not self._closed_event.is_set():
                 try:
@@ -967,7 +967,7 @@ class SubprocessSession:
         except ValueError:
             pass
 
-    def _register_pending(self, rid: int, fut: "concurrent.futures.Future") -> None:
+    def _register_pending(self, rid: int, fut: concurrent.futures.Future) -> None:
         """Atomically insert ``fut`` into the pending registry, refusing
         the insert if the session has been closed.
 
@@ -1078,7 +1078,7 @@ class SubprocessSession:
         self._closed_event.set()
         self._reset_timeout_counter()
 
-    def call(self, req: Request, timeout: Optional[float] = ...) -> Response:
+    def call(self, req: Request, timeout: float | None = ...) -> Response:
         """Blocking synchronous call. Retries transport failures up to
         ``max_retries`` times (respawning + replaying setup steps between
         attempts). Application errors raised inside the worker are NOT
@@ -1107,7 +1107,7 @@ class SubprocessSession:
                 attempts_left -= 1
                 self._respawn()
 
-    async def call_async(self, req: Request, timeout: Optional[float] = ...) -> Response:
+    async def call_async(self, req: Request, timeout: float | None = ...) -> Response:
         """Async counterpart of ``call`` with identical retry semantics.
 
         Concurrent ``call_async`` invocations no longer queue at a session
@@ -1283,7 +1283,7 @@ class SubprocessSession:
             # Replay calls read responses directly from ``_resp_q``; running
             # them with the reader live would race the reader for those
             # messages.
-            new_remap: "dict[int, int]" = {}
+            new_remap: dict[int, int] = {}
             for step in list(self._replay_steps):
                 req = step.make_request()
                 # Rewrite any handle_id that was already remapped in this
@@ -1308,7 +1308,7 @@ class SubprocessSession:
             # ``id_A`` to ``id_B``. Overwriting with ``new_remap`` alone would
             # strand ``original`` — it would keep pointing at the now-dead
             # ``id_A``.
-            composed: "dict[int, int]" = {}
+            composed: dict[int, int] = {}
             for orig, intermediate in self._handle_remap.items():
                 composed[orig] = new_remap.get(intermediate, intermediate)
             for old, new in new_remap.items():
@@ -1357,7 +1357,7 @@ class SubprocessSession:
             )
         return self._handle_response(resp)
 
-    def shutdown(self, timeout: Optional[float] = None) -> None:
+    def shutdown(self, timeout: float | None = None) -> None:
         """Tear down the worker process. Always reaches ``_terminate``, even
         if the session is already marked closed — a timeout or crash flips
         the closed flag without reaping the child, and a second call would

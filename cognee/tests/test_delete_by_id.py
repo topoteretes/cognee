@@ -1,13 +1,14 @@
 import os
 import pathlib
-import cognee
 from uuid import uuid4
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_default_user, create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+
+import cognee
+from cognee.api.v1.exceptions import DatasetNotFoundError, DocumentNotFoundError
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
-from cognee.api.v1.exceptions import DocumentNotFoundError, DatasetNotFoundError
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_default_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -92,7 +93,7 @@ async def main():
     # Extract dataset_ids from cognify results
     def extract_dataset_id_from_cognify(cognify_result):
         """Extract dataset_id from cognify output dictionary"""
-        for dataset_id, pipeline_result in cognify_result.items():
+        for dataset_id in cognify_result:
             return dataset_id  # Return the first (and likely only) dataset_id
         return None
 

@@ -1,6 +1,7 @@
 from functools import lru_cache
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class EvalConfig(BaseSettings):
@@ -11,7 +12,7 @@ class EvalConfig(BaseSettings):
     task_getter_type: str = (
         "Default"  # Options: 'Default', 'CascadeGraph', 'NoSummaries', 'JustChunks'
     )
-    chunks_per_batch: Optional[int] = None  # Override chunks_per_batch for the cognify pipeline
+    chunks_per_batch: int | None = None  # Override chunks_per_batch for the cognify pipeline
 
     # Question answering params
     answering_questions: bool = True
@@ -23,7 +24,7 @@ class EvalConfig(BaseSettings):
     evaluating_answers: bool = True
     evaluating_contexts: bool = True
     evaluation_engine: str = "DeepEval"  # Options: 'DeepEval', 'BeamEval', 'DirectLLM'
-    evaluation_metrics: List[str] = [
+    evaluation_metrics: list[str] = [
         "correctness",
         "EM",
         "f1",
@@ -43,7 +44,7 @@ class EvalConfig(BaseSettings):
     # artifacts under "<results_dir>/<benchmark>_<engine>/" so successive runs
     # are comparable instead of overwriting each other. When unset, artifacts are
     # written to the current working directory (legacy behavior).
-    results_dir: Optional[str] = None
+    results_dir: str | None = None
 
     # file paths
     questions_path: str = "questions_output.json"
@@ -53,7 +54,7 @@ class EvalConfig(BaseSettings):
     dashboard_path: str = "dashboard.html"
     direct_llm_system_prompt: str = "direct_llm_eval_system.txt"
     direct_llm_eval_prompt: str = "direct_llm_eval_prompt.txt"
-    instance_filter: Optional[List[str]] = None
+    instance_filter: list[str] | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

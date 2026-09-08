@@ -16,9 +16,9 @@ import subprocess
 import sys
 import tempfile
 import time
-import uuid
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime
 from pathlib import Path
 

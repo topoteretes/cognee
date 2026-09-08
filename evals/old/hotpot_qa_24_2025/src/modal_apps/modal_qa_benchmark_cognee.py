@@ -5,8 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import modal
-
 from qa.qa_benchmark_cognee import CogneeConfig, QABenchmarkCognee
+
 from modal_apps.modal_image import image
 
 APP_NAME = "qa-benchmark-cognee"
@@ -68,8 +68,8 @@ def run_cognee_benchmark(config_params: dict, dir_suffix: str):
 @app.local_entrypoint()
 async def main(
     runs: int = 45,
-    corpus_limit: int = None,
-    qa_limit: int = None,
+    corpus_limit: int | None = None,
+    qa_limit: int | None = None,
     qa_engine: str = "cognee_graph_completion",  # 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension'
     top_k: int = 15,
     system_prompt_path: str = "answer_simple_question_benchmark2.txt",

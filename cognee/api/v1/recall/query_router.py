@@ -8,6 +8,7 @@ search types, and the highest-scoring type wins.
 
 import re
 from dataclasses import dataclass, field
+
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 

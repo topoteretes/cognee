@@ -1,20 +1,21 @@
 from typing import List
+
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.root_dir import get_absolute_path
 
 
 class PotentialNodes(BaseModel):
     """Response model containing a list of potential node names."""
 
-    nodes: List[str]
+    nodes: list[str]
 
 
-async def extract_nodes(text: str, n_rounds: int = 2) -> List[str]:
+async def extract_nodes(text: str, n_rounds: int = 2) -> list[str]:
     """Extracts node names from content through multiple rounds of analysis."""
-    all_nodes: List[str] = []
+    all_nodes: list[str] = []
     existing_nodes = set()
 
     for round_num in range(n_rounds):

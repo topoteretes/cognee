@@ -1,29 +1,29 @@
+import asyncio
 import io
 import os
 import uuid
-import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import List, Optional
+
 import aiohttp
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime, timezone
-from dataclasses import dataclass
 
 from cognee.api.v1.cognify import cognify
-
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.tasks.ingestion.ingest_data import ingest_data
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.models import User
-from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import get_dataset_data
+from cognee.modules.data.models import Dataset
 from cognee.modules.sync.methods import (
     create_sync_operation,
-    update_sync_operation,
-    mark_sync_started,
     mark_sync_completed,
     mark_sync_failed,
+    mark_sync_started,
+    update_sync_operation,
 )
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import create_secure_ssl_context
+from cognee.tasks.ingestion.ingest_data import ingest_data
 
 logger = get_logger("sync")
 
@@ -49,9 +49,7 @@ async def _safe_update_progress(run_id: str, stage: str, **kwargs):
         logger.info(f"Sync {run_id}: Progress updated during {stage}")
     except Exception as e:
         # Log error but don't fail the sync - progress updates are nice-to-have
-        logger.warning(
-            f"Sync {run_id}: Non-critical progress update failed during {stage}: {str(e)}"
-        )
+        logger.warning(f"Sync {run_id}: Non-critical progress update failed during {stage}: {e!s}")
         # Continue without raising - sync operation is more important than progress tracking
 
 
@@ -60,12 +58,12 @@ class LocalFileInfo(BaseModel):
 
     id: str
     name: str
-    mime_type: Optional[str]
-    extension: Optional[str]
+    mime_type: str | None
+    extension: str | None
     raw_data_location: str
     content_hash: str  # MD5 hash
     file_size: int
-    node_set: Optional[str] = None
+    node_set: str | None = None
 
 
 class CheckMissingHashesRequest(BaseModel):
@@ -73,20 +71,20 @@ class CheckMissingHashesRequest(BaseModel):
 
     dataset_id: str
     dataset_name: str
-    hashes: List[str]
+    hashes: list[str]
 
 
 class CheckHashesDiffResponse(BaseModel):
     """Response model for missing hashes check"""
 
-    missing_on_remote: List[str]
-    missing_on_local: List[str]
+    missing_on_remote: list[str]
+    missing_on_local: list[str]
 
 
 class PruneDatasetRequest(BaseModel):
     """Request model for pruning dataset to specific hashes"""
 
-    items: List[str]
+    items: list[str]
 
 
 class SyncResponse(BaseModel):
@@ -94,15 +92,15 @@ class SyncResponse(BaseModel):
 
     run_id: str
     status: str  # "started" for immediate response
-    dataset_ids: List[str]
-    dataset_names: List[str]
+    dataset_ids: list[str]
+    dataset_names: list[str]
     message: str
     timestamp: str
     user_id: str
 
 
 async def sync(
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     user: User,
 ) -> SyncResponse:
     """
@@ -152,7 +150,7 @@ async def sync(
         )
         logger.info(f"Created sync operation record for {run_id}")
     except Exception as e:
-        logger.error(f"Failed to create sync operation record: {str(e)}")
+        logger.error(f"Failed to create sync operation record: {e!s}")
         # Continue without database tracking if record creation fails
 
     # Start the sync operation in the background
@@ -172,7 +170,7 @@ async def sync(
     )
 
 
-async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: User) -> None:
+async def _perform_background_sync(run_id: str, datasets: list[Dataset], user: User) -> None:
     """Perform the actual sync operation in the background for multiple datasets."""
     start_time = datetime.now(timezone.utc)
 
@@ -199,7 +197,7 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
             except Exception as e:
                 retry_count += 1
                 logger.error(
-                    f"Background sync {run_id}: Failed after {retry_count} retries with error: {str(e)}"
+                    f"Background sync {run_id}: Failed after {retry_count} retries with error: {e!s}"
                 )
                 await update_sync_operation(run_id, retry_count=retry_count)
                 await asyncio.sleep(2**retry_count)
@@ -231,14 +229,14 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
 
-        logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {str(e)}")
+        logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {e!s}")
 
         # Mark sync as failed with error message
         await mark_sync_failed(run_id, str(e))
 
 
 async def _sync_to_cognee_cloud(
-    datasets: List[Dataset], user: User, run_id: str
+    datasets: list[Dataset], user: User, run_id: str
 ) -> tuple[int, int, int, int, dict]:
     """
     Sync local data to Cognee Cloud using three-step idempotent process:
@@ -317,7 +315,7 @@ async def _sync_to_cognee_cloud(
                 )
             except Exception as e:
                 completed_datasets += 1
-                logger.error(f"Dataset file sync failed: {str(e)}")
+                logger.error(f"Dataset file sync failed: {e!s}")
                 # Update progress even for failed datasets
                 file_sync_progress = int((completed_datasets / len(datasets)) * 80)
                 await _safe_update_progress(
@@ -340,7 +338,7 @@ async def _sync_to_cognee_cloud(
                 )
                 logger.info("Cognify processing triggered successfully for all datasets")
             except Exception as e:
-                logger.warning(f"Failed to trigger cognify processing: {str(e)}")
+                logger.warning(f"Failed to trigger cognify processing: {e!s}")
                 # Don't fail the entire sync if cognify fails
         else:
             logger.info(
@@ -356,7 +354,7 @@ async def _sync_to_cognee_cloud(
                 await cognify()
                 logger.info("Local cognify processing completed successfully for all datasets")
             except Exception as e:
-                logger.warning(f"Failed to run local cognify processing: {str(e)}")
+                logger.warning(f"Failed to run local cognify processing: {e!s}")
                 # Don't fail the entire sync if local cognify fails
         else:
             logger.info(
@@ -376,7 +374,7 @@ async def _sync_to_cognee_cloud(
                 records_uploaded=total_records_uploaded,
             )
         except Exception as e:
-            logger.warning(f"Failed to update final sync progress: {str(e)}")
+            logger.warning(f"Failed to update final sync progress: {e!s}")
 
         logger.info(
             f"Multi-dataset sync completed: {len(datasets)} datasets processed, downloaded {total_records_downloaded} records/{total_bytes_downloaded} bytes, uploaded {total_records_uploaded} records/{total_bytes_uploaded} bytes"
@@ -391,8 +389,8 @@ async def _sync_to_cognee_cloud(
         )
 
     except Exception as e:
-        logger.error(f"Sync failed: {str(e)}")
-        raise ConnectionError(f"Cloud sync failed: {str(e)}")
+        logger.error(f"Sync failed: {e!s}")
+        raise ConnectionError(f"Cloud sync failed: {e!s}")
 
 
 @dataclass
@@ -407,13 +405,13 @@ class DatasetSyncResult:
     bytes_uploaded: int
     has_uploads: bool  # Whether any files were uploaded (for cognify decision)
     has_downloads: bool  # Whether any files were downloaded (for cognify decision)
-    uploaded_hashes: List[str]  # Content hashes of files uploaded during sync
-    downloaded_hashes: List[str]  # Content hashes of files downloaded during sync
+    uploaded_hashes: list[str]  # Content hashes of files uploaded during sync
+    downloaded_hashes: list[str]  # Content hashes of files downloaded during sync
 
 
 async def _sync_dataset_files(
     dataset: Dataset, cloud_base_url: str, cloud_auth_token: str, user: User, run_id: str
-) -> Optional[DatasetSyncResult]:
+) -> DatasetSyncResult | None:
     """
     Sync files for a single dataset (2-way: upload to cloud, download from cloud).
     Does NOT trigger cognify - that's done separately once for all datasets.
@@ -475,13 +473,13 @@ async def _sync_dataset_files(
         )
 
     except Exception as e:
-        logger.error(f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {str(e)}")
+        logger.error(f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {e!s}")
         raise  # Re-raise to be handled by the caller
 
 
 async def _extract_local_files_with_hashes(
     dataset: Dataset, user: User, run_id: str
-) -> List[LocalFileInfo]:
+) -> list[LocalFileInfo]:
     """
     Extract local dataset data with existing MD5 hashes from database.
 
@@ -501,7 +499,7 @@ async def _extract_local_files_with_hashes(
         logger.info(f"Found {len(data_entries)} data entries in dataset")
 
         # Process each data entry to get file info and hash
-        local_files: List[LocalFileInfo] = []
+        local_files: list[LocalFileInfo] = []
         skipped_count = 0
 
         for data_entry in data_entries:
@@ -537,7 +535,7 @@ async def _extract_local_files_with_hashes(
 
             except Exception as e:
                 skipped_count += 1
-                logger.warning(f"Failed to process file {data_entry.name}: {str(e)}")
+                logger.warning(f"Failed to process file {data_entry.name}: {e!s}")
                 # Continue with other entries even if one fails
                 continue
 
@@ -547,7 +545,7 @@ async def _extract_local_files_with_hashes(
         return local_files
 
     except Exception as e:
-        logger.error(f"Failed to extract files from dataset {dataset.name}: {str(e)}")
+        logger.error(f"Failed to extract files from dataset {dataset.name}: {e!s}")
         raise
 
 
@@ -586,7 +584,7 @@ async def _get_cloud_auth_token(user: User) -> str:
 
 
 async def _check_hashes_diff(
-    cloud_base_url: str, auth_token: str, dataset: Dataset, local_hashes: List[str], run_id: str
+    cloud_base_url: str, auth_token: str, dataset: Dataset, local_hashes: list[str], run_id: str
 ) -> CheckHashesDiffResponse:
     """
     Check which hashes are missing on cloud.
@@ -625,15 +623,15 @@ async def _check_hashes_diff(
                     )
 
     except Exception as e:
-        logger.error(f"Error checking missing hashes: {str(e)}")
-        raise ConnectionError(f"Failed to check missing hashes: {str(e)}")
+        logger.error(f"Error checking missing hashes: {e!s}")
+        raise ConnectionError(f"Failed to check missing hashes: {e!s}")
 
 
 async def _download_missing_files(
     cloud_base_url: str,
     auth_token: str,
     dataset: Dataset,
-    hashes_missing_on_local: List[str],
+    hashes_missing_on_local: list[str],
     user: User,
 ) -> int:
     """
@@ -692,7 +690,7 @@ async def _download_missing_files(
                         continue
 
             except Exception as e:
-                logger.error(f"Error downloading file {file_hash}: {str(e)}")
+                logger.error(f"Error downloading file {file_hash}: {e!s}")
                 continue
 
     logger.info(
@@ -742,7 +740,7 @@ async def _save_downloaded_file(
         logger.debug(f"Successfully saved downloaded file: {file_name} (hash: {file_hash})")
 
     except Exception as e:
-        logger.error(f"Failed to save downloaded file {file_name}: {str(e)}")
+        logger.error(f"Failed to save downloaded file {file_name}: {e!s}")
         raise
 
 
@@ -750,8 +748,8 @@ async def _upload_missing_files(
     cloud_base_url: str,
     auth_token: str,
     dataset: Dataset,
-    local_files: List[LocalFileInfo],
-    hashes_missing_on_remote: List[str],
+    local_files: list[LocalFileInfo],
+    hashes_missing_on_remote: list[str],
     run_id: str,
 ) -> int:
     """
@@ -815,15 +813,15 @@ async def _upload_missing_files(
                         )
 
             except Exception as e:
-                logger.error(f"Error uploading file {file_info.name}: {str(e)}")
-                raise ConnectionError(f"Upload failed for {file_info.name}: {str(e)}")
+                logger.error(f"Error uploading file {file_info.name}: {e!s}")
+                raise ConnectionError(f"Upload failed for {file_info.name}: {e!s}")
 
     logger.info(f"All {uploaded_count} files uploaded successfully: {total_bytes_uploaded} bytes")
     return total_bytes_uploaded
 
 
 async def _prune_cloud_dataset(
-    cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: List[str], run_id: str
+    cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: list[str], run_id: str
 ) -> None:
     """
     Prune cloud dataset to match local state.
@@ -856,7 +854,7 @@ async def _prune_cloud_dataset(
                     # Don't raise error for prune failures - sync partially succeeded
 
     except Exception as e:
-        logger.error(f"Error pruning cloud dataset: {str(e)}")
+        logger.error(f"Error pruning cloud dataset: {e!s}")
         # Don't raise error for prune failures - sync partially succeeded
 
 
@@ -904,5 +902,5 @@ async def _trigger_remote_cognify(
                     # TODO: consider adding retries
 
     except Exception as e:
-        logger.warning(f"Error triggering cognify processing: {str(e)}")
+        logger.warning(f"Error triggering cognify processing: {e!s}")
         # TODO: consider adding retries

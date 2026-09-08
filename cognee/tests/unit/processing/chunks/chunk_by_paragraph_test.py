@@ -1,6 +1,7 @@
-from unittest.mock import patch
-from cognee.tasks.chunks import chunk_by_paragraph
 import sys
+from unittest.mock import patch
+
+from cognee.tasks.chunks import chunk_by_paragraph
 
 chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
 

@@ -1,11 +1,12 @@
-from deepeval.test_case import LLMTestCase
 from typing import Optional
+
+from deepeval.test_case import LLMTestCase
 
 
 class ExactMatchMetric:
     def __init__(self) -> None:
-        self.score: Optional[float] = None
-        self.reason: Optional[str] = None
+        self.score: float | None = None
+        self.reason: str | None = None
 
     def measure(self, test_case: "LLMTestCase") -> float:
         actual = test_case.actual_output.strip().lower() if test_case.actual_output else ""

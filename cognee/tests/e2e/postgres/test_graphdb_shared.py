@@ -8,15 +8,15 @@ graph backend is configured via `provider`. Requires:
 """
 
 import os
-import shutil
 import pathlib
+import shutil
 
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
@@ -34,8 +34,8 @@ async def run_graph_db_test(provider: str):
     system_dir = str((base / f".cognee_system/test_{provider}").resolve())
 
     # Capture current config so we can restore after the test
-    from cognee.infrastructure.databases.graph.config import get_graph_config
     from cognee.base_config import get_base_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
 
     graph_config = get_graph_config()
     base_config = get_base_config()

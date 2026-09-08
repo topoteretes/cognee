@@ -6,20 +6,21 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, List
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
-from cognee import config, prune, search, SearchType, visualize_graph
-from cognee.low_level import setup, DataPoint
+from cognee import SearchType, config, prune, search, visualize_graph
+from cognee.low_level import DataPoint, setup
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.pipelines.operations import run_pipeline
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.pipelines import Task
 from cognee.tasks.storage import add_data_points
-from cognee.modules.users.methods import get_default_user
 
 
 class Person(DataPoint):
@@ -186,8 +187,8 @@ def build_companies(data: Data) -> list[Company]:
 
 class Data(BaseModel):
     id: UUID
-    companies: List[Dict[str, Any]]
-    people: List[Dict[str, Any]]
+    companies: list[dict[str, Any]]
+    people: list[dict[str, Any]]
 
 
 def load_default_payload() -> Data:
@@ -204,7 +205,7 @@ def load_default_payload() -> Data:
     return data
 
 
-def ingest_payloads(data: List[Data]) -> list[Company]:
+def ingest_payloads(data: list[Data]) -> list[Company]:
     """Ingest payloads and build company nodes."""
     companies = build_companies(data[0])
     return companies

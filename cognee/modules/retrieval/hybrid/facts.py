@@ -10,7 +10,7 @@ MIN_FACT_WORD_COUNT = 3
 CONTAINS_FACT_PREFIX = "Document chunk mentions "
 
 
-def connection_edge_type_id(edge: dict) -> Optional[str]:
+def connection_edge_type_id(edge: dict) -> str | None:
     """Recompute the EdgeType vector row id for a graph connection edge.
 
     Must mirror index_graph_edges._get_edge_text: nonblank edge_text first

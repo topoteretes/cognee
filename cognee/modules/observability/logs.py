@@ -25,8 +25,8 @@ try:
 except ImportError:
     _OTEL_LOGS_AVAILABLE = False
 
-_log_provider: Optional[object] = None
-_handler: Optional[object] = None
+_log_provider: object | None = None
+_handler: object | None = None
 
 # Loggers that receive the OTel handler (covers all cognee namespaces)
 _COGNEE_LOGGER_NAMES = [
@@ -38,7 +38,7 @@ _COGNEE_LOGGER_NAMES = [
 ]
 
 
-def setup_log_bridge(console_output: bool = False) -> Optional[object]:
+def setup_log_bridge(console_output: bool = False) -> object | None:
     """Attach an OTel logging handler to all cognee loggers.
 
     Reads the OTLP endpoint from BaseConfig (same as tracing). Returns the
@@ -50,8 +50,8 @@ def setup_log_bridge(console_output: bool = False) -> Optional[object]:
         return None
 
     from cognee.base_config import get_base_config
-    from cognee.version import get_cognee_version
     from cognee.modules.observability.tracing import _parse_otlp_headers
+    from cognee.version import get_cognee_version
 
     config = get_base_config()
     version = get_cognee_version()

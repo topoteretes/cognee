@@ -1,19 +1,18 @@
 import os
 from pathlib import Path
+from typing import Any, BinaryIO, Union
 from urllib.parse import urlparse
 from urllib.request import url2pathname
-from typing import Union, BinaryIO, Any
 
-from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
-from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
-from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from cognee.tasks.web_scraper.utils import fetch_page_content
-from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+from cognee.modules.ingestion import StoredFile, save_data_to_file_detailed
+from cognee.modules.ingestion.exceptions import IngestionError
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
-
+from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.tasks.web_scraper.utils import fetch_page_content
 
 logger = get_logger()
 
@@ -48,7 +47,7 @@ def _resolve_local_file_uri(
 
 
 async def save_data_item_to_storage_detailed(
-    data_item: Union[BinaryIO, str, Any],
+    data_item: BinaryIO | str | Any,
 ) -> StoredFile:
     """Put ``data_item`` in cognee storage and describe what landed there.
 
@@ -138,7 +137,7 @@ async def save_data_item_to_storage_detailed(
     raise IngestionError(message=f"Data type not supported: {type(data_item)}")
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+async def save_data_item_to_storage(data_item: BinaryIO | str | Any) -> str:
     """Put ``data_item`` in cognee storage and return its path.
 
     Thin wrapper over :func:`save_data_item_to_storage_detailed` for callers

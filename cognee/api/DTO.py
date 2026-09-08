@@ -1,6 +1,7 @@
+from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel, to_snake
-from typing import Optional
 
 
 class OutDTO(BaseModel):
@@ -19,4 +20,4 @@ class InDTO(BaseModel):
 
 class ErrorResponse(OutDTO):
     error: str
-    detail: Optional[str] = None
+    detail: str | None = None

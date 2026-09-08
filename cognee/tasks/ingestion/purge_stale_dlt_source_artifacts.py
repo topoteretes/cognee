@@ -16,7 +16,7 @@ re-runs the purge harmlessly and rebuilds.
 
 from typing import TYPE_CHECKING, List, Optional
 
-from cognee.modules.data.processing.document_types import Document, DltSourceDocument
+from cognee.modules.data.processing.document_types import DltSourceDocument, Document
 from cognee.shared.logging_utils import get_logger
 
 if TYPE_CHECKING:
@@ -26,9 +26,9 @@ logger = get_logger("purge_stale_dlt_source_artifacts")
 
 
 async def purge_stale_dlt_source_artifacts(
-    documents: List[Document],
+    documents: list[Document],
     ctx: Optional["PipelineContext"] = None,
-) -> List[Document]:
+) -> list[Document]:
     manifest_docs = [doc for doc in documents if isinstance(doc, DltSourceDocument)]
     if not manifest_docs:
         return documents

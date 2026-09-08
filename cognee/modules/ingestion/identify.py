@@ -29,7 +29,7 @@ def content_hash_predicates(content_hash: str, user: User, dataset_id: UUID) -> 
     )
 
 
-async def identify(data: IngestionData, user: User, dataset_id: UUID) -> Optional[UUID]:
+async def identify(data: IngestionData, user: User, dataset_id: UUID) -> UUID | None:
     """Resolve the existing ``Data`` row for this content in this dataset.
 
     Dedup is a lookup, not an identity: a hit returns the id of the row that
@@ -56,8 +56,8 @@ async def identify_data(
     data: IngestionData,
     user: User,
     dataset_id: UUID,
-    session: Optional[AsyncSession] = None,
-) -> Optional[Data]:
+    session: AsyncSession | None = None,
+) -> Data | None:
     """:func:`identify`, but return the whole row instead of its id.
 
     Callers that need the row's columns right after resolving it — the
@@ -76,8 +76,8 @@ async def identify_data_by_hash(
     content_hash: str,
     user: User,
     dataset_id: UUID,
-    session: Optional[AsyncSession] = None,
-) -> Optional[Data]:
+    session: AsyncSession | None = None,
+) -> Data | None:
     """:func:`identify_data` for callers that already hold the content hash.
 
     Ingestion computes the hash while the payload's bytes are in hand, so the
@@ -86,7 +86,7 @@ async def identify_data_by_hash(
     """
     predicates = content_hash_predicates(content_hash, user, dataset_id)
 
-    async def _lookup(active_session: AsyncSession) -> Optional[Data]:
+    async def _lookup(active_session: AsyncSession) -> Data | None:
         return (
             await active_session.execute(select(Data).filter(*predicates).limit(1))
         ).scalar_one_or_none()

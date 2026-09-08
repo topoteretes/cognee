@@ -8,7 +8,6 @@ import tempfile
 import pytest
 from PIL import Image
 
-
 # ------------------------------------------------------------------
 #  Standalone helper functions (copied from what would be added to image_loader.py)
 # ------------------------------------------------------------------
@@ -300,7 +299,7 @@ class TestPerceptualHash:
         h2 = _dhash(Image.open(path))
         os.unlink(path)
         # Hamming distance should be small
-        diff = bin(int(h1, 16) ^ int(h2, 16)).count("1")
+        diff = (int(h1, 16) ^ int(h2, 16)).bit_count()
         assert diff < 20, f"Should be similar: Hamming distance = {diff}"
 
 

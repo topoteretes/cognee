@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import List, Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
@@ -7,15 +7,15 @@ from cognee.infrastructure.session.session_persist_watermark import (
     SessionPersistWindow,
     get_persisted_qa_count,
 )
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("extract_user_sessions")
 
 
 async def extract_user_sessions(
     data,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
 ):
     """
     Extract not-yet-persisted Q&A entries for the current user via SessionManager.
@@ -109,7 +109,7 @@ async def extract_user_sessions(
                         persisted_qa_count=len(qa_data),
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to extract session {session_id}: {str(e)}")
+                    logger.warning(f"Failed to extract session {session_id}: {e!s}")
                     continue
         else:
             logger.info(
@@ -119,5 +119,5 @@ async def extract_user_sessions(
     except CogneeSystemError:
         raise
     except Exception as e:
-        logger.error(f"Error extracting user sessions: {str(e)}")
-        raise CogneeSystemError(message=f"Failed to extract user sessions: {str(e)}", log=False)
+        logger.error(f"Error extracting user sessions: {e!s}")
+        raise CogneeSystemError(message=f"Failed to extract user sessions: {e!s}", log=False)

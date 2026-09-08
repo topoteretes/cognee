@@ -93,8 +93,8 @@ class PreferenceUpdateScope:
 
 async def resolve_preference_scope(
     *,
-    dataset: Union[str, UUID],
-    user: Optional[User],
+    dataset: str | UUID,
+    user: User | None,
 ) -> PreferenceUpdateScope:
     resolved_user = user if user is not None else session_user.get()
     if resolved_user is None or getattr(resolved_user, "id", None) is None:
@@ -121,15 +121,15 @@ def _qa_metadata(row: dict) -> dict:
     return metadata if isinstance(metadata, dict) else {}
 
 
-def _valid_rating(value: Any) -> Optional[int]:
+def _valid_rating(value: Any) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
         return None
     return value if 1 <= value <= 5 else None
 
 
-def build_rating_map(feedback_rows: List[dict]) -> Dict[str, int]:
+def build_rating_map(feedback_rows: list[dict]) -> dict[str, int]:
     """Map qa_id -> inferred 1-5 rating from feedback entries, latest entry winning."""
-    ratings: Dict[str, int] = {}
+    ratings: dict[str, int] = {}
     for row in feedback_rows:
         rating = _valid_rating(row.get("referenced_qa_rating"))
         if rating is None:
@@ -140,7 +140,7 @@ def build_rating_map(feedback_rows: List[dict]) -> Dict[str, int]:
     return ratings
 
 
-def resolve_turn_rating(qa_row: dict, rating_map: Dict[str, int]) -> Optional[int]:
+def resolve_turn_rating(qa_row: dict, rating_map: dict[str, int]) -> int | None:
     """Explicit human feedback wins where it exists; otherwise the inferred rating."""
     explicit = _valid_rating(qa_row.get("feedback_score"))
     if explicit is not None:
@@ -149,7 +149,7 @@ def resolve_turn_rating(qa_row: dict, rating_map: Dict[str, int]) -> Optional[in
     return rating_map.get(str(qa_id)) if qa_id else None
 
 
-def extract_node_ids(used_graph_element_ids: Any) -> List[str]:
+def extract_node_ids(used_graph_element_ids: Any) -> list[str]:
     """Node ids a turn's answer was built from. edge_ids are ignored (rule 5)."""
     if not isinstance(used_graph_element_ids, dict):
         return []
@@ -176,8 +176,8 @@ def _truncate_to_whole_lines(text: str, max_chars: int) -> str:
 def refresh_preference_text(
     existing_text: str,
     text_watermark: str,
-    context_entries: List[SessionContextEntry],
-) -> Tuple[str, str, int]:
+    context_entries: list[SessionContextEntry],
+) -> tuple[str, str, int]:
     """Fold new gated preference lines into the node text; returns (text, watermark, added).
 
     Deterministic, no LLM call, and no content deduplication — a preference the
@@ -216,12 +216,12 @@ def refresh_preference_text(
 async def _load_session_rows(
     session_manager,
     scope: PreferenceUpdateScope,
-    session_ids: List[str],
-) -> Tuple[List[Tuple[str, dict]], List[dict], List[Any]]:
+    session_ids: list[str],
+) -> tuple[list[tuple[str, dict]], list[dict], list[Any]]:
     """Load QA turns (oldest first, across sessions), feedback rows, and context rows."""
-    qa_rows: List[Tuple[str, dict]] = []
-    feedback_rows: List[dict] = []
-    context_rows: List[Any] = []
+    qa_rows: list[tuple[str, dict]] = []
+    feedback_rows: list[dict] = []
+    context_rows: list[Any] = []
 
     for session_id in session_ids:
         raw_qa = await session_manager.get_session(
@@ -252,7 +252,7 @@ async def _load_session_rows(
 
 async def _run_preference_update(
     scope: PreferenceUpdateScope,
-    session_ids: List[str],
+    session_ids: list[str],
 ) -> PreferenceUpdateResult:
     config = get_base_config()
     alpha = config.preference_alpha
@@ -280,9 +280,9 @@ async def _run_preference_update(
 
     # Steps 2-4: resolve a rating per turn and move weights toward its target.
     weights_state = {target_id: dict(props) for target_id, props in stored.items()}
-    pending_writes: Dict[str, float] = {}
-    applied_turns: List[Tuple[str, dict]] = []
-    unapplied_turns: List[Tuple[str, dict]] = []
+    pending_writes: dict[str, float] = {}
+    applied_turns: list[tuple[str, dict]] = []
+    unapplied_turns: list[tuple[str, dict]] = []
 
     for session_id, row in qa_rows:
         if not row.get("qa_id"):
@@ -392,7 +392,7 @@ async def _run_preference_update(
     # value over a fresher one. Both values are real bools (the field validates
     # as Dict[str, bool]); and the applied key records the actual outcome, not
     # a hard True — the skip guard is `is True`, so False gives a free retry.
-    metadata_updates: Dict[Tuple[str, str], dict] = {}
+    metadata_updates: dict[tuple[str, str], dict] = {}
     for session_id, row in new_turns:
         metadata_updates[(session_id, row["qa_id"])] = {PREFERENCE_TURN_COUNTED_KEY: True}
     for session_id, row in applied_turns:
@@ -421,9 +421,9 @@ async def _run_preference_update(
 
 
 async def update_user_preferences(
-    session_ids: List[str],
-    dataset: Union[str, UUID],
-    user: Optional[User] = None,
+    session_ids: list[str],
+    dataset: str | UUID,
+    user: User | None = None,
 ) -> PreferenceUpdateResult:
     """Fold rated turns and stated preferences from ``session_ids`` into the
     caller's preference subgraph for ``dataset``.

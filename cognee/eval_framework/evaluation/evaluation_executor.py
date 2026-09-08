@@ -1,11 +1,12 @@
-from typing import List, Dict, Any, Union
+from typing import Any, Dict, List, Union
+
 from cognee.eval_framework.evaluation.evaluator_adapters import EvaluatorAdapter
 
 
 class EvaluationExecutor:
     def __init__(
         self,
-        evaluator_engine: Union[str, EvaluatorAdapter, Any] = "DeepEval",
+        evaluator_engine: str | EvaluatorAdapter | Any = "DeepEval",
         evaluate_contexts: bool = False,
     ) -> None:
         if isinstance(evaluator_engine, str):
@@ -20,7 +21,7 @@ class EvaluationExecutor:
             self.eval_adapter = evaluator_engine
         self.evaluate_contexts = evaluate_contexts
 
-    async def execute(self, answers: List[Dict[str, str]], evaluator_metrics: Any) -> Any:
+    async def execute(self, answers: list[dict[str, str]], evaluator_metrics: Any) -> Any:
         if self.evaluate_contexts:
             evaluator_metrics.append("contextual_relevancy")
             evaluator_metrics.append("context_coverage")

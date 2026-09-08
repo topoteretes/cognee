@@ -1,15 +1,16 @@
 import asyncio
+from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, Path, UploadFile, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, Path, Request, UploadFile
 from fastapi.responses import JSONResponse
-from typing import Optional, List
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.shared.utils import send_telemetry
-from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
-from ..ontologies import OntologyService, DuplicateOntologyKeyError
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+
+from ..ontologies import DuplicateOntologyKeyError, OntologyService
 
 logger = get_logger(__name__)
 
@@ -36,7 +37,7 @@ def get_ontology_router() -> APIRouter:
                 "— other extensions are rejected with 400. Exactly one file per request."
             ),
         ),
-        description: Optional[str] = Form(
+        description: str | None = Form(
             None,
             examples=["OWL ontology of medical conditions and treatments"],
             description=(

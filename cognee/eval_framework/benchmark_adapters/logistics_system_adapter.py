@@ -11,8 +11,8 @@ from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import (
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.corpus_generator.narrativize_corpus import (
     PACKAGE_FOLDER,
     load_narrative_corpus,
-    narrativize_corpus,
     narrative_corpus_exists,
+    narrativize_corpus,
     run_narrativize_corpus,
 )
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.ontology import (
@@ -26,7 +26,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.utils
     load_world,
     store_world,
 )
-
 
 DEFAULT_WORLD_ROOT = Path("data/logistics_system_worlds")
 DEFAULT_WORLD_NAME = "default"
@@ -137,7 +136,7 @@ class LogisticsSystemAdapter(BaseBenchmarkAdapter):
         self,
         world: dict[str, object],
         load_golden_context: bool = False,
-    ) -> List[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         packages = list(world.get("packages", []))
         golden_answers = self._load_golden_answers()
         package_narratives = self._load_package_narratives(world)
@@ -205,11 +204,11 @@ class LogisticsSystemAdapter(BaseBenchmarkAdapter):
 
     def load_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         seed: int = 42,
         load_golden_context: bool = False,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
-    ) -> Tuple[List[str], List[dict[str, Any]]]:
+        instance_filter: str | list[str] | list[int] | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         world = self._get_or_create_world()
         if not narrative_corpus_exists(self.world_directory, world):
             run_narrativize_corpus(self.world_directory)

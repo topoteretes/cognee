@@ -3,12 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
+from cognee.shared.data_models import Edge as KGEdge
+from cognee.shared.data_models import KnowledgeGraph, Node
+from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 from cognee.tasks.graph.extract_graph_from_data import (
     extract_graph_from_data,
     integrate_chunk_graphs,
 )
-from cognee.tasks.graph.exceptions import InvalidOntologyAdapterError
 
 egd_module = importlib.import_module("cognee.tasks.graph.extract_graph_from_data")
 
@@ -393,17 +394,17 @@ class _Activity(DataPoint):
 
 class _Person(DataPoint):
     name: str
-    likes: Optional[List[_Activity]] = None
+    likes: list[_Activity] | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class _Directory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": []}
 
 
 class _TransparentDirectory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": [], "transparent": True}
 
 

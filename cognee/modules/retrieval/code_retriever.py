@@ -14,16 +14,17 @@ contains the repositories they want to traverse.
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict, defaultdict, deque
-from dataclasses import dataclass
 import hashlib
 import json
 import math
 import os
-from threading import RLock
 import time
+from collections import OrderedDict, defaultdict, deque
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass
+from threading import RLock
 from types import SimpleNamespace
-from typing import Any, Awaitable, Callable, Iterable, Mapping, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from cognee.context_global_variables import current_dataset_id
@@ -32,7 +33,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.code_graph_diagram import DIAGRAM_FORMATS, render_result_diagram
-
 
 CODE_NODE_TYPES = (
     "ApiEndpoint",
@@ -220,7 +220,7 @@ def _offset(value: Any) -> int:
     return value
 
 
-def _confidence(value: Any, *, field: str) -> Optional[float]:
+def _confidence(value: Any, *, field: str) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
@@ -228,7 +228,7 @@ def _confidence(value: Any, *, field: str) -> Optional[float]:
     return float(value)
 
 
-def _optional_bool(value: Any, *, field: str) -> Optional[bool]:
+def _optional_bool(value: Any, *, field: str) -> bool | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -427,7 +427,7 @@ class _CodeGraphSnapshot:
         self,
         node_id: str,
         *,
-        depth: Optional[int] = None,
+        depth: int | None = None,
         include_relations: bool = True,
     ) -> dict[str, Any]:
         node = self.nodes[node_id]
@@ -486,9 +486,9 @@ class _CodeGraphSnapshot:
     def resolve(
         self,
         *,
-        name: Optional[str] = None,
-        node_id: Optional[str] = None,
-        repo: Optional[str] = None,
+        name: str | None = None,
+        node_id: str | None = None,
+        repo: str | None = None,
         role: str = "node",
     ) -> str:
         if node_id:
@@ -723,7 +723,7 @@ def _positive_int_env(name: str, default: int) -> int:
 def _code_graph_snapshot_cache_key(
     *,
     dataset_id: Any = _MISSING,
-    graph_config: Optional[Mapping[str, Any]] = None,
+    graph_config: Mapping[str, Any] | None = None,
 ) -> _CodeGraphSnapshotCacheKey:
     """Build a stable key without retaining database credentials in memory."""
     if dataset_id is _MISSING:
@@ -754,7 +754,7 @@ def invalidate_code_graph_snapshot_cache(
     *,
     all_entries: bool = False,
     dataset_id: Any = _MISSING,
-    graph_config: Optional[Mapping[str, Any]] = None,
+    graph_config: Mapping[str, Any] | None = None,
 ) -> None:
     """Invalidate parsed CODE indexes after graph mutations.
 
@@ -806,8 +806,8 @@ class CodeRetriever(BaseRetriever):
 
     def __init__(
         self,
-        config: Optional[Mapping[str, Any]] = None,
-        retriever_specific_config: Optional[Mapping[str, Any]] = None,
+        config: Mapping[str, Any] | None = None,
+        retriever_specific_config: Mapping[str, Any] | None = None,
         **operation_config: Any,
     ):
         combined = dict(retriever_specific_config or {})
@@ -824,7 +824,7 @@ class CodeRetriever(BaseRetriever):
         self.diagram_format = self._diagram_format(combined.get("diagram"), operation)
 
     @staticmethod
-    def _diagram_format(value: Any, operation: str) -> Optional[str]:
+    def _diagram_format(value: Any, operation: str) -> str | None:
         """Which diagram to attach to the result, if any.
 
         ``diagram`` may be a format name ("mermaid", "dot"), True (Mermaid) or
@@ -867,7 +867,7 @@ class CodeRetriever(BaseRetriever):
 
         return await _CODE_GRAPH_SNAPSHOT_CACHE.get_or_load(key, load)
 
-    async def get_retrieved_objects(self, query: Optional[str], query_batch=None) -> dict[str, Any]:
+    async def get_retrieved_objects(self, query: str | None, query_batch=None) -> dict[str, Any]:
         if query_batch is not None:
             raise CodeSearchValidationError("SearchType.CODE does not support batched queries.")
         snapshot = await self._snapshot()
@@ -879,7 +879,7 @@ class CodeRetriever(BaseRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
+        query: str | None = None,
         query_batch=None,
         retrieved_objects: Any = None,
     ) -> str:
@@ -887,7 +887,7 @@ class CodeRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
+        query: str | None = None,
         query_batch=None,
         retrieved_objects: Any = None,
         context: Any = None,
@@ -949,14 +949,14 @@ class CodeRetriever(BaseRetriever):
             node = graph.nodes[node_id]
             return node.get("type") in node_types and (repo is None or node.get("repo") == repo)
 
-        module_cache: dict[str, Optional[str]] = {}
+        module_cache: dict[str, str | None] = {}
 
-        def module_of(node_id: str) -> Optional[str]:
+        def module_of(node_id: str) -> str | None:
             """The module that declares a fact: its `declares` edge, else its file's directory."""
             if node_id in module_cache:
                 return module_cache[node_id]
             node = graph.nodes[node_id]
-            found: Optional[str] = None
+            found: str | None = None
             if node.get("type") == "CodeModule":
                 found = node_id
             else:
@@ -987,7 +987,7 @@ class CodeRetriever(BaseRetriever):
             module_cache[node_id] = found
             return found
 
-        def endpoint(node_id: str) -> Optional[str]:
+        def endpoint(node_id: str) -> str | None:
             return node_id if in_scope(node_id) else module_of(node_id)
 
         rolled: dict[tuple[str, str, str], int] = defaultdict(int)
@@ -1073,7 +1073,7 @@ class CodeRetriever(BaseRetriever):
         query_name = query if set(self.config).issubset({"operation"}) else ""
         substring = str(self.config.get("name") or query_name).strip().casefold()
 
-        def confidence_of(node_id: str) -> Optional[float]:
+        def confidence_of(node_id: str) -> float | None:
             value = graph.properties_of(graph.nodes[node_id]).get("confidence")
             return (
                 float(value)
@@ -1344,7 +1344,7 @@ class CodeRetriever(BaseRetriever):
         parent: dict[str, tuple[str, dict[str, Any]]] = {}
         visited = {source_id}
         queue = deque([(source_id, 0)])
-        matched_target_id: Optional[str] = None
+        matched_target_id: str | None = None
         while queue and matched_target_id is None:
             node_id, depth = queue.popleft()
             if depth >= max_depth:

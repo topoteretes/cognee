@@ -23,9 +23,11 @@ import os
 from dataclasses import asdict
 from typing import Optional
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
+from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
 from cognee.modules.visualization.preprocessor import preprocess
+from cognee.modules.visualization.semantic_clusters import compute_clusters
 from cognee.modules.visualization.views import (
     inspector,
     memory_map,
@@ -34,14 +36,12 @@ from cognee.modules.visualization.views import (
     story_view,
     ui_chrome,
 )
-from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
-from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
-from cognee.modules.visualization.semantic_clusters import compute_clusters
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
-async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
+async def _semantic_payload(pre) -> tuple[dict | None, dict | None]:
     """Best-effort semantic positions + clusters. Never blocks the classic render.
 
     Returns ``(positions, clusters)`` or ``(None, None)`` when they can't be
@@ -68,8 +68,8 @@ async def _semantic_payload(pre) -> tuple[Optional[dict], Optional[dict]]:
 
 def build_visualization_payload(
     graph_data,
-    schema_data: Optional[dict] = None,
-    search_events: Optional[list] = None,
+    schema_data: dict | None = None,
+    search_events: list | None = None,
 ) -> dict:
     """JSON-safe snapshot of the graph, for a client that renders it itself.
 
@@ -94,7 +94,7 @@ def build_visualization_payload(
     return {**asdict(pre), "search_events": search_events or []}
 
 
-async def build_semantic_payload(graph_data, schema_data: Optional[dict] = None) -> dict:
+async def build_semantic_payload(graph_data, schema_data: dict | None = None) -> dict:
     """Semantic layout for the graph, computed on demand.
 
     Re-runs ``preprocess()`` rather than accepting an already-built ``pre``:
@@ -150,9 +150,9 @@ def _read_template() -> str:
 
 async def cognee_network_visualization(
     graph_data,
-    destination_file_path: Optional[str] = None,
-    schema_data: Optional[dict] = None,
-    search_events: Optional[list] = None,
+    destination_file_path: str | None = None,
+    schema_data: dict | None = None,
+    search_events: list | None = None,
 ) -> str:
     """Render the graph to a self-contained HTML file and return the HTML.
 
@@ -262,8 +262,8 @@ async def aggregate_multi_user_graphs(user_dataset_pairs):
         ``get_graph_data()``, with nodes tagged with ``source_user`` from
         the owning user's email.
     """
-    from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.databases.graph import get_graph_engine
 
     all_nodes: dict = {}
     all_edges: list = []

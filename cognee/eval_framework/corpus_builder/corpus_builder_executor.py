@@ -1,11 +1,12 @@
-import cognee
-from cognee.shared.logging_utils import get_logger, ERROR
-from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import cognee
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.shared.logging_utils import ERROR, get_logger
 
 logger = get_logger(level=ERROR)
 
@@ -13,8 +14,8 @@ logger = get_logger(level=ERROR)
 class CorpusBuilderExecutor:
     def __init__(
         self,
-        benchmark: Union[str, Any] = "Dummy",
-        task_getter: Callable[..., Awaitable[List[Task]]] = None,
+        benchmark: str | Any = "Dummy",
+        task_getter: Callable[..., Awaitable[list[Task]]] | None = None,
     ) -> None:
         if isinstance(benchmark, str):
             try:
@@ -31,11 +32,11 @@ class CorpusBuilderExecutor:
 
     def load_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         load_golden_context: bool = False,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+        instance_filter: str | list[str] | list[int] | None = None,
         seed: int = 42,
-    ) -> Tuple[List[Dict], List[str]]:
+    ) -> tuple[list[dict], list[str]]:
         self.raw_corpus, self.questions = self.adapter.load_corpus(
             limit=limit,
             seed=seed,
@@ -46,13 +47,13 @@ class CorpusBuilderExecutor:
 
     async def build_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         chunk_size=1024,
         chunker=TextChunker,
         load_golden_context: bool = False,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+        instance_filter: str | list[str] | list[int] | None = None,
         seed: int = 42,
-    ) -> List[str]:
+    ) -> list[str]:
         await self.adapter.prepare_corpus()
         self.load_corpus(
             limit=limit,

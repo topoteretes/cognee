@@ -31,7 +31,7 @@ class Tenant:
 def _email_to_tenant_name(email: str) -> str:
     """Generate a deterministic tenant name from email, matching the frontend convention."""
     # Frontend uses uuid5(NAMESPACE_URL, email) — we replicate the same hash
-    from uuid import uuid5, NAMESPACE_URL
+    from uuid import NAMESPACE_URL, uuid5
 
     return f"tenant-{uuid5(NAMESPACE_URL, email)}"
 
@@ -39,20 +39,22 @@ def _email_to_tenant_name(email: str) -> str:
 async def get_current_tenant(
     management_url: str,
     access_token: str,
-) -> Optional[Tenant]:
+) -> Tenant | None:
     """GET /api/tenants/current — returns the user's active tenant or None."""
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(
             f"{management_url}/api/tenants/current",
             headers={"Authorization": f"Bearer {access_token}"},
-        ) as resp:
-            if resp.status == 404:
-                return None
-            if resp.status != 200:
-                body = await resp.text()
-                raise RuntimeError(f"Failed to get tenant ({resp.status}): {body}")
-            data = await resp.json()
-            return Tenant(id=str(data.get("id", "")), name=data.get("name", ""))
+        ) as resp,
+    ):
+        if resp.status == 404:
+            return None
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Failed to get tenant ({resp.status}): {body}")
+        data = await resp.json()
+        return Tenant(id=str(data.get("id", "")), name=data.get("name", ""))
 
 
 async def create_tenant(
@@ -71,15 +73,17 @@ async def create_tenant(
     tenant_name = _email_to_tenant_name(email)
     logger.info("Creating tenant '%s' for %s", tenant_name, email)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.post(
             f"{management_url}/api/tenants",
             params={"tenant_name": tenant_name},
             headers={"Authorization": f"Bearer {access_token}"},
-        ) as resp:
-            if resp.status not in (200, 201, 202):
-                body = await resp.text()
-                raise RuntimeError(f"Failed to create tenant ({resp.status}): {body}")
+        ) as resp,
+    ):
+        if resp.status not in (200, 201, 202):
+            body = await resp.text()
+            raise RuntimeError(f"Failed to create tenant ({resp.status}): {body}")
 
     # Poll until tenant is available
     print("  Provisioning tenant (this may take a minute)...")
@@ -100,19 +104,21 @@ async def get_service_url(
     access_token: str,
 ) -> str:
     """GET /api/tenants/current/service-url — returns the tenant's dedicated instance URL."""
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(
             f"{management_url}/api/tenants/current/service-url",
             headers={"Authorization": f"Bearer {access_token}"},
-        ) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise RuntimeError(f"Failed to get service URL ({resp.status}): {body}")
-            data = await resp.json()
-            url = data.get("service_url") or data.get("url", "")
-            if not url:
-                raise RuntimeError("Service URL is empty — tenant may still be provisioning")
-            return url.rstrip("/")
+        ) as resp,
+    ):
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Failed to get service URL ({resp.status}): {body}")
+        data = await resp.json()
+        url = data.get("service_url") or data.get("url", "")
+        if not url:
+            raise RuntimeError("Service URL is empty — tenant may still be provisioning")
+        return url.rstrip("/")
 
 
 async def get_or_create_api_key(

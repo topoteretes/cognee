@@ -26,18 +26,19 @@ cannot proceed with a cache database the upsert would break on.
 import logging
 import os
 import sqlite3
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import Optional, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 logger = logging.getLogger(__name__)
 
 # revision identifiers, used by Alembic.
 revision: str = "c3d5e7f9a1b2"
-down_revision: Union[str, None] = "b2c4d6e8f0a1"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "b2c4d6e8f0a1"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 TABLE_NAME = "cache_session_context"
 INDEX_NAME = "uq_cache_session_context_entry"
@@ -72,7 +73,7 @@ def create_session_context_unique_index(conn) -> None:
     )
 
 
-def standalone_sqlite_cache_path(alembic_conn) -> Optional[str]:
+def standalone_sqlite_cache_path(alembic_conn) -> str | None:
     """Path of the standalone SQLite cache database this migration must also fix.
 
     Resolves the location exactly as the runtime does (CACHE_DB_URL when set,

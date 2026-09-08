@@ -10,10 +10,10 @@ def rank_chunk_summary_pairs(
     limit: int,
     use_importance_weight: bool,
     use_truth_weight: bool = False,
-    q_coords: Optional[list[float]] = None,
-    truth_state_by_id: Optional[dict] = None,
-    current_truth_epoch: Optional[int] = None,
-    personal_weights: Optional[dict] = None,
+    q_coords: list[float] | None = None,
+    truth_state_by_id: dict | None = None,
+    current_truth_epoch: int | None = None,
+    personal_weights: dict | None = None,
     personal_influence: float = 0.0,
 ) -> list[dict]:
     if limit <= 0:

@@ -6,11 +6,11 @@ import argparse
 import asyncio
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from typing import Any, Optional
 
 # Keep Cognee's normal logging quiet; this script prints its own progress.
@@ -88,10 +88,10 @@ def summarize_aggregate_metrics(aggregate_metrics: dict[str, Any]) -> str:
 class ExistingIngestionSweepParams:
     split: str
     conversation_index: int
-    questions_path: Optional[Path]
-    max_batches: Optional[int]
-    max_questions: Optional[int]
-    retriever_names: Optional[list[str]]
+    questions_path: Path | None
+    max_batches: int | None
+    max_questions: int | None
+    retriever_names: list[str] | None
     config_json_path: Path
     sweep: RetrieverSweepSettings
     cli_args: tuple[str, ...]
@@ -179,7 +179,7 @@ def _load_questions(params: ExistingIngestionSweepParams) -> list[dict[str, Any]
 
 def filter_retriever_configs(
     retriever_configs: list[dict[str, Any]],
-    retriever_names: Optional[list[str]],
+    retriever_names: list[str] | None,
 ) -> list[dict[str, Any]]:
     if not retriever_names:
         return retriever_configs
@@ -301,7 +301,7 @@ async def run_existing_ingestion_sweep(
     return batch_results
 
 
-def _parse_csv(value: str) -> Optional[list[str]]:
+def _parse_csv(value: str) -> list[str] | None:
     values = [item.strip() for item in value.split(",") if item.strip()]
     return values or None
 

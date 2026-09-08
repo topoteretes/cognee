@@ -15,13 +15,12 @@ from cognee.modules.tools.path_safety import trusted_is_dir, trusted_is_file, tr
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.add_data_points import add_data_points
 
-
 logger = get_logger("cognee.tools.ingest_skills")
 
 SKILL_SOURCE_ROOTS_ENV = "COGNEE_SKILL_SOURCE_ROOTS"
 
 
-def _configured_skill_source_roots() -> Tuple[Path, ...]:
+def _configured_skill_source_roots() -> tuple[Path, ...]:
     import tempfile
 
     roots = [Path.cwd(), Path(tempfile.gettempdir())]
@@ -32,7 +31,7 @@ def _configured_skill_source_roots() -> Tuple[Path, ...]:
     return tuple(roots)
 
 
-def _normalize_skill_path(path: Union[str, Path]) -> str:
+def _normalize_skill_path(path: str | Path) -> str:
     return os.path.normpath(os.path.realpath(os.path.abspath(os.path.expanduser(os.fspath(path)))))
 
 
@@ -41,7 +40,7 @@ def _has_allowed_skill_root(path_str: str, root_str: str) -> bool:
     return path_str == root_str or path_str.startswith(root_prefix)
 
 
-def _resolve_candidate_under_root(raw_path: str, root: Path) -> Optional[str]:
+def _resolve_candidate_under_root(raw_path: str, root: Path) -> str | None:
     root_str = _normalize_skill_path(root)
     candidate = raw_path if os.path.isabs(raw_path) else os.path.join(root_str, raw_path)
     candidate = _normalize_skill_path(candidate)
@@ -50,7 +49,7 @@ def _resolve_candidate_under_root(raw_path: str, root: Path) -> Optional[str]:
     return None
 
 
-def _resolve_skill_source_path(source: Union[str, Path]) -> Optional[Path]:
+def _resolve_skill_source_path(source: str | Path) -> Path | None:
     if isinstance(source, Path):
         raw_path = os.fspath(source)
     elif isinstance(source, str):
@@ -103,7 +102,7 @@ def _scoped_skill_id(dataset_id: UUID, skill: Skill) -> UUID:
     )
 
 
-def _make_storage_context(user, dataset, source: Path) -> Optional[PipelineContext]:
+def _make_storage_context(user, dataset, source: Path) -> PipelineContext | None:
     if user is None or dataset is None:
         return None
     return PipelineContext(
@@ -115,13 +114,13 @@ def _make_storage_context(user, dataset, source: Path) -> Optional[PipelineConte
 
 
 async def add_skills(
-    source: Union[str, Path],
+    source: str | Path,
     *,
     source_repo: str = "",
     node_set: str = "skills",
     user=None,
     dataset=None,
-) -> List[Skill]:
+) -> list[Skill]:
     """Parse and persist SKILL.md files as dataset-scoped Skill nodes."""
     if dataset is None or getattr(dataset, "id", None) is None:
         raise ValueError("Skill ingestion requires one explicit dataset.")
@@ -149,7 +148,7 @@ async def add_skills(
 
     dataset_id = dataset.id
     node_set_point = NodeSet(id=generate_node_id(f"NodeSet:{node_set}"), name=node_set)
-    scoped: List[Skill] = []
+    scoped: list[Skill] = []
     for skill in parsed:
         skill.id = _scoped_skill_id(dataset_id, skill)
         skill.dataset_scope = [str(dataset_id)]

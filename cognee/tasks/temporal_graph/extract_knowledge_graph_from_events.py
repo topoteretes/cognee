@@ -1,17 +1,16 @@
 from typing import List
+
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Event
-from cognee.tasks.temporal_graph.enrich_events import enrich_events
-from cognee.tasks.temporal_graph.add_entities_to_event import add_entities_to_event
-
-
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.tasks.temporal_graph.add_entities_to_event import add_entities_to_event
+from cognee.tasks.temporal_graph.enrich_events import enrich_events
 
 
 @task_summary("Built graph from {n} event(s)")
 async def extract_knowledge_graph_from_events(
-    data_chunks: List[DocumentChunk],
-) -> List[DocumentChunk]:
+    data_chunks: list[DocumentChunk],
+) -> list[DocumentChunk]:
     """
     Extracts events from document chunks and enriches them with entities to form a knowledge graph.
 

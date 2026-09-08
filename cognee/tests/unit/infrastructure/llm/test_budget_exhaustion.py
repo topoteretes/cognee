@@ -29,8 +29,8 @@ which is what these tests pin. Two failure directions matter equally:
 import litellm
 import pytest
 from instructor.core.exceptions import FailedAttempt, InstructorRetryException
-from tenacity import RetryError
 from tenacity import Future as TenacityFuture
+from tenacity import RetryError
 
 from cognee.infrastructure.llm.exceptions import (
     LLMPaymentRequiredError,

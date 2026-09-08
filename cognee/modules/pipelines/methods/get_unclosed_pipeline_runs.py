@@ -1,4 +1,3 @@
-from typing import Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -15,8 +14,8 @@ _TERMINAL_STATUSES = (
 
 
 async def get_unclosed_pipeline_runs(
-    dataset_ids: Optional[List[UUID]] = None,
-) -> List[PipelineRun]:
+    dataset_ids: list[UUID] | None = None,
+) -> list[PipelineRun]:
     """Every STARTED pipeline run that never got a terminal row of its own.
 
     Deliberately not built on the latest-run-per-dataset lookups next door.
@@ -64,7 +63,7 @@ async def get_unclosed_pipeline_runs(
             .all()
         )
 
-    unclosed: Dict[UUID, PipelineRun] = {}
+    unclosed: dict[UUID, PipelineRun] = {}
     for row in rows:
         unclosed.setdefault(row.pipeline_run_id, row)
 

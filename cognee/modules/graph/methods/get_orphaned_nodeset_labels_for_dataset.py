@@ -14,7 +14,7 @@ async def get_orphaned_nodeset_labels_for_dataset(
     dataset_id: UUID,
     data_id: UUID,
     session: AsyncSession,
-) -> List[str]:
+) -> list[str]:
     """Return labels of NodeSet ledger rows owned by `(dataset_id, data_id)`
     that will have NO other `(dataset_id, *)` anchor after that row goes away.
 

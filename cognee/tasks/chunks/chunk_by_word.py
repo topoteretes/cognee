@@ -1,6 +1,6 @@
 import re
-from typing import Iterator, Tuple
-
+from collections.abc import Iterator
+from typing import Tuple
 
 SENTENCE_ENDINGS = r"[.;!?…。！？]"
 PARAGRAPH_ENDINGS = r"[\n\r]"
@@ -39,12 +39,10 @@ def is_real_paragraph_end(last_char: str, current_pos: int, text: str) -> bool:
             return False
         next_character = text[j]
 
-    if next_character.isupper():
-        return True
-    return False
+    return bool(next_character.isupper())
 
 
-def chunk_by_word(data: str) -> Iterator[Tuple[str, str]]:
+def chunk_by_word(data: str) -> Iterator[tuple[str, str]]:
     """
     Chunk text into words and sentence endings, preserving whitespace.
 

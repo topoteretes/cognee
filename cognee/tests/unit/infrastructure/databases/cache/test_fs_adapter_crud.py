@@ -1,11 +1,12 @@
 """Unit tests for FsCacheAdapter CRUD operations."""
 
-from datetime import datetime
-from uuid import uuid4
 import tempfile
 from contextlib import contextmanager
-import pytest
+from datetime import datetime
 from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,
@@ -18,18 +19,20 @@ from cognee.tasks.memify.feedback_weights_constants import (
 
 @pytest.fixture
 def adapter():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
-        ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
-            )
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
 
-            inst = FSCacheAdapter()
-            yield inst
-            inst.cache.close()
+        inst = FSCacheAdapter()
+        yield inst
+        inst.cache.close()
 
 
 @pytest.mark.asyncio

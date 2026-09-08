@@ -50,26 +50,11 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.locks import dataset_lock
-from cognee.modules.cognify.config import get_cognify_config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
-from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
-    log_pipeline_run_complete,
-)
-from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
-from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
-from cognee.modules.pipelines.utils import generate_pipeline_id
-from cognee.shared.utils import send_telemetry
-from cognee.tasks.documents.classify_documents import update_node_set
-from cognee.tasks.graph.detect_contradictions import detect_contradictions
-from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.chunking.chunk_id import chunk_content_hash
 from cognee.modules.chunking.chunk_policy import (
     DEFAULT_CHUNK_POLICY,
@@ -79,8 +64,10 @@ from cognee.modules.chunking.chunk_policy import (
     IncrementalPlanError,
     stored_chunker_id,
 )
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
     get_authorized_dataset,
@@ -91,25 +78,37 @@ from cognee.modules.data.methods import (
     publish_updated_data,
 )
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.tasks.documents.classify_documents import document_class_for
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
 from cognee.modules.ingestion import classify, save_data_to_file
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
-from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
-from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
-from cognee.tasks.ingestion.data_item import DataItem
-from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
+    log_pipeline_run_complete,
+)
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
+from cognee.tasks.graph.detect_contradictions import detect_contradictions
+from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
+from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 from cognee.tasks.storage.add_data_points import add_data_points
 
 logger = get_logger("incremental_update")
@@ -164,7 +163,7 @@ async def _read_processed_text(raw_data_location: str) -> str:
         ) from error
 
 
-async def _get_stored_chunks(document_id: UUID) -> List[dict]:
+async def _get_stored_chunks(document_id: UUID) -> list[dict]:
     """Return the document's stored chunk nodes (full props) in document order.
 
     Chunks are discovered via their ``is_part_of`` edges and ordered by their
@@ -202,7 +201,7 @@ async def _get_stored_chunks(document_id: UUID) -> List[dict]:
 
 
 async def _require_chunk_scoped_ownership(
-    stored_chunks: List[dict], dataset_id: UUID, data_id: UUID
+    stored_chunks: list[dict], dataset_id: UUID, data_id: UUID
 ) -> None:
     """Refuse baselines whose chunks predate v2 ownership.
 
@@ -223,7 +222,7 @@ async def _require_chunk_scoped_ownership(
             )
 
 
-async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> Optional[int]:
+async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> int | None:
     """The token budget the document's stored chunks were cut against, if usable.
 
     The full-flow fallback re-cognifies the document; without this it would
@@ -260,7 +259,7 @@ async def recorded_chunk_budget(data_id: UUID, dataset_id: UUID, user: User) -> 
     return recorded
 
 
-def _require_stored_chunks_tile(stored_chunks: List[dict], old_text: str) -> None:
+def _require_stored_chunks_tile(stored_chunks: list[dict], old_text: str) -> None:
     """Refuse extra, missing, or wrongly ordered chunks before any shortcut."""
     if "".join(node["text"] for node in stored_chunks) != old_text:
         raise IncrementalUpdateNotPossible(
@@ -272,7 +271,7 @@ def _require_stored_chunks_tile(stored_chunks: List[dict], old_text: str) -> Non
 def _build_document(
     data: Data,
     staged: Optional["StagedContent"] = None,
-    node_set: Optional[List[str]] = None,
+    node_set: list[str] | None = None,
 ) -> Document:
     """Mirror classify_documents' Document construction for this data row.
 
@@ -351,7 +350,7 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
     )
 
 
-def _misindexed_chunks(document: Document, stored_chunks: List[dict]) -> List[DocumentChunk]:
+def _misindexed_chunks(document: Document, stored_chunks: list[dict]) -> list[DocumentChunk]:
     """Stored chunks whose recorded index disagrees with their actual position.
 
     Drift the planner never intended: a crash between a delete and its
@@ -369,7 +368,7 @@ def _misindexed_chunks(document: Document, stored_chunks: List[dict]) -> List[Do
     ]
 
 
-async def _restore_repositioned_chunks(chunks: List[DocumentChunk], _context) -> None:
+async def _restore_repositioned_chunks(chunks: list[DocumentChunk], _context) -> None:
     """Write back chunks whose ONLY change is their position (kept or reused).
 
     Incremental preflight requires both narrow operations. The graph adapter
@@ -514,10 +513,10 @@ async def incremental_update(
     data,
     dataset_id: UUID,
     user: User,
-    node_set: Optional[List[str]] = None,
+    node_set: list[str] | None = None,
     preferred_loaders=None,
     graph_model: type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
 ) -> dict:
@@ -621,10 +620,10 @@ async def _run_incremental_update(
     dataset,
     user: User,
     old_data: Data,
-    node_set: Optional[List[str]],
+    node_set: list[str] | None,
     preferred_loaders,
     graph_model: type[BaseModel],
-    custom_prompt: Optional[str],
+    custom_prompt: str | None,
     chunker: type,
     policy: ChunkPolicy,
 ) -> dict:
@@ -695,7 +694,7 @@ async def _stage_and_plan(
     data,
     dataset,
     user: User,
-    node_set: Optional[List[str]],
+    node_set: list[str] | None,
     preferred_loaders,
     chunker: type,
     policy: ChunkPolicy,
@@ -802,7 +801,7 @@ async def _stage_and_plan(
     }
 
 
-def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: List[dict], new_text: str) -> None:
+def _validate_plan_reassembles(plan: ChunkPlan, stored_chunks: list[dict], new_text: str) -> None:
     """Refuse a plan whose chunks do not reassemble into exactly the new text.
 
     Also catches what a region-level check cannot: duplicate or missing final
@@ -845,9 +844,9 @@ async def _write_and_publish(
     data_id: UUID,
     dataset,
     user: User,
-    node_set: Optional[List[str]],
+    node_set: list[str] | None,
     graph_model: type[BaseModel],
-    custom_prompt: Optional[str],
+    custom_prompt: str | None,
     pipeline_run_id: UUID,
 ) -> dict:
     """The write phase, ending in the one-transaction publish.

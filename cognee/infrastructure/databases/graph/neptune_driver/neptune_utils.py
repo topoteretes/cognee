@@ -5,7 +5,7 @@ connection management, URL parsing, and Neptune-specific configurations.
 """
 
 import re
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from cognee.shared.logging_utils import get_logger
@@ -13,7 +13,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("NeptuneUtils")
 
 
-def parse_neptune_url(url: str) -> Tuple[str, str]:
+def parse_neptune_url(url: str) -> tuple[str, str]:
     """
     Parse a Neptune Analytics URL to extract graph ID and region.
 
@@ -53,7 +53,7 @@ def parse_neptune_url(url: str) -> Tuple[str, str]:
         return graph_id, region
 
     except Exception as e:
-        raise ValueError(f"Failed to parse Neptune Analytics URL '{url}': {str(e)}") from e
+        raise ValueError(f"Failed to parse Neptune Analytics URL '{url}': {e!s}") from e
 
 
 def validate_graph_id(graph_id: str) -> bool:
@@ -101,12 +101,12 @@ def validate_aws_region(region: str) -> bool:
 
 def build_neptune_config(
     graph_id: str,
-    region: Optional[str],
-    aws_access_key_id: Optional[str] = None,
-    aws_secret_access_key: Optional[str] = None,
-    aws_session_token: Optional[str] = None,
+    region: str | None,
+    aws_access_key_id: str | None = None,
+    aws_secret_access_key: str | None = None,
+    aws_session_token: str | None = None,
     **kwargs,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Build a configuration dictionary for Neptune Analytics connection.
 
@@ -208,7 +208,7 @@ def get_default_query_timeout() -> int:
     return 300  # 5 minutes
 
 
-def get_default_connection_config() -> Dict[str, Any]:
+def get_default_connection_config() -> dict[str, Any]:
     """
     Get default connection configuration for Neptune Analytics.
 

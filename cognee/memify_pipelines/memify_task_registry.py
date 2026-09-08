@@ -10,30 +10,31 @@ requires ``session_ids``) stay SDK-only, where callers construct the ``Task``
 themselves.
 """
 
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from collections.abc import Callable, Sequence
+from typing import Dict, List, Optional, Union
 
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.pipelines.tasks.task import Task
 
 # Name -> zero-argument factory producing a fresh Task instance.
 # Defaults mirror how the dedicated memify pipelines construct these tasks.
-_MEMIFY_TASK_FACTORIES: Dict[str, Callable[[], Task]] = {}
+_MEMIFY_TASK_FACTORIES: dict[str, Callable[[], Task]] = {}
 
 
-def _build_task_factories() -> Dict[str, Callable[[], Task]]:
-    from cognee.tasks.memify.extract_subgraph import extract_subgraph
-    from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-    from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
-    from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
-    from cognee.tasks.memify.cognify_session import cognify_session
-    from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
-    from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
+def _build_task_factories() -> dict[str, Callable[[], Task]]:
     from cognee.tasks.memify.apply_feedback_weights import apply_feedback_weights
     from cognee.tasks.memify.apply_frequency_weights import apply_frequency_weights
+    from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
+    from cognee.tasks.memify.cognify_session import cognify_session
     from cognee.tasks.memify.consolidate_entities import (
         detect_entity_duplicates,
         merge_entity_duplicates,
     )
+    from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
+    from cognee.tasks.memify.extract_subgraph import extract_subgraph
+    from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
+    from cognee.tasks.memify.extract_user_sessions import extract_user_sessions
+    from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
     from cognee.tasks.storage.index_data_points import index_data_points
 
     return {
@@ -56,21 +57,21 @@ def _build_task_factories() -> Dict[str, Callable[[], Task]]:
     }
 
 
-def _get_task_factories() -> Dict[str, Callable[[], Task]]:
+def _get_task_factories() -> dict[str, Callable[[], Task]]:
     global _MEMIFY_TASK_FACTORIES
     if not _MEMIFY_TASK_FACTORIES:
         _MEMIFY_TASK_FACTORIES = _build_task_factories()
     return _MEMIFY_TASK_FACTORIES
 
 
-def supported_memify_task_names() -> List[str]:
+def supported_memify_task_names() -> list[str]:
     """Return the sorted names of memify tasks selectable by name."""
     return sorted(_get_task_factories())
 
 
 def resolve_memify_tasks(
-    tasks: Optional[Sequence[Union[Task, str]]],
-) -> Optional[List[Task]]:
+    tasks: Sequence[Task | str] | None,
+) -> list[Task] | None:
     """Resolve a mixed list of Task instances and task names into Task instances.
 
     Passes ``None``/empty input through unchanged so callers keep their

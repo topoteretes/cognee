@@ -59,13 +59,11 @@ def _echo(registry, req):
 def _sleep(registry, req):
     # Sleep forever — simulates a hung native call.
     time.sleep(60.0)
-    return None
 
 
 def _sleep_param(registry, req):
     # Bounded sleep used by race-window tests. Caller sets the duration.
     time.sleep(req.args[0])
-    return None
 
 
 class _NotPicklable:

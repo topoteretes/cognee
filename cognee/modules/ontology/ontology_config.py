@@ -1,4 +1,4 @@
-from typing import TypedDict, Optional
+from typing import Optional, TypedDict
 
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.matching_strategies import MatchingStrategy
@@ -15,8 +15,8 @@ class OntologyConfig(TypedDict, total=False):
             ONTOLOGY_MODE environment value when omitted.
     """
 
-    ontology_resolver: Optional[BaseOntologyResolver]
-    ontology_mode: Optional[str]
+    ontology_resolver: BaseOntologyResolver | None
+    ontology_mode: str | None
 
 
 class Config(TypedDict, total=False):
@@ -26,4 +26,4 @@ class Config(TypedDict, total=False):
         ontology_config: Configuration containing ontology resolver
     """
 
-    ontology_config: Optional[OntologyConfig]
+    ontology_config: OntologyConfig | None

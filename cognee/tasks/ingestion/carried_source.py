@@ -42,7 +42,7 @@ def publish_carried_source(ctx, data_item, stored: StoredFile) -> None:
     ctx.extras[CARRIED_SOURCE_KEY] = CarriedSource(data_item_id=id(data_item), stored=stored)
 
 
-def find_carried_source(ctx, *, data_item=None, file_path: str = None) -> Optional[StoredFile]:
+def find_carried_source(ctx, *, data_item=None, file_path: str | None = None) -> StoredFile | None:
     """The wrapper's :class:`StoredFile` for this item, or None.
 
     Pass ``data_item`` to match by object identity (before any storage work),

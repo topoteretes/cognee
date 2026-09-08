@@ -1,15 +1,14 @@
 import os
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
+from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     graph_engine_cache,
 )
-from cognee.base_config import get_base_config
-from cognee.modules.users.models import User
-from cognee.modules.users.models import DatasetDatabase
-from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
@@ -18,7 +17,7 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Create a new Ladybug instance for the dataset. Return connection info that will be mapped to the dataset.
 

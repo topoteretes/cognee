@@ -113,7 +113,7 @@ def compute_checksum(entry: Any) -> str:
     return hashlib.sha256(_SEP.join(parts).encode("utf-8")).hexdigest()
 
 
-def verify_checksum(entry: Any, expected: Optional[str] = None) -> bool:
+def verify_checksum(entry: Any, expected: str | None = None) -> bool:
     """Recompute the entry's checksum and compare it to the stored/expected one.
 
     Returns False when no checksum is present to compare against.

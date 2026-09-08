@@ -2,10 +2,11 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from cognee.infrastructure.databases.relational.ModelBase import Base
 from sqlalchemy import JSON, DateTime, Index, LargeBinary, SmallInteger, String
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column
+
+from cognee.infrastructure.databases.relational.ModelBase import Base
 
 
 class IntegrationCredential(Base):
@@ -51,20 +52,20 @@ class IntegrationCredential(Base):
 
     # Optional second owner dimension — see the class docstring. No FK: a
     # plain opaque id, same as user_id.
-    workspace_id: Mapped[Optional[UUID]] = mapped_column(SAUUID, nullable=True, index=True)
+    workspace_id: Mapped[UUID | None] = mapped_column(SAUUID, nullable=True, index=True)
 
     provider: Mapped[str] = mapped_column(String, nullable=False)
-    provider_account_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    account_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    provider_account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    account_label: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # 'oauth2' | 'api_key' — most connectors are OAuth, a few take a raw key.
     auth_type: Mapped[str] = mapped_column(String, nullable=False, default="oauth2")
-    scopes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    scopes: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Non-secret, connector-specific display/routing data (e.g. Slack's
     # bot_user_id, enterprise_id, incoming-webhook URL). Secret material never
     # goes here — only in ciphertext.
-    provider_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    provider_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # AES-GCM-encrypted token payload (access + refresh token, or a raw API
     # key). encryption_version dispatches decryption so a future KMS envelope
@@ -78,15 +79,13 @@ class IntegrationCredential(Base):
     # see modules.integrations.crypto.
     key_id: Mapped[str] = mapped_column(String, nullable=False, default="1")
 
-    token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+    token_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
 
-    last_synced_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    sync_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sync_status: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
@@ -97,4 +96,4 @@ class IntegrationCredential(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

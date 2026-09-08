@@ -1,31 +1,31 @@
 from typing import Any, Dict, List, Optional, Type
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
-from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
-from cognee.base_config import get_base_config
+from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
 from cognee.modules.user_preferences import (
     load_preference_text,
     load_preference_weights,
     personal_factor,
 )
-from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CompletionRetriever")
 
 
 def _stable_sort_by_personal_distance(
-    found_chunks: List[Any], weights: Dict[str, float], influence: float
-) -> List[Any]:
+    found_chunks: list[Any], weights: dict[str, float], influence: float
+) -> list[Any]:
     """Stable re-sort of ScoredResult chunks by personalized distance.
 
     ``score`` is a distance here (lower is better), so a preferred chunk's
@@ -53,8 +53,8 @@ def _stable_sort_by_personal_distance(
 
 
 async def _weights_matching_collection(
-    vector_engine: Any, weights: Dict[str, float], collection_name: str = "DocumentChunk_text"
-) -> Dict[str, float]:
+    vector_engine: Any, weights: dict[str, float], collection_name: str = "DocumentChunk_text"
+) -> dict[str, float]:
     """Keep only the prefers weights whose key is a row in this collection.
 
     Weight keys span every rated node — graph entities included — but only
@@ -90,14 +90,14 @@ class CompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
-        top_k: Optional[int] = 1,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        system_prompt: str | None = None,
+        top_k: int | None = 1,
+        session_id: str | None = None,
+        response_model: type = str,
         include_references: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-        wide_search_top_k: Optional[int] = 100,
+        wide_search_top_k: int | None = 100,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
@@ -158,7 +158,7 @@ class CompletionRetriever(BaseRetriever):
             secondary_reserve=conversational_reserve(self.top_k),
         )
 
-    def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+    def extract_context_object_ids(self, retrieved_objects: Any) -> dict[str, list[str]] | None:
         """Extract node_ids from ScoredResult-like list for session QA."""
         if isinstance(retrieved_objects, list) and retrieved_objects:
             return extract_from_scored_results(retrieved_objects)
@@ -204,7 +204,7 @@ class CompletionRetriever(BaseRetriever):
             "response_model": self.response_model,
         }
 
-    async def _generate_completion_without_session(self, query: str, context: str) -> List[Any]:
+    async def _generate_completion_without_session(self, query: str, context: str) -> list[Any]:
         """Generate completion without session; returns list of one completion."""
         kwargs = self._completion_kwargs(context)
         # Sessionless guidance site: preference text rides the guidance channel
@@ -222,7 +222,7 @@ class CompletionRetriever(BaseRetriever):
         )
         return [completion]
 
-    async def append_references(self, completions: List[Any], retrieved_objects: Any) -> List[Any]:
+    async def append_references(self, completions: list[Any], retrieved_objects: Any) -> list[Any]:
         return append_chunk_evidence(
             completions,
             retrieved_objects,
@@ -233,10 +233,10 @@ class CompletionRetriever(BaseRetriever):
         self,
         query: str,
         retrieved_objects: Any,
-        context: Optional[Any] = None,
-        effective_query: Optional[str] = None,
+        context: Any | None = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Generates an LLM completion using the context.
 

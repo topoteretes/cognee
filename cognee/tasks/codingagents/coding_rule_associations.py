@@ -1,18 +1,18 @@
+from typing import Any, List, Optional
 from uuid import NAMESPACE_OID, uuid5
+
+from pydantic import Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-
-from cognee.low_level import DataPoint
-from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
-from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.llm.prompts import render_prompt
+from cognee.low_level import DataPoint
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.methods import upsert_edges
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import add_data_points, index_graph_edges
-from typing import Optional, List, Any
-from pydantic import Field
 
 logger = get_logger("coding_rule_association")
 
@@ -21,20 +21,20 @@ class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
     text: str = Field(..., description="The coding rule associated with the conversation")
-    belongs_to_set: Optional[List[NodeSet] | List[str]] = None
+    belongs_to_set: list[NodeSet] | list[str] | None = None
     metadata: dict = {"index_fields": ["rule"]}
 
 
 class RuleSet(DataPoint):
     """Collection of parsed rules."""
 
-    rules: List[Rule] = Field(
+    rules: list[Rule] = Field(
         ...,
         description="List of developer rules extracted from the input text. Each rule represents a coding best practice or guideline.",
     )
 
 
-async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
+async def get_existing_rules(rules_nodeset_name: str) -> list[str]:
     graph_engine = await get_graph_engine()
     nodes_data, _ = await graph_engine.get_nodeset_subgraph(
         node_type=NodeSet, node_name=[rules_nodeset_name]
@@ -52,7 +52,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
     return existing_rules
 
 
-async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
+async def get_origin_edges(data: str, rules: list[Rule]) -> list[Any]:
     vector_engine = await get_vector_engine_async()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)

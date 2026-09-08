@@ -1,11 +1,13 @@
 import asyncio
-from typing import Any, AsyncIterable, AsyncGenerator, Callable, Dict, Union, Awaitable
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
-from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
-from cognee.modules.users.methods.get_default_user import get_default_user
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
+from typing import Any, Dict, Union
+
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
+from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
+from cognee.modules.users.methods.get_default_user import get_default_user
 
 AsyncGenLike = Union[
     AsyncIterable[Any],
@@ -21,7 +23,7 @@ AsyncGenLike = Union[
 _BACKGROUND_PIPELINE_TASKS: set[asyncio.Task] = set()
 
 
-async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, Any]:
+async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> dict[str, Any]:
     """
     Execute a pipeline synchronously (blocking until all results are consumed).
 
@@ -39,7 +41,7 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, A
     """
     agen = pipeline(**params) if callable(pipeline) else pipeline
 
-    total_run_info: Dict[str, Any] = {}
+    total_run_info: dict[str, Any] = {}
 
     async for run_info in agen:
         dataset_id = getattr(run_info, "dataset_id", None)
@@ -54,7 +56,7 @@ async def run_pipeline_blocking(pipeline: AsyncGenLike, **params) -> Dict[str, A
 async def run_pipeline_as_background_process(
     pipeline: AsyncGenLike,
     **params,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Execute one or more pipelines as background tasks.
 
@@ -129,7 +131,7 @@ async def run_pipeline_as_background_process(
 
 def get_pipeline_executor(
     run_in_background: bool = False,
-) -> Callable[..., Awaitable[Dict[str, Any]]]:
+) -> Callable[..., Awaitable[dict[str, Any]]]:
     """
     Return the appropriate pipeline runner.
 

@@ -52,7 +52,7 @@ _INTERNAL_TYPES: frozenset = frozenset()
 
 # Stage assignment by node type — drives the left-to-right Story layout.
 # Unknown types fall through to "other".
-_STAGE_BY_TYPE: Dict[str, str] = {
+_STAGE_BY_TYPE: dict[str, str] = {
     "TextDocument": "document",
     "DocumentChunk": "chunk",
     "TextSummary": "summary",
@@ -71,7 +71,7 @@ _STAGE_BY_TYPE: Dict[str, str] = {
 
 
 # Visual ordering of stages along the Story view's left-to-right spine.
-STAGE_ORDER: Tuple[str, ...] = (
+STAGE_ORDER: tuple[str, ...] = (
     "document",
     "chunk",
     "entity",
@@ -101,7 +101,7 @@ _STRUCTURAL_RELATIONS: frozenset = frozenset(
 
 # Default colors per node type — preserved verbatim from the original
 # monolith so existing test tokens continue to match.
-_TYPE_COLOR_MAP: Dict[str, str] = {
+_TYPE_COLOR_MAP: dict[str, str] = {
     "TextDocument": "#A550FF",
     "DocumentChunk": "#0DFF00",
     "Entity": "#6510F4",
@@ -135,7 +135,7 @@ _UNKNOWN_TYPE_COLOR = "#DBD8D8"
 # instead of the deterministic hue-rotation, so they stay recognizable across
 # graphs. session_learnings (distilled lessons) is the headline feature.
 _DISTILLED_LEARNING_NODE_SET = "session_learnings"
-_MEMORY_NODESET_COLORS: Dict[str, str] = {
+_MEMORY_NODESET_COLORS: dict[str, str] = {
     "session_learnings": "#FFC53D",  # distilled lessons (gold)
     "user_sessions_from_cache": "#00C2AA",  # persisted session Q&A (teal)
     "agent_trace_feedbacks": "#FF7A59",  # persisted agent trace feedback (coral)
@@ -178,15 +178,15 @@ def generate_provenance_colors(values):
     verbatim so existing string-token tests continue to pass.
     """
     color_map = {}
-    unique = sorted(set(v for v in values if v))
+    unique = sorted({v for v in values if v})
     for i, name in enumerate(unique):
         hue = (i * 137.5) % 360
         r, g, b = colorsys.hls_to_rgb(hue / 360, 0.6, 0.65)
-        color_map[name] = "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+        color_map[name] = f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
     return color_map
 
 
-def build_node_set_colors(values) -> Dict[str, str]:
+def build_node_set_colors(values) -> dict[str, str]:
     """The ``node_set`` color map: hue rotation, with memory sets pinned.
 
     Split out of ``preprocess`` so a caller that derives the same map from
@@ -423,7 +423,7 @@ def _schema_value_type(value):
 
 def extract_type_schema_fields(type_nodes):
     field_counts: Counter = Counter()
-    field_types: Dict[str, str] = {}
+    field_types: dict[str, str] = {}
     preferred_fields = (
         "source_task",
         "source_pipeline",
@@ -459,10 +459,10 @@ def extract_type_schema_fields(type_nodes):
             field_counts[key] += 1
             field_types.setdefault(key, _schema_value_type(value))
 
-    fields: List[Dict[str, Any]] = [
+    fields: list[dict[str, Any]] = [
         {"name": "count", "type": str(len(type_nodes)), "required": True}
     ]
-    ordered_field_names: List[str] = []
+    ordered_field_names: list[str] = []
     for key in preferred_fields:
         if key in field_counts:
             ordered_field_names.append(key)
@@ -473,7 +473,7 @@ def extract_type_schema_fields(type_nodes):
 
     for key in ordered_field_names[:5]:
         count = field_counts[key]
-        coverage = int(round(count / max(1, len(type_nodes)) * 100))
+        coverage = round(count / max(1, len(type_nodes)) * 100)
         fields.append(
             {
                 "name": key,
@@ -499,7 +499,7 @@ def _relationship_label(relation_counts):
 ENTITY_TYPE_RELATION: str = "is_a"
 
 
-def _link_relation(link: Dict[str, Any]) -> str:
+def _link_relation(link: dict[str, Any]) -> str:
     """Read a link's relation name across the shapes the preprocessor emits."""
     edge_info = link.get("edge_info") or {}
     return (
@@ -512,8 +512,8 @@ def _link_relation(link: Dict[str, Any]) -> str:
 
 
 def resolve_semantic_types(
-    nodes_list: List[Dict[str, Any]], links_list: List[Dict[str, Any]]
-) -> Dict[str, str]:
+    nodes_list: list[dict[str, Any]], links_list: list[dict[str, Any]]
+) -> dict[str, str]:
     """Map each node id to its semantic type name.
 
     Non-Entity nodes keep their raw ``type`` property. Entity nodes (``type ==
@@ -544,8 +544,8 @@ def resolve_semantic_types(
 
 
 def extract_type_schema_graph_data(
-    nodes_list: List[Dict[str, Any]], links_list: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    nodes_list: list[dict[str, Any]], links_list: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Fallback schema view: collapse the graph to one node per semantic type."""
     node_type_by_id = resolve_semantic_types(nodes_list, links_list)
 
@@ -565,7 +565,7 @@ def extract_type_schema_graph_data(
     # remap happens on node_type_by_id *before* any downstream aggregation, so
     # relationship distributions, pair edges, instance drill-down, and the
     # operation layer all treat the rollup as an ordinary type.
-    rolled_up_types: List[Dict[str, Any]] = []
+    rolled_up_types: list[dict[str, Any]] = []
     entity_type_counts = Counter(
         type_name for type_name in node_type_by_id.values() if type_name in semantic_type_names
     )
@@ -589,7 +589,7 @@ def extract_type_schema_graph_data(
             return node_type_rank("Entity")
         return node_type_rank(type_name)
 
-    nodes_by_type: Dict[str, List[Dict]] = defaultdict(list)
+    nodes_by_type: dict[str, list[dict]] = defaultdict(list)
     for node in nodes_list:
         type_name = node_type_by_id[node["id"]]
         if type_name not in _INTERNAL_TYPES:
@@ -601,7 +601,7 @@ def extract_type_schema_graph_data(
     # Track both outgoing AND incoming so types like DocumentChunk whose primary
     # connections are incoming (TextDocument→contains→DocumentChunk) are not
     # shown as isolated nodes.
-    relationships_by_type: Dict[str, Counter] = defaultdict(Counter)
+    relationships_by_type: dict[str, Counter] = defaultdict(Counter)
     for link in links_list:
         source_type = node_type_by_id.get(str(link["source"]))
         target_type = node_type_by_id.get(str(link["target"]))
@@ -685,7 +685,7 @@ def extract_type_schema_graph_data(
             )
         schema_nodes.append(schema_node)
 
-    relation_counts_by_pair: Dict[Tuple[str, str], Counter] = defaultdict(Counter)
+    relation_counts_by_pair: dict[tuple[str, str], Counter] = defaultdict(Counter)
     for link in links_list:
         source_type = node_type_by_id.get(str(link["source"]))
         target_type = node_type_by_id.get(str(link["target"]))
@@ -695,7 +695,7 @@ def extract_type_schema_graph_data(
             continue
         relation_counts_by_pair[(source_type, target_type)][_link_relation(link)] += 1
 
-    schema_links: List[Dict[str, Any]] = []
+    schema_links: list[dict[str, Any]] = []
     for index, ((source_type, target_type), relation_counts) in enumerate(
         sorted(
             relation_counts_by_pair.items(),
@@ -752,8 +752,8 @@ def extract_type_schema_graph_data(
     #   * instance_index: a compact per-instance adjacency (outgoing/incoming edges)
     # NOTE: for very large graphs this should be scoped/paginated; it is sized to
     # the schema graph (one entry per instance) which is fine for typical graphs.
-    instances_by_type: Dict[str, List[Dict[str, str]]] = defaultdict(list)
-    instance_index: Dict[str, Dict[str, Any]] = {}
+    instances_by_type: dict[str, list[dict[str, str]]] = defaultdict(list)
+    instance_index: dict[str, dict[str, Any]] = {}
     for node in nodes_list:
         nid = str(node["id"])
         type_name = node_type_by_id[node["id"]]
@@ -788,10 +788,10 @@ def extract_type_schema_graph_data(
 
 
 def build_operation_layer(
-    schema_graph: Dict[str, Any],
-    nodes_list: List[Dict[str, Any]],
-    links_list: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    schema_graph: dict[str, Any],
+    nodes_list: list[dict[str, Any]],
+    links_list: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Attach a transformation impact-layer to ``schema_graph`` in place.
 
     For each catalog operation whose effects touch a schema type present in the
@@ -933,12 +933,12 @@ MEMORY_TIMELINE_GAP_MS: int = 300_000
 MEMORY_GROUP_TOP_MEMBERS: int = 8
 
 
-def _t_sort_key(t_created) -> Tuple[bool, int]:
+def _t_sort_key(t_created) -> tuple[bool, int]:
     """Sort key tolerant of missing timestamps: untimed values sort last."""
     return (t_created is None, t_created if t_created is not None else 0)
 
 
-def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_memory_map(nodes: list[dict[str, Any]], links: list[dict[str, Any]]) -> dict[str, Any]:
     """Build the Memory-tab payload (embedded via the ``__MEMORY_DATA__`` token).
 
     The payload carries *structure only*: ids, deterministic ordering,
@@ -965,17 +965,17 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
     context_ids = {n["id"] for n in context_nodes}
 
     # ── Structural edge index + relation maps (single pass over links) ─────
-    edge_index: Dict[str, List[int]] = {
+    edge_index: dict[str, list[int]] = {
         "contains": [],
         "made_from": [],
         "is_part_of": [],
         "summarized_in": [],
         "semantic": [],
     }
-    chunk_doc_via_edge: Dict[str, str] = {}
-    summary_chunks: Dict[str, set] = defaultdict(set)
-    bucket_children: Dict[str, set] = defaultdict(set)
-    members_by_type: Dict[str, set] = defaultdict(set)
+    chunk_doc_via_edge: dict[str, str] = {}
+    summary_chunks: dict[str, set] = defaultdict(set)
+    bucket_children: dict[str, set] = defaultdict(set)
+    members_by_type: dict[str, set] = defaultdict(set)
 
     for position, link in enumerate(links):
         source, target = link["source"], link["target"]
@@ -1013,9 +1013,9 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
             edge_index["semantic"].append(position)
 
     # ── Documents with ordered chunk cells ─────────────────────────────────
-    chunks_by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    legacy_chunks_by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    orphan_chunks: List[str] = []
+    chunks_by_doc: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    legacy_chunks_by_doc: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    orphan_chunks: list[str] = []
     for chunk in chunk_nodes:
         raw_doc_id = chunk.get("document_id")
         doc_id = str(raw_doc_id) if raw_doc_id is not None else None
@@ -1042,7 +1042,7 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
             "t_created": chunk.get("t_created"),
         }
 
-    documents: List[Dict[str, Any]] = []
+    documents: list[dict[str, Any]] = []
     for doc in doc_nodes:
         primary = sorted(chunks_by_doc.get(doc["id"], []), key=_chunk_sort_key)
         # Legacy chunks (attributed only via the is_part_of edge) append
@@ -1065,7 +1065,7 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
     documents.sort(key=lambda d: (*_t_sort_key(d["t_first"]), d["name"], d["id"]))
 
     # ── Entity groups (one per EntityType node) ────────────────────────────
-    entity_groups: List[Dict[str, Any]] = []
+    entity_groups: list[dict[str, Any]] = []
     grouped_entity_ids: set = set()
     type_nodes = sorted(
         (n for n in nodes if n.get("type") == "EntityType"),
@@ -1105,7 +1105,7 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
     ]
 
     # ── Summaries ──────────────────────────────────────────────────────────
-    summaries: List[Dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
     for summary in sorted(summary_nodes, key=lambda n: (*_t_sort_key(n.get("t_created")), n["id"])):
         bucket_id = summary.get("global_context_bucket_id")
         summaries.append(
@@ -1117,7 +1117,7 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
         )
 
     # ── Global context (None → the view renders its empty state) ──────────
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
     if context_nodes:
         root_ids = sorted(n["id"] for n in context_nodes if n.get("is_root"))
         buckets = [
@@ -1143,14 +1143,14 @@ def _build_memory_map(nodes: List[Dict[str, Any]], links: List[Dict[str, Any]]) 
     )
     untimed_ids = sorted(n["id"] for n in nodes if n.get("t_created") is None)
 
-    clusters: List[List[Dict[str, Any]]] = []
+    clusters: list[list[dict[str, Any]]] = []
     for node in timed:
         if clusters and node["t_created"] - clusters[-1][-1]["t_created"] <= MEMORY_TIMELINE_GAP_MS:
             clusters[-1].append(node)
         else:
             clusters.append([node])
 
-    timeline: List[Dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
     for index, cluster in enumerate(clusters):
         node_ids = [n["id"] for n in cluster]
         if index == 0 and untimed_ids:
@@ -1215,20 +1215,20 @@ class PreprocessedGraph:
     should not synthesize stage/rank/edge_class/etc. on its own.
     """
 
-    nodes: List[Dict[str, Any]] = field(default_factory=list)
-    links: List[Dict[str, Any]] = field(default_factory=list)
-    color_maps: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    schema_graph: Dict[str, Any] = field(default_factory=lambda: {"nodes": [], "links": []})
-    schema_data: Optional[Dict[str, Any]] = None
-    pipeline_stages: List[str] = field(default_factory=list)
-    edge_classes: Dict[str, int] = field(default_factory=dict)
-    bundles: Dict[str, int] = field(default_factory=dict)
-    provenance_index: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    nodes: list[dict[str, Any]] = field(default_factory=list)
+    links: list[dict[str, Any]] = field(default_factory=list)
+    color_maps: dict[str, dict[str, str]] = field(default_factory=dict)
+    schema_graph: dict[str, Any] = field(default_factory=lambda: {"nodes": [], "links": []})
+    schema_data: dict[str, Any] | None = None
+    pipeline_stages: list[str] = field(default_factory=list)
+    edge_classes: dict[str, int] = field(default_factory=dict)
+    bundles: dict[str, int] = field(default_factory=dict)
+    provenance_index: dict[str, dict[str, Any]] = field(default_factory=dict)
     has_meaningful_topological_rank: bool = False
-    memory_map: Dict[str, Any] = field(default_factory=dict)
+    memory_map: dict[str, Any] = field(default_factory=dict)
 
 
-def _label_priority_threshold(importances: List[float], percentile: float = 0.75) -> float:
+def _label_priority_threshold(importances: list[float], percentile: float = 0.75) -> float:
     """Return the importance threshold above which a node earns a Key-mode label."""
     if not importances:
         return 0.0
@@ -1244,7 +1244,7 @@ def _label_priority_threshold(importances: List[float], percentile: float = 0.75
 _ALWAYS_LABEL_STAGES = frozenset({"document", "type"})
 
 
-def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> PreprocessedGraph:
+def preprocess(graph_data, schema_data: dict[str, Any] | None = None) -> PreprocessedGraph:
     """Turn raw ``(nodes_data, edges_data)`` into a fully-enriched snapshot.
 
     Mirrors the data shape the existing ``cognee_network_visualization``
@@ -1259,7 +1259,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
     nodes_data, edges_data = graph_data
 
     # ── Nodes pass 1: normalize, color, name, stage ────────────────────────
-    nodes: List[Dict[str, Any]] = []
+    nodes: list[dict[str, Any]] = []
     node_ids_seen: set = set()
     has_meaningful_rank = False
 
@@ -1302,7 +1302,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
             node_info["provenance"] = prov
 
         rank = node_info.get("topological_rank")
-        if (isinstance(rank, int) or isinstance(rank, float)) and rank not in (None, 0):
+        if (isinstance(rank, (int, float))) and rank not in (None, 0):
             has_meaningful_rank = True
 
         nodes.append(node_info)
@@ -1311,7 +1311,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
     nodes_by_id = {n["id"]: n for n in nodes}
 
     # ── Links pass: normalize, classify, weight, bundle ────────────────────
-    links: List[Dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
     edge_class_counts: Counter = Counter()
     bundle_counts: Counter = Counter()
     degree_counter: Counter = Counter()
@@ -1327,8 +1327,8 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         source = str(source)
         target = str(target)
 
-        all_weights: Dict[str, float] = {}
-        primary_weight: Optional[float] = None
+        all_weights: dict[str, float] = {}
+        primary_weight: float | None = None
         if edge_info:
             if "weight" in edge_info:
                 all_weights["default"] = edge_info["weight"]
@@ -1384,9 +1384,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
         if node.get("is_unnamed"):
             # A placeholder name is never worth a Key-mode label slot.
             node["label_priority"] = False
-        elif node["stage"] in _ALWAYS_LABEL_STAGES:
-            node["label_priority"] = True
-        elif node["importance"] >= threshold and threshold > 0:
+        elif node["stage"] in _ALWAYS_LABEL_STAGES or node["importance"] >= threshold > 0:
             node["label_priority"] = True
         else:
             node["label_priority"] = False

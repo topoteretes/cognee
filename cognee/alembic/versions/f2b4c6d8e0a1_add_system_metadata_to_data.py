@@ -15,17 +15,17 @@ whole dict moves to system_metadata and external_metadata is cleared.
 """
 
 import json
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f2b4c6d8e0a1"
-down_revision: Union[str, None] = "d6e8f0a2b4c6"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "d6e8f0a2b4c6"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 _DLT_SOURCES = ("dlt", "dlt_source")

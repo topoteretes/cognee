@@ -17,6 +17,7 @@ import mimetypes
 import os
 from typing import Any, Optional
 from urllib.parse import urljoin
+
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 
@@ -54,7 +55,7 @@ class CogneeApiClient:
         self,
         base_url: str,
         timeout: float = 120.0,
-        headers: Optional[dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -155,9 +156,9 @@ class CogneeApiClient:
 
     def cognify(
         self,
-        datasets: Optional[list[str]] = None,
+        datasets: list[str] | None = None,
         run_in_background: bool = False,
-        chunks_per_batch: Optional[int] = None,
+        chunks_per_batch: int | None = None,
     ) -> dict:
         payload: dict[str, Any] = {"run_in_background": run_in_background}
         if datasets:
@@ -174,7 +175,7 @@ class CogneeApiClient:
         self,
         query: str,
         search_type: str = "HYBRID_COMPLETION",
-        datasets: Optional[list[str]] = None,
+        datasets: list[str] | None = None,
         top_k: int = 15,
     ) -> list:
         payload: dict[str, Any] = {
@@ -192,10 +193,10 @@ class CogneeApiClient:
 
     def memify(
         self,
-        dataset_name: Optional[str] = None,
-        dataset_id: Optional[str] = None,
-        data: Optional[str] = None,
-        node_name: Optional[list[str]] = None,
+        dataset_name: str | None = None,
+        dataset_id: str | None = None,
+        data: str | None = None,
+        node_name: list[str] | None = None,
         run_in_background: bool = False,
     ) -> dict:
         payload: dict[str, Any] = {"run_in_background": run_in_background}
@@ -228,9 +229,7 @@ class CogneeApiClient:
         self._raise_for_status(r)
         return r.json()
 
-    def datasets_status(
-        self, dataset_ids: list[str], pipelines: Optional[list[str]] = None
-    ) -> dict:
+    def datasets_status(self, dataset_ids: list[str], pipelines: list[str] | None = None) -> dict:
         params = [("dataset", did) for did in dataset_ids]
         if pipelines:
             params.extend([("pipeline", pipeline) for pipeline in pipelines])
@@ -257,12 +256,12 @@ class CogneeApiClient:
         self,
         data_items: list[str],
         dataset_name: str = DEFAULT_DATASET_NAME,
-        session_id: Optional[str] = None,
-        node_set: Optional[list[str]] = None,
+        session_id: str | None = None,
+        node_set: list[str] | None = None,
         run_in_background: bool = False,
-        chunk_size: Optional[int] = None,
-        chunks_per_batch: Optional[int] = None,
-        custom_prompt: Optional[str] = None,
+        chunk_size: int | None = None,
+        chunks_per_batch: int | None = None,
+        custom_prompt: str | None = None,
     ) -> dict:
         files = []
         opened = []
@@ -312,12 +311,12 @@ class CogneeApiClient:
     def recall(
         self,
         query: str,
-        search_type: Optional[str] = "HYBRID_COMPLETION",
-        datasets: Optional[list[str]] = None,
+        search_type: str | None = "HYBRID_COMPLETION",
+        datasets: list[str] | None = None,
         top_k: int = 15,
-        system_prompt: Optional[str] = None,
-        session_id: Optional[str] = None,
-        node_name: Optional[list[str]] = None,
+        system_prompt: str | None = None,
+        session_id: str | None = None,
+        node_name: list[str] | None = None,
         only_context: bool = False,
         context_format: str = "context",
         verbose: bool = False,
@@ -348,10 +347,10 @@ class CogneeApiClient:
 
     def improve(
         self,
-        dataset_name: Optional[str] = None,
-        dataset_id: Optional[str] = None,
-        node_name: Optional[list[str]] = None,
-        session_ids: Optional[list[str]] = None,
+        dataset_name: str | None = None,
+        dataset_id: str | None = None,
+        node_name: list[str] | None = None,
+        session_ids: list[str] | None = None,
         run_in_background: bool = False,
     ) -> dict:
         payload: dict[str, Any] = {"run_in_background": run_in_background}
@@ -371,9 +370,9 @@ class CogneeApiClient:
 
     def forget(
         self,
-        dataset: Optional[str] = None,
-        dataset_id: Optional[str] = None,
-        data_id: Optional[str] = None,
+        dataset: str | None = None,
+        dataset_id: str | None = None,
+        data_id: str | None = None,
         everything: bool = False,
         memory_only: bool = False,
     ) -> dict:

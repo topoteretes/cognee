@@ -21,8 +21,8 @@ and the initiating user) passes more fields and reads them back with a
 matching ``field_count``.
 """
 
-import hmac
 import hashlib
+import hmac
 import time
 from typing import Optional, Union
 from uuid import UUID
@@ -39,7 +39,7 @@ def sign_state_payload(payload: str, *, signing_secret: str) -> str:
 
 
 def make_state(
-    *fields: Union[str, UUID],
+    *fields: str | UUID,
     signing_secret: str,
     ttl_seconds: int = DEFAULT_STATE_TTL_SECONDS,
 ) -> str:
@@ -63,7 +63,7 @@ def validate_state(
     *,
     signing_secret: str,
     field_count: int = 1,
-) -> Optional[Union[UUID, tuple]]:
+) -> UUID | tuple | None:
     """Return the signed fields for a valid, unexpired state; ``None`` otherwise.
 
     Verifies the HMAC before reading any field, so a forged or tampered

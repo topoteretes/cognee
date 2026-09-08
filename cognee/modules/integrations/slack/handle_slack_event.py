@@ -70,7 +70,7 @@ async def handle_slack_event(raw_body: bytes) -> dict[str, Any]:
     return {"ok": True}
 
 
-async def _publish_home_view(team_id: str, slack_user_id: Optional[str]) -> None:
+async def _publish_home_view(team_id: str, slack_user_id: str | None) -> None:
     """Best-effort Home tab refresh — never raises.
 
     A broken Home tab is a cosmetic problem, not a reason to fail this

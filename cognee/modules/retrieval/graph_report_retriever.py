@@ -23,10 +23,10 @@ _HUB_TYPES = frozenset({"Entity", "EntityType"})
 
 
 class _SuggestedQuestions(BaseModel):
-    questions: List[str]
+    questions: list[str]
 
 
-def _display_name(node_id: str, props: Dict[str, Any]) -> str:
+def _display_name(node_id: str, props: dict[str, Any]) -> str:
     """Human-readable label for a node, falling back to ``type (short-id)``."""
     name = props.get("name") or props.get("label")
     if isinstance(name, str) and name.strip():
@@ -35,7 +35,7 @@ def _display_name(node_id: str, props: Dict[str, Any]) -> str:
     return f"{node_type} ({str(node_id)[:8]})"
 
 
-def _normalize(values: Dict[str, float]) -> Dict[str, float]:
+def _normalize(values: dict[str, float]) -> dict[str, float]:
     """Min-max normalise a dict of floats to [0, 1]."""
     if not values:
         return {}
@@ -46,7 +46,7 @@ def _normalize(values: Dict[str, float]) -> Dict[str, float]:
     return {k: (v - lo) / span for k, v in values.items()}
 
 
-def _pagerank(graph: nx.DiGraph) -> Dict[str, float]:
+def _pagerank(graph: nx.DiGraph) -> dict[str, float]:
     """PageRank via networkx (sparse; scipy-backed). Empty on failure so the
     caller can fall back to degree — never build a dense N×N matrix."""
     if graph.number_of_edges() == 0:
@@ -89,9 +89,9 @@ class GraphReportRetriever(BaseRetriever):
 
     async def get_retrieved_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[str] = None,
-    ) -> Tuple[list, list]:
+        query: str | None = None,
+        query_batch: str | None = None,
+    ) -> tuple[list, list]:
         """Fetch all nodes and edges from the graph engine."""
         graph_engine = await get_graph_engine()
         nodes, edges = await graph_engine.get_graph_data()
@@ -100,8 +100,8 @@ class GraphReportRetriever(BaseRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[str] = None,
+        query: str | None = None,
+        query_batch: str | None = None,
         retrieved_objects: Any = None,
     ) -> str:
         """Format the three deterministic report sections."""
@@ -181,11 +181,11 @@ class GraphReportRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects: Any = None,
         context: Any = None,
-    ) -> List[str]:
+    ) -> list[str]:
         """Append LLM-suggested questions then return the full report."""
         context = context or ""
         questions_md = await self._suggest_questions(context)
@@ -224,7 +224,7 @@ class GraphReportRetriever(BaseRetriever):
         return "\n".join(lines)
 
 
-def _resolve_node_sets(nodes: list, edges: list, node_type: Dict[str, Any]) -> Dict[str, Set[str]]:
+def _resolve_node_sets(nodes: list, edges: list, node_type: dict[str, Any]) -> dict[str, set[str]]:
     """Map each node id to the node_set names it belongs to.
 
     Uses the real cognee mechanism: ``belongs_to_set`` edges pointing at
@@ -236,7 +236,7 @@ def _resolve_node_sets(nodes: list, edges: list, node_type: Dict[str, Any]) -> D
         for node_id, props in nodes
         if node_type.get(node_id) == _CONTAINER_TYPE and props.get("name")
     }
-    node_sets: Dict[str, Set[str]] = {}
+    node_sets: dict[str, set[str]] = {}
     for src, tgt, rel, _ in edges:
         if rel == _MEMBERSHIP_RELATIONSHIP and tgt in nodeset_name:
             node_sets.setdefault(src, set()).add(nodeset_name[tgt])
@@ -251,11 +251,11 @@ def _resolve_node_sets(nodes: list, edges: list, node_type: Dict[str, Any]) -> D
 
 def _rank_hubs(
     graph: nx.DiGraph,
-    node_type: Dict[str, Any],
-    degree: Dict[str, int],
-    pagerank: Dict[str, float],
+    node_type: dict[str, Any],
+    degree: dict[str, int],
+    pagerank: dict[str, float],
     top_n: int,
-) -> List[str]:
+) -> list[str]:
     """Top-N hub nodes by combined (normalised) degree + PageRank.
 
     Prefers the knowledge layer (entities/entity types); falls back to all
@@ -271,11 +271,11 @@ def _rank_hubs(
 
 def _cross_set_connections(
     graph: nx.DiGraph,
-    node_type: Dict[str, Any],
-    node_sets: Dict[str, Set[str]],
-    pagerank: Dict[str, float],
+    node_type: dict[str, Any],
+    node_sets: dict[str, set[str]],
+    pagerank: dict[str, float],
     top_n: int,
-) -> List[Tuple[str, str, str]]:
+) -> list[tuple[str, str, str]]:
     """Entity pairs whose endpoints have differing node_set membership.
 
     Restricted to entity-to-entity edges (the knowledge layer) so structural
@@ -297,7 +297,7 @@ def _cross_set_connections(
     return [(src, tgt, rel) for _, _, src, tgt, rel in surprising[:top_n]]
 
 
-def _edge_provenance(graph: nx.DiGraph, node_type: Dict[str, Any]) -> Dict[str, int]:
+def _edge_provenance(graph: nx.DiGraph, node_type: dict[str, Any]) -> dict[str, int]:
     """Classify content edges by provenance.
 
     EXTRACTED = entity-to-entity relationships the LLM extracted; DERIVED =

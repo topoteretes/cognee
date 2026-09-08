@@ -12,7 +12,7 @@ from .guess_file_type import guess_file_type
 logger = get_logger("FileMetadata")
 
 
-def _derive_basename(file_path: str) -> Optional[str]:
+def _derive_basename(file_path: str) -> str | None:
     """Derive a clean, extension-less document name from a path or file:// URI.
 
     In the ingestion pipeline ``file.name`` is a percent-encoded ``file://`` URI
@@ -82,7 +82,7 @@ async def get_file_metadata(file: BinaryIO, name: str | None = None) -> FileMeta
         content_hash = await get_file_content_hash(file)
         file.seek(0)
     except io.UnsupportedOperation as error:
-        logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
+        logger.error(f"Error retrieving content hash for file: {file.name} \n{error!s}\n\n")
 
     file_type = guess_file_type(file, name)
 

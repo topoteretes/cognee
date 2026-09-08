@@ -2,12 +2,12 @@ import pathlib
 
 import pytest
 import pytest_asyncio
-import cognee
 
+import cognee
 from cognee.infrastructure.engine import DataPoint
+from cognee.low_level import setup
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.low_level import setup
 from cognee.tasks.storage import add_data_points
 
 
@@ -129,11 +129,11 @@ async def test_node_feedback_does_not_modify_penalty_placeholder_in_edge_only_re
         ],
     )
 
-    search_kwargs = dict(
-        query=shared_edge_text,
-        top_k=1,
-        collections=["EdgeType_relationship_name"],
-    )
+    search_kwargs = {
+        "query": shared_edge_text,
+        "top_k": 1,
+        "collections": ["EdgeType_relationship_name"],
+    }
 
     top_with_no_feedback = await brute_force_triplet_search(**search_kwargs, feedback_influence=0.0)
     top_with_full_feedback = await brute_force_triplet_search(

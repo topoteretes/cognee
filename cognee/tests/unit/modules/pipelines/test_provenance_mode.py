@@ -14,12 +14,11 @@ All tests are deterministic and require no real LLM calls or network access.
 """
 
 import os
-from typing import Optional, List
+from typing import List, Optional
 from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ---------------------------------------------------------------------------
 # Minimal DataPoint replica (avoids the full cognee import chain)
@@ -31,11 +30,11 @@ class DataPoint(BaseModel):
 
     id: object = Field(default_factory=uuid4)
     version: int = 1
-    source_pipeline: Optional[str] = None
-    source_task: Optional[str] = None
-    source_node_set: Optional[str] = None
-    source_content_hash: Optional[str] = None
-    source_user: Optional[str] = None
+    source_pipeline: str | None = None
+    source_task: str | None = None
+    source_node_set: str | None = None
+    source_content_hash: str | None = None
+    source_user: str | None = None
 
 
 class ChildDP(DataPoint):
@@ -141,10 +140,10 @@ def _simulate_pipeline_task(
     mode: str = "lightweight",
     pipeline_name: str = "test_pipeline",
     task_name: str = "test_task",
-    node_set: Optional[str] = None,
-    content_hash: Optional[str] = None,
-    user_label: Optional[str] = None,
-    visited: Optional[set] = None,
+    node_set: str | None = None,
+    content_hash: str | None = None,
+    user_label: str | None = None,
+    visited: set | None = None,
 ) -> DataPoint:
     """Simulates the provenance-gated stamping block in handle_task."""
     cfg = _make_config(mode)
@@ -349,7 +348,7 @@ class TestSharedFixture:
     This is the shared-fixture requirement from the issue description.
     """
 
-    def _ingest(self, mode: str) -> List[DataPoint]:
+    def _ingest(self, mode: str) -> list[DataPoint]:
         """Simulate ingesting a small corpus of DataPoints."""
         dataset_id = "dataset-001"
         nodes = [

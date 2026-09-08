@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import List
 
 from cognee.shared.logging_utils import get_logger
+
 from .node_setup import get_nvm_sh_path
 
 logger = get_logger()
 
 
-def run_npm_command(cmd: List[str], cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:
+def run_npm_command(cmd: list[str], cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:
     """
     Run an npm command, ensuring nvm is sourced if needed (Unix-like systems only).
     Returns the CompletedProcess result.

@@ -32,7 +32,7 @@ _ANSWER_FIELD_NAMES = [
 def _extract_answer(question_dict: dict) -> str:
     """Extract the ground-truth answer from a BEAM probing question."""
     for field in _ANSWER_FIELD_NAMES:
-        if field in question_dict and question_dict[field]:
+        if question_dict.get(field):
             val = question_dict[field]
             return val if isinstance(val, str) else str(val)
     return ""
@@ -61,7 +61,7 @@ def load_beam_row(split: str, conversation_index: int) -> dict[str, Any]:
     return ds[conversation_index]
 
 
-def truncate_beam_chat_batches(chat_batches: list, max_batches: Optional[int]) -> list:
+def truncate_beam_chat_batches(chat_batches: list, max_batches: int | None) -> list:
     if max_batches is not None and len(chat_batches) > max_batches:
         logger.info(
             "Truncating conversation from %s batches to %s (max_batches)",
@@ -76,9 +76,9 @@ def parse_beam_probing_questions(
     row: dict[str, Any],
     chat_batches: list,
     *,
-    limit: Optional[int] = None,
+    limit: int | None = None,
     load_golden_context: bool = False,
-    instance_filter: Optional[Union[str, List[str], List[int]]] = None,
+    instance_filter: str | list[str] | list[int] | None = None,
     filter_instances_fn=None,
     conversation_index: int = 0,
 ) -> list[dict[str, Any]]:
@@ -109,7 +109,7 @@ def parse_beam_probing_questions(
             if isinstance(rubric, str):
                 rubric = [rubric]
 
-            qa_pair: Dict[str, Any] = {
+            qa_pair: dict[str, Any] = {
                 "question": q["question"],
                 "answer": answer_text,
                 "question_type": question_type,
@@ -173,7 +173,7 @@ class BEAMAdapter(BaseBenchmarkAdapter):
         self,
         split: str = "100K",
         conversation_index: int = 0,
-        max_batches: Optional[int] = None,
+        max_batches: int | None = None,
     ):
         self.split = split
         self.conversation_index = conversation_index
@@ -181,11 +181,11 @@ class BEAMAdapter(BaseBenchmarkAdapter):
 
     def load_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         seed: int = 42,
         load_golden_context: bool = False,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
-    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        instance_filter: str | list[str] | list[int] | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         """Load a single BEAM conversation as corpus + probing questions.
 
         Returns:

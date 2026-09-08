@@ -1,28 +1,25 @@
 """Adapter for Ladybug graph database."""
 
-import os
-import json
 import asyncio
-from contextlib import nullcontext
-import threading
+import json
+import os
 import tempfile
-from uuid import UUID, uuid5, NAMESPACE_OID
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, nullcontext
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from uuid import NAMESPACE_OID, UUID, uuid5
+
+from ladybug import Connection
+from ladybug.database import Database
 
 # Importing this package registers the Windows DLL search path ladybug's native
 # extension needs, so it has to precede the ``ladybug`` imports below. See
 # cognee_db_workers/_windows_openssl.py.
 import cognee_db_workers  # noqa: F401
-from ladybug import Connection
-from ladybug.database import Database
-from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, Union, Optional, Tuple, Type, Set
-from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.exceptions import CogneeValidationError
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
 )
@@ -31,28 +28,31 @@ from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     NodeDeleteData,
 )
-from cognee.infrastructure.databases.provenance.source_refs import (
-    get_dataset_id_from_source_ref_key,
-    get_pipeline_run_id_from_source_run_ref,
-    get_source_ref_key_from_source_run_ref,
-)
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
     provenance_after_remove,
     provenance_attach_inputs,
 )
+from cognee.infrastructure.databases.provenance.source_refs import (
+    get_dataset_id_from_source_ref_key,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.storage.utils import JSONEncoder
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
-from cognee.tasks.temporal_graph.models import Timestamp
-from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
-    COGNEE_DB_SYSTEM,
     COGNEE_DB_QUERY,
     COGNEE_DB_ROW_COUNT,
+    COGNEE_DB_SYSTEM,
     redact_secrets,
 )
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -83,7 +83,7 @@ PROVENANCE_COLUMNS = (
 )
 
 
-def _provenance_fold_clause(alias: str, row: Optional[str] = None) -> str:
+def _provenance_fold_clause(alias: str, row: str | None = None) -> str:
     """Cypher ``SET`` fragment that stamps provenance inside the artifact write.
 
     Appended to the ``MERGE`` in ``add_nodes`` / ``add_edges`` so a node/edge is
@@ -126,7 +126,7 @@ def _provenance_fold_clause(alias: str, row: Optional[str] = None) -> str:
             """
 
 
-def _provenance_fold_params(source_ref_key: str, pipeline_run_id: Optional[str]) -> dict:
+def _provenance_fold_params(source_ref_key: str, pipeline_run_id: str | None) -> dict:
     """Scalar query params consumed by :func:`_provenance_fold_clause`."""
     inputs = provenance_attach_inputs(source_ref_key, pipeline_run_id)
     return {
@@ -143,13 +143,13 @@ def _provenance_token(value: str) -> str:
     return f"|{value}|"
 
 
-def _per_row_fold_fields(pipeline_run_id: Optional[str]):
+def _per_row_fold_fields(pipeline_run_id: str | None):
     """Per-unique-key cache of fold fields for per-row provenance stamping.
 
     Grouped chunk-ownership writes share few unique ref keys across many rows;
     computing the six fold fields once per key keeps payload prep linear.
     """
-    cache: Dict[str, dict] = {}
+    cache: dict[str, dict] = {}
 
     def fields_for(source_ref_key: str) -> dict:
         fields = cache.get(source_ref_key)
@@ -161,7 +161,7 @@ def _per_row_fold_fields(pipeline_run_id: Optional[str]):
     return fields_for
 
 
-def _encode_refs(items: List[str]) -> str:
+def _encode_refs(items: list[str]) -> str:
     if not items:
         return "|"
     for item in items:
@@ -170,7 +170,7 @@ def _encode_refs(items: List[str]) -> str:
     return "|" + "|".join(items) + "|"
 
 
-def _decode_refs(value: Any) -> List[str]:
+def _decode_refs(value: Any) -> list[str]:
     """Normalize a delimiter-wrapped provenance string into ``list[str]``."""
     if value is None or value == "":
         return []
@@ -188,7 +188,7 @@ def _encode_provenance_row(row: dict) -> dict:
     return encoded
 
 
-def _parse_properties_blob(raw: Any) -> Dict[str, Any]:
+def _parse_properties_blob(raw: Any) -> dict[str, Any]:
     """Decode a node/edge JSON ``properties`` blob, tolerating empty/invalid input."""
     if not raw:
         return {}
@@ -290,9 +290,9 @@ class LadybugAdapter(GraphDBInterface):
         kuzu_max_db_size: int = DEFAULT_KUZU_MAX_DB_SIZE,
         *,
         subprocess_mode: bool = False,
-        database: Optional[Any] = None,
-        connection: Optional[Any] = None,
-        session: Optional[Any] = None,
+        database: Any | None = None,
+        connection: Any | None = None,
+        session: Any | None = None,
     ):
         """Initialize Ladybug database connection and schema.
 
@@ -341,8 +341,8 @@ class LadybugAdapter(GraphDBInterface):
         self._session = session
         self._subprocess_mode = subprocess_mode
         self._permanently_closed = False
-        self.db: Optional[Database] = database
-        self.connection: Optional[Connection] = connection
+        self.db: Database | None = database
+        self.connection: Connection | None = connection
 
         # Always construct the executor — the shared-lock query path still
         # runs ``blocking_query`` through ``loop.run_in_executor(self.executor,
@@ -511,7 +511,8 @@ class LadybugAdapter(GraphDBInterface):
                             pass
                     else:
                         import ladybug
-                        from .ladybug_migrate import needs_migration, ladybug_migration
+
+                        from .ladybug_migrate import ladybug_migration, needs_migration
 
                         should_migrate, old_version = needs_migration(
                             self.db_path, ladybug.__version__
@@ -568,7 +569,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.debug("Ladybug database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Ladybug database: {e}")
-            raise e
+            raise
 
     async def push_to_s3(self) -> None:
         if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
@@ -602,7 +603,7 @@ class LadybugAdapter(GraphDBInterface):
         query_result = await self.query(query)
         return len(query_result) == 0
 
-    async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
+    async def query(self, query: str, params: dict | None = None) -> list[tuple]:
         """
         Execute a Ladybug query asynchronously.
 
@@ -654,7 +655,7 @@ class LadybugAdapter(GraphDBInterface):
 
                     return rows
                 except Exception as e:
-                    logger.error(f"Query execution failed: {str(e)}")
+                    logger.error(f"Query execution failed: {e!s}")
                     raise
 
             try:
@@ -994,7 +995,7 @@ class LadybugAdapter(GraphDBInterface):
         finally:
             pass
 
-    def _parse_node(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_node(self, data: dict[str, Any]) -> dict[str, Any]:
         """Convert a raw node result (with JSON properties) into a dictionary."""
         if data.get("properties"):
             try:
@@ -1006,7 +1007,7 @@ class LadybugAdapter(GraphDBInterface):
                 logger.warning(f"Failed to parse properties JSON for node {data.get('id')}")
         return data
 
-    def _parse_node_properties(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_node_properties(self, data: dict[str, Any]) -> dict[str, Any]:
         try:
             if isinstance(data, dict) and "properties" in data and data["properties"]:
                 props = json.loads(data["properties"])
@@ -1020,8 +1021,8 @@ class LadybugAdapter(GraphDBInterface):
     # Helper method for building edge queries
 
     def _edge_query_and_params(
-        self, from_node: str, to_node: str, relationship_name: str, properties: Dict[str, Any]
-    ) -> Tuple[str, dict]:
+        self, from_node: str, to_node: str, relationship_name: str, properties: dict[str, Any]
+    ) -> tuple[str, dict]:
         """Build the edge creation query and parameters."""
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
         query = """
@@ -1132,9 +1133,9 @@ class LadybugAdapter(GraphDBInterface):
 
     async def add_nodes(
         self,
-        nodes: List[DataPoint],
-        source_ref_key: Optional[Union[str, Dict[str, str]]] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[DataPoint],
+        source_ref_key: str | dict[str, str] | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
@@ -1272,7 +1273,7 @@ class LadybugAdapter(GraphDBInterface):
         query_str = "MATCH (n:Node) WHERE n.id = $id DETACH DELETE n"
         await self.query(query_str, {"id": node_id})
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         """
         Delete multiple nodes at once.
 
@@ -1299,8 +1300,8 @@ class LadybugAdapter(GraphDBInterface):
     # ------------------------------------------------------------------
 
     async def _read_node_provenance(
-        self, node_ids: List[str]
-    ) -> Dict[str, Tuple[List[str], List[str]]]:
+        self, node_ids: list[str]
+    ) -> dict[str, tuple[list[str], list[str]]]:
         """Return ``{node_id: (source_ref_keys, source_run_refs)}`` for existing nodes."""
         ids = list(node_ids)
         rows = []
@@ -1317,7 +1318,7 @@ class LadybugAdapter(GraphDBInterface):
             )
         return {row[0]: (_decode_refs(row[1]), _decode_refs(row[2])) for row in rows}
 
-    async def _write_node_provenance(self, batch: List[dict]) -> None:
+    async def _write_node_provenance(self, batch: list[dict]) -> None:
         if not batch:
             return
         encoded_batch = [_encode_provenance_row(row) for row in batch]
@@ -1337,7 +1338,7 @@ class LadybugAdapter(GraphDBInterface):
 
     async def _read_edge_provenance(
         self, edges: list[EdgeIdentity]
-    ) -> Dict[EdgeIdentity, Tuple[List[str], List[str]]]:
+    ) -> dict[EdgeIdentity, tuple[list[str], list[str]]]:
         """Return ``{edge: (source_ref_keys, source_run_refs)}`` for existing edges."""
         edge_params = [
             {"s": edge.source_id, "t": edge.target_id, "rel": edge.relationship_name}
@@ -1356,13 +1357,13 @@ class LadybugAdapter(GraphDBInterface):
                     {"edges": edge_params[start : start + _WRITE_CHUNK_SIZE]},
                 )
             )
-        result: Dict[EdgeIdentity, Tuple[List[str], List[str]]] = {}
+        result: dict[EdgeIdentity, tuple[list[str], list[str]]] = {}
         for row in rows:
             edge = EdgeIdentity(source_id=row[0], target_id=row[1], relationship_name=row[2])
             result[edge] = (_decode_refs(row[3]), _decode_refs(row[4]))
         return result
 
-    async def _write_edge_provenance(self, batch: List[dict]) -> None:
+    async def _write_edge_provenance(self, batch: list[dict]) -> None:
         if not batch:
             return
         encoded_batch = [_encode_provenance_row(row) for row in batch]
@@ -1736,13 +1737,13 @@ class LadybugAdapter(GraphDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         if not tags:
-            return None
+            return
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         tag_set = set(tags)
         if node_ids is not None:
@@ -1778,9 +1779,9 @@ class LadybugAdapter(GraphDBInterface):
                 {"rows": updates},
             )
             await self.checkpoint()
-        return None
+        return
 
-    async def update_chunk_index(self, chunk_indexes: Dict[str, int]) -> None:
+    async def update_chunk_index(self, chunk_indexes: dict[str, int]) -> None:
         """Patch ONLY chunk_index inside the stored properties blobs.
 
         The stored blob is the source of truth: every other key is carried
@@ -1818,7 +1819,7 @@ class LadybugAdapter(GraphDBInterface):
             )
             await self.checkpoint()
 
-    async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def extract_node(self, node_id: str) -> dict[str, Any] | None:
         """
         Extract a node by its ID.
 
@@ -1856,7 +1857,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to extract node {node_id}: {e}")
             return None
 
-    async def extract_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def extract_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """
         Extract multiple nodes by their IDs.
 
@@ -1926,7 +1927,7 @@ class LadybugAdapter(GraphDBInterface):
         )
         return result[0][0] if result else False
 
-    async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    async def has_edges(self, edges: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
         """
         Check if multiple edges exist in a batch operation.
 
@@ -1994,7 +1995,7 @@ class LadybugAdapter(GraphDBInterface):
         from_node: str,
         to_node: str,
         relationship_name: str,
-        edge_properties: Dict[str, Any] = {},
+        edge_properties: dict[str, Any] = {},
     ) -> None:
         """
         Add an edge between two nodes.
@@ -2024,9 +2025,9 @@ class LadybugAdapter(GraphDBInterface):
 
     async def add_edges(
         self,
-        edges: List[Tuple[str, str, str, Dict[str, Any]]],
-        source_ref_key: Optional[Union[str, Dict[Tuple[str, str, str], str]]] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[tuple[str, str, str, dict[str, Any]]],
+        source_ref_key: str | dict[tuple[str, str, str], str] | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         """
         Add multiple edges in a batch operation.
@@ -2127,7 +2128,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to add edges in batch: {e}")
             raise
 
-    async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+    async def get_edges(self, node_id: str) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
         """
         Get all edges connected to a node.
 
@@ -2178,7 +2179,7 @@ class LadybugAdapter(GraphDBInterface):
 
     # Neighbor Operations
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> list[dict[str, Any]]:
         """
         Get all neighboring nodes.
 
@@ -2214,7 +2215,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to get neighbours for node {node_id}: {e}")
             return []
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """
         Get a single node by ID.
 
@@ -2251,7 +2252,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to get node {node_id}: {e}")
             return None
 
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         """
         Get multiple nodes by their IDs.
 
@@ -2287,7 +2288,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.error(f"Failed to get nodes: {e}")
             return []
 
-    def _rows_to_dicts(self, rows: List, column_names: List[str]) -> List[Dict[str, Any]]:
+    def _rows_to_dicts(self, rows: list, column_names: list[str]) -> list[dict[str, Any]]:
         """Convert query result rows to a list of dicts keyed by column names."""
         result = []
         for row in rows:
@@ -2298,8 +2299,8 @@ class LadybugAdapter(GraphDBInterface):
 
     @staticmethod
     def _resolve_edge_object_id(
-        properties: Dict[str, Any], edge_object_id_json: Optional[str]
-    ) -> Optional[str]:
+        properties: dict[str, Any], edge_object_id_json: str | None
+    ) -> str | None:
         """Resolve edge_object_id from properties or from edge_object_id_json string."""
         edge_object_id = properties.get("edge_object_id")
         if (not isinstance(edge_object_id, str) or not edge_object_id) and isinstance(
@@ -2321,8 +2322,8 @@ class LadybugAdapter(GraphDBInterface):
     ]
 
     async def _fetch_edge_rows_by_object_ids(
-        self, edge_object_ids: Set[str]
-    ) -> List[Dict[str, Any]]:
+        self, edge_object_ids: set[str]
+    ) -> list[dict[str, Any]]:
         """Fetch edge rows (as dicts) for the given edge_object_ids."""
         if not edge_object_ids:
             return []
@@ -2339,9 +2340,9 @@ class LadybugAdapter(GraphDBInterface):
 
     def _build_node_feedback_updates(
         self,
-        nodes: List[Dict[str, Any]],
-        node_feedback_weights: Dict[str, float],
-    ) -> List[Dict[str, Any]]:
+        nodes: list[dict[str, Any]],
+        node_feedback_weights: dict[str, float],
+    ) -> list[dict[str, Any]]:
         """Build UNWIND items for node feedback weight updates."""
         updates = []
         for node in nodes:
@@ -2359,7 +2360,7 @@ class LadybugAdapter(GraphDBInterface):
             )
         return updates
 
-    async def _execute_node_feedback_updates(self, updates: List[Dict[str, Any]]) -> Set[str]:
+    async def _execute_node_feedback_updates(self, updates: list[dict[str, Any]]) -> set[str]:
         """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
         if not updates:
             return set()
@@ -2378,9 +2379,9 @@ class LadybugAdapter(GraphDBInterface):
 
     def _build_node_truth_state_updates(
         self,
-        nodes: List[Dict[str, Any]],
-        node_truth_state: Dict[str, Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        nodes: list[dict[str, Any]],
+        node_truth_state: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         """Build UNWIND items for node truth state updates."""
         updates = []
         for node in nodes:
@@ -2401,7 +2402,7 @@ class LadybugAdapter(GraphDBInterface):
             )
         return updates
 
-    async def _execute_node_truth_state_updates(self, updates: List[Dict[str, Any]]) -> Set[str]:
+    async def _execute_node_truth_state_updates(self, updates: list[dict[str, Any]]) -> set[str]:
         """Run node truth state UNWIND/SET; return set of updated node_ids."""
         if not updates:
             return set()
@@ -2420,9 +2421,9 @@ class LadybugAdapter(GraphDBInterface):
 
     def _build_edge_feedback_updates(
         self,
-        edge_rows: List[Dict[str, Any]],
-        edge_feedback_weights: Dict[str, float],
-    ) -> List[Dict[str, Any]]:
+        edge_rows: list[dict[str, Any]],
+        edge_feedback_weights: dict[str, float],
+    ) -> list[dict[str, Any]]:
         """Build UNWIND items for edge feedback weight updates."""
         edge_updates = []
         for row in edge_rows:
@@ -2450,7 +2451,7 @@ class LadybugAdapter(GraphDBInterface):
             )
         return edge_updates
 
-    async def _execute_edge_feedback_updates(self, edge_updates: List[Dict[str, Any]]) -> Set[str]:
+    async def _execute_edge_feedback_updates(self, edge_updates: list[dict[str, Any]]) -> set[str]:
         """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
         if not edge_updates:
             return set()
@@ -2469,14 +2470,14 @@ class LadybugAdapter(GraphDBInterface):
         rows_dicts = self._rows_to_dicts(result, ["edge_object_id"])
         return {str(r["edge_object_id"]) for r in rows_dicts if r.get("edge_object_id") is not None}
 
-    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+    async def get_node_feedback_weights(self, node_ids: list[str]) -> dict[str, float]:
         if not node_ids:
             return {}
         valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
         if not valid_node_ids:
             return {}
         nodes = await self.get_nodes(valid_node_ids)
-        result: Dict[str, float] = {}
+        result: dict[str, float] = {}
         for node in nodes:
             node_id = node.get("id")
             if not isinstance(node_id, str):
@@ -2489,8 +2490,8 @@ class LadybugAdapter(GraphDBInterface):
         return result
 
     async def set_node_feedback_weights(
-        self, node_feedback_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, node_feedback_weights: dict[str, float]
+    ) -> dict[str, bool]:
         if not node_feedback_weights:
             return {}
         node_ids = list(node_feedback_weights.keys())
@@ -2504,14 +2505,14 @@ class LadybugAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_feedback_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
-    async def get_node_truth_state(self, node_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    async def get_node_truth_state(self, node_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not node_ids:
             return {}
         valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
         if not valid_node_ids:
             return {}
         nodes = await self.get_nodes(valid_node_ids)
-        result: Dict[str, Dict[str, Any]] = {}
+        result: dict[str, dict[str, Any]] = {}
         for node in nodes:
             node_id = node.get("id")
             if not isinstance(node_id, str):
@@ -2530,8 +2531,8 @@ class LadybugAdapter(GraphDBInterface):
         return result
 
     async def set_node_truth_state(
-        self, node_truth_state: Dict[str, Dict[str, Any]]
-    ) -> Dict[str, bool]:
+        self, node_truth_state: dict[str, dict[str, Any]]
+    ) -> dict[str, bool]:
         if not node_truth_state:
             return {}
         node_ids = list(node_truth_state.keys())
@@ -2545,7 +2546,7 @@ class LadybugAdapter(GraphDBInterface):
         updated_ids = await self._execute_node_truth_state_updates(updates)
         return {nid: (nid in updated_ids) for nid in node_ids}
 
-    async def update_node(self, node_id: str, values: Dict[str, Any]) -> bool:
+    async def update_node(self, node_id: str, values: dict[str, Any]) -> bool:
         """Merge *values* into an existing node's JSON property blob.
 
         Reads the node, layers the patch on top of its current properties, and writes
@@ -2580,14 +2581,14 @@ class LadybugAdapter(GraphDBInterface):
         )
         return bool(result)
 
-    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+    async def get_edge_feedback_weights(self, edge_object_ids: list[str]) -> dict[str, float]:
         if not edge_object_ids:
             return {}
         requested_ids = {eid for eid in edge_object_ids if isinstance(eid, str) and eid}
         if not requested_ids:
             return {}
         edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
-        result: Dict[str, float] = {}
+        result: dict[str, float] = {}
         for row in edge_rows:
             properties_raw = row.get("properties")
             if not properties_raw:
@@ -2609,8 +2610,8 @@ class LadybugAdapter(GraphDBInterface):
         return result
 
     async def set_edge_feedback_weights(
-        self, edge_feedback_weights: Dict[str, float]
-    ) -> Dict[str, bool]:
+        self, edge_feedback_weights: dict[str, float]
+    ) -> dict[str, bool]:
         if not edge_feedback_weights:
             return {}
         requested_ids = {eid for eid in edge_feedback_weights if isinstance(eid, str) and eid}
@@ -2624,8 +2625,8 @@ class LadybugAdapter(GraphDBInterface):
         return {eid: (eid in updated_ids) for eid in edge_feedback_weights}
 
     async def get_predecessors(
-        self, node_id: Union[str, UUID], edge_label: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, node_id: str | UUID, edge_label: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         Get all predecessor nodes.
 
@@ -2678,8 +2679,8 @@ class LadybugAdapter(GraphDBInterface):
             return []
 
     async def get_successors(
-        self, node_id: Union[str, UUID], edge_label: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, node_id: str | UUID, edge_label: str | None = None
+    ) -> list[dict[str, Any]]:
         """
         Get all successor nodes.
 
@@ -2733,7 +2734,7 @@ class LadybugAdapter(GraphDBInterface):
 
     async def get_connections(
         self, node_id: str
-    ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
+    ) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         """
         Get all nodes connected to a given node.
 
@@ -2781,7 +2782,7 @@ class LadybugAdapter(GraphDBInterface):
                     processed_rows = []
                     for i, item in enumerate(row):
                         if isinstance(item, dict):
-                            if "properties" in item and item["properties"]:
+                            if item.get("properties"):
                                 try:
                                     props = json.loads(item["properties"])
                                     item.update(props)
@@ -2798,7 +2799,7 @@ class LadybugAdapter(GraphDBInterface):
             return []  # Return empty list on error
 
     async def remove_connection_to_predecessors_of(
-        self, node_ids: List[str], edge_label: str
+        self, node_ids: list[str], edge_label: str
     ) -> None:
         """
         Remove all incoming edges of specified type for given nodes.
@@ -2821,7 +2822,7 @@ class LadybugAdapter(GraphDBInterface):
         await self.query(query_str, {"node_ids": node_ids, "edge_label": edge_label})
 
     async def remove_connection_to_successors_of(
-        self, node_ids: List[str], edge_label: str
+        self, node_ids: list[str], edge_label: str
     ) -> None:
         """
         Remove all outgoing edges of specified type for given nodes.
@@ -2847,7 +2848,7 @@ class LadybugAdapter(GraphDBInterface):
 
     async def get_graph_data(
         self,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """
         Get all nodes and edges in the graph.
 
@@ -2942,10 +2943,10 @@ class LadybugAdapter(GraphDBInterface):
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         """
         Get the k-hop neighborhood subgraph around a set of seed nodes.
 
@@ -3079,8 +3080,8 @@ class LadybugAdapter(GraphDBInterface):
             raise
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str = "OR"
-    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+        self, node_type: type[Any], node_name: list[str], node_name_filter_operator: str = "OR"
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         """
         Get subgraph for a set of nodes based on type and names.
 
@@ -3141,7 +3142,7 @@ class LadybugAdapter(GraphDBInterface):
             RETURN n.id, n.name, n.type, n.properties
         """
         node_rows = await self.query(nodes_query, {"ids": all_ids})
-        nodes: List[Tuple[str, dict]] = []
+        nodes: list[tuple[str, dict]] = []
         for node_id, name, typ, props in node_rows:
             data = {"id": node_id, "name": name, "type": typ}
             if props:
@@ -3161,7 +3162,7 @@ class LadybugAdapter(GraphDBInterface):
         # See get_neighborhood: the far endpoint is filtered in Python because
         # a second ``b.id IN $ids`` predicate would reintroduce the per-id scan.
         kept_ids = set(all_ids)
-        edges: List[Tuple[str, str, str, dict]] = []
+        edges: list[tuple[str, str, str, dict]] = []
         for from_id, to_id, rel_type, props in edge_rows:
             if to_id not in kept_ids:
                 continue
@@ -3176,9 +3177,7 @@ class LadybugAdapter(GraphDBInterface):
 
         return nodes, edges
 
-    async def get_filtered_graph_data(
-        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
-    ):
+    async def get_filtered_graph_data(self, attribute_filters: list[dict[str, list[str | int]]]):
         """
         Get filtered nodes and relationships based on attributes.
 
@@ -3356,10 +3355,10 @@ class LadybugAdapter(GraphDBInterface):
             return list(nodes_dict.values()), edges
 
         except Exception as e:
-            logger.error(f"Error during ID-filtered graph data retrieval: {str(e)}")
+            logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
-    async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
+    async def get_graph_metrics(self, include_optional=False) -> dict[str, Any]:
         """
         Get metrics on graph structure and connectivity.
 
@@ -3445,7 +3444,7 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query)
         return result[0][0] if result else 0
 
-    async def _get_size_of_connected_components(self) -> List[int]:
+    async def _get_size_of_connected_components(self) -> list[int]:
         """Get the sizes of all connected components in the graph."""
         query = """
         MATCH (n:Node)
@@ -3459,7 +3458,7 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query)
         return [row[0] for row in result] if result else []
 
-    async def _get_shortest_path_lengths(self) -> List[int]:
+    async def _get_shortest_path_lengths(self) -> list[int]:
         """Get the lengths of shortest paths between all pairs of nodes."""
         query = """
         MATCH (n:Node), (m:Node)
@@ -3491,7 +3490,7 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query)
         return result[0][0] if result and result[0][0] is not None else -1
 
-    async def get_disconnected_nodes(self) -> List[str]:
+    async def get_disconnected_nodes(self) -> list[str]:
         """
         Get nodes that are not connected to any other node.
 
@@ -3514,7 +3513,7 @@ class LadybugAdapter(GraphDBInterface):
 
     # Graph Meta-Data Operations
 
-    async def get_model_independent_graph_data(self) -> Dict[str, List[str]]:
+    async def get_model_independent_graph_data(self) -> dict[str, list[str]]:
         """
         Get graph data independent of any specific data model.
 
@@ -3705,13 +3704,13 @@ class LadybugAdapter(GraphDBInterface):
         result = await self.query(query)
         return [record[0] for record in result] if result else []
 
-    def _normalize_temporal_ids(self, ids: Union[List[str], str]) -> List[str]:
+    def _normalize_temporal_ids(self, ids: list[str] | str) -> list[str]:
         if isinstance(ids, str):
             return [uid.strip().strip("'\"") for uid in ids.split(",") if uid.strip()]
 
         return ids
 
-    async def collect_events(self, ids: Union[List[str], str]) -> Any:
+    async def collect_events(self, ids: list[str] | str) -> Any:
         """
         Collect all Event-type nodes reachable within 1..2 hops
         from the given node IDs.
@@ -3756,9 +3755,9 @@ class LadybugAdapter(GraphDBInterface):
 
     async def collect_time_ids(
         self,
-        time_from: Optional[Timestamp] = None,
-        time_to: Optional[Timestamp] = None,
-    ) -> List[str]:
+        time_from: Timestamp | None = None,
+        time_to: Timestamp | None = None,
+    ) -> list[str]:
         """
         Collect IDs of Timestamp nodes between time_from and time_to.
 
@@ -3771,7 +3770,7 @@ class LadybugAdapter(GraphDBInterface):
             A list of timestamp node IDs.
         """
 
-        ids: List[str] = []
+        ids: list[str] = []
 
         if time_from and time_to:
             time_from = date_to_int(time_from)
@@ -3886,7 +3885,7 @@ class LadybugAdapter(GraphDBInterface):
         try:
             results = await self.query(query, {"offset": offset, "limit": limit})
         except Exception as e:
-            logger.error(f"Failed to execute triplet query: {str(e)}")
+            logger.error(f"Failed to execute triplet query: {e!s}")
             logger.error(f"Query: {query}")
             logger.error(f"Parameters: offset={offset}, limit={limit}")
             raise
@@ -3961,8 +3960,8 @@ class LadybugAdapter(GraphDBInterface):
 
                 triplets.append(triplet)
 
-            except Exception as e:
-                logger.error(f"Error processing triplet at index {idx}: {e}", exc_info=True)
+            except Exception:
+                logger.exception(f"Error processing triplet at index {idx}")
                 continue
 
         return triplets

@@ -49,8 +49,8 @@ os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ.setdefault("LOG_LEVEL", "ERROR")
 
 import cognee
-from cognee.memory import TraceEntry
 from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.memory import TraceEntry
 from cognee.modules.users.methods import get_default_user
 
 DATASET_NAME = "agentic_session_context_demo"
@@ -202,7 +202,7 @@ async def run_distillation_act(user) -> dict:
 async def save_demo_output(output: dict):
     with open(OUTPUT_PATH, "w", encoding="utf-8") as output_file:
         output_file.write(json.dumps(output, indent=2))
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print("--- Saved structured output ---", file=sys.stderr)
     print(OUTPUT_PATH, file=sys.stderr)
 
@@ -381,12 +381,12 @@ def block_text(recall_result: Any) -> str:
 
 
 def print_act_header(title: str, explanation: str):
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print("===", file=sys.stderr)
     print(title, file=sys.stderr)
     print(explanation, file=sys.stderr)
     print("===", file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     sys.stderr.flush()
 
 
@@ -399,9 +399,9 @@ def print_trace_memory(trace_state: dict):
     print(label, file=sys.stderr)
     print("---", file=sys.stderr)
     print_trace_details(trace_state["trace"])
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print_session_memory(trace_state["snapshot"])
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
 
 
 def _distillation_label(trace_number: int) -> str:
@@ -421,10 +421,10 @@ def print_distillation(result: dict):
         file=sys.stderr,
     )
     print(f"context entries touched: {len(result['flush_touched_entry_ids'])}", file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print("Distillation input: session memory", file=sys.stderr)
     print_snapshot(distillation_input)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print("Graph documents written", file=sys.stderr)
     print(f"status: {result['distillation_status']}", file=sys.stderr)
     documents = result["cognified_documents"]
@@ -484,7 +484,7 @@ def print_session_memory(snap: dict):
 def print_recall(result: dict):
     print("Agent-profile session memory recall", file=sys.stderr)
     print((result["agent_profile_block"] or "  (empty)"), file=sys.stderr)
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print(
         f"QA-profile session memory results: {result['qa_profile_result_count']}", file=sys.stderr
     )

@@ -1,16 +1,15 @@
 import asyncio
-from typing import Type, List
+from typing import List, Type
+
 from cognee.infrastructure.llm.extraction import extract_event_graph
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.tasks.temporal_graph.models import EventList
 from cognee.modules.engine.utils.generate_event_datapoint import generate_event_datapoint
-
-
 from cognee.modules.pipelines.tasks.task import task_summary
+from cognee.tasks.temporal_graph.models import EventList
 
 
 @task_summary("Extracted events from {n} chunk(s)")
-async def extract_events_and_timestamps(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+async def extract_events_and_timestamps(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
     """
     Extracts events and their timestamps from document chunks using an LLM.
 

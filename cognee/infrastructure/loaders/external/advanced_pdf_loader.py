@@ -9,10 +9,9 @@ from typing import Any
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -44,14 +43,13 @@ class AdvancedPdfLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(
         self, file_path: str, strategy: str = "auto", **kwargs: Any
-    ) -> "str | LoaderResult":
+    ) -> str | LoaderResult:
         """Load PDF file using unstructured library. If Exception occurs, fallback to PyPDFLoader.
 
         Args:
@@ -113,7 +111,7 @@ class AdvancedPdfLoader(LoaderInterface):
             logger.warning("Failed to process PDF with AdvancedPdfLoader: %s", exc)
             return await self._fallback(file_path, **kwargs)
 
-    async def _fallback(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
+    async def _fallback(self, file_path: str, **kwargs: Any) -> str | LoaderResult:
         logger.info("Falling back to PyPDF loader for %s", file_path)
         fallback_loader = PyPdfLoader()
         return await fallback_loader.load(file_path, **kwargs)

@@ -1,11 +1,11 @@
 import uuid
 from functools import lru_cache
+
 from fastapi_users import FastAPIUsers
 
 from .authentication.get_api_auth_backend import get_api_auth_backend
-from .authentication.get_client_auth_backend import get_client_auth_backend
 from .authentication.get_api_key_backend import get_api_key_backend
-
+from .authentication.get_client_auth_backend import get_client_auth_backend
 from .get_user_manager import get_user_manager
 from .models.User import User
 

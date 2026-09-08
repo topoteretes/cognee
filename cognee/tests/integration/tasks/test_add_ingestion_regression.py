@@ -71,21 +71,23 @@ def add_env():
                 pass
 
     mp = pytest.MonkeyPatch()
-    for key, value in dict(
-        DB_PROVIDER="sqlite",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        STORAGE_BACKEND="local",
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "kuzu",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "STORAGE_BACKEND": "local",
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
         # add-by-path tests read from source_dir; mkdtemp lives under the
         # default-allowed tempdir, this just makes the intent explicit.
-        COGNEE_ALLOWED_LOCAL_FILE_ROOTS=os.pathsep.join([str(source_dir), tempfile.gettempdir()]),
-    ).items():
+        "COGNEE_ALLOWED_LOCAL_FILE_ROOTS": os.pathsep.join(
+            [str(source_dir), tempfile.gettempdir()]
+        ),
+    }.items():
         mp.setenv(key, value)
     clear_config_caches()
 

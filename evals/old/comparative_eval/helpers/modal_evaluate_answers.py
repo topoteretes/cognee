@@ -1,13 +1,15 @@
-import modal
-import os
 import asyncio
 import datetime
 import hashlib
 import json
-from cognee.shared.logging_utils import get_logger
+import os
+
+import modal
+
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 from cognee.eval_framework.metrics_dashboard import create_dashboard
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 vol = modal.Volume.from_name("comparison-eval-answers", create_if_missing=True)
@@ -31,7 +33,7 @@ image = (
 
 @app.function(image=image, concurrency_limit=10, timeout=86400, volumes={"/data": vol})
 async def modal_evaluate_answers(
-    answers_json_content: dict, answers_filename: str, eval_config: dict = None
+    answers_json_content: dict, answers_filename: str, eval_config: dict | None = None
 ):
     """Evaluates answers from JSON content and returns metrics results."""
     if eval_config is None:

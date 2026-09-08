@@ -1,29 +1,31 @@
-import json
-import os
-import sys
 import argparse
 import asyncio
 import base64
+import importlib.util
+import json
+import os
 import subprocess
+import sys
 from collections import deque
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from typing import Deque, List, Optional, Tuple
-from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
-from cognee.modules.data.methods.get_last_added_data import get_last_added_data
-from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
-from cognee.shared.usage_logger import log_usage
-import importlib.util
-from contextlib import redirect_stdout
-import mcp.types as types
+
+import uvicorn
 from fastmcp import FastMCP
 from fastmcp.server.transforms.search import BM25SearchTransform
 from fastmcp.server.transforms.search.base import BaseSearchTransform
-from cognee.modules.storage.utils import JSONEncoder
-from starlette.responses import JSONResponse
+from mcp import types
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-import uvicorn
+from starlette.responses import JSONResponse
+
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
+from cognee.modules.data.methods.get_last_added_data import get_last_added_data
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
+from cognee.shared.usage_logger import log_usage
 
 try:
     from .cognee_client import CogneeClient
@@ -84,12 +86,12 @@ registry = ToolRegistry(mcp)
 
 logger = get_logger()
 
-cognee_client: Optional[CogneeClient] = None
+cognee_client: CogneeClient | None = None
 
 # Per-dataset error ring buffer (bounded so long-running servers don't accumulate
 # unbounded memory). Each entry is (iso_timestamp, error_message).
 _TASK_ERROR_HISTORY = 50
-_task_errors: dict[str, Deque[Tuple[str, str]]] = {}
+_task_errors: dict[str, deque[tuple[str, str]]] = {}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 # Strong references to in-flight background tasks. asyncio's event loop only keeps
@@ -183,7 +185,7 @@ TOOL_MODES = ("default", "minimal", "all")
 TOOL_SEARCH_MAX_RESULTS = 10
 
 
-def apply_tool_mode(mode: str = None) -> str:
+def apply_tool_mode(mode: str | None = None) -> str:
     """Gate the advertised tool surface behind FastMCP's tool-search transform.
 
     Every tool stays registered and directly callable by name; the transform
@@ -274,10 +276,10 @@ async def health_check(request):
 @log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str,
-    dataset_name: str = None,
-    graph_model_file: str = None,
-    graph_model_name: str = None,
-    custom_prompt: str = None,
+    dataset_name: str | None = None,
+    graph_model_file: str | None = None,
+    graph_model_name: str | None = None,
+    custom_prompt: str | None = None,
 ) -> list:
     """
     Transform ingested data into a structured knowledge graph.
@@ -393,7 +395,7 @@ async def cognify(
         return [
             types.TextContent(
                 type="text",
-                text=f"Error: {str(e)}",
+                text=f"Error: {e!s}",
             )
         ]
 
@@ -412,9 +414,9 @@ async def cognify(
     async def cognify_task(
         data_items: list[str],
         dataset_name: str = "main_dataset",
-        graph_model_file: str = None,
-        graph_model_name: str = None,
-        custom_prompt: str = None,
+        graph_model_file: str | None = None,
+        graph_model_name: str | None = None,
+        custom_prompt: str | None = None,
     ) -> str:
         """Build knowledge graph from the input text"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
@@ -441,7 +443,7 @@ async def cognify(
                 logger.info("Cognify submitted; running in the background on the server.")
             except Exception as e:
                 logger.error("Cognify process failed.")
-                raise ValueError(f"Failed to cognify: {str(e)}") from e
+                raise ValueError(f"Failed to cognify: {e!s}") from e
 
     async def cognify_task_wrapper(**kwargs):
         """Wrapper that captures errors from the background task."""
@@ -528,7 +530,7 @@ async def save_interaction(data: str) -> list:
 
             except Exception as e:
                 logger.error("Save interaction process failed.")
-                raise ValueError(f"Failed to Save interaction: {str(e)}") from e
+                raise ValueError(f"Failed to Save interaction: {e!s}") from e
 
     async def save_task_wrapper(**kwargs):
         """Wrapper that captures errors from the background task."""
@@ -556,7 +558,7 @@ async def save_interaction(data: str) -> list:
 
 @log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(
-    search_query: str, search_type: str, top_k: int = 15, datasets: str = None
+    search_query: str, search_type: str, top_k: int = 15, datasets: str | None = None
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -677,10 +679,10 @@ async def search(
         normalized_search_type = normalize_search_type(search_type)
         normalized_top_k = validate_top_k(top_k)
     except ValueError as e:
-        return [types.TextContent(type="text", text=f"Error: {str(e)}")]
+        return [types.TextContent(type="text", text=f"Error: {e!s}")]
 
     async def search_task(
-        search_query: str, search_type: str, top_k: int, datasets_list: list = None
+        search_query: str, search_type: str, top_k: int, datasets_list: list | None = None
     ) -> str:
         """
         Internal task to execute knowledge graph search with result formatting.
@@ -735,7 +737,7 @@ async def search(
             datasets_list,
         )
     except Exception as e:
-        error_msg = f"Search failed: {str(e)}"
+        error_msg = f"Search failed: {e!s}"
         logger.error(error_msg)
         return [types.TextContent(type="text", text=f"Error: {error_msg}")]
     return [types.TextContent(type="text", text=search_results)]
@@ -778,7 +780,7 @@ async def get_document(
                 )
             ]
         except Exception as e:
-            error_msg = f"get_document failed: {str(e)}"
+            error_msg = f"get_document failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -822,13 +824,13 @@ async def get_chunk_neighbors(
                 )
             ]
         except Exception as e:
-            error_msg = f"get_chunk_neighbors failed: {str(e)}"
+            error_msg = f"get_chunk_neighbors failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
 @log_usage(function_name="MCP list_data", log_type="mcp_tool")
-async def list_data(dataset_id: str = None) -> list:
+async def list_data(dataset_id: str | None = None) -> list:
     """
     List all datasets and their data items with IDs for deletion operations.
 
@@ -870,8 +872,8 @@ async def list_data(dataset_id: str = None) -> list:
                         )
                     ]
 
-                from cognee.modules.users.methods import get_default_user
                 from cognee.modules.data.methods import get_dataset, get_dataset_data
+                from cognee.modules.users.methods import get_default_user
 
                 logger.info(f"Listing data for dataset: {dataset_id}")
                 dataset_uuid = UUID(dataset_id)
@@ -945,13 +947,13 @@ async def list_data(dataset_id: str = None) -> list:
             return [types.TextContent(type="text", text=result_text)]
 
         except ValueError as e:
-            error_msg = f"❌ Invalid UUID format: {str(e)}"
+            error_msg = f"❌ Invalid UUID format: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
         except Exception as e:
-            error_msg = f"❌ Failed to list data: {str(e)}"
-            logger.error(f"List data error: {str(e)}")
+            error_msg = f"❌ Failed to list data: {e!s}"
+            logger.error(f"List data error: {e!s}")
             return [types.TextContent(type="text", text=error_msg)]
 
 
@@ -983,9 +985,9 @@ async def delete_dataset(dataset_name: str) -> list:
                     )
                 ]
 
-            from cognee.modules.users.methods import get_default_user
             from cognee.modules.data.methods import delete_dataset as _delete_dataset
             from cognee.modules.data.methods import get_datasets
+            from cognee.modules.users.methods import get_default_user
 
             user = await get_default_user()
             datasets = await get_datasets(user.id)
@@ -1011,7 +1013,7 @@ async def delete_dataset(dataset_name: str) -> list:
                 )
             ]
         except Exception as e:
-            return [types.TextContent(type="text", text=f"Error deleting dataset: {str(e)}")]
+            return [types.TextContent(type="text", text=f"Error deleting dataset: {e!s}")]
 
 
 @log_usage(function_name="MCP delete", log_type="mcp_tool")
@@ -1082,14 +1084,14 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
             ]
 
         except ValueError as e:
-            error_msg = f"❌ Invalid delete request: {str(e)}"
+            error_msg = f"❌ Invalid delete request: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
         except Exception as e:
             # Handle all other errors (DocumentNotFoundError, DatasetNotFoundError, etc.)
-            error_msg = f"❌ Delete operation failed: {str(e)}"
-            logger.error(f"Delete operation error: {str(e)}")
+            error_msg = f"❌ Delete operation failed: {e!s}"
+            logger.error(f"Delete operation error: {e!s}")
             return [types.TextContent(type="text", text=error_msg)]
 
 
@@ -1124,7 +1126,7 @@ async def prune():
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
-            error_msg = f"❌ Prune operation failed: {str(e)}"
+            error_msg = f"❌ Prune operation failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
@@ -1136,12 +1138,12 @@ async def prune():
 
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def remember(
-    data: str = None,
-    filename: str = None,
-    content_base64: str = None,
-    dataset_name: str = None,
-    session_id: str = None,
-    custom_prompt: str = None,
+    data: str | None = None,
+    filename: str | None = None,
+    content_base64: str | None = None,
+    dataset_name: str | None = None,
+    session_id: str | None = None,
+    custom_prompt: str | None = None,
     background: bool = False,
 ) -> list:
     """Store data in memory.
@@ -1282,7 +1284,7 @@ async def remember(
                 text = f"Stored permanently in knowledge graph (dataset={dataset_name}, status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Remember failed: {str(e)}"
+            error_msg = f"Remember failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -1290,10 +1292,10 @@ async def remember(
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def recall(
     query: str,
-    search_type: str = None,
-    datasets: str = None,
-    session_id: str = None,
-    system_prompt: str = None,
+    search_type: str | None = None,
+    datasets: str | None = None,
+    session_id: str | None = None,
+    system_prompt: str | None = None,
     top_k: int = 15,
 ) -> list:
     """Search memory with auto-routing and session awareness.
@@ -1343,17 +1345,17 @@ async def recall(
                 )
             ]
         except Exception as e:
-            error_msg = f"Recall failed: {str(e)}"
+            error_msg = f"Recall failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def forget(
-    dataset: str = None,
+    dataset: str | None = None,
     everything: bool = False,
-    data_id: str = None,
-    dataset_id: str = None,
+    data_id: str | None = None,
+    dataset_id: str | None = None,
 ) -> list:
     """Delete data from memory.
 
@@ -1420,15 +1422,15 @@ async def forget(
                 text = f"Dataset '{dataset or dataset_id}' deleted (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Forget failed: {str(e)}"
+            error_msg = f"Forget failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
 @log_usage(function_name="MCP improve", log_type="mcp_tool")
 async def improve(
-    dataset_name: str = None,
-    session_ids: str = None,
+    dataset_name: str | None = None,
+    session_ids: str | None = None,
 ) -> list:
     """Enrich the knowledge graph and bridge session data to the permanent graph.
 
@@ -1467,7 +1469,7 @@ async def improve(
                 text = f"Graph enrichment completed (status={status})."
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
-            error_msg = f"Improve failed: {str(e)}"
+            error_msg = f"Improve failed: {e!s}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
@@ -1486,8 +1488,8 @@ async def improve(
     ),
 )
 async def cognify_status(
-    dataset_name: str = None,
-    pipelines: List[str] = None,
+    dataset_name: str | None = None,
+    pipelines: list[str] | None = None,
 ) -> list:
     """
     Get the current status of selected pipelines.
@@ -1567,7 +1569,7 @@ async def cognify_status(
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
-            error_msg = f"❌ Failed to get cognify status: {str(e)}"
+            error_msg = f"❌ Failed to get cognify status: {e!s}"
             # Still report background errors even if pipeline status fails
             dataset_errors = _task_errors.get(dataset_name, [])
             if dataset_errors:
@@ -1865,5 +1867,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except Exception as e:
-        logger.error(f"Error initializing Cognee MCP server: {str(e)}")
+        logger.error(f"Error initializing Cognee MCP server: {e!s}")
         raise

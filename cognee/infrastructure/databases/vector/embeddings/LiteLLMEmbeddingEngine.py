@@ -1,37 +1,37 @@
 import asyncio
 import logging
-
-from cognee.shared.logging_utils import get_logger
-from typing import List, Optional
-import numpy as np
 import math
+import os
 import re
+from typing import List, Optional
+from urllib.parse import urlparse
+
+import httpx
+import litellm
+import numpy as np
 from tenacity import (
+    before_sleep_log,
     retry,
     stop_after_delay,
     wait_exponential_jitter,
-    before_sleep_log,
 )
-import litellm
-import os
-from urllib.parse import urlparse
-import httpx
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingContextWindowTooSmallError,
     EmbeddingException,
 )
-
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
+from cognee.infrastructure.databases.vector.embeddings.utils import (
+    handle_embedding_response,
+    sanitize_embedding_text_inputs,
+)
 from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
 from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
-from cognee.infrastructure.databases.vector.embeddings.utils import (
-    sanitize_embedding_text_inputs,
-    handle_embedding_response,
-)
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
@@ -62,7 +62,7 @@ _EMBED_LENGTH_ERROR_RE = re.compile(
 _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT = {"nvidia_nim"}
 
 
-def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
+def _uses_nvidia_nim(provider: str | None, model: str | None) -> bool:
     """Whether this engine is actually talking to NVIDIA NIM.
 
     Note: Cognee's `provider` attribute is metadata used locally (e.g. for
@@ -74,13 +74,11 @@ def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
     """
     if provider and provider.lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT:
         return True
-    if (
+    return bool(
         model
         and "/" in model
         and model.split("/", 1)[0].lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT
-    ):
-        return True
-    return False
+    )
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):
@@ -106,15 +104,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
     def __init__(
         self,
-        model: Optional[str] = "openai/text-embedding-3-large",
+        model: str | None = "openai/text-embedding-3-large",
         provider: str = "openai",
-        dimensions: Optional[int] = 3072,
-        api_key: str = None,
-        endpoint: str = None,
-        api_version: str = None,
+        dimensions: int | None = 3072,
+        api_key: str | None = None,
+        endpoint: str | None = None,
+        api_version: str | None = None,
         max_completion_tokens: int = 512,
         batch_size: int = 100,
-        input_type: Optional[str] = None,
+        input_type: str | None = None,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -174,7 +172,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def embed_text(self, text: List[str]) -> List[List[float]]:
+    async def embed_text(self, text: list[str]) -> list[list[float]]:
         """
         Embed a list of text strings into vector representations.
 
@@ -313,7 +311,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [pooled.tolist()]
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))
-            raise error
+            raise
 
         except asyncio.TimeoutError as e:
             # Per-attempt timeout – likely an unreachable endpoint
@@ -353,7 +351,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.BadRequestError,
             litellm.exceptions.NotFoundError,
         ) as e:
-            logger.error(f"Embedding error with model {self.model}: {str(e)}")
+            logger.error(f"Embedding error with model {self.model}: {e!s}")
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:

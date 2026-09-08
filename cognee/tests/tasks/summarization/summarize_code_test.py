@@ -1,10 +1,11 @@
 import asyncio
 
-from cognee.shared.data_models import SummarizedContent
-from cognee.tasks.summarization import summarize_code
 from cognee.tests.tasks.graph.code_graph_test_data_generation import (
     code_graph_test_data_generation,
 )
+
+from cognee.shared.data_models import SummarizedContent
+from cognee.tasks.summarization import summarize_code
 
 
 def test_summarize_code():

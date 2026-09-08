@@ -11,7 +11,6 @@ from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result
 from cognee.modules.retrieval.hybrid_retriever import HybridRetriever
 
-
 QUERY_VECTOR = [0.1, 0.2, 0.3]
 
 

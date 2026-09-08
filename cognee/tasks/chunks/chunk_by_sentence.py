@@ -1,8 +1,11 @@
-from uuid import uuid4, UUID
-from typing import Optional, Iterator, Tuple
-from .chunk_by_word import chunk_by_word
+from collections.abc import Iterator
+from typing import Optional, Tuple
+from uuid import UUID, uuid4
+
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.shared.logging_utils import get_logger
+
+from .chunk_by_word import chunk_by_word
 
 logger = get_logger(__name__)
 
@@ -33,8 +36,8 @@ def get_word_size(word: str) -> int:
 
 
 def chunk_by_sentence(
-    data: str, maximum_size: Optional[int] = None
-) -> Iterator[Tuple[UUID, str, int, Optional[str]]]:
+    data: str, maximum_size: int | None = None
+) -> Iterator[tuple[UUID, str, int, str | None]]:
     """
     Splits text into sentences while preserving word and paragraph boundaries.
 

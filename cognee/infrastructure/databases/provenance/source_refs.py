@@ -27,7 +27,7 @@ class ParsedSourceRef(NamedTuple):
     version: int
     dataset_id: UUID
     data_id: UUID
-    chunk_id: Optional[UUID]
+    chunk_id: UUID | None
 
 
 def parse_source_ref_key(source_ref_key: str) -> ParsedSourceRef:

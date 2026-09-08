@@ -20,9 +20,10 @@ Known approximations:
 import inspect
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional, Type
+from typing import Any, Optional, Type
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import NAMESPACE_OID, UUID, uuid5
@@ -32,8 +33,8 @@ from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -46,11 +47,11 @@ from cognee.modules.data.processing.document_types import (
     TextDocument,
     UnstructuredDocument,
 )
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.session_lifecycle.usage_tracking import estimate_cost_usd
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.graph_model_utils import datapoint_model_to_basemodel
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.documents import classify_documents
 from cognee.tasks.documents.classify_documents import EXTENSION_TO_DOCUMENT_CLASS
 from cognee.tasks.ingestion.data_item import DataItem
@@ -190,13 +191,13 @@ def _count_tokens(text: str, tokenizer: TikTokenTokenizer) -> int:
     return tokenizer.count_tokens(text) if text else 0
 
 
-def _schema_tokens(model: Type[BaseModel], tokenizer: TikTokenTokenizer) -> int:
+def _schema_tokens(model: type[BaseModel], tokenizer: TikTokenTokenizer) -> int:
     if isinstance(model, type) and issubclass(model, BaseModel):
         return _count_tokens(json.dumps(model.model_json_schema(), sort_keys=True), tokenizer)
     return 0
 
 
-def _graph_prompt(custom_prompt: Optional[str]) -> str:
+def _graph_prompt(custom_prompt: str | None) -> str:
     """The graph-extraction system prompt — mirrors ``extract_content_graph``."""
     if custom_prompt:
         return custom_prompt
@@ -209,7 +210,7 @@ def _graph_prompt(custom_prompt: Optional[str]) -> str:
     return render_prompt(prompt_path, {}, base_directory=base_directory)
 
 
-def _simplify_graph_model(graph_model: Type[BaseModel]) -> Type[BaseModel]:
+def _simplify_graph_model(graph_model: type[BaseModel]) -> type[BaseModel]:
     """DataPoint models are sent simplified — mirrors ``extract_content_graph``."""
     from cognee.infrastructure.engine import DataPoint
 
@@ -222,8 +223,8 @@ def estimate_chunks(
     chunks: list[DocumentChunk],
     *,
     operation: str,
-    graph_model: Type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: str | None = None,
     skipped_items: int = 0,
     skipped_dlt_chunks: int = 0,
     skipped_code_items: int = 0,
@@ -340,7 +341,7 @@ def _accept_local_file_path() -> bool:
     return settings.accept_local_file_path
 
 
-def _path_candidate(value: str) -> Optional[Path]:
+def _path_candidate(value: str) -> Path | None:
     """The local path this string refers to, or None when it is raw text.
 
     Mirrors ``save_data_item_to_storage``: remote URLs are loud errors and
@@ -454,7 +455,7 @@ async def _input_to_texts(data: Any) -> list[str]:
 async def _chunks_from_texts(
     texts: Iterable[str],
     *,
-    chunker: Type[Any],
+    chunker: type[Any],
     chunk_size: int,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
@@ -481,7 +482,7 @@ async def _chunks_from_texts(
 async def _chunks_from_data_items(
     data_items: list[Data],
     *,
-    chunker: Type[Any],
+    chunker: type[Any],
     chunk_size: int,
 ) -> tuple[list[DocumentChunk], int, int, int]:
     """Chunk the LLM-bound items; DLT and code items are routed out BEFORE any read.
@@ -532,10 +533,10 @@ async def _chunks_from_data_items(
 async def estimate_remember_dry_run(
     data: Any,
     *,
-    chunker: Type[Any] = TextChunker,
+    chunker: type[Any] = TextChunker,
     chunk_size: int,
-    graph_model: Type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``remember(data)`` for permanent add+cognify inputs."""
     chunks = await _chunks_from_texts(
@@ -550,10 +551,10 @@ async def estimate_cognify_dry_run(
     datasets,
     *,
     user=None,
-    chunker: Type[Any] = TextChunker,
+    chunker: type[Any] = TextChunker,
     chunk_size: int,
-    graph_model: Type[BaseModel] = KnowledgeGraph,
-    custom_prompt: Optional[str] = None,
+    graph_model: type[BaseModel] = KnowledgeGraph,
+    custom_prompt: str | None = None,
 ) -> DryRunEstimate:
     """Estimate ``cognify(datasets)`` over all data in the authorized datasets.
 

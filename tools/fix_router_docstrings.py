@@ -203,10 +203,9 @@ def _section_for(parameter: inspect.Parameter, route_path: str, name: str) -> st
 def collect_param_docs(endpoint, route_path: str) -> dict[str, ParamDoc]:
     """Documentation source material for every client-facing parameter."""
     import fastapi
+    from check_router_docstrings import _is_dependency, _pydantic_models
     from fastapi import params as fastapi_params
     from pydantic import BaseModel
-
-    from check_router_docstrings import _is_dependency, _pydantic_models
 
     framework_types = (
         fastapi.Request,

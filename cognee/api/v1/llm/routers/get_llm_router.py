@@ -1,17 +1,21 @@
 import json
+import os
+import tempfile
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, List
 
 import litellm
 from fastapi import APIRouter, Depends, File, Form
 from fastapi.responses import JSONResponse
-from pydantic import Field
-from pydantic import ConfigDict, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO, OutDTO
+from cognee.api.upload_fields import OptionalUploadFile, UploadFile, drop_blank_uploads
 from cognee.infrastructure.llm import get_llm_config
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.modules.users.methods import get_authenticated_user
@@ -19,11 +23,6 @@ from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
-from cognee.api.upload_fields import OptionalUploadFile, UploadFile, drop_blank_uploads
-from contextlib import asynccontextmanager
-from pathlib import Path
-import os
-import tempfile
 
 logger = get_logger("api.llm")
 
@@ -172,8 +171,8 @@ async def upload_to_temp_path(upload: UploadFile):
 
 
 class CustomPromptGenerationPayloadDTO(InDTO):
-    graph_model: Dict[str, Any] = Field(..., description="Graph model schema as JSON object.")
-    parameters: Dict[str, Any] = Field(
+    graph_model: dict[str, Any] = Field(..., description="Graph model schema as JSON object.")
+    parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional kwargs forwarded to LLMGateway.",
     )
@@ -184,15 +183,15 @@ class CustomPromptGenerationResponseDTO(OutDTO):
 
 
 class InferSchemaResponseDTO(OutDTO):
-    graph_schema: Dict[str, Any]
+    graph_schema: dict[str, Any]
 
 
 class InferredGraphSchemaDTO(OutDTO):
     title: str
     type: str
-    properties: Dict[str, Any]
-    required: List[str] = Field(default_factory=list)
-    defs: Dict[str, Any] = Field(default_factory=dict, alias="$defs")
+    properties: dict[str, Any]
+    required: list[str] = Field(default_factory=list)
+    defs: dict[str, Any] = Field(default_factory=dict, alias="$defs")
 
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 
@@ -269,7 +268,7 @@ def get_llm_router() -> APIRouter:
     @router.post("/infer-schema", response_model=InferSchemaResponseDTO)
     @log_usage(function_name="POST /v1/llm/infer-schema", log_type="api_endpoint")
     async def infer_schema(
-        data: List[OptionalUploadFile] = File(default=None),
+        data: list[OptionalUploadFile] = File(default=None),
         text: str = Form(default=None),
         parameters: str = Form(
             default="{}",

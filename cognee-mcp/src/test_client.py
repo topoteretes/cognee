@@ -9,7 +9,6 @@ from uuid import uuid4
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-
 try:
     from .server import registry
     from .tool_registry import DEFAULT_TAG

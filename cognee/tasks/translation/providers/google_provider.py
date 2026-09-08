@@ -3,8 +3,8 @@ from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
-from .base import TranslationProvider, TranslationResult
 from ..config import get_translation_config
+from .base import TranslationProvider, TranslationResult
 
 logger = get_logger(__name__)
 
@@ -56,7 +56,7 @@ class GoogleTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using Google Translate API.
@@ -105,7 +105,7 @@ class GoogleTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using Google Translate API.

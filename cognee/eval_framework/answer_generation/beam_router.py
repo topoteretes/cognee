@@ -8,8 +8,8 @@ and delegates to the matching retrieval strategy.
 from typing import Any, Dict, List, Optional
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -19,7 +19,7 @@ logger = get_logger()
 
 
 # Prompt templates per question type — instruct the LLM on HOW to answer
-_TYPE_PROMPTS: Dict[str, str] = {
+_TYPE_PROMPTS: dict[str, str] = {
     "information_extraction": (
         "You are answering a factual question about a conversation. "
         "Extract the specific information requested. Be precise and concise. "
@@ -74,7 +74,7 @@ _TYPE_PROMPTS: Dict[str, str] = {
 }
 
 # Map question types to retriever classes
-_TYPE_RETRIEVERS: Dict[str, type] = {
+_TYPE_RETRIEVERS: dict[str, type] = {
     "information_extraction": GraphCompletionRetriever,
     "temporal_reasoning": GraphCompletionRetriever,
     "event_ordering": GraphCompletionRetriever,
@@ -104,9 +104,9 @@ class BEAMRouter:
         answers = await router.answer_questions(questions)
     """
 
-    def __init__(self, fallback_retriever: Optional[type] = None):
+    def __init__(self, fallback_retriever: type | None = None):
         self._fallback_retriever = fallback_retriever or GraphCompletionRetriever
-        self._retriever_cache: Dict[str, BaseRetriever] = {}
+        self._retriever_cache: dict[str, BaseRetriever] = {}
 
     def _get_retriever(self, question_type: str) -> BaseRetriever:
         """Get or create a retriever instance for the given question type."""
@@ -123,7 +123,7 @@ class BEAMRouter:
         """Get the system prompt for a question type."""
         return _TYPE_PROMPTS.get(question_type, _DEFAULT_PROMPT)
 
-    async def answer_questions(self, questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def answer_questions(self, questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Answer a list of BEAM probing questions using type-based routing.
 
         Args:

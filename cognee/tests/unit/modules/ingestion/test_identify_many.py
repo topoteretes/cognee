@@ -28,7 +28,6 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.identify_many import _CHUNK_SIZE, identify_many
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -73,17 +72,17 @@ def _user(tenant_id=None):
 
 
 def _row(*, dataset_id, owner_id, content_hash, tenant_id=None, name="doc.txt"):
-    return dict(
-        id=uuid4(),
-        dataset_id=dataset_id,
-        owner_id=owner_id,
-        tenant_id=tenant_id,
-        name=name,
-        content_hash=content_hash,
-        raw_data_location=f"file:///tmp/{name}",
-        pipeline_status={},
-        token_count=-1,
-    )
+    return {
+        "id": uuid4(),
+        "dataset_id": dataset_id,
+        "owner_id": owner_id,
+        "tenant_id": tenant_id,
+        "name": name,
+        "content_hash": content_hash,
+        "raw_data_location": f"file:///tmp/{name}",
+        "pipeline_status": {},
+        "token_count": -1,
+    }
 
 
 # ---------------------------------------------------------------------------

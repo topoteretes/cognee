@@ -1,18 +1,18 @@
-from cognee.shared.logging_utils import get_logger
 import json
 from typing import List, Optional
+
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
     retriever_options,
 )
-from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
-    get_relational_engine,
     get_relational_config,
+    get_relational_engine,
 )
+from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.data.models.answers_base import AnswersBase
 from cognee.modules.data.models.answers_data import Answers
-
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -35,8 +35,8 @@ async def create_and_insert_answers_table(questions_payload):
 
 
 async def run_question_answering(
-    params: dict, system_prompt="answer_simple_question_benchmark.txt", top_k: Optional[int] = None
-) -> List[dict]:
+    params: dict, system_prompt="answer_simple_question_benchmark.txt", top_k: int | None = None
+) -> list[dict]:
     if params.get("answering_questions"):
         logger.info("Question answering started...")
         try:

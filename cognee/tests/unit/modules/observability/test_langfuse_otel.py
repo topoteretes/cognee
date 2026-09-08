@@ -7,10 +7,10 @@ Covers the three pieces of the feature, all offline (no live Langfuse):
      in-memory stub collector.
 """
 
-import os
 import asyncio
 import base64
-from unittest.mock import patch, MagicMock
+import os
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -215,8 +215,7 @@ def _run_observed(
     """Drive an @observe-decorated LLM-adapter method (mirrors the real
     acreate_structured_output signature) with tracing pointed at a stub collector,
     and return the single exported span."""
-    import cognee.modules.observability.tracing as tracing
-    import cognee.modules.observability.trace_context as trace_context
+    from cognee.modules.observability import trace_context, tracing
     from cognee.modules.observability.get_observe import get_observe
 
     collector, provider, tracer = _tracer_with_collector()
@@ -247,6 +246,7 @@ def _run_observed(
 @requires_otel
 def test_generation_span_exports_genai_and_io(monkeypatch):
     import json
+
     from opentelemetry.trace import SpanKind
 
     class OpenAILike:
@@ -297,8 +297,8 @@ def test_generation_input_capture_is_name_agnostic(monkeypatch):
     """Input capture records string prompt args by parameter name, so it keeps working
     if cognee renames the adapter's prompt parameters in the future."""
     import json
-    import cognee.modules.observability.tracing as tracing
-    import cognee.modules.observability.trace_context as trace_context
+
+    from cognee.modules.observability import trace_context, tracing
     from cognee.modules.observability.get_observe import get_observe
 
     collector, provider, tracer = _tracer_with_collector()
@@ -329,6 +329,7 @@ def test_llm_generation_contract_keeps_string_prompt_params():
     string parameters. If this contract changes (e.g. to a structured messages object),
     _generation_input_payload must be updated to match. No opentelemetry needed."""
     import inspect
+
     from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
         LLMInterface,
     )

@@ -6,7 +6,8 @@ then applies LLM-based comparison to determine whether chunks should be
 linked with weighted "associated_with" edges in the knowledge graph.
 """
 
-from typing import AsyncGenerator, List, Optional, Union
+from collections.abc import AsyncGenerator
+from typing import List, Optional, Union
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import index_graph_edges
 
@@ -28,7 +29,7 @@ class ChunkSimilarity(BaseModel):
     are_similar: bool = Field(description="Whether chunks are semantically related")
     similarity_score: float = Field(ge=0.0, le=1.0, description="Similarity score 0.0-1.0")
     reasoning: str = Field(description="Brief explanation of similarity assessment")
-    association_type: Optional[str] = Field(
+    association_type: str | None = Field(
         default=None, description="Type: topical, causal, temporal, elaboration, contextual"
     )
 
@@ -38,7 +39,7 @@ async def _compare_chunks(
     chunk_2: str,
     user_prompt_location: str,
     system_prompt_location: str,
-) -> Optional[ChunkSimilarity]:
+) -> ChunkSimilarity | None:
     """Compare two text chunks for semantic similarity using an LLM.
 
     Renders the user and system prompts with the chunk texts and calls the LLM
@@ -99,10 +100,10 @@ def _create_edge(chunk_1_id: str, chunk_2_id: str, similarity: ChunkSimilarity):
 
 
 async def create_chunk_associations(
-    chunks: Union[List[str], str],
+    chunks: list[str] | str,
     similarity_threshold: float = 0.7,
     min_chunk_length: int = 10,
-    top_k_candidates: Optional[int] = None,
+    top_k_candidates: int | None = None,
     user_prompt_location: str = "chunk_association_user.txt",
     system_prompt_location: str = "chunk_association_system.txt",
     ctx=None,

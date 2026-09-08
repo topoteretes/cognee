@@ -19,9 +19,9 @@ class TranslationResult:
     source_language: str
     target_language: str
     # Confidence score from the provider, or None if not available (e.g., Google Translate)
-    confidence_score: Optional[float]
+    confidence_score: float | None
     provider: str
-    raw_response: Optional[dict] = None
+    raw_response: dict | None = None
 
 
 class TranslationProvider(ABC):
@@ -31,14 +31,13 @@ class TranslationProvider(ABC):
     @abstractmethod
     def provider_name(self) -> str:
         """Return the name of this translation provider."""
-        pass
 
     @abstractmethod
     async def translate(
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text to the target language.
@@ -51,14 +50,13 @@ class TranslationProvider(ABC):
         Returns:
             TranslationResult with translated text and metadata
         """
-        pass
 
     @abstractmethod
     async def translate_batch(
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts to the target language.
@@ -71,7 +69,6 @@ class TranslationProvider(ABC):
         Returns:
             List of TranslationResult objects
         """
-        pass
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -82,4 +79,3 @@ class TranslationProvider(ABC):
         Returns:
             True if the provider has valid credentials and is ready to use.
         """
-        pass

@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Optional, Protocol
 from abc import abstractmethod
-from cognee.infrastructure.engine import DataPoint
-from .models.PayloadSchema import PayloadSchema
+from typing import Any, Dict, List, Optional, Protocol
 from uuid import UUID
+
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.users.models import User
+
+from .models.PayloadSchema import PayloadSchema
 
 
 class VectorDBInterface(Protocol):
@@ -33,7 +35,7 @@ class VectorDBInterface(Protocol):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema: Optional[Any] = None,
+        payload_schema: Any | None = None,
     ):
         """
         Create a new collection with an optional payload schema.
@@ -50,7 +52,7 @@ class VectorDBInterface(Protocol):
     """ Data points """
 
     @abstractmethod
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """
         Insert new data points into the specified collection.
 
@@ -67,7 +69,7 @@ class VectorDBInterface(Protocol):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: Optional[Any] = None,
+        payload_schema: Any | None = None,
     ) -> None:
         """
         Upsert already-computed vectors into the specified collection.
@@ -98,12 +100,12 @@ class VectorDBInterface(Protocol):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str],
-        query_vector: Optional[List[float]],
-        limit: Optional[int],
+        query_text: str | None,
+        query_vector: list[float] | None,
+        limit: int | None,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -133,11 +135,11 @@ class VectorDBInterface(Protocol):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: Optional[int],
+        query_texts: list[str],
+        limit: int | None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -162,7 +164,7 @@ class VectorDBInterface(Protocol):
     supports_payload_update: bool = False
 
     async def update_payload(
-        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+        self, collection_name: str, payload_updates: dict[str, dict[str, Any]]
     ) -> None:
         """
         Update payload fields on existing rows WITHOUT re-embedding.
@@ -190,7 +192,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError("This vector adapter does not support payload-only updates.")
 
     @abstractmethod
-    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         """
         Delete specified data points from a collection.
 
@@ -208,8 +210,8 @@ class VectorDBInterface(Protocol):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Remove the given tag names from every `belongs_to_set` array in the
@@ -226,7 +228,7 @@ class VectorDBInterface(Protocol):
         Default no-op; adapters that need to clean up stale NodeSet tags
         on dataset deletion override this.
         """
-        return None
+        return
 
     @abstractmethod
     async def prune(self):
@@ -236,7 +238,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def embed_data(self, data: List[str]) -> List[List[float]]:
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
         Embed textual data into vector representations.
 
@@ -258,31 +260,30 @@ class VectorDBInterface(Protocol):
         Run adapter-specific vector storage migrations.
         Default implementation is a no-op.
         """
-        return None
+        return
 
     async def get_connection(self):
         """
         Get a connection to the vector database.
         This method is optional and may return None for adapters that don't use connections.
         """
-        return None
+        return
 
     async def get_collection(self, collection_name: str):
         """
         Get a collection object from the vector database.
         This method is optional and may return None for adapters that don't expose collection objects.
         """
-        return None
+        return
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """
         Create a vector index for improved search performance.
         This method is optional and may be a no-op for adapters that don't support indexing.
         """
-        pass
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         """
         Index data points for improved search performance.
@@ -294,7 +295,6 @@ class VectorDBInterface(Protocol):
             - index_property_name (str): Property name to index on
             - data_points (List[DataPoint]): Data points to index
         """
-        pass
 
     def get_data_point_schema(self, model_type: Any) -> Any:
         """
@@ -312,7 +312,7 @@ class VectorDBInterface(Protocol):
         return model_type
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Return a dictionary with connection info for a vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.
@@ -330,7 +330,6 @@ class VectorDBInterface(Protocol):
         Returns:
             dict: Connection info for the created vector database instance.
         """
-        pass
 
     async def delete_dataset(self, dataset_id: UUID, user: User) -> None:
         """
@@ -342,4 +341,3 @@ class VectorDBInterface(Protocol):
             dataset_id: UUID of the dataset
             user: User object
         """
-        pass

@@ -1,9 +1,9 @@
-import random
-import pytest
 import asyncio
+import random
 from typing import List
 from uuid import NAMESPACE_OID, uuid5
 
+import pytest
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils import get_graph_from_model
@@ -18,8 +18,8 @@ class Repository(DataPoint):
 
 class CodeFile(DataPoint):
     part_of: Repository
-    contains: List["CodePart"] = []
-    depends_on: List["CodeFile"] = []
+    contains: list["CodePart"] = []
+    depends_on: list["CodeFile"] = []
     source_code: str
     metadata: dict = {"index_fields": []}
 

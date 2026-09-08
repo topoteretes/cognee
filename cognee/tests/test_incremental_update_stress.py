@@ -45,10 +45,12 @@ a mock without them verifies nothing about either.
 
 import asyncio
 import hashlib
+import itertools
 import os
 import re
 from collections import Counter
 from pathlib import Path
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
@@ -89,7 +91,7 @@ def _kind(name: str) -> str:
 def _pairs(text: str) -> set:
     """Consecutive distinct entities in a chunk: the relationships it states."""
     names = _nouns_ordered(text)
-    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
+    return {(a, b) for a, b in itertools.pairwise(names) if a != b}
 
 
 def _setup_environment() -> None:

@@ -1,7 +1,8 @@
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable, Dict, List
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -97,7 +98,7 @@ def _max_concurrent_dataset_recoveries() -> int:
     return max(1, int(get_dataset_queue_settings().max_concurrent))
 
 
-def _rollback_handlers() -> Dict[str, Callable[..., Awaitable[None]]]:
+def _rollback_handlers() -> dict[str, Callable[..., Awaitable[None]]]:
     """The rollback policy per pipeline, for the pipelines that have one.
 
     Mirrors what each pipeline hands ``run_tasks`` as its ``rollback_handler``,
@@ -145,9 +146,9 @@ def _is_older_than_threshold(created_at) -> bool:
 _LOOKUP_CHUNK_SIZE = 500
 
 
-async def _load_rows_by_id(session, model, ids) -> Dict[UUID, Any]:
+async def _load_rows_by_id(session, model, ids) -> dict[UUID, Any]:
     """The rows for *ids*, keyed by id. Ids with no row are simply absent."""
-    rows: Dict[UUID, Any] = {}
+    rows: dict[UUID, Any] = {}
 
     ids = [row_id for row_id in ids if row_id is not None]
     for start in range(0, len(ids), _LOOKUP_CHUNK_SIZE):
@@ -158,7 +159,7 @@ async def _load_rows_by_id(session, model, ids) -> Dict[UUID, Any]:
     return rows
 
 
-async def _load_datasets_and_users(pipeline_runs) -> tuple[Dict[UUID, Any], Dict[UUID, Any]]:
+async def _load_datasets_and_users(pipeline_runs) -> tuple[dict[UUID, Any], dict[UUID, Any]]:
     """Every candidate's dataset and attributable user, in one session.
 
     A session and two primary-key reads per run was over half the cost of the
@@ -213,18 +214,19 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
                     dataset=dataset,
                 )
         except Exception as error:
-            logger.error(
-                "Recovery could not roll back %s run %s (dataset=%s, user=%s): "
-                "%s: %s. The data that run wrote is still in the dataset's graph, so the "
-                "run is deliberately left unclosed for the next boot to retry. Every "
-                "other candidate is still recovered.",
+            # logger.exception, not logger.error(exc_info=True): the traceback
+            # carries the error's own message, so the message here says which
+            # dataset, which run, and what the failure leaves behind.
+            logger.exception(
+                "Recovery could not roll back %s run %s (dataset=%s, user=%s): %s. The "
+                "data that run wrote is still in the dataset's graph, so the run is "
+                "deliberately left unclosed for the next boot to retry. Every other "
+                "candidate is still recovered.",
                 pipeline_name,
                 pipeline_run.pipeline_run_id,
                 dataset.id,
                 getattr(run_user, "id", None),
                 type(error).__name__,
-                error,
-                exc_info=True,
             )
             return False
 
@@ -262,17 +264,15 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
             )
     except Exception as error:
         # Same scope as above: this one dataset's closing row.
-        logger.error(
-            "Recovery could not close %s run %s (dataset=%s, user=%s): %s: %s. Its "
-            "rollback, if it had one, already ran, so the graph is unwound but the run "
-            "still reads as started until the next boot closes it.",
+        logger.exception(
+            "Recovery could not close %s run %s (dataset=%s, user=%s): %s. Its rollback, "
+            "if it had one, already ran, so the graph is unwound but the run still reads "
+            "as started until the next boot closes it.",
             pipeline_name,
             pipeline_run.pipeline_run_id,
             dataset.id,
             getattr(run_user, "id", None),
             type(error).__name__,
-            error,
-            exc_info=True,
         )
         return False
 
@@ -361,7 +361,7 @@ async def recover_abandoned_pipeline_runs() -> None:
     recovery_candidates = await get_unclosed_pipeline_runs()
     datasets_by_id, users_by_id = await _load_datasets_and_users(recovery_candidates)
 
-    runs_by_dataset: Dict[UUID, List[Any]] = {}
+    runs_by_dataset: dict[UUID, list[Any]] = {}
 
     for pipeline_run in recovery_candidates:
         if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):

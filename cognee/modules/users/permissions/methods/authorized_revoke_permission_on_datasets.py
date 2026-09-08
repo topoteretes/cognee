@@ -1,4 +1,4 @@
-from typing import Union, List
+from typing import List, Union
 from uuid import UUID
 
 from cognee.modules.users.permissions.methods import (
@@ -11,7 +11,7 @@ from cognee.modules.users.permissions.methods.revoke_permission_on_dataset impor
 
 
 async def authorized_revoke_permission_on_datasets(
-    principal_id: UUID, dataset_ids: Union[List[UUID], UUID], permission_name: str, owner_id: UUID
+    principal_id: UUID, dataset_ids: list[UUID] | UUID, permission_name: str, owner_id: UUID
 ):
     """
     Revoke permission on datasets from a principal.

@@ -1,6 +1,8 @@
 from typing import List
+
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
@@ -16,12 +18,11 @@ from cognee.tasks.graph.extract_graph_from_data_v2 import (
 )
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.infrastructure.llm import get_max_chunk_tokens
 
 
 async def get_cascade_graph_tasks(
     user: User = None, graph_model: BaseModel = KnowledgeGraph
-) -> List[Task]:
+) -> list[Task]:
     """Retrieve cascade graph tasks asynchronously."""
     if user is None:
         user = await get_default_user()
@@ -43,7 +44,7 @@ async def get_cascade_graph_tasks(
             ),
             Task(add_data_points, task_config={"batch_size": 10}),
         ]
-    except Exception as error:
+    except Exception:
         send_telemetry("cognee.cognify DEFAULT TASKS CREATION ERRORED", user)
-        raise error
+        raise
     return default_tasks

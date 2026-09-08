@@ -4,9 +4,9 @@ import aiohttp
 
 from cognee.shared.logging_utils import get_logger
 
-from .base import TranslationProvider, TranslationResult
 from ..config import get_translation_config
 from ..exceptions import TranslationProviderError
+from .base import TranslationProvider, TranslationResult
 
 logger = get_logger(__name__)
 
@@ -35,7 +35,7 @@ class AzureTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using Azure Translator API.
@@ -73,16 +73,18 @@ class AzureTranslationProvider(TranslationProvider):
         body = [{"text": text}]
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
                     endpoint,
                     params=params,
                     headers=headers,
                     json=body,
                     timeout=aiohttp.ClientTimeout(total=self._config.timeout_seconds),
-                ) as response:
-                    response.raise_for_status()
-                    result = await response.json()
+                ) as response,
+            ):
+                response.raise_for_status()
+                result = await response.json()
 
             translation = result[0]["translations"][0]
             detected_language = result[0].get("detectedLanguage", {})
@@ -108,7 +110,7 @@ class AzureTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using Azure Translator API.

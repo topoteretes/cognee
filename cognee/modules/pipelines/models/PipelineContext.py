@@ -24,12 +24,12 @@ class PipelineContext:
     data_item: Any = None
     dataset: Any = None
     pipeline_run_id: Any = None
-    pipeline_name: Optional[str] = None
-    extras: Dict[str, Any] = field(default_factory=dict)
+    pipeline_name: str | None = None
+    extras: dict[str, Any] = field(default_factory=dict)
 
     # Internal: persisted across tasks so _stamp_provenance skips
     # DataPoints that were already walked in earlier pipeline stages.
-    _provenance_visited: Set[int] = field(default_factory=set, repr=False)
+    _provenance_visited: set[int] = field(default_factory=set, repr=False)
 
     # Lazily-created relational provenance buffer. Keeping this None for
     # pipelines without document chunks makes the feature zero-cost there.
@@ -40,4 +40,4 @@ class PipelineContext:
     # so the visualization can lay nodes out in pipeline order. A task that
     # runs N times because an upstream task streams N results still gets the
     # same rank — rank is "position in pipeline", not "invocation count".
-    task_sequence: List[str] = field(default_factory=list)
+    task_sequence: list[str] = field(default_factory=list)

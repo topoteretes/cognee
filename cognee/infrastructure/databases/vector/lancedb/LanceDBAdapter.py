@@ -4,33 +4,33 @@ import inspect
 import threading
 import types
 from collections import OrderedDict
-from os import path
-from uuid import UUID
 from enum import Enum
-import lancedb
-from pydantic import BaseModel
-from lancedb.pydantic import LanceModel, Vector
+from os import path
 from typing import List, Optional, Union, get_args, get_origin, get_type_hints
+from uuid import UUID
+
+import lancedb
+from lancedb.pydantic import LanceModel, Vector
+from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.modules.storage.utils import copy_model
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
-from cognee.shared.logging_utils import get_logger
-
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
 )
+from cognee.modules.storage.utils import copy_model
+from cognee.shared.logging_utils import get_logger
+
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
@@ -44,7 +44,7 @@ _SIMPLE_TYPE_DEFAULTS = {
 }
 _ORIGIN_DEFAULT_FACTORIES = {
     list: list,
-    List: list,
+    List: list,  # noqa: UP006 - typing.List is a distinct origin key, not an annotation
     dict: dict,
     set: set,
     tuple: tuple,
@@ -69,14 +69,14 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
+    belongs_to_set: list[str] = []
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -87,8 +87,8 @@ class LanceDBAdapter(VectorDBInterface):
     # mode without an API key passes ``api_key=None``, and subprocess-mode
     # adapters constructed from cached state may also receive ``url=None``
     # (the ``RemoteLanceDBConnection`` carries the real URL).
-    url: Optional[str]
-    api_key: Optional[str]
+    url: str | None
+    api_key: str | None
     connection = None
 
     # Class-level memoization caches. They are shared across all adapter
@@ -116,8 +116,8 @@ class LanceDBAdapter(VectorDBInterface):
     @classmethod
     def create_subprocess(
         cls,
-        url: Optional[str],
-        api_key: Optional[str],
+        url: str | None,
+        api_key: str | None,
         embedding_engine: "EmbeddingEngine",
     ) -> "LanceDBAdapter":
         """Create a LanceDBAdapter running in subprocess-proxy mode."""
@@ -143,12 +143,12 @@ class LanceDBAdapter(VectorDBInterface):
 
     def __init__(
         self,
-        url: Optional[str],
-        api_key: Optional[str],
+        url: str | None,
+        api_key: str | None,
         embedding_engine: EmbeddingEngine,
         *,
-        connection: Optional[object] = None,
-        session: Optional[object] = None,
+        connection: object | None = None,
+        session: object | None = None,
     ):
         """
         In subprocess-proxy mode, ``connection`` is a ``RemoteLanceDBConnection``
@@ -550,7 +550,7 @@ class LanceDBAdapter(VectorDBInterface):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: Optional[type[BaseModel]] = None,
+        payload_schema: type[BaseModel] | None = None,
     ) -> None:
         """Upsert caller-provided vectors without invoking the embedding engine."""
         if not points:
@@ -917,7 +917,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         return _NO_DEFAULT
 
-    def _coerce_rows_to_typed_payload(self, rows: list, payload_schema: Optional[type]) -> list:
+    def _coerce_rows_to_typed_payload(self, rows: list, payload_schema: type | None) -> list:
         """Validate raw LanceDB rows through the collection's declared
         payload model so `collection.add()` writes values whose Arrow types
         match the stored schema. Without this, LanceDB infers Arrow types
@@ -1011,12 +1011,12 @@ class LanceDBAdapter(VectorDBInterface):
     async def search(
         self,
         collection_name: str,
-        query_text: str = None,
-        query_vector: List[float] = None,
-        limit: Optional[int] = 15,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         with new_span("cognee.db.vector.search") as otel_span:
@@ -1100,11 +1100,11 @@ class LanceDBAdapter(VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: Optional[int] = None,
+        query_texts: list[str],
+        limit: int | None = None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -1208,8 +1208,8 @@ class LanceDBAdapter(VectorDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Strip the given tag names from `belongs_to_set` arrays in every
@@ -1226,15 +1226,13 @@ class LanceDBAdapter(VectorDBInterface):
         deletes them when the array is empty.
         """
         if not tags:
-            return None
+            return
 
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         tag_set = set(tags)
-        id_set: Optional[set[str]] = (
-            {str(nid) for nid in node_ids} if node_ids is not None else None
-        )
+        id_set: set[str] | None = {str(nid) for nid in node_ids} if node_ids is not None else None
         connection = await self.get_connection()
         collection_names = await connection.table_names()
 
@@ -1357,7 +1355,7 @@ class LanceDBAdapter(VectorDBInterface):
                         )
                         raise
 
-        return None
+        return
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
@@ -1459,23 +1457,24 @@ class LanceDBAdapter(VectorDBInterface):
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():
-            if hasattr(field_config, "model_fields"):
-                related_models_fields.append(field_name)
-
-            elif hasattr(field_config.annotation, "model_fields"):
+            if hasattr(field_config, "model_fields") or hasattr(
+                field_config.annotation, "model_fields"
+            ):
                 related_models_fields.append(field_name)
 
             elif (
-                get_origin(field_config.annotation) == Union
+                # `Optional[X]` / `Union[...]` have origin typing.Union; the PEP 604
+                # spelling `X | None` has origin types.UnionType. Treat both alike.
+                get_origin(field_config.annotation) in (Union, types.UnionType)
                 or get_origin(field_config.annotation) is list
             ):
                 models_list = get_args(field_config.annotation)
-                if any(hasattr(model, "model_fields") for model in models_list):
-                    related_models_fields.append(field_name)
-                elif models_list and any(get_args(model) is DataPoint for model in models_list):
-                    related_models_fields.append(field_name)
-                elif models_list and any(
-                    submodel is DataPoint for submodel in get_args(models_list[0])
+                if (
+                    any(hasattr(model, "model_fields") for model in models_list)
+                    or models_list
+                    and any(get_args(model) is DataPoint for model in models_list)
+                    or models_list
+                    and any(submodel is DataPoint for submodel in get_args(models_list[0]))
                 ):
                     related_models_fields.append(field_name)
 
@@ -1488,7 +1487,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
-                "belongs_to_set": (Optional[List[str]], None),
+                "belongs_to_set": (Optional[list[str]], None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )

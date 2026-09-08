@@ -1,26 +1,25 @@
+from typing import Annotated, List, Literal, Optional, Union
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, File, Form, status
 from fastapi.responses import JSONResponse
-from fastapi import Form, File, Depends, status
-from typing import List, Optional, Union, Literal, Annotated
 from pydantic import WithJsonSchema
 
-from cognee.modules.users.models import User
+from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse
+from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
+from cognee.modules.pipelines.models import PipelineRunErrored
+from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
+from cognee.shared.utils import send_telemetry
 from cognee.tasks.ingestion.data_item import (
     pair_labels_with_data,
     parse_external_metadata,
     parse_labels,
 )
-from cognee.shared.utils import send_telemetry
-from cognee.modules.pipelines.models import PipelineRunErrored
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunInfo
-from cognee.shared.logging_utils import get_logger
-from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse
-from cognee.api.upload_fields import OptionalUploadFile, drop_blank_uploads
 
 logger = get_logger()
 
@@ -45,8 +44,8 @@ def get_add_router() -> APIRouter:
     )
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
-        data: List[OptionalUploadFile] = File(default=None),
-        raw_data: Optional[List[EmptyExampleStr]] = Form(
+        data: list[OptionalUploadFile] = File(default=None),
+        raw_data: list[EmptyExampleStr] | None = Form(
             default=None,
             examples=[[]],
             description=(
@@ -60,7 +59,7 @@ def get_add_router() -> APIRouter:
                 "ignored."
             ),
         ),
-        labels: Optional[str] = Form(
+        labels: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -73,7 +72,7 @@ def get_add_router() -> APIRouter:
                 "returned when listing dataset data."
             ),
         ),
-        external_metadata: Optional[str] = Form(
+        external_metadata: str | None = Form(
             default=None,
             examples=[""],
             description=(
@@ -85,7 +84,7 @@ def get_add_router() -> APIRouter:
                 "ones; 'node_set' is reserved) and returned when listing dataset data."
             ),
         ),
-        datasetName: Optional[str] = Form(
+        datasetName: str | None = Form(
             default=None,
             examples=["default_dataset"],
             description=(
@@ -94,15 +93,15 @@ def get_add_router() -> APIRouter:
             ),
         ),
         # Note: Literal is needed for Swagger use
-        datasetId: Union[UUID, Literal[""], None] = Form(
+        datasetId: UUID | Literal[""] | None = Form(
             default=None,
             examples=[""],
             description=(
                 "Providing dataset ID is mandatory for sharing a dataset between users. Datasets provided by name will only be resolvable by dataset owner."
             ),
         ),
-        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
-        run_in_background: Optional[bool] = Form(default=False),
+        node_set: list[str] | None = Form(default=[""], example=[""]),
+        run_in_background: bool | None = Form(default=False),
         user: User = Depends(get_authenticated_user),
     ):
         """

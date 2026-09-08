@@ -1,13 +1,14 @@
 import os
-import pytest
 import pathlib
-import pytest_asyncio
 from typing import Optional, Union
-import cognee
 
-from cognee.low_level import setup, DataPoint
-from cognee.tasks.storage import add_data_points
+import pytest
+import pytest_asyncio
+
+import cognee
+from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.tasks.storage import add_data_points
 
 
 def _detailed_context_check(context: str):
@@ -167,7 +168,7 @@ async def setup_test_environment_complex():
     class Person(DataPoint):
         name: str
         works_for: Company
-        owns: Optional[list[Union[Car, Home]]] = None
+        owns: list[Car | Home] | None = None
 
     company1 = Company(name="Figma")
     company2 = Company(name="Canva")

@@ -237,9 +237,9 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as e:
+        ):
             if not (self.fallback_model and self.fallback_api_key):
-                raise e
+                raise
             # Fall back to litellm for fallback model
             try:
                 fallback_aclient = instructor.from_litellm(litellm.acompletion)
@@ -270,7 +270,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

@@ -30,17 +30,17 @@ run yet — same as a7f3c9e1b5d2 and e5a7b9c1d3f4), but a pipeline_runs table
 missing created_at or id raises: see _require_index_columns.
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c4e8a1f6b3d7"
-down_revision: Union[str, None] = "c7e2a9b4d1f3"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "c7e2a9b4d1f3"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 TABLE_NAME = "pipeline_runs"
 INDEX_NAME = "ix_pipeline_runs_created_at_id"

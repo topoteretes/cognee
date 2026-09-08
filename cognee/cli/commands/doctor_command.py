@@ -3,10 +3,10 @@ import asyncio
 import logging
 from contextlib import contextmanager
 
+import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.reference import SupportsCliCommand
-import cognee.cli.echo as fmt
 
 
 @contextmanager
@@ -62,10 +62,10 @@ Exits non-zero when any check fails, so it can gate CI and setup scripts.
 
         # --- 1. Provider configuration consistency (zero network) ---
         fmt.bold("Configuration")
-        from cognee.infrastructure.llm.config import get_llm_context_config
         from cognee.infrastructure.databases.vector.embeddings.config import (
             get_embedding_context_config,
         )
+        from cognee.infrastructure.llm.config import get_llm_context_config
         from cognee.modules.preflight import check_provider_config
 
         llm_config = get_llm_context_config()

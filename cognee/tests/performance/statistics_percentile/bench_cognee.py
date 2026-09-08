@@ -33,9 +33,13 @@ from dotenv import dotenv_values
 # aliases keep this file's call sites and capture_mock.py's imports stable.
 from cognee.tests.utils.mock_ingestion import (
     install_mocks as _install_mocks,
+)
+from cognee.tests.utils.mock_ingestion import (
     load_memories,
-    load_mock_data as _load_mock_data,
     memory_to_text,
+)
+from cognee.tests.utils.mock_ingestion import (
+    load_mock_data as _load_mock_data,
 )
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -191,12 +195,12 @@ async def run_benchmark(
     *,
     config: dict,
 ) -> dict:
-    import cognee
-
     # Register community adapters before any engine is created. Comma-separated
     # module names; a module-level register() is called if present (some
     # adapters register on import alone).
     import importlib
+
+    import cognee
 
     for module_name in filter(None, os.environ.get("COGNEE_REGISTER_ADAPTERS", "").split(",")):
         module = importlib.import_module(module_name)
@@ -483,8 +487,9 @@ async def _create_cloud_tenant(
     call PLUS the wait until the tenant reports healthy — the number that
     matters is "time until a usable tenant", not just the POST round trip.
     """
-    import aiohttp
     from urllib.parse import urlsplit
+
+    import aiohttp
 
     t0 = time.time()
     async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
@@ -607,13 +612,13 @@ async def _delete_cloud_tenant(management_url: str, api_key: str, tenant_id: str
     import aiohttp
 
     t0 = time.time()
-    async with aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session:
-        async with session.delete(
-            f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}
-        ) as resp:
-            if resp.status >= 400:
-                body = await resp.text()
-                raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
+    async with (
+        aiohttp.ClientSession(headers={"X-Api-Key": api_key}) as session,
+        session.delete(f"{management_url}/api/v1/tenants", params={"tenant_id": tenant_id}) as resp,
+    ):
+        if resp.status >= 400:
+            body = await resp.text()
+            raise RuntimeError(f"Tenant deletion failed ({resp.status}): {body}")
     return time.time() - t0
 
 

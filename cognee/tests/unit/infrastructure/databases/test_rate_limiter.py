@@ -1,7 +1,9 @@
 """Tests for the LLM rate limiter."""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     llm_rate_limiter,
     rate_limit_async,

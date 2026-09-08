@@ -72,8 +72,8 @@ class TestLoad:
             captured["path"] = path
             return SimpleNamespace(name=source_name)
 
-        import cognee.tasks.ingestion.create_dlt_source as create_module
         import cognee.infrastructure.loaders.external.dlt_csv_loader as loader_module
+        import cognee.tasks.ingestion.create_dlt_source as create_module
 
         monkeypatch.setattr(create_module, "create_dlt_source_from_csv", fake_create)
         monkeypatch.setattr(

@@ -1,13 +1,14 @@
-from collections import Counter
-from deepeval.test_case import LLMTestCase
 import re
-from typing import Optional, Any
+from collections import Counter
+from typing import Any, Optional
+
+from deepeval.test_case import LLMTestCase
 
 
 class F1ScoreMetric:
     def __init__(self) -> None:
-        self.score: Optional[float] = None
-        self.reason: Optional[str] = None
+        self.score: float | None = None
+        self.reason: str | None = None
 
     def measure(self, test_case: "LLMTestCase") -> float:
         actual = (test_case.actual_output or "").lower()

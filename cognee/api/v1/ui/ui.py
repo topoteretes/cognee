@@ -1,27 +1,30 @@
 import os
 import platform
+import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import webbrowser
 import zipfile
-import requests
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional, Tuple, List
-import tempfile
-import shutil
+from typing import List, Optional, Tuple
+
+import requests
 
 from cognee.shared.logging_utils import get_logger
 from cognee.version import get_cognee_version
+
 from .node_setup import check_node_npm, get_nvm_dir, get_nvm_sh_path
 from .npm_utils import run_npm_command
 
 logger = get_logger()
 
 
-def _check_docker_available() -> Tuple[bool, str]:
+def _check_docker_available() -> tuple[bool, str]:
     """
     Check if the Docker daemon is reachable by running `docker info`.
 
@@ -130,7 +133,7 @@ def _is_port_available(port: int) -> bool:
         return False
 
 
-def _check_required_ports(ports_to_check: List[Tuple[int, str]]) -> Tuple[bool, List[str]]:
+def _check_required_ports(ports_to_check: list[tuple[int, str]]) -> tuple[bool, list[str]]:
     """
     Check if all required ports are available on localhost.
 
@@ -174,7 +177,7 @@ def get_frontend_cache_dir() -> Path:
     return cache_dir
 
 
-def get_frontend_download_info() -> Tuple[str, str]:
+def get_frontend_download_info() -> tuple[str, str]:
     """
     Get the download URL and version for the actual cognee-frontend source.
     Downloads the real frontend from GitHub releases, matching the installed version.
@@ -255,8 +258,7 @@ def download_frontend_assets(force: bool = False) -> bool:
             response.raise_for_status()
 
             with open(archive_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                f.writelines(response.iter_content(chunk_size=8192))
 
             # Extract the archive and find the cognee-frontend directory
             if frontend_dir.exists():
@@ -303,16 +305,16 @@ def download_frontend_assets(force: bool = False) -> bool:
             )
             logger.error("Try using a stable release version of cognee.")
         else:
-            logger.error(f"Failed to download from GitHub: {str(e)}")
+            logger.error(f"Failed to download from GitHub: {e!s}")
         logger.error("You can still use cognee without the UI functionality.")
         return False
     except Exception as e:
-        logger.error(f"Failed to download frontend assets: {str(e)}")
+        logger.error(f"Failed to download frontend assets: {e!s}")
         logger.error("You can still use cognee without the UI functionality.")
         return False
 
 
-def find_frontend_path() -> Optional[Path]:
+def find_frontend_path() -> Path | None:
     """
     Find the cognee-frontend directory.
     Checks both development location and cached download location.
@@ -369,7 +371,7 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
         logger.error("Timeout installing frontend dependencies")
         return False
     except Exception as e:
-        logger.error(f"Error installing frontend dependencies: {str(e)}")
+        logger.error(f"Error installing frontend dependencies: {e!s}")
         return False
 
 
@@ -430,7 +432,7 @@ def start_ui(
     backend_port: int = 8000,
     start_mcp: bool = False,
     mcp_port: int = 8001,
-) -> Optional[subprocess.Popen]:
+) -> subprocess.Popen | None:
     """
     Start the cognee frontend UI server, optionally with the backend API server and MCP server.
 
@@ -580,7 +582,7 @@ def start_ui(
                 f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse ({mode_info})"
             )
         except Exception as e:
-            logger.error(f"Failed to start MCP server with Docker: {str(e)}")
+            logger.error(f"Failed to start MCP server with Docker: {e!s}")
     # Start backend server if requested
     if start_backend:
         logger.info("Starting cognee backend API server...")
@@ -619,7 +621,7 @@ def start_ui(
             logger.info(f"✓ Backend API started at http://localhost:{backend_port}")
 
         except Exception as e:
-            logger.error(f"Failed to start backend server: {str(e)}")
+            logger.error(f"Failed to start backend server: {e!s}")
             return None
 
     # Find frontend directory
@@ -754,7 +756,7 @@ def start_ui(
         return process
 
     except Exception as e:
-        logger.error(f"Failed to start frontend server: {str(e)}")
+        logger.error(f"Failed to start frontend server: {e!s}")
         # Clean up backend process if it was started
         if backend_process:
             logger.info("Cleaning up backend process due to frontend failure...")

@@ -19,13 +19,13 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.pipelines.models import PipelineContext, PipelineRun, PipelineRunStatus
+from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.tasks.storage.add_data_points import add_data_points
@@ -52,11 +52,11 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
     system_directory_path = str(root / "system")
     data_directory_path = str(root / "data")
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -191,7 +191,8 @@ async def _mock_structured_output(
     **_kwargs,
 ):
     from cognee.shared.data_models import Edge as KGEdge
-    from cognee.shared.data_models import KnowledgeGraph, Node as KGNode, SummarizedContent
+    from cognee.shared.data_models import KnowledgeGraph, SummarizedContent
+    from cognee.shared.data_models import Node as KGNode
 
     if response_model == SummarizedContent:
         return SummarizedContent(

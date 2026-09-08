@@ -4,12 +4,13 @@ Postprocessing script to create benchmark summary JSON from cross-benchmark anal
 Converts CSV data into JSON format with confidence intervals.
 """
 
-import os
 import json
-import pandas as pd
+import os
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
+import pandas as pd
 
 
 def validate_csv_exists(csv_path: str) -> bool:
@@ -100,8 +101,8 @@ def load_aggregate_metrics(benchmark_name: str, temp_dir: str) -> pd.DataFrame:
 
 
 def bootstrap_confidence_interval(
-    data: List[float], n_bootstrap: int = 1000, confidence: float = 0.95
-) -> List[float]:
+    data: list[float], n_bootstrap: int = 1000, confidence: float = 0.95
+) -> list[float]:
     """Calculate bootstrap confidence interval for given data."""
     bootstrap_means = []
 
@@ -122,7 +123,7 @@ def bootstrap_confidence_interval(
     return [lower_bound, upper_bound]
 
 
-def load_all_run_scores(benchmark_name: str, temp_dir: str, metric: str) -> List[float]:
+def load_all_run_scores(benchmark_name: str, temp_dir: str, metric: str) -> list[float]:
     """Load all individual run scores for a metric from the metrics CSV files."""
     analysis_path = get_benchmark_analysis_path(benchmark_name, temp_dir)
     metrics_csv_path = os.path.join(analysis_path, f"metrics_{metric}.csv")
@@ -147,8 +148,8 @@ def load_all_run_scores(benchmark_name: str, temp_dir: str, metric: str) -> List
 
 
 def process_single_metric_with_bootstrap(
-    benchmark_name: str, temp_dir: str, metric: str, cross_benchmark_mean: float = None
-) -> Tuple[float, List[float]]:
+    benchmark_name: str, temp_dir: str, metric: str, cross_benchmark_mean: float | None = None
+) -> tuple[float, list[float]]:
     """Process a single metric: load run scores, calculate bootstrap CI, and return mean and CI."""
     print(f"📊 Calculating {metric} for {benchmark_name}")
 
@@ -177,8 +178,8 @@ def process_single_metric_with_bootstrap(
 
 
 def process_single_benchmark(
-    benchmark_name: str, temp_dir: str, cross_benchmark_means: Dict[str, float] = None
-) -> Dict[str, Any]:
+    benchmark_name: str, temp_dir: str, cross_benchmark_means: dict[str, float] | None = None
+) -> dict[str, Any]:
     """Process a single benchmark and return formatted data."""
     print(f"🔄 Processing benchmark: {benchmark_name}")
 
@@ -207,8 +208,8 @@ def process_single_benchmark(
 
 
 def extract_confidence_intervals(
-    metric_values: Dict[str, Dict[str, Any]],
-) -> Dict[str, List[float]]:
+    metric_values: dict[str, dict[str, Any]],
+) -> dict[str, list[float]]:
     """Extract confidence intervals from processed metric values."""
     print(f"📊 Extracting confidence intervals for {len(metric_values)} metrics")
 
@@ -238,8 +239,8 @@ def map_metric_names(metric: str) -> str:
 
 
 def create_metric_entry(
-    metric_name: str, mean: float, confidence_interval: List[float]
-) -> Tuple[str, float, List[float]]:
+    metric_name: str, mean: float, confidence_interval: list[float]
+) -> tuple[str, float, list[float]]:
     """Create a formatted metric entry with proper name mapping."""
     mapped_name = map_metric_names(metric_name)
     error_name = f"{mapped_name} Error"
@@ -247,8 +248,8 @@ def create_metric_entry(
 
 
 def format_benchmark_entry(
-    benchmark_name: str, means: Dict[str, float], confidence_intervals: Dict[str, List[float]]
-) -> Dict[str, Any]:
+    benchmark_name: str, means: dict[str, float], confidence_intervals: dict[str, list[float]]
+) -> dict[str, Any]:
     """Format benchmark data into required JSON structure."""
     print(f"📝 Formatting benchmark entry for {benchmark_name}")
 
@@ -309,7 +310,7 @@ def handle_processing_errors(benchmark_name: str, error: Exception) -> None:
     print(f"  📝 Skipping {benchmark_name} and continuing with next benchmark")
 
 
-def process_all_benchmarks(temp_dir: str, max_benchmarks: int = 3) -> List[Dict[str, Any]]:
+def process_all_benchmarks(temp_dir: str, max_benchmarks: int = 3) -> list[dict[str, Any]]:
     """Process all benchmarks with optional limit for testing."""
     print(f"Processing benchmarks from {temp_dir} (max: {max_benchmarks})")
 
@@ -389,7 +390,7 @@ def process_all_benchmarks(temp_dir: str, max_benchmarks: int = 3) -> List[Dict[
     return results
 
 
-def validate_output_data(results: List[Dict[str, Any]]) -> bool:
+def validate_output_data(results: list[dict[str, Any]]) -> bool:
     """Validate that the output data has the correct structure."""
     if not results:
         print("❌ No results to save")
@@ -405,7 +406,7 @@ def validate_output_data(results: List[Dict[str, Any]]) -> bool:
 
         # Check that we have metric data
         metric_count = 0
-        for key in result.keys():
+        for key in result:
             if key != "system" and not key.endswith(" Error"):
                 metric_count += 1
 
@@ -419,7 +420,7 @@ def validate_output_data(results: List[Dict[str, Any]]) -> bool:
     return True
 
 
-def format_json_output(results: List[Dict[str, Any]]) -> str:
+def format_json_output(results: list[dict[str, Any]]) -> str:
     """Format the results as a JSON string with proper indentation."""
     try:
         json_string = json.dumps(results, indent=2, ensure_ascii=False)
@@ -438,7 +439,7 @@ def create_output_directory(output_path: str) -> None:
         print(f"📁 Created output directory: {output_dir}")
 
 
-def save_benchmark_summary_json(results: List[Dict[str, Any]], output_path: str) -> None:
+def save_benchmark_summary_json(results: list[dict[str, Any]], output_path: str) -> None:
     """Save benchmark summary to JSON file."""
     print(f"💾 Saving {len(results)} benchmark results to {output_path}")
 

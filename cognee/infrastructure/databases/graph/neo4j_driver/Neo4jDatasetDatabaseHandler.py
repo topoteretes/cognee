@@ -4,6 +4,9 @@ from time import monotonic
 from typing import Optional
 from uuid import UUID
 
+from cognee.infrastructure.databases.dataset_database_handler import (
+    DatasetDatabaseHandlerInterface,
+)
 from cognee.infrastructure.databases.exceptions import (
     DatabaseCredentialsError,
     Neo4jMultiDatabaseSupportError,
@@ -13,11 +16,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.infrastructure.databases.dataset_database_handler import (
-    DatasetDatabaseHandlerInterface,
-)
 from cognee.modules.users.models import DatasetDatabase, User
-
 
 NEO4J_DATASET_DATABASE_HANDLER = "neo4j"
 NEO4J_SYSTEM_DATABASE = "system"
@@ -49,7 +48,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """Handler for per-dataset databases in a local/self-hosted Neo4j DBMS."""
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "neo4j":
@@ -119,7 +118,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         await cls._drop_neo4j_database(graph_db_name)
 
     @classmethod
-    def _database_name_for_dataset(cls, dataset_id: Optional[UUID]) -> str:
+    def _database_name_for_dataset(cls, dataset_id: UUID | None) -> str:
         if dataset_id is None:
             raise ValueError("dataset_id is required to create a local Neo4j dataset database.")
 
@@ -223,9 +222,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         graph_database_allow_anonymous = graph_config.graph_database_allow_anonymous
 
         if not graph_database_url:
-            raise EnvironmentError(
-                "Missing required GRAPH_DATABASE_URL for local Neo4j multi-user mode."
-            )
+            raise OSError("Missing required GRAPH_DATABASE_URL for local Neo4j multi-user mode.")
 
         if graph_database_username and graph_database_password:
             pass
@@ -288,7 +285,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         )
 
     @classmethod
-    async def _run_system_query(cls, driver, query: str, params: Optional[dict] = None) -> list:
+    async def _run_system_query(cls, driver, query: str, params: dict | None = None) -> list:
         try:
             async with driver.session(database=NEO4J_SYSTEM_DATABASE) as session:
                 result = await session.run(query, parameters=params or {})
@@ -326,7 +323,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 ),
             )
 
-        return EnvironmentError(
+        return OSError(
             "Local Neo4j multi-user mode requires a Neo4j deployment that supports "
             "CREATE/DROP DATABASE and credentials with database-management privileges."
         )

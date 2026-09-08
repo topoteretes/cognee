@@ -13,21 +13,20 @@ from __future__ import annotations
 import asyncio
 import multiprocessing as mp
 import pickle
+import sys
 import time
 
 import pytest
 
 from cognee_db_workers.harness import (
+    _TIMEOUT_BEFORE_RESPAWN,
     Request,
     Response,
     SubprocessSession,
     SubprocessTransportError,
-    _TIMEOUT_BEFORE_RESPAWN,
     run_worker_loop,
     spawn_without_main,
 )
-
-import sys
 
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from

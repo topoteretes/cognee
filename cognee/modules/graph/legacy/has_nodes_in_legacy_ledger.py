@@ -1,19 +1,21 @@
-from uuid import UUID
 from typing import List, Tuple
+from uuid import UUID
+
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import with_async_session
-from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.models import Node
+
 from .GraphRelationshipLedger import GraphRelationshipLedger
 
 BATCH_SIZE = 1000
 
 
 @with_async_session
-async def has_nodes_in_legacy_ledger(nodes: List[Node], session: AsyncSession):
+async def has_nodes_in_legacy_ledger(nodes: list[Node], session: AsyncSession):
     node_ids = [node.slug for node in nodes]
 
     legacy_nodes = []
@@ -53,7 +55,7 @@ async def has_nodes_in_legacy_ledger(nodes: List[Node], session: AsyncSession):
 
 
 async def confirm_nodes_in_graph(
-    legacy_nodes: List[Tuple[str, UUID]],
+    legacy_nodes: list[tuple[str, UUID]],
 ):
     graph_engine = await get_graph_engine()
 

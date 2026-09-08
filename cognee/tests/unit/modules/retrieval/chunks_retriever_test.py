@@ -1,10 +1,11 @@
-import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 
 def _make_unified_mock(vector_engine):
@@ -102,12 +103,14 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
 
     retriever = ChunksRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
-        return_value=_make_unified_mock(mock_vector_engine),
+    with (
+        patch(
+            "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+            return_value=_make_unified_mock(mock_vector_engine),
+        ),
+        pytest.raises(NoDataError, match="No data found"),
     ):
-        with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_retrieved_objects("test query")
+        await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio

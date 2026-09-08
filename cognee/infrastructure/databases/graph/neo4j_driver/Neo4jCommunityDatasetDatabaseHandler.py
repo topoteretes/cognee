@@ -1,17 +1,17 @@
-import os
 import base64
 import hashlib
+import os
 import secrets
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from cryptography.fernet import Fernet
 
-from cognee.infrastructure.databases.graph import get_graph_config
 from cognee.infrastructure.databases.dataset_database_handler import (
     DatasetDatabaseHandlerInterface,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.infrastructure.databases.graph import get_graph_config
+from cognee.modules.users.models import DatasetDatabase, User
 from cognee.shared.logging_utils import get_logger
 
 from .neo4j_community_containers import (
@@ -66,7 +66,7 @@ class Neo4jCommunityDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "neo4j":
@@ -88,7 +88,7 @@ class Neo4jCommunityDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         manager = get_container_manager()
         host_port = None
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for _ in range(PORT_ALLOCATION_ATTEMPTS):
             candidate_port = allocate_free_port()
             try:

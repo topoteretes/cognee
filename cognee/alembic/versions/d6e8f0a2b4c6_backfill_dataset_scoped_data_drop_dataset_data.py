@@ -45,11 +45,12 @@ Create Date: 2026-08-11
 
 import logging
 import uuid
+from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Sequence, Union
+from typing import Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ def _chunks(values, size=_IN_CLAUSE_CHUNK):
 
 # revision identifiers, used by Alembic.
 revision: str = "d6e8f0a2b4c6"
-down_revision: Union[str, None] = "c5d7e9f1a3b5"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "c5d7e9f1a3b5"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def _get_column(inspector, table, name, schema=None):

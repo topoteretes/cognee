@@ -1,34 +1,34 @@
-from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional, Union
-from typing_extensions import Annotated
-from fastapi import status
-from fastapi import APIRouter
-from fastapi.encoders import jsonable_encoder
-from fastapi import HTTPException, Query, Depends
-from fastapi import Path as PathParam
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, Response
-from urllib.parse import urlparse
 from pathlib import Path
+from typing import Annotated, Any, Dict, List, Optional, Union
+from urllib.parse import urlparse
+from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import Path as PathParam
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, Field
+
+from cognee import __version__ as cognee_version
 from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.api.v1.datasets.dto import DataDTO
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.data.methods import get_datasets_by_name
-from cognee.modules.data.methods import get_datasets_graph_counts
-from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
-from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.exceptions import DataNotFoundError
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.methods import (
+    get_authorized_existing_datasets,
+    get_datasets_by_name,
+    get_datasets_graph_counts,
+)
+from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
 
 logger = get_logger()
 
@@ -41,7 +41,7 @@ class ErrorResponseDTO(BaseModel):
 # dataset/pipeline selection, so the query param definitions (alias,
 # description, examples) live here once instead of twice.
 StatusDatasetIdsQuery = Annotated[
-    List[UUID],
+    list[UUID],
     Query(
         alias="dataset",
         description=(
@@ -53,7 +53,7 @@ StatusDatasetIdsQuery = Annotated[
 ]
 
 StatusPipelineNamesQuery = Annotated[
-    List[str],
+    list[str],
     Query(
         alias="pipeline",
         description=(
@@ -71,7 +71,7 @@ class PipelineRunStatusWithProgress(BaseModel):
     # Present only once a run has emitted at least one progress tick (see
     # log_pipeline_run_progress); None before that or for terminal runs that
     # predate this field.
-    progress: Optional[Dict[str, Any]] = Field(
+    progress: dict[str, Any] | None = Field(
         default=None,
         examples=[{"completed_items": 3, "total_items": 10, "current_stage": "extract_graph"}],
     )
@@ -81,18 +81,18 @@ class DatasetDTO(OutDTO):
     id: UUID
     name: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     owner_id: UUID
 
 
 class DatasetGraphSummaryDTO(OutDTO):
     dataset_id: UUID
-    pipeline_run_id: Optional[UUID] = None
+    pipeline_run_id: UUID | None = None
     num_nodes: int
     num_edges: int
     # None while pipeline_run_id is set means the last count attempt degraded
     # (graph store unavailable) and wasn't cached — retried on the next poll.
-    computed_at: Optional[datetime] = None
+    computed_at: datetime | None = None
 
 
 class GraphNodeDTO(OutDTO):
@@ -109,8 +109,8 @@ class GraphEdgeDTO(OutDTO):
 
 
 class GraphDTO(OutDTO):
-    nodes: List[GraphNodeDTO]
-    edges: List[GraphEdgeDTO]
+    nodes: list[GraphNodeDTO]
+    edges: list[GraphEdgeDTO]
 
 
 class DatasetCreationPayload(InDTO):
@@ -124,8 +124,8 @@ class DatasetCreationPayload(InDTO):
 
 
 class DatasetSchemaPayloadDTO(InDTO):
-    graph_schema: Optional[Dict[str, Any]] = None
-    custom_prompt: Optional[str] = None
+    graph_schema: dict[str, Any] | None = None
+    custom_prompt: str | None = None
 
 
 def get_datasets_router() -> APIRouter:
@@ -165,10 +165,10 @@ def get_datasets_router() -> APIRouter:
 
             return datasets
         except Exception as error:
-            logger.error(f"Error retrieving datasets: {str(error)}")
+            logger.error(f"Error retrieving datasets: {error!s}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error retrieving datasets: {str(error)}",
+                detail=f"Error retrieving datasets: {error!s}",
             ) from error
 
     @router.post("", response_model=DatasetDTO)
@@ -218,10 +218,10 @@ def get_datasets_router() -> APIRouter:
 
             return dataset
         except Exception as error:
-            logger.error(f"Error creating dataset: {str(error)}")
+            logger.error(f"Error creating dataset: {error!s}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error creating dataset: {str(error)}",
+                detail=f"Error creating dataset: {error!s}",
             ) from error
 
     @router.delete("")
@@ -268,7 +268,7 @@ def get_datasets_router() -> APIRouter:
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
+                "endpoint": f"DELETE /v1/datasets/{dataset_id!s}",
                 "dataset_id": str(dataset_id),
                 "cognee_version": cognee_version,
             },
@@ -318,7 +318,7 @@ def get_datasets_router() -> APIRouter:
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
+                "endpoint": f"DELETE /v1/datasets/{dataset_id!s}/data/{data_id!s}",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
                 "cognee_version": cognee_version,
@@ -403,7 +403,7 @@ def get_datasets_router() -> APIRouter:
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/data",
                 "dataset_id": str(dataset_id),
                 "cognee_version": cognee_version,
             },
@@ -418,7 +418,7 @@ def get_datasets_router() -> APIRouter:
             return JSONResponse(
                 status_code=404,
                 content=ErrorResponseDTO(
-                    message=f"Dataset ({str(dataset_id)}) not found."
+                    message=f"Dataset ({dataset_id!s}) not found."
                 ).model_dump(),
             )
 
@@ -589,10 +589,10 @@ def get_datasets_router() -> APIRouter:
                 content={"error": "Unable to retrieve dataset progress."},
             )
 
-    @router.get("/graph-summary", response_model=List[DatasetGraphSummaryDTO])
+    @router.get("/graph-summary", response_model=list[DatasetGraphSummaryDTO])
     async def get_datasets_graph_summary(
         dataset_ids: Annotated[
-            List[UUID],
+            list[UUID],
             Query(
                 alias="dataset_ids",
                 description=(
@@ -710,7 +710,7 @@ def get_datasets_router() -> APIRouter:
             "Datasets API Endpoint Invoked",
             user,
             additional_properties={
-                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
+                "endpoint": f"GET /v1/datasets/{dataset_id!s}/data/{data_id!s}/raw",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
                 "cognee_version": cognee_version,
@@ -800,8 +800,9 @@ def get_datasets_router() -> APIRouter:
         ## Path Parameters
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
         """
-        from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
+
+        from cognee.modules.data.models import DatasetConfiguration
 
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
         if not dataset:
@@ -836,8 +837,9 @@ def get_datasets_router() -> APIRouter:
         - **graphSchema** (Optional[Dict[str, Any]]): JSON graph schema to store for the
           dataset; omitting it leaves any existing schema unchanged.
         """
-        from cognee.modules.data.models import DatasetConfiguration
         from sqlalchemy import select
+
+        from cognee.modules.data.models import DatasetConfiguration
 
         dataset = await get_authorized_existing_datasets([dataset_id], "write", user)
         if not dataset:

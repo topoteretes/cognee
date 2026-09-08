@@ -5,9 +5,9 @@ from typing import Optional
 
 from cognee.modules.observability.tracing import (
     CogneeTrace,
+    get_exporter,
     setup_tracing,
     shutdown_tracing,
-    get_exporter,
 )
 
 _tracing_enabled: bool = False
@@ -96,7 +96,7 @@ def is_tracing_enabled() -> bool:
     return False
 
 
-def get_last_trace() -> Optional[CogneeTrace]:
+def get_last_trace() -> CogneeTrace | None:
     """Return the most recent completed trace from the in-memory buffer."""
     exporter = get_exporter()
     if exporter is None:

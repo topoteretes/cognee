@@ -8,16 +8,16 @@ from typing import Any, Optional
 from uuid import UUID
 
 from cognee.exceptions import CogneeValidationError
-from cognee.modules.observability import new_span
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.models import User
-from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.agent_memory.sanitization import (
     MAX_SERIALIZED_VALUE_LENGTH,
     sanitize_value,
     truncate_text,
 )
+from cognee.modules.observability import new_span
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
+from cognee.modules.users.permissions.methods import get_all_user_permission_datasets
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("agent_memory")
 
@@ -31,19 +31,19 @@ class AgentMemoryConfig:
     with_memory: bool
     with_session_memory: bool
     save_session_traces: bool
-    memory_query_fixed: Optional[str]
-    memory_query_from_method: Optional[str]
-    memory_system_prompt: Optional[str]
+    memory_query_fixed: str | None
+    memory_query_from_method: str | None
+    memory_system_prompt: str | None
     memory_top_k: int
     memory_only_context: bool
     session_memory_last_n: int
-    session_id: Optional[str]
-    user: Optional[User]
-    dataset_name: Optional[str]
+    session_id: str | None
+    user: User | None
+    dataset_name: str | None
     session_trace_summary: bool
-    persist_session_trace_after: Optional[int]
+    persist_session_trace_after: int | None
     persist_session_trace_raw_content: bool
-    persist_session_trace_node_set_name: Optional[str]
+    persist_session_trace_node_set_name: str | None
 
 
 @dataclass(slots=True)
@@ -62,8 +62,8 @@ class AgentMemoryContext:
     origin_function: str
     config: AgentMemoryConfig
     method_params: dict[str, Any]
-    user: Optional[User] = None
-    scope: Optional[AgentScope] = None
+    user: User | None = None
+    scope: AgentScope | None = None
     memory_query: str = ""
     memory_context: str = ""
     method_return_value: Any = None
@@ -71,25 +71,25 @@ class AgentMemoryContext:
     error_message: str = ""
 
 
-_agent_memory_context_var: contextvars.ContextVar[Optional[AgentMemoryContext]] = (
+_agent_memory_context_var: contextvars.ContextVar[AgentMemoryContext | None] = (
     contextvars.ContextVar("agent_memory_context", default=None)
 )
 
 
-def get_current_agent_memory_context() -> Optional[AgentMemoryContext]:
+def get_current_agent_memory_context() -> AgentMemoryContext | None:
     """Return the active agent-memory execution context for the current async task."""
     return _agent_memory_context_var.get()
 
 
 def set_current_agent_memory_context(
     context: AgentMemoryContext,
-) -> contextvars.Token[Optional[AgentMemoryContext]]:
+) -> contextvars.Token[AgentMemoryContext | None]:
     """Store the active agent-memory context and return a reset token."""
     return _agent_memory_context_var.set(context)
 
 
 def reset_current_agent_memory_context(
-    token: contextvars.Token[Optional[AgentMemoryContext]],
+    token: contextvars.Token[AgentMemoryContext | None],
 ) -> None:
     """Restore the previously active agent-memory context."""
     _agent_memory_context_var.reset(token)
@@ -100,19 +100,19 @@ def validate_agent_memory_config(
     with_memory: bool,
     with_session_memory: bool,
     save_session_traces: bool,
-    memory_query_fixed: Optional[str],
-    memory_query_from_method: Optional[str],
-    memory_system_prompt: Optional[str],
+    memory_query_fixed: str | None,
+    memory_query_from_method: str | None,
+    memory_system_prompt: str | None,
     memory_top_k: int,
     memory_only_context: bool,
     session_memory_last_n: int,
-    session_id: Optional[str],
-    user: Optional[User],
-    dataset_name: Optional[str],
+    session_id: str | None,
+    user: User | None,
+    dataset_name: str | None,
     session_trace_summary: bool,
-    persist_session_trace_after: Optional[int],
+    persist_session_trace_after: int | None,
     persist_session_trace_raw_content: bool,
-    persist_session_trace_node_set_name: Optional[str],
+    persist_session_trace_node_set_name: str | None,
 ) -> AgentMemoryConfig:
     """Validate and normalize the public decorator configuration."""
     from cognee.infrastructure.databases.cache.config import get_cache_config
@@ -326,7 +326,7 @@ def build_method_params(func, args: tuple[Any, ...], kwargs: dict[str, Any]) -> 
     return {key: sanitize_value(value) for key, value in bound_args.arguments.items()}
 
 
-def normalize_optional_text(value: Any, limit: int = MAX_SERIALIZED_VALUE_LENGTH) -> Optional[str]:
+def normalize_optional_text(value: Any, limit: int = MAX_SERIALIZED_VALUE_LENGTH) -> str | None:
     """Convert a value into a bounded non-empty string, or return None when unusable."""
     if value is None:
         return None
@@ -342,9 +342,9 @@ def normalize_optional_text(value: Any, limit: int = MAX_SERIALIZED_VALUE_LENGTH
 
 
 def get_query_text_from_method_param(
-    memory_query_from_method: Optional[str],
+    memory_query_from_method: str | None,
     method_params: dict[str, Any],
-) -> Optional[str]:
+) -> str | None:
     """Extract a bounded retrieval query from a configured wrapped-method parameter."""
     if not memory_query_from_method or memory_query_from_method not in method_params:
         return None
@@ -353,10 +353,10 @@ def get_query_text_from_method_param(
 
 
 def derive_query_text(
-    memory_query_fixed: Optional[str],
-    memory_query_from_method: Optional[str],
+    memory_query_fixed: str | None,
+    memory_query_from_method: str | None,
     method_params: dict[str, Any],
-) -> Optional[str]:
+) -> str | None:
     """Resolve the retrieval query from dynamic, fixed, or fallback method inputs."""
     query_from_method = get_query_text_from_method_param(memory_query_from_method, method_params)
     if query_from_method:

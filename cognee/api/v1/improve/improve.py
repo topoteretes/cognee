@@ -1,5 +1,5 @@
+from typing import Any, List, Optional, Type, Union
 from uuid import UUID
-from typing import Union, Optional, List, Type, Any
 
 try:
     from typing import Unpack
@@ -8,17 +8,17 @@ except ImportError:
 
 from typing_extensions import TypedDict
 
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    COGNEE_IMPROVE_STAGES,
+    COGNEE_SESSION_ID,
+    new_span,
+)
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_DATASET_NAME,
-    COGNEE_SESSION_ID,
-    COGNEE_IMPROVE_STAGES,
-)
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("improve")
 
@@ -29,7 +29,7 @@ class ImproveKwargs(TypedDict, total=False):
     extraction_tasks: list
     enrichment_tasks: list
     data: Any
-    node_type: Type
+    node_type: type
     user: object
     vector_db_config: dict
     graph_db_config: dict
@@ -37,11 +37,11 @@ class ImproveKwargs(TypedDict, total=False):
 
 
 async def improve(
-    dataset: Union[str, UUID] = "main_dataset",
+    dataset: str | UUID = "main_dataset",
     *,
     run_in_background: bool = False,
-    node_name: Optional[List[str]] = None,
-    session_ids: Optional[List[str]] = None,
+    node_name: list[str] | None = None,
+    session_ids: list[str] | None = None,
     build_global_context_index: bool = False,
     build_truth_subspace: bool = False,
     **kwargs: Unpack[ImproveKwargs],
@@ -103,8 +103,8 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     stages_run = []
 
@@ -170,7 +170,7 @@ async def improve(
             # lock so auto-improve + idle-watcher + SessionEnd don't
             # duplicate work. Multi-session improves skip the lock — the
             # pattern is rare and locking N sessions at once is messy.
-            acquired_lock_for: Optional[str] = None
+            acquired_lock_for: str | None = None
             if session_ids and len(session_ids) == 1:
                 from cognee.infrastructure.locks import (
                     release_improve_lock,
@@ -315,7 +315,7 @@ async def improve(
 
 
 async def _build_global_context_index(
-    dataset: Union[str, UUID],
+    dataset: str | UUID,
     user,
 ) -> bool:
     from cognee.memify_pipelines.global_context_index import global_context_index_pipeline
@@ -336,8 +336,8 @@ async def _build_global_context_index(
 
 
 async def _bridge_sessions(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
     feedback_alpha: float,
     run_in_background: bool,
@@ -385,7 +385,7 @@ async def _bridge_sessions(
 
 
 async def _extract_agent_context(
-    session_ids: List[str],
+    session_ids: list[str],
     user,
 ) -> int:
     """Flush pending trace windows into agent-profile lessons before distillation.
@@ -426,8 +426,8 @@ async def _extract_agent_context(
 
 
 async def _distill_sessions(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
 ) -> int:
     """Distill each session's gated learnings into curated lessons in the graph.
@@ -468,8 +468,8 @@ async def _distill_sessions(
 
 
 async def _update_user_preferences(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
 ):
     """Update the caller's per-dataset preference node and ``prefers`` weights.
@@ -512,8 +512,8 @@ async def _update_user_preferences(
 
 
 async def _persist_session_traces(
-    dataset: Union[str, UUID],
-    session_ids: List[str],
+    dataset: str | UUID,
+    session_ids: list[str],
     user,
     run_in_background: bool,
 ):

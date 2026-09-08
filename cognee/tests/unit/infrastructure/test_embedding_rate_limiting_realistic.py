@@ -1,12 +1,12 @@
-import os
-import time
 import asyncio
 import logging
+import os
+import time
 
-import cognee.shared.rate_limiting as rate_limiting
 from cognee.infrastructure.databases.vector.embeddings.config import (
     get_embedding_config,
 )
+from cognee.shared import rate_limiting
 from cognee.tests.unit.infrastructure.mock_embedding_engine import MockEmbeddingEngine
 
 # Configure logging
@@ -183,7 +183,7 @@ async def test_with_mock_failures():
             text = f"Test text {i}"
             embedding = await engine.embed_text([text])
 
-            logger.info(f"Request #{i + 1} succeeded for {str(embedding)}")
+            logger.info(f"Request #{i + 1} succeeded for {embedding!s}")
         except Exception as e:
             logger.info(f"Request #{i + 1} failed as expected: {e}")
 

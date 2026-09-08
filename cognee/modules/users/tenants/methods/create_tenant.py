@@ -1,17 +1,18 @@
+from typing import Optional
 from uuid import UUID
+
 from sqlalchemy import insert
 from sqlalchemy.exc import IntegrityError
-from typing import Optional
 
-from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.infrastructure.databases.exceptions import EntityAlreadyExistsError
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models import Tenant
 from cognee.modules.users.methods import get_user
+from cognee.modules.users.models import Tenant
+from cognee.modules.users.models.UserTenant import UserTenant
 
 
 async def create_tenant(
-    tenant_name: str, user_id: UUID, set_as_active_tenant: Optional[bool] = True
+    tenant_name: str, user_id: UUID, set_as_active_tenant: bool | None = True
 ) -> UUID:
     """
         Create a new tenant with the given name, for the user with the given id.

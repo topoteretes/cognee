@@ -14,8 +14,8 @@ load_dotenv()
 class QABenchmarkConfig:
     """Base configuration for QA benchmark pipelines."""
 
-    corpus_limit: Optional[int] = None
-    qa_limit: Optional[int] = None
+    corpus_limit: int | None = None
+    qa_limit: int | None = None
     results_file: str = "hotpot_qa_results.json"
     print_results: bool = True
 
@@ -24,7 +24,7 @@ class QABenchmarkRAG(ABC):
     """Abstract base class for QA benchmarking with different RAG systems."""
 
     def __init__(
-        self, corpus: List[str], qa_pairs: List[Dict[str, Any]], config: QABenchmarkConfig
+        self, corpus: list[str], qa_pairs: list[dict[str, Any]], config: QABenchmarkConfig
     ):
         """Initialize the benchmark with corpus and QA data."""
         self.corpus = corpus
@@ -59,28 +59,23 @@ class QABenchmarkRAG(ABC):
     @abstractmethod
     async def initialize_rag(self) -> Any:
         """Initialize the RAG system. Returns the RAG client."""
-        pass
 
     @abstractmethod
     async def cleanup_rag(self) -> None:
         """Clean up RAG system resources."""
-        pass
 
     @abstractmethod
     async def insert_document(self, document: str, document_id: int) -> None:
         """Insert a single document into the RAG system."""
-        pass
 
     @abstractmethod
     async def query_rag(self, question: str) -> str:
         """Query the RAG system and return the answer."""
-        pass
 
     @property
     @abstractmethod
     def system_name(self) -> str:
         """Return the name of the RAG system for logging."""
-        pass
 
     async def load_corpus_to_rag(self) -> None:
         """Load corpus data into the RAG system."""
@@ -89,7 +84,7 @@ class QABenchmarkRAG(ABC):
             await self.insert_document(document, i + 1)
         print(f"All documents added to {self.system_name}")
 
-    async def answer_questions(self) -> List[Dict[str, Any]]:
+    async def answer_questions(self) -> list[dict[str, Any]]:
         """Answer questions using the RAG system."""
         print(f"Processing {len(self.qa_pairs)} questions...")
         results = []
@@ -105,7 +100,7 @@ class QABenchmarkRAG(ABC):
                 answer = await self.query_rag(question)
             except Exception as e:
                 print(f"Error processing question {i + 1}: {e}")
-                answer = f"Error: {str(e)}"
+                answer = f"Error: {e!s}"
 
             result = {"question": question, "answer": answer, "golden_answer": expected_answer}
 
@@ -118,14 +113,14 @@ class QABenchmarkRAG(ABC):
 
         return results
 
-    def save_results(self, results: List[Dict[str, Any]]) -> None:
+    def save_results(self, results: list[dict[str, Any]]) -> None:
         """Save results to JSON file."""
         if self.config.results_file:
             print(f"Saving results to {self.config.results_file}...")
             with open(self.config.results_file, "w", encoding="utf-8") as file:
                 json.dump(results, file, indent=2)
 
-    async def run_benchmark(self) -> List[Dict[str, Any]]:
+    async def run_benchmark(self) -> list[dict[str, Any]]:
         """Run the complete benchmark pipeline."""
         print(f"Starting QA benchmark for {self.system_name}...")
 
@@ -154,6 +149,6 @@ class QABenchmarkRAG(ABC):
             if self.rag_client:
                 await self.cleanup_rag()
 
-    def run(self) -> List[Dict[str, Any]]:
+    def run(self) -> list[dict[str, Any]]:
         """Synchronous wrapper for the benchmark."""
         return asyncio.run(self.run_benchmark())

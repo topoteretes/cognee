@@ -3,9 +3,9 @@ from itertools import product
 import numpy as np
 import pytest
 
-from cognee.tasks.chunks import chunk_by_sentence
-from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS_LONGWORDS, INPUT_TEXTS
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+from cognee.tasks.chunks import chunk_by_sentence
+from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS, INPUT_TEXTS_LONGWORDS
 
 maximum_length_vals = [None, 16, 64]
 

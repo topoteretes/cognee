@@ -1,10 +1,10 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 
-def read_results(dir_path: str) -> Dict[str, Any]:
+def read_results(dir_path: str) -> dict[str, Any]:
     """Read all JSON files from the specified directory path."""
     results = {}
     dir_path = Path(dir_path)
@@ -25,7 +25,7 @@ def read_results(dir_path: str) -> Dict[str, Any]:
 
 
 def validate_file_results(
-    data: List[Dict[str, Any]], filename: str, expected_keys: List[str] = None
+    data: list[dict[str, Any]], filename: str, expected_keys: list[str] | None = None
 ) -> bool:
     """Validate that a single file's data has correct structure and keys."""
     if expected_keys is None:
@@ -66,7 +66,7 @@ def validate_file_results(
     return True
 
 
-def validate_metrics(metrics: Dict[str, Any], expected_metrics: List[str] = None) -> bool:
+def validate_metrics(metrics: dict[str, Any], expected_metrics: list[str] | None = None) -> bool:
     """Validate that metrics have correct structure and expected keys."""
     if expected_metrics is None:
         expected_metrics = ["directllm_correctness", "deepeval_correctness", "EM", "f1"]
@@ -107,7 +107,9 @@ def validate_metrics(metrics: Dict[str, Any], expected_metrics: List[str] = None
     return True
 
 
-def validate_folder_results(results: Dict[str, Any], expected_keys: List[str] = None) -> bool:
+def validate_folder_results(
+    results: dict[str, Any], expected_keys: list[str] | None = None
+) -> bool:
     """Validate that all files have same length and all dictionaries contain same keys."""
     if expected_keys is None:
         expected_keys = ["answer", "golden_answer", "metrics", "question"]

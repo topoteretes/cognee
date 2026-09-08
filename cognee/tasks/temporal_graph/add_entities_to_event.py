@@ -1,9 +1,9 @@
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import Event
-from cognee.tasks.temporal_graph.models import EventWithEntities
 from cognee.modules.engine.models.Entity import Entity
 from cognee.modules.engine.models.EntityType import EntityType
-from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.utils import generate_node_name
+from cognee.tasks.temporal_graph.models import EventWithEntities
 
 
 def add_entities_to_event(event: Event, event_with_entities: EventWithEntities) -> None:

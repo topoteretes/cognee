@@ -15,7 +15,6 @@ from typing import Dict, Optional, Set
 
 from cognee.modules.engine.models import Skill
 
+active_skills_var: ContextVar[dict[str, Skill]] = ContextVar("cognee_active_skills", default={})
 
-active_skills_var: ContextVar[Dict[str, Skill]] = ContextVar("cognee_active_skills", default={})
-
-opened_skills_var: ContextVar[Optional[Set[str]]] = ContextVar("cognee_opened_skills", default=None)
+opened_skills_var: ContextVar[set[str] | None] = ContextVar("cognee_opened_skills", default=None)

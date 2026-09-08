@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UUID
+from sqlalchemy import UUID, Column, DateTime, Float, Integer, String, Text
 
 from cognee.infrastructure.databases.relational import Base
 

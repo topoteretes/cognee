@@ -1,9 +1,8 @@
 import asyncio
 from functools import wraps
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.calculate_backoff import calculate_backoff
-
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("deadlock_retry")
 
@@ -26,7 +25,7 @@ def deadlock_retry(max_retries=10):
     def decorator(func):
         @wraps(func)
         async def wrapper(self, *args, **kwargs):
-            from neo4j.exceptions import Neo4jError, DatabaseUnavailable
+            from neo4j.exceptions import DatabaseUnavailable, Neo4jError
 
             attempt = 0
 

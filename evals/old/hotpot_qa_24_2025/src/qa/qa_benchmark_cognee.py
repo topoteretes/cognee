@@ -1,19 +1,20 @@
 import asyncio
 import os
 from dataclasses import dataclass
-from typing import Any, List, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
+
 import cognee
 from cognee.api.v1.search import SearchType
-
-from .qa_benchmark_base import QABenchmarkRAG, QABenchmarkConfig
-from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
-from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     retriever_options,
 )
+from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
+
+from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
 
 load_dotenv()
 
@@ -114,12 +115,10 @@ class QABenchmarkCognee(QABenchmarkRAG):
 
     async def cleanup_rag(self) -> None:
         """Clean up resources."""
-        pass
 
     async def insert_document(self, document: str, document_id: int) -> None:
         """Insert document into Cognee via corpus builder."""
         # Documents are handled in bulk by load_corpus_to_rag method
-        pass
 
     async def load_corpus_to_rag(self) -> None:
         """Load corpus data into Cognee using eval framework's corpus builder."""
@@ -154,7 +153,7 @@ class QABenchmarkCognee(QABenchmarkRAG):
 
         except Exception as e:
             print(f"Error during retrieval: {e}")
-            return f"Error: {str(e)}"
+            return f"Error: {e!s}"
 
     @property
     def system_name(self) -> str:

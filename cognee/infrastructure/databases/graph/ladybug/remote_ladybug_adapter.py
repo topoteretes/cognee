@@ -1,8 +1,8 @@
 """Adapter for remote Ladybug graph database via REST API."""
 
 import json
-from uuid import UUID
 from typing import List, Optional, Tuple
+from uuid import UUID
 
 import aiohttp
 
@@ -85,10 +85,10 @@ class RemoteLadybugAdapter(LadybugAdapter):
                     )
                 return await response.json()
         except aiohttp.ClientError as e:
-            logger.error(f"API request failed for {endpoint}: {str(e)}")
+            logger.error(f"API request failed for {endpoint}: {e!s}")
             raise
 
-    async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
+    async def query(self, query: str, params: dict | None = None) -> list[tuple]:
         """Execute a Ladybug query via the REST API."""
         try:
             # Initialize schema if needed
@@ -117,7 +117,7 @@ class RemoteLadybugAdapter(LadybugAdapter):
 
             return results
         except Exception as e:
-            logger.error(f"Query execution failed: {str(e)}")
+            logger.error(f"Query execution failed: {e!s}")
             raise
 
     async def _check_schema_exists(self) -> bool:

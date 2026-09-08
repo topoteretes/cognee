@@ -19,7 +19,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-def _kendall_tau_b(x: List[int], y: List[int]) -> float:
+def _kendall_tau_b(x: list[int], y: list[int]) -> float:
     """Compute Kendall's tau-b rank correlation coefficient.
 
     Pure-Python implementation to avoid scipy dependency.
@@ -84,7 +84,7 @@ Text:
 Return ONLY a JSON array like: ["first event", "second event", ...]"""
 
 
-def _parse_json_list(raw: str) -> List[str]:
+def _parse_json_list(raw: str) -> list[str]:
     """Parse a JSON list from LLM response."""
     text = raw.strip()
     fence_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
@@ -113,7 +113,7 @@ def _parse_json_list(raw: str) -> List[str]:
     return [line for line in lines if line and len(line) > 5]
 
 
-def _parse_alignment(raw: str, n_system: int) -> Dict[int, int]:
+def _parse_alignment(raw: str, n_system: int) -> dict[int, int]:
     """Parse alignment mapping from LLM response."""
     text = raw.strip()
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
@@ -146,10 +146,10 @@ class KendallTauMetric:
     """
 
     def __init__(self):
-        self.score: Optional[float] = None
-        self.reason: Optional[str] = None
+        self.score: float | None = None
+        self.reason: str | None = None
 
-    def measure(self, test_case) -> Optional[float]:
+    def measure(self, test_case) -> float | None:
         import asyncio
 
         try:
@@ -167,7 +167,7 @@ class KendallTauMetric:
 
         return result
 
-    async def a_measure(self, test_case) -> Optional[float]:
+    async def a_measure(self, test_case) -> float | None:
         metadata = getattr(test_case, "additional_metadata", {}) or {}
         question_type = metadata.get("question_type", "")
 

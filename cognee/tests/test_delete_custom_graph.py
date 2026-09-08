@@ -1,20 +1,21 @@
 import os
 import pathlib
+from contextlib import AsyncExitStack
 from typing import List
 from uuid import UUID, uuid4
+
 from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.engine.utils import generate_node_id
-from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import add_data_points
 
@@ -53,7 +54,7 @@ async def main():
 
     class Person(DataPoint):
         name: str
-        works_for: List[Organization]
+        works_for: list[Organization]
         metadata: dict = {"index_fields": ["name"]}
 
     companyA = ForProfit(id=generate_node_id("Company A"), name="Company A")
@@ -124,16 +125,13 @@ async def main():
     edges_by_ids = {f"{edge[0]}_{edge[2]}_{edge[1]}": edge[3] for edge in edges}
 
     assert (
-        f"{str(generate_node_id('John'))}_works_for_{str(generate_node_id('Company A'))}"
-        in edges_by_ids
+        f"{generate_node_id('John')!s}_works_for_{generate_node_id('Company A')!s}" in edges_by_ids
     ), "Edge between John and Company A not present in the graph."
     assert (
-        f"{str(generate_node_id('John'))}_works_for_{str(generate_node_id('Company B'))}"
-        in edges_by_ids
+        f"{generate_node_id('John')!s}_works_for_{generate_node_id('Company B')!s}" in edges_by_ids
     ), "Edge between John and Company A not present in the graph."
     assert (
-        f"{str(generate_node_id('Jane'))}_works_for_{str(generate_node_id('Company B'))}"
-        in edges_by_ids
+        f"{generate_node_id('Jane')!s}_works_for_{generate_node_id('Company B')!s}" in edges_by_ids
     ), "Edge between John and Company A not present in the graph."
 
     # Second data deletion
@@ -155,8 +153,7 @@ async def main():
     edges_by_ids = {f"{edge[0]}_{edge[2]}_{edge[1]}": edge[3] for edge in edges}
 
     assert (
-        f"{str(generate_node_id('Jane'))}_works_for_{str(generate_node_id('Company B'))}"
-        in edges_by_ids
+        f"{generate_node_id('Jane')!s}_works_for_{generate_node_id('Company B')!s}" in edges_by_ids
     ), "Edge between John and Company A not present in the graph."
 
     # Second data deletion

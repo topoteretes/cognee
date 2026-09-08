@@ -97,7 +97,7 @@ def find_enola_binary() -> str:
 
 
 async def run_enola_generate(
-    repo_path: Union[str, Path],
+    repo_path: str | Path,
     timeout: float = 600.0,
 ) -> Path:
     """Run `enola --generate` in repo_path and return the snapshot directory.
@@ -174,8 +174,8 @@ async def run_enola_generate(
 
 
 def parse_enola_snapshot(
-    snapshot_dir: Union[str, Path],
-) -> Tuple[list, Optional[dict]]:
+    snapshot_dir: str | Path,
+) -> tuple[list, dict | None]:
     """Parse facts.jsonl (streamed line by line) and receipt.json from a snapshot dir.
 
     Blank and corrupt lines are skipped with a warning counter. A missing or
@@ -236,9 +236,9 @@ def parse_enola_snapshot(
 
 
 def validate_receipt(
-    receipt: Optional[dict],
-    snapshot_dir: Union[str, Path],
-    fact_count: Optional[int] = None,
+    receipt: dict | None,
+    snapshot_dir: str | Path,
+    fact_count: int | None = None,
 ) -> None:
     """Reject unsupported artifact formats and surface extraction-quality signals.
 
@@ -315,7 +315,7 @@ def is_enola_id(value: Any) -> bool:
     )
 
 
-def relation_target_id(relation: Any) -> Optional[str]:
+def relation_target_id(relation: Any) -> str | None:
     """The writer-resolved target identity of a relation (``target_id``), or None.
 
     enola emits it only when the target resolves unambiguously (same-repo
@@ -396,7 +396,7 @@ def _synthesize_insight_facts(snapshot_dir: Path) -> list:
     return facts
 
 
-def snapshot_identity(snapshot_dir: Union[str, Path], receipt: Optional[dict]) -> Optional[str]:
+def snapshot_identity(snapshot_dir: str | Path, receipt: dict | None) -> str | None:
     """Stable identity of a snapshot's content, used for incremental skip.
 
     Prefers receipt.json's snapshot_id — a SHA-256 over enola's byte-stable
@@ -416,7 +416,7 @@ def snapshot_identity(snapshot_dir: Union[str, Path], receipt: Optional[dict]) -
         return None
 
 
-def normalize_relation(relation: dict) -> Optional[Tuple[str, str]]:
+def normalize_relation(relation: dict) -> tuple[str, str] | None:
     """Extract (relation_type, target_name) from a relation object, or None.
 
     Probes the alternate key spellings enola may use; returns None when either

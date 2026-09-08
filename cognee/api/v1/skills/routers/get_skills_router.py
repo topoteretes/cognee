@@ -13,13 +13,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from cognee import __version__ as cognee_version
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -58,14 +58,14 @@ class SkillIngestRequest(BaseModel):
     """JSON body for ingesting a single skill from inline SKILL.md markdown."""
 
     skills_text: str = Field(description="Inline SKILL.md markdown to ingest as a Skill node.")
-    skill_name: Optional[str] = Field(
+    skill_name: str | None = Field(
         default=None, description="Name/slug for the skill (defaults to 'skill')."
     )
-    dataset_name: Optional[str] = Field(
+    dataset_name: str | None = Field(
         default=None,
         description="Target dataset name (created if needed). Required unless dataset_id is given.",
     )
-    dataset_id: Optional[UUID] = Field(
+    dataset_id: UUID | None = Field(
         default=None, description="Target dataset UUID (alternative to dataset_name)."
     )
 
@@ -135,8 +135,8 @@ def get_skills_router() -> APIRouter:
                 **({"dataset_id": payload.dataset_id} if payload.dataset_id else {}),
             )
             return jsonable_encoder(result.to_dict())
-        except Exception as exc:
-            logger.error("ingest skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("ingest skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to ingest skill"})
 
     @router.get(
@@ -194,8 +194,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("list skills failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list skills failed")
             return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
 
     @router.get(
@@ -232,8 +232,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("get skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("get skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
 
     @router.delete(
@@ -270,8 +270,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("delete skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("delete skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})
 
     return router

@@ -1,9 +1,9 @@
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
-from sqlalchemy.orm import aliased
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from cognee.infrastructure.databases.relational import with_async_session
 from cognee.modules.graph.models import Node
@@ -37,7 +37,7 @@ async def get_data_related_nodes(dataset_id: UUID, data_id: UUID, session: Async
 async def get_global_data_related_nodes(
     data_id: UUID,
     session: AsyncSession,
-    dataset_id: Optional[UUID] = None,
+    dataset_id: UUID | None = None,
 ):
     """Return nodes safe to hard-delete for a single-DB (non-multi-user)
     deployment where the same data item may be linked to multiple datasets.

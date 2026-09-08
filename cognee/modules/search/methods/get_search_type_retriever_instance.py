@@ -1,42 +1,42 @@
 import os
-from typing import Callable, List, Optional, Type, Tuple
+from collections.abc import Callable
+from typing import List, Optional, Tuple, Type
 
 from cognee.base_config import get_base_config
-from cognee.modules.retrieval.base_retriever import BaseRetriever
-
+from cognee.context_global_variables import session_user
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.modules.search.types import SearchType
-from cognee.modules.search.operations import select_search_type
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
-from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
+from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
-from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
-from cognee.modules.retrieval.completion_retriever import CompletionRetriever
-from cognee.modules.retrieval.hybrid_retriever import HybridRetriever, DEFAULT_HYBRID_LANE_TOP_K
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
-    GraphCompletionDecompositionRetriever,
-)
-from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
-from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
-from cognee.modules.retrieval.graph_summary_completion_retriever import (
-    GraphSummaryCompletionRetriever,
-)
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.completion_retriever import CompletionRetriever
+from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
-from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
-from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
-from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
-from cognee.modules.retrieval.code_retriever import CodeRetriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
+    GraphCompletionDecompositionRetriever,
+)
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_report_retriever import GraphReportRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
+from cognee.modules.retrieval.hybrid_retriever import DEFAULT_HYBRID_LANE_TOP_K, HybridRetriever
+from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 from cognee.modules.retrieval.skills_retriever import SkillsRetriever
-from cognee.context_global_variables import session_user
+from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.triplet_retriever import TripletRetriever
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
+from cognee.modules.search.operations import select_search_type
+from cognee.modules.search.types import SearchType
 
 
 def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int | None:
@@ -95,7 +95,7 @@ async def get_search_type_retriever_instance(
     dataset = kwargs.get("dataset")
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
-    search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+    search_core_registry: dict[SearchType, tuple[BaseRetriever, dict]] = {
         SearchType.CODE: (
             CodeRetriever,
             {"config": retriever_specific_config},

@@ -1,5 +1,5 @@
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
@@ -10,14 +10,14 @@ from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
     drop_pg_database_if_exists,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class PostgresGraphDatasetDatabaseHandler:
     """Handler for per-dataset Postgres graph databases."""
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider not in ("postgres", "postgres_demo"):
