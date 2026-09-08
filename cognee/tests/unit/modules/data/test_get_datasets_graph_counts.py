@@ -160,6 +160,51 @@ async def test_a_cache_miss_counts_the_graph_and_caches_it_against_the_run():
 
 
 @pytest.mark.asyncio
+async def test_a_run_that_is_not_completed_recounts_instead_of_serving_its_cache():
+    """A cache entry only describes a finished run.
+
+    Startup recovery closes an abandoned run by writing an ERRORED row that
+    reuses the dead run's pipeline_run_id, so its cached counts were computed
+    before that run's rollback deleted the nodes they describe. Serving them
+    would report the pre-rollback graph size forever, since nothing recomputes
+    until the dataset is cognified again (SDK-577). Same for a run still in
+    flight: recounting keeps the numbers live.
+    """
+    dataset = _dataset()
+    run_id = uuid4()
+    stale_cached = SimpleNamespace(
+        id=run_id,
+        num_nodes=137,
+        num_edges=421,
+        created_at=datetime(2026, 8, 3, 9, 0, tzinfo=timezone.utc),
+    )
+    errored_run = SimpleNamespace(
+        dataset_id=dataset.id,
+        pipeline_run_id=run_id,
+        status=PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+    )
+    added = []
+
+    with (
+        patch.object(
+            counts_module,
+            "_get_latest_cognify_runs",
+            AsyncMock(return_value={dataset.id: errored_run}),
+        ),
+        patch.object(
+            counts_module, "_get_cached_metrics", AsyncMock(return_value={run_id: stale_cached})
+        ),
+        patch.object(counts_module, "set_database_global_context_variables", _no_op_context),
+        patch.object(counts_module, "get_graph_engine", _graph_engine()),
+        patch.object(counts_module, "get_relational_engine", lambda: _fake_engine(added)),
+    ):
+        counts = await get_datasets_graph_counts([dataset])
+
+    assert counts[dataset.id].num_nodes == 12
+    assert counts[dataset.id].num_edges == 34
+
+
+@pytest.mark.asyncio
 async def test_an_unreadable_graph_degrades_to_zero_without_dropping_the_dataset():
     """One unavailable graph store must not fail, or silently shrink, a batch."""
     readable, unreadable = _dataset(), _dataset()

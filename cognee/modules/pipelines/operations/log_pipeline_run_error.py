@@ -22,8 +22,14 @@ async def log_pipeline_run_error(
     started_at: Optional[datetime] = None,
     tokens_in: Optional[int] = None,
     tokens_out: Optional[int] = None,
+    data_info: Optional[Any] = None,
 ):
-    data_info = summarize_run_info_data(data)
+    # ``data_info`` is for a caller that already holds a summarized value: the
+    # startup recovery closes a run whose STARTED row carries one, and
+    # summarizing a summary stringifies the list of data ids and re-truncates
+    # an already-truncated preview with a wrong character count.
+    if data_info is None:
+        data_info = summarize_run_info_data(data)
 
     pipeline_run = PipelineRun(
         pipeline_run_id=pipeline_run_id,

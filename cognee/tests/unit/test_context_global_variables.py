@@ -389,3 +389,48 @@ async def test_uuid_string_dataset_is_rejected(monkeypatch):
     with pytest.raises(CogneeValidationError, match="must be a dataset id"):
         async with set_database_global_context_variables(str(uuid4()), uuid4()):
             pass
+
+
+@pytest.mark.asyncio
+async def test_failure_after_the_queue_slot_releases_it(monkeypatch):
+    """A slot taken on the way in must not outlive a failed entry.
+
+    Everything after ensure_slot can raise: a dataset whose owner user was
+    deleted (get_user), a provisioning or connection failure. When it does,
+    __aenter__ never returns, so __aexit__ never runs, and without the release
+    the permit is held for the life of the task. In a long-lived task (the API
+    lifespan) that is the life of the process, and enough of them wedge every
+    later ensure_slot (SDK-577).
+    """
+    import cognee.context_global_variables as context_module
+
+    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
+
+    dataset_id = uuid4()
+    slots = []
+    released = []
+
+    class _FakeQueue:
+        async def ensure_slot(self, dataset):
+            slots.append(dataset)
+
+        async def release_slot_for(self, dataset=None):
+            released.append(dataset)
+
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.dataset_queue.dataset_queue", lambda: _FakeQueue()
+    )
+
+    async def _boom(*_args, **_kwargs):
+        raise RuntimeError("dataset owner is gone")
+
+    monkeypatch.setattr(
+        context_module.DatabaseContextManager, "_apply_dataset_databases", _boom, raising=True
+    )
+
+    with pytest.raises(RuntimeError):
+        async with set_database_global_context_variables(dataset_id, uuid4()):
+            pass
+
+    assert slots == [dataset_id]
+    assert released == [dataset_id]

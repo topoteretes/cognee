@@ -100,9 +100,16 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
-    from cognee.modules.cognify.recovery import recover_stale_cognify_runs_on_startup
+    from cognee.modules.pipelines.recovery import recover_stale_pipeline_runs_on_startup
 
-    await recover_stale_cognify_runs_on_startup()
+    try:
+        await recover_stale_pipeline_runs_on_startup()
+    except Exception:
+        # Recovery is housekeeping for runs a previous process abandoned.
+        # It handles its own per-run failures; anything that still escapes
+        # (a relational error mid-sweep) must not keep the server down,
+        # because the next boot will find the same rows waiting.
+        logger.error("Startup recovery of abandoned pipeline runs failed", exc_info=True)
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")

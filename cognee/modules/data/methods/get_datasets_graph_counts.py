@@ -177,7 +177,20 @@ async def get_datasets_graph_counts(
             counts[dataset.id] = DatasetGraphCounts()
             continue
 
-        cached = cached_metrics.get(latest_run.pipeline_run_id)
+        # Only a COMPLETED run's counts are trustworthy. The latest run may be
+        # one the startup recovery closed as ERRORED, which reuses the dead
+        # run's pipeline_run_id, so its counts were cached before that run's
+        # rollback deleted the nodes they describe (SDK-577). Recomputing on a
+        # non-COMPLETED run also keeps a mid-run dataset reporting real counts
+        # instead of zero. Same guard the other latest-run readers already
+        # apply (live_updates, edge-evidence lookup).
+        from cognee.modules.pipelines.models import PipelineRunStatus
+
+        cached = (
+            cached_metrics.get(latest_run.pipeline_run_id)
+            if latest_run.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+            else None
+        )
         if cached is not None:
             counts[dataset.id] = DatasetGraphCounts(
                 pipeline_run_id=latest_run.pipeline_run_id,

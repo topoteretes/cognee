@@ -219,6 +219,26 @@ class DatabaseContextManager:
 
         await dataset_queue().ensure_slot(dataset)
 
+        try:
+            await self._apply_dataset_databases(dataset, user_id, permission_type)
+        except BaseException:
+            # Everything below the slot acquisition can raise: a deleted
+            # dataset owner (get_user), a provisioning or connection failure.
+            # When it does, __aenter__ never returns, so __aexit__ never runs
+            # and the permit would be held for the life of the task. In a
+            # lifespan task that is the life of the process, and enough of
+            # them wedge every later ensure_slot (SDK-577 found this through
+            # startup recovery looping over datasets).
+            await dataset_queue().release_slot_for(dataset)
+            raise
+
+    async def _apply_dataset_databases(
+        self,
+        dataset: UUID,
+        user_id: Optional[UUID],
+        permission_type: Optional[str],
+    ) -> None:
+        """Resolve and bind the dataset's own databases. Runs holding a queue slot."""
         # Optional permission gate: checked only when the caller asked for it
         # by passing a permission_type — callers that already authorized at the
         # API layer pass nothing and no check is performed here.

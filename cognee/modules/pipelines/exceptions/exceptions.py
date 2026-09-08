@@ -1,3 +1,5 @@
+from typing import Optional
+
 from cognee.exceptions import CogneeSystemError
 from fastapi import status
 
@@ -15,6 +17,37 @@ class PipelineRunFailedError(CogneeSystemError):
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
+
+
+class AbandonedPipelineRunError(CogneeSystemError):
+    """A pipeline run whose process ended before it could write a terminal status.
+
+    A SIGKILL, an OOM kill or a pod eviction runs no Python, so the run's own
+    error path never fires and its row stays DATASET_PROCESSING_STARTED.
+    Startup recovery closes such a run with this class, so a consumer reading
+    ``error_class`` can tell a killed run (worth re-running as-is) from one
+    that genuinely failed on its input.
+
+    Never raised and never logged by the base class: it is constructed purely
+    to carry a message and an ``error_class`` onto the run's terminal row, and
+    a "raised (Status code: 500)" line for an object nobody raises, with no run
+    id and no dataset, is worse than no line. Recovery logs the event itself,
+    with that context.
+    """
+
+    def __init__(
+        self,
+        pipeline_name: Optional[str] = None,
+        name: str = "AbandonedPipelineRunError",
+        status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ):
+        super().__init__(
+            f"The {pipeline_name or 'pipeline'} run was abandoned: its process ended "
+            "before it could write a terminal status. Recovered on startup; run it again.",
+            name,
+            status_code,
+            log=False,
+        )
 
 
 class CognifyFailedError(CogneeSystemError):

@@ -144,6 +144,80 @@ async def test_operation_record_does_not_make_unbuilt_dataset_warm(
 
 
 @pytest.mark.asyncio
+async def test_abandoned_run_keeps_failsafe_warm(clean_test_environment, monkeypatch):
+    """A run the startup recovery closed must not read as build_failed.
+
+    Recovery writes an ERRORED row for a run a killed process left open
+    (SDK-577). That says nothing about whether the graph is usable: the run
+    was ended by a process death, and for a pipeline with no rollback policy
+    nothing was unwound. Counting it would flip a dataset whose graph is
+    intact into build_failed, and recall() would then refuse to search it.
+    """
+    dataset_id = uuid4()
+    _permit(monkeypatch, [dataset_id])
+
+    await _insert_run(
+        dataset_id,
+        "custom_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class="AbandonedPipelineRunError",
+        error_message="The custom_pipeline run was abandoned",
+    )
+
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert probe.state == STATE_WARM
+
+
+@pytest.mark.asyncio
+async def test_abandoned_run_does_not_mask_a_real_failure(clean_test_environment, monkeypatch):
+    """The newest errored row wins, so an abandoned run must not become the
+    reported cause of a build that failed for a real reason."""
+    dataset_id = uuid4()
+    _permit(monkeypatch, [dataset_id])
+
+    await _insert_run(
+        dataset_id,
+        "cognify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class="AuthenticationError",
+        error_message="invalid api key",
+    )
+    await _insert_run(
+        dataset_id,
+        "memify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+        error_class="AbandonedPipelineRunError",
+        error_message="The memify_pipeline run was abandoned",
+    )
+
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert probe.state == STATE_BUILD_FAILED
+    assert probe.error_class == "AuthenticationError"
+    assert probe.error_message == "invalid api key"
+
+
+@pytest.mark.asyncio
+async def test_legacy_errored_row_without_error_class_still_flags_build_failed(
+    clean_test_environment, monkeypatch
+):
+    """Rows written before error_class existed carry NULL, and SQL's `!=` is
+    NULL for those, so the abandoned-run exclusion has to spell out the NULL
+    case or it would silently drop every legacy failure."""
+    dataset_id = uuid4()
+    _permit(monkeypatch, [dataset_id])
+
+    await _insert_run(
+        dataset_id,
+        "cognify_pipeline",
+        PipelineRunStatus.DATASET_PROCESSING_ERRORED,
+    )
+
+    probe = await get_graph_build_status(_USER, [dataset_id])
+    assert probe.state == STATE_BUILD_FAILED
+    assert probe.error_class is None
+
+
+@pytest.mark.asyncio
 async def test_errored_graph_write_flags_build_failed_until_a_build_completes(
     clean_test_environment, monkeypatch
 ):
