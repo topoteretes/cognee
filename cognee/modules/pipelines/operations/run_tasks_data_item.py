@@ -15,7 +15,10 @@ from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules import ingestion
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.models import PipelineContext
-from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
+from cognee.modules.pipelines.models.DataItemStatus import (
+    DataItemStatus,
+    is_data_item_completed,
+)
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunAlreadyCompleted,
     PipelineRunCompleted,
@@ -192,10 +195,8 @@ async def run_tasks_data_item_incremental(
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
     if data_point:
-        if (
-            data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-            == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-        ):
+        status_for_pipeline = (data_point.pipeline_status or {}).get(pipeline_name) or {}
+        if is_data_item_completed(status_for_pipeline.get(str(dataset.id))):
             yield {
                 "run_info": PipelineRunAlreadyCompleted(
                     pipeline_run_id=pipeline_run_id,
