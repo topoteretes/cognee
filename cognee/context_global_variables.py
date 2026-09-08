@@ -234,8 +234,8 @@ class DatabaseContextManager:
     async def _bind_dataset_databases(
         self,
         dataset: UUID,
-        user_id: Optional[UUID],
-        permission_type: Optional[str],
+        user_id: UUID | None,
+        permission_type: str | None,
     ) -> None:
         """Resolve and bind the dataset's own databases. Runs holding a queue slot."""
         # Optional permission gate: checked only when the caller asked for it

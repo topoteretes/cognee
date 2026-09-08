@@ -3,7 +3,6 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.exceptions import CogneeValidationError
 from cognee.context_global_variables import (
     current_dataset_id,
     embedding_config,
@@ -12,6 +11,7 @@ from cognee.context_global_variables import (
     set_database_global_context_variables,
     vector_db_config,
 )
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.infrastructure.llm.config import LLMConfig
