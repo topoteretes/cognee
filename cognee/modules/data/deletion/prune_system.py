@@ -59,8 +59,18 @@ async def prune_vector_databases():
 
 
 async def prune_system(graph=True, vector=True, metadata=True, cache=True):
-    # Note: prune system should not be available through the API, it has no permission checks and will
-    #       delete all graph and vector databases if called. It should only be used in development or testing environments.
+    """Drop cognee's backing stores, one flag per store.
+
+    ``metadata`` is a guarantee, not a hint: with ``metadata=False`` the
+    relational schema (``users``, ``datasets``, ``acls``, ``alembic_version``)
+    must still be intact when this returns, whatever the other flags did. An
+    adapter sharing one database with the relational layer therefore has to
+    scope its own ``prune()`` to the tables it owns — see
+    ``PGVectorAdapter.prune`` (#4956).
+
+    Note: prune_system should not be available through the API, it has no permission checks and will
+          delete all graph and vector databases if called. It should only be used in development or testing environments.
+    """
 
     async def _prune():
         if graph and not backend_access_control_enabled():

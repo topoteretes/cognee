@@ -37,6 +37,12 @@ QUERY_BATCH_SIZE = 1000
 # connections close on release instead of idling.
 _ACCESS_CONTROL_DEFAULT_POOL_ARGS = {"pool_size": 2, "max_overflow": 20}
 
+# Stamped as a table comment on every collection this adapter creates, and the only
+# thing prune() trusts when the engine is shared with the relational layer. Column
+# shape can't stand in for it: an app table holding an id, a JSON payload and an
+# embedding looks exactly like a collection (#4956). Compared exactly, not by prefix.
+_COLLECTION_OWNERSHIP_MARKER = "cognee:pgvector-collection:v1"
+
 
 class IndexSchema(DataPoint):
     """
@@ -93,6 +99,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.VECTOR_DB_LOCK = asyncio.Lock()
         self._write_locks: dict[str, asyncio.Lock] = {}
         self._metadata = MetaData()
+        # Collections already marked by this instance, so the backfill costs one
+        # statement per collection rather than one per create_collection() call.
+        self._marked_collections: set[str] = set()
         # True when this adapter created its own engine and must dispose it on close().
         # False when the engine is borrowed from the relational adapter.
         self._owns_engine: bool = False
@@ -327,11 +336,18 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             await connection.run_sync(
                                 Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
                             )
+                            # Same transaction as the DDL, so the table and its
+                            # ownership marker can never exist without each other.
+                            await self._mark_collection_owned(connection, collection_name)
+                            self._marked_collections.add(collection_name)
                     # Reflect AFTER the DDL transaction commits so
                     # _metadata is never populated for a table that
                     # might be rolled back.
                     async with self.engine.begin() as connection:
                         await connection.run_sync(self._metadata.reflect, only=[collection_name])
+                    return
+
+        await self._backfill_collection_marker(collection_name)
 
     @retry(
         retry=retry_if_exception_type((DeadlockDetectedError, DBAPIError)),
@@ -859,10 +875,158 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         return
 
+    async def _mark_collection_owned(self, connection, collection_name: str) -> None:
+        """Stamp the ownership marker on ``collection_name``.
+
+        Unqualified, so it resolves through the same search_path as
+        ``create_collection``'s ``CREATE TABLE``. ``COMMENT ON`` takes no bind
+        parameters, so the marker is inlined; it is a module constant, never
+        caller input.
+        """
+        await connection.execute(
+            text(f"COMMENT ON TABLE \"{collection_name}\" IS '{_COLLECTION_OWNERSHIP_MARKER}'")
+        )
+
+    async def _backfill_collection_marker(self, collection_name: str) -> None:
+        """Mark an already-existing collection table this adapter is reopening.
+
+        Collections predating the marker carry no proof, and prune fails closed
+        on anything unproven, so without this an upgrade would leak them
+        forever. Claiming the table is safe here: ``collection_name`` is a
+        cognee index name that reached ``create_collection``, so the adapter is
+        about to write rows to it anyway.
+
+        Best-effort — a marker that cannot be written just leaves the table
+        unproven, and prune leaves it alone.
+        """
+        if collection_name in self._marked_collections:
+            return
+
+        try:
+            async with self.engine.begin() as connection:
+                await self._mark_collection_owned(connection, collection_name)
+            self._marked_collections.add(collection_name)
+        except Exception as error:
+            logger.debug(
+                "Could not stamp the ownership marker on collection '%s'; prune() will leave it in place: %s",
+                collection_name,
+                error,
+            )
+
+    # Reports both signals per table — the ownership marker and the collection column
+    # shape — instead of filtering in SQL, so prune can log what it declined to drop.
+    _COLLECTION_OWNERSHIP_SQL = text(
+        """
+        WITH candidates AS (
+            SELECT
+                c.relname AS table_name,
+                obj_description(c.oid, 'pg_class') IS NOT DISTINCT FROM :marker AS is_marked,
+                (
+                    EXISTS (
+                        SELECT 1 FROM pg_attribute a
+                        JOIN pg_type t ON t.oid = a.atttypid
+                        WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                          AND a.attname = 'vector' AND t.typname = 'vector'
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM pg_attribute a
+                        WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                          AND a.attname = 'id'
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM pg_attribute a
+                        WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                          AND a.attname = 'payload'
+                    )
+                ) AS has_collection_shape
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind = 'r' AND n.nspname = :schema_name
+        )
+        SELECT table_name, is_marked, has_collection_shape
+        FROM candidates
+        WHERE is_marked OR has_collection_shape
+        """
+    )
+
+    async def _classify_schema_tables(self, connection) -> tuple[str | None, list[str], list[str]]:
+        """Split the current schema into tables prune owns and tables it must not drop.
+
+        Scoped to ``current_schema()`` — where ``create_collection``'s
+        unqualified ``CREATE TABLE`` lands — so this follows the engine's
+        search_path instead of assuming ``public``.
+
+        Returns ``(schema_name, owned, unproven)``. ``owned`` needs the marker
+        *and* the collection shape; the shape is a second opinion that stops a
+        marker copied onto some other table (``INCLUDING COMMENTS``) from
+        authorizing a drop. Everything else is ``unproven`` and survives.
+        """
+        schema_name = (await connection.execute(text("SELECT current_schema()"))).scalar()
+        if not schema_name:
+            return None, [], []
+
+        result = await connection.execute(
+            self._COLLECTION_OWNERSHIP_SQL,
+            {"schema_name": schema_name, "marker": _COLLECTION_OWNERSHIP_MARKER},
+        )
+
+        owned: list[str] = []
+        unproven: list[str] = []
+        for table_name, is_marked, has_collection_shape in result.all():
+            if is_marked and has_collection_shape:
+                owned.append(table_name)
+            else:
+                unproven.append(table_name)
+        return schema_name, sorted(owned), sorted(unproven)
+
     async def prune(self):
-        """Drop all vector collection tables and reset cached reflection metadata."""
+        """Drop all vector collection tables and reset cached reflection metadata.
+
+        When this adapter owns its engine the database is dedicated to vectors,
+        so the inherited whole-database drop is correct. When the engine is
+        borrowed from the relational adapter (Postgres serving as both the
+        relational and the vector backend), that inherited path would reflect
+        and drop *every* table in the schema — including ``users``,
+        ``datasets`` and ``alembic_version`` — so
+        ``prune_system(vector=True, metadata=False)`` would silently destroy
+        the relational schema it promises to leave alone (#4956).
+
+        On the borrowed path prune drops only tables carrying the ownership
+        marker stamped at creation, and fails closed on everything else. A
+        table that merely looks like a collection is left alone and reported:
+        in a shared schema, guessing wrong costs someone else their data.
+        """
         self._metadata.clear()
-        await self.delete_database()
+
+        if self._owns_engine:
+            await self.delete_database()
+            return
+
+        async with self.engine.begin() as connection:
+            schema_name, owned, unproven = await self._classify_schema_tables(connection)
+
+            if unproven:
+                # Either unrelated app tables, or pre-marker collections the operator
+                # now has to drop by hand — they cannot act on either without being told.
+                logger.warning(
+                    "PGVector prune (borrowed engine): leaving %d table(s) in schema %s in "
+                    "place — cognee cannot prove it owns them: %s",
+                    len(unproven),
+                    schema_name,
+                    unproven,
+                )
+
+            # Record of what was dropped, in a schema cognee does not exclusively own.
+            logger.info(
+                "PGVector prune (borrowed engine): dropping %d owned collection table(s) in schema %s: %s",
+                len(owned),
+                schema_name,
+                owned,
+            )
+            for table_name in owned:
+                await connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+
+        self._marked_collections.clear()
 
     async def run_migrations(self):
         """Run PGVector adapter migrations (currently no-op)."""
