@@ -1310,7 +1310,9 @@ class Neo4jAdapter(GraphDBInterface):
         return [
             (
                 result["source_id"],
-                result["m"]["id"] if result["n"]["id"] == result["source_id"] else result["n"]["id"],
+                result["m"]["id"]
+                if result["n"]["id"] == result["source_id"]
+                else result["n"]["id"],
                 {"relationship_name": result["r"][1]},
             )
             for result in results
