@@ -44,7 +44,7 @@ _SIMPLE_TYPE_DEFAULTS = {
 }
 _ORIGIN_DEFAULT_FACTORIES = {
     list: list,
-    List: list,  # typing.List is a distinct origin key, not an annotation
+    List: list,  # noqa: UP006 - typing.List is a distinct origin key, not an annotation
     dict: dict,
     set: set,
     tuple: tuple,

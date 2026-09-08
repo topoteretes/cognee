@@ -12,7 +12,7 @@ class Role(Principal):
 
     name = Column(String, nullable=False, index=True)
 
-    users: Mapped[list["User"]] = relationship(
+    users: Mapped[list["User"]] = relationship(  # noqa: F821
         "User",
         secondary=UserRole.__tablename__,
         back_populates="roles",
