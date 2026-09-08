@@ -59,6 +59,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
 )
 from .api.v1.ui import start_ui
 from .api.v1.session import session
+from .modules.seeding import seed
 
 # Pipelines
 from .modules import pipelines
