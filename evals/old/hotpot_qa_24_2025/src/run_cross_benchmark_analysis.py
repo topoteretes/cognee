@@ -28,7 +28,7 @@ def download_modal_volume(volume_name: str, download_path: str) -> None:
 
     try:
         cmd = ["modal", "volume", "get", volume_name, "/"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
         if result.returncode == 0:
             print("✅ Successfully downloaded modal volume")

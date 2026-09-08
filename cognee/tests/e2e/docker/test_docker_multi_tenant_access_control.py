@@ -77,7 +77,7 @@ def _free_port() -> int:
 def _run(
     command: list[str], *, timeout: int = 60, check: bool = True
 ) -> subprocess.CompletedProcess:
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
     if check and result.returncode != 0:
         output = "\n".join(part for part in (result.stdout, result.stderr) if part)
         raise AssertionError(f"Command failed ({result.returncode}): {' '.join(command)}\n{output}")

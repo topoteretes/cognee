@@ -267,6 +267,7 @@ def write_diagram(results: Any, path: str) -> str:
             input=source.encode("utf-8"),
             capture_output=True,
             timeout=120,
+            check=False,
         )
         if completed.returncode != 0:
             raise CliCommandInnerException(

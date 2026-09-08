@@ -87,7 +87,7 @@ def run_single(run_num: int, total: int, extra_args: list[str]) -> dict:
     print(f"{'=' * 60}\n")
 
     t0 = time.time()
-    result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR))
+    result = subprocess.run(cmd, text=True, cwd=str(COGNEE_DIR), check=False)
     wall = time.time() - t0
 
     # A non-zero exit with results present is a FAILED RUN (the bench exits 1

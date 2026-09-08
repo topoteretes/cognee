@@ -45,6 +45,7 @@ def _check_docker_available() -> tuple[bool, str]:
             ["docker", "info"],
             capture_output=True,
             timeout=15,
+            check=False,
         )
         if result.returncode == 0:
             return True, "Docker daemon is running."

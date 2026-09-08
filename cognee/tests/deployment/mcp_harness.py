@@ -43,6 +43,7 @@ def image_exists(tag: str) -> bool:
         subprocess.run(
             ["docker", "image", "inspect", tag],
             capture_output=True,
+            check=False,
         ).returncode
         == 0
     )
@@ -100,6 +101,7 @@ class MCPContainer:
             ["docker", "logs", self.name],
             capture_output=True,
             text=True,
+            check=False,
         )
         return result.stdout + result.stderr
 
@@ -133,7 +135,7 @@ def run_mcp_http_container(
     for key, value in env.items():
         env_args += ["-e", f"{key}={value}"]
 
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
     subprocess.run(
         [
@@ -163,7 +165,7 @@ def run_mcp_http_container(
             raise
         yield container
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
 
 @contextlib.asynccontextmanager

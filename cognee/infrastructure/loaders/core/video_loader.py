@@ -200,7 +200,7 @@ class VideoLoader(LoaderInterface):
         ]
 
         def run_ffmpeg() -> subprocess.CompletedProcess:
-            return subprocess.run(command, capture_output=True)
+            return subprocess.run(command, capture_output=True, check=False)
 
         try:
             result = await asyncio.to_thread(run_ffmpeg)
