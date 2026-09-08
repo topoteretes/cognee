@@ -95,7 +95,7 @@ import threading
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -379,6 +379,61 @@ def emit(
         _dropped += 1
         return
 
+    _enqueue(
+        CaptureEvent(
+            kind=kind,
+            payload=payload,
+            payload_kind=payload_kind,
+            run_id=run_id,
+            dataset_id=dataset_id,
+            scope=_current_scope.get(),
+            stage=stage,
+            ts=time.time(),
+        )
+    )
+
+
+def has_room() -> bool:
+    """True when the next ``emit()`` would be buffered rather than dropped.
+
+    For emit points whose payload is expensive to build (a graph snapshot): a
+    burst past ``QUEUE_SIZE`` would otherwise pay the full build cost for
+    events ``emit()`` discards on arrival. One global read plus a ``len()``;
+    a soft check (another thread may fill the buffer in between), never a
+    reservation.
+    """
+    return _sink is not None and len(_buffer) < QUEUE_SIZE
+
+
+def emit_lazy(
+    kind: str,
+    build_payload: Callable[[], Any],
+    *,
+    payload_kind: str = "json",
+    stage: str | None = None,
+    run_id: UUID | str | None = None,
+    dataset_id: UUID | str | None = None,
+) -> None:
+    """``emit()`` for an expensive payload: build it only if it will be buffered.
+
+    ``build_payload`` is the emit point's sanctioned snapshot cost (a
+    ``model_dump(mode="json")``, a hash) and runs on the caller's thread, but
+    only after the same sink/room checks ``emit()`` makes — so a full buffer
+    costs the drop counter and nothing else, instead of a snapshot per dropped
+    event. Unlike ``emit()`` this has an exception path: a builder that raises
+    costs its own event (logged at debug), never the caller.
+    """
+    global _dropped
+    if _sink is None:
+        return
+    if len(_buffer) >= QUEUE_SIZE:
+        _dropped += 1
+        return
+    try:
+        payload = build_payload()
+    except Exception as exc:
+        logger.debug("capture payload build failed (%s)", exc)
+        return
     _enqueue(
         CaptureEvent(
             kind=kind,

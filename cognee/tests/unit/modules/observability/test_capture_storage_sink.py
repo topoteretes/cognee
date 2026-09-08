@@ -1,19 +1,23 @@
 """StorageSink layout (SDK-529): gzip'd JSONL blobs per (dataset, run, kind) and a
 pretty manifest.json per run, written through the normal StorageManager."""
 
+import asyncio
 import gzip
 import json
 import re
+import time
 from uuid import uuid4
 
 import pytest
 
 from cognee.infrastructure.files.storage import StorageManager
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.modules.observability import capture
 from cognee.modules.observability.capture import (
     KIND_RUN_MANIFEST,
     KIND_SUMMARY_GENERATED,
     StorageSink,
+    hook,
 )
 
 pytestmark = pytest.mark.usefixtures("capture_reset")
@@ -102,6 +106,66 @@ async def test_manifest_overwrite_keeps_latest_and_root_prefix(tmp_path):
 
     manifest_path = tmp_path / "evals-run-1" / dataset_id / run_id / "manifest.json"
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["payload"] == {"v": 2}
+
+
+class _StalledLocalFileStorage(LocalFileStorage):
+    """A filesystem that stalls: ``store`` is an ``async def`` whose body blocks
+    without ever suspending — exactly what LocalFileStorage.store is, only slower."""
+
+    stall_s = 0.2
+
+    async def store(self, *args, **kwargs):
+        time.sleep(self.stall_s)
+        return await super().store(*args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_store_does_not_pin_the_event_loop(tmp_path):
+    """The write runs on a worker thread, so a stalled filesystem freezes neither
+    the flusher's loop nor the coroutines sharing it (a concurrent recall, the
+    pipeline awaiting drain())."""
+    sink = StorageSink(StorageManager(_StalledLocalFileStorage(str(tmp_path))))
+    run_id = str(uuid4())
+    ticks = 0
+
+    async def ticker():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.01)
+
+    task = asyncio.create_task(ticker())
+    try:
+        await sink([_record(KIND_SUMMARY_GENERATED, run_id, None, "written")])
+    finally:
+        task.cancel()
+
+    # ~20 ticks fit in a 0.2 s stall; on-loop the ticker would have seen 0-1.
+    assert ticks >= 5
+    [blob] = (tmp_path / "nodataset" / run_id / KIND_SUMMARY_GENERATED).glob("*.jsonl.gz")
+    assert [line["payload"] for line in _read_jsonl_gz(blob)] == ["written"]
+
+
+@pytest.mark.asyncio
+async def test_sink_timeout_cuts_a_wedged_local_write(tmp_path):
+    """SINK_TIMEOUT_S can only fire at a real suspension point. Awaited on the
+    loop, LocalFileStorage.store had none, so a wedged write pinned the flusher
+    past every timeout and drain()'s documented budget was false for the default
+    sink. Off-loop, the timeout lands and the event is accounted for as dropped."""
+    storage = _StalledLocalFileStorage(str(tmp_path))
+    storage.stall_s = 1.0
+    capture.register_capture_sink(StorageSink(StorageManager(storage)))
+    hook._configure(flush_interval_s=60.0, sink_timeout_s=0.05)
+
+    capture.emit(KIND_SUMMARY_GENERATED, "wedged", payload_kind="text")
+    started = time.monotonic()
+    await capture.drain(timeout=0.5)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5  # the 0.05 s timeout, not the 1 s stall
+    assert hook._dropped == 1
+    assert not hook._buffer
+    assert hook._in_flight_total() == 0
 
 
 @pytest.mark.asyncio

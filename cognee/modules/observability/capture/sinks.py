@@ -23,8 +23,17 @@ waits ``_CANCEL_GRACE_S`` for that cancel to land before abandoning the write
 and re-buffering the batch.
 Sinks must not depend on the default executor or on threads: the atexit drain
 runs after ``threading._shutdown()``, when ``asyncio.to_thread`` raises and the
-write is lost; ``StorageSink`` goes through ``run_off_loop``, which falls back
-to an inline call there.
+write is lost; ``StorageSink`` goes through ``run_off_loop`` /
+``run_coroutine_off_loop``, which fall back to an inline call there.
+
+A sink write must have a REAL suspension point. The flusher bounds each write
+with ``SINK_TIMEOUT_S`` (and ``drain()`` with its budget) by cancelling it, and
+a coroutine can only be cancelled where it awaits something that actually
+suspends: ``LocalFileStorage.store`` is an ``async def`` whose body never does
+(makedirs, write, rename), so awaited directly it would pin the flusher — and
+every other coroutine on that loop — for as long as the filesystem takes, and
+neither timeout could fire. ``StorageSink`` therefore drives the whole write on
+a worker thread (``run_coroutine_off_loop``).
 """
 
 from __future__ import annotations
@@ -76,6 +85,35 @@ async def run_off_loop(func: Callable[..., T], /, *args: Any) -> T:
     return await future
 
 
+def _run_to_completion(make_coroutine: Callable[[], Awaitable[T]]) -> T:
+    """Worker-thread body: build the coroutine HERE (never on the caller's side,
+    so a submit-time failure leaves no never-awaited coroutine behind) and drive
+    it on a private loop."""
+    return asyncio.run(make_coroutine())
+
+
+async def run_coroutine_off_loop(make_coroutine: Callable[[], Awaitable[T]]) -> T:
+    """Drive a coroutine to completion in a worker thread; inline once the executor is gone.
+
+    For an ``async def`` whose body blocks — ``LocalFileStorage.store`` (no
+    suspension point at all) — or that offloads internally with no
+    interpreter-exit fallback (``S3FileStorage.store``). Running it on its own
+    loop in a worker thread gives the awaiting flusher a real suspension point,
+    so ``SINK_TIMEOUT_S`` and ``drain()``'s budget can actually cut the wait
+    (the worker then finishes on its own: abandoned, not interrupted — which is
+    why blob names are collision-free and manifests are written atomically) and
+    a stalled filesystem no longer freezes every coroutine on the flusher's loop.
+    Same submit-time fallback as ``run_off_loop``: inside the atexit drain the
+    executor is gone, and the coroutine is awaited inline on the drain's own loop.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        future = loop.run_in_executor(None, functools.partial(_run_to_completion, make_coroutine))
+    except RuntimeError:
+        return await make_coroutine()
+    return await future
+
+
 # Process-wide blob sequence: together with time_ns and pid this makes blob
 # names collision-free across loops/threads/processes without coordination. A
 # per-sink NNNNNN counter with overwrite=True would silently clobber blobs
@@ -101,12 +139,12 @@ class StorageSink:
     ``dataset_id``, ``stage``, ``ts``, ``payload``); the manifest's fields live
     under ``payload``. Nothing is written to the relational DB.
 
-    Runs on the flusher task only, never on an emit path. Encoding (the CPU-heavy
-    part) is pushed off-loop; the ``store()`` call itself is awaited on the loop,
-    and ``LocalFileStorage.store`` is an ``async def`` with a blocking body
-    (makedirs, write, rename) — sub-millisecond for a gzipped batch on local disk,
-    unbounded on a slow network filesystem. That is pre-existing storage-layer
-    behaviour this sink inherits rather than introduces.
+    Runs on the flusher task only, never on an emit path. Each write — the
+    encode and the ``store()`` call — runs as one unit on a worker thread
+    (``run_coroutine_off_loop``): ``LocalFileStorage.store`` is an ``async def``
+    with a blocking body (makedirs, write, rename), sub-millisecond on local
+    disk and unbounded on a slow network filesystem, and awaited on the loop it
+    would pin the flusher past every timeout (see the module docstring).
     """
 
     def __init__(self, storage: StorageManager, root: str = "") -> None:
@@ -126,21 +164,27 @@ class StorageSink:
         for (dataset, run, kind), group in groups.items():
             if kind == KIND_RUN_MANIFEST:
                 for record in group:
-                    # str branch writes UTF-8; overwrite is write-then-rename on Local.
-                    await self._storage.store(
-                        f"{self._root}{dataset}/{run}/manifest.json",
-                        json.dumps(record, indent=2, default=str),
-                        overwrite=True,
+                    await run_coroutine_off_loop(
+                        functools.partial(
+                            self._write_manifest,
+                            f"{self._root}{dataset}/{run}/manifest.json",
+                            record,
+                        )
                     )
                 continue
 
-            # Encoding is pure CPU; keep it off the loop like the flusher's
-            # serialization step (inline at interpreter exit, see run_off_loop).
-            blob = await run_off_loop(_encode_group, group)
             blob_name = f"batch-{time.time_ns()}-{os.getpid()}-{next(_blob_sequence):06d}.jsonl.gz"
-            # BytesIO, not raw bytes, honors the ``BinaryIO | str`` annotation.
-            await self._storage.store(
-                f"{self._root}{dataset}/{run}/{kind}/{blob_name}",
-                io.BytesIO(blob),
-                overwrite=True,
+            await run_coroutine_off_loop(
+                functools.partial(
+                    self._write_blob, f"{self._root}{dataset}/{run}/{kind}/{blob_name}", group
+                )
             )
+
+    async def _write_manifest(self, path: str, record: dict) -> None:
+        # str branch writes UTF-8; overwrite is write-then-rename on Local.
+        await self._storage.store(path, json.dumps(record, indent=2, default=str), overwrite=True)
+
+    async def _write_blob(self, path: str, group: list[dict]) -> None:
+        # Encode and write on the same worker: the encode is pure CPU, the write
+        # blocks. BytesIO, not raw bytes, honors the ``BinaryIO | str`` annotation.
+        await self._storage.store(path, io.BytesIO(_encode_group(group)), overwrite=True)

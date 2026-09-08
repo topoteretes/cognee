@@ -396,6 +396,26 @@ async def test_fuzzy_match_emits_nothing_for_a_chunk_that_triggered_no_lookup(fa
     assert [event["payload"]["chunk_index"] for event in events] == [0]
 
 
+@pytest.mark.asyncio
+async def test_fuzzy_match_capture_never_breaks_canonicalization(fake_capture_sink):
+    """The emit point reads ``chunk.id`` while its caller never does: a duck-typed
+    chunk without one (only ``.text`` is validated upstream) must cost its event,
+    not the ontology pass — turning capture on cannot fail a working run."""
+    chunk = MagicMock()
+    del chunk.id
+    chunk.importance_weight = 0.5
+    chunk.belongs_to_set = []
+    graphs = _make_two_chunk_graphs()
+
+    canonicalize_extracted_graphs([chunk, _make_chunk()], graphs, _StubResolver())
+    await capture.drain()
+
+    assert graphs[0].nodes[0].name == "widget_canonical"
+    events = [r for r in fake_capture_sink.records if r["kind"] == KIND_EXTRACTION_FUZZY_MATCH]
+    # The id-less chunk's event is absent; the second chunk still reports.
+    assert [event["payload"]["chunk_index"] for event in events] == [1]
+
+
 def test_fuzzy_match_capture_off_collects_nothing(monkeypatch, capture_reset):
     monkeypatch.delenv("COGNEE_CAPTURE_ENABLED", raising=False)
 

@@ -662,6 +662,18 @@ async def recall(
                     if not search_dataset_ids:
                         raise DatasetNotFoundError(message="No datasets found.")
 
+                # Bind the dataset on the operation record as soon as it is
+                # known, mirroring search(): with exactly one target the row and
+                # the eval-capture manifest (SDK-529) file under it instead of
+                # under ``nodataset/``.
+                if (
+                    current_operation is not None
+                    and search_dataset_ids
+                    and len(search_dataset_ids) == 1
+                    and isinstance(search_dataset_ids[0], UUID)
+                ):
+                    current_operation.set_dataset(search_dataset_ids[0])
+
                 from cognee.modules.recall.config import get_recall_config
 
                 # Warm-up short-circuit. Config errors fail open (skip the

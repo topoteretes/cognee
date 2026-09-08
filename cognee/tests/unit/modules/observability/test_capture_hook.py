@@ -1151,3 +1151,68 @@ async def test_drain_is_bounded_even_when_a_sink_swallows_its_cancellation():
 
     # The budget plus at most one cancellation grace, not 30s.
     assert elapsed < 0.2 + hook._CANCEL_GRACE_S + 1.0
+
+
+# ---------------------------------------------------------------------------
+# emit_lazy / has_room: an expensive payload is built only if it will be buffered
+# ---------------------------------------------------------------------------
+
+
+def test_has_room_and_emit_lazy_are_no_ops_when_off():
+    builds = []
+
+    assert capture.has_room() is False
+    capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: builds.append(1))
+
+    assert builds == []
+    assert not hook._buffer
+    assert hook._dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_emit_lazy_builds_and_buffers_while_there_is_room(fake_capture_sink):
+    hook._configure(flush_interval_s=60.0)
+
+    assert capture.has_room() is True
+    capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: {"graph": "snapshot"}, stage="s")
+    await capture.drain()
+
+    [record] = fake_capture_sink.records
+    assert record["kind"] == KIND_EXTRACTION_CHUNK_GRAPH
+    assert record["payload"] == {"graph": "snapshot"}
+    assert record["stage"] == "s"
+
+
+@pytest.mark.asyncio
+async def test_emit_lazy_never_calls_the_builder_for_an_event_the_full_buffer_drops(
+    fake_capture_sink,
+):
+    """The whole point: a synchronous burst past QUEUE_SIZE (a 2000-chunk cognify
+    batch against a smaller buffer) must not pay a snapshot per dropped event."""
+    hook._configure(queue_size=1, flush_interval_s=60.0)
+    capture.emit(KIND_SUMMARY_GENERATED, "fills", payload_kind="text")
+    builds = []
+
+    assert capture.has_room() is False
+    capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: builds.append(1))
+    capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: builds.append(1))
+
+    assert builds == []
+    assert hook._dropped == 2  # accounted for exactly like emit()'s drop-newest
+    assert len(hook._buffer) == 1
+
+
+@pytest.mark.asyncio
+async def test_emit_lazy_swallows_a_raising_builder(monkeypatch, fake_capture_sink):
+    fake_logger = MagicMock()
+    monkeypatch.setattr(hook, "logger", fake_logger)
+
+    def explode():
+        raise ValueError("cyclic graph")
+
+    capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, explode)
+    capture.emit_lazy(KIND_EXTRACTION_CHUNK_GRAPH, lambda: "fine")
+    await capture.drain()
+
+    assert [r["payload"] for r in fake_capture_sink.records] == ["fine"]
+    fake_logger.debug.assert_any_call("capture payload build failed (%s)", ANY)

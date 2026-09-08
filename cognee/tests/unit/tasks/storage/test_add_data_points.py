@@ -120,6 +120,42 @@ async def test_add_data_points_indexes_nodes_and_edges(
 @patch.object(adp_module, "get_unified_engine")
 @patch.object(adp_module, "deduplicate_nodes_and_edges")
 @patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_capture_failure_never_breaks_the_write(
+    mock_get_graph,
+    mock_dedup,
+    mock_get_unified,
+    mock_index_nodes,
+    mock_index_edges,
+    monkeypatch,
+    fake_capture_sink,
+):
+    """Capture never breaks the write it observes (SDK-529): a payload build that
+    raises costs the storage.delta event, never the nodes and edges."""
+    from cognee.modules.observability.capture import KIND_STORAGE_DELTA
+
+    dp1 = SimplePoint(text="first")
+    mock_get_graph.side_effect = [([dp1], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    unified, graph_engine, _vector_engine = _make_unified_mock()
+    mock_get_unified.return_value = unified
+    monkeypatch.setattr(
+        adp_module, "_storage_delta_payload", MagicMock(side_effect=RuntimeError("boom"))
+    )
+
+    result = await add_data_points([dp1])
+
+    assert result == [dp1]
+    graph_engine.add_nodes.assert_awaited_once()
+    await capture.drain()
+    assert [r for r in fake_capture_sink.records if r["kind"] == KIND_STORAGE_DELTA] == []
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_unified_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
 async def test_add_data_points_indexes_triplets_when_enabled(
     mock_get_graph, mock_dedup, mock_get_unified, mock_index_nodes, mock_index_edges
 ):

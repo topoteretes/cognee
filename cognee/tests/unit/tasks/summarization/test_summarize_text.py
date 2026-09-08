@@ -96,6 +96,25 @@ async def test_summarize_text_leaves_provenance_unset_when_capture_is_off(monkey
 
 
 @pytest.mark.asyncio
+async def test_summarize_text_capture_failure_never_breaks_summarization(
+    monkeypatch, fake_capture_sink, extract
+):
+    """Capture never breaks the summarization it observes: a provenance hash that
+    raises costs that chunk's fingerprints (reported as None), never the summaries."""
+    monkeypatch.setattr(capture, "prompt_fingerprint", MagicMock(side_effect=RuntimeError("no")))
+    chunks = [_chunk("First chunk text", chunk_index=0), _chunk("Second chunk text", chunk_index=1)]
+
+    summaries = await summarize_text_module.summarize_text(chunks, summarization_model=object)
+
+    assert [summary.text for summary in summaries] == [f"Summary of {c.text}" for c in chunks]
+    await capture.drain()
+    events = _summary_events(fake_capture_sink)
+    assert [event["payload"]["chunk_id"] for event in events] == [str(c.id) for c in chunks]
+    assert all(event["payload"]["prompt_fingerprint"] is None for event in events)
+    assert all(event["payload"]["source_text_hash"] is None for event in events)
+
+
+@pytest.mark.asyncio
 async def test_summarize_text_populates_provenance_and_emits_one_event_per_chunk(
     fake_capture_sink, extract
 ):

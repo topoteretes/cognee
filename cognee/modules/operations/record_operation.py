@@ -81,6 +81,10 @@ class OperationContext:
         self.session_id = session_id
         self.background = background
         self.parent_operation_id = parent_operation_id
+        # The eval-capture run scope opened for this operation, when capture is
+        # active (SDK-529). Bound by ``record_operation`` so ``set_dataset``
+        # can forward the dataset the moment the caller learns it.
+        self._capture_scope = None
 
     def set_user(self, user) -> None:
         """Bind the triggering user (tolerates None and partial objects)."""
@@ -90,8 +94,19 @@ class OperationContext:
         self.tenant_id = getattr(user, "tenant_id", None)
 
     def set_dataset(self, dataset_id: Optional[UUID]) -> None:
-        """Bind the target dataset, when the operation has exactly one."""
+        """Bind the target dataset, when the operation has exactly one.
+
+        Forwarded to the eval-capture scope immediately, not at operation exit:
+        capture resolves an event's dataset when the event is FLUSHED, and the
+        flusher ticks every ``FLUSH_INTERVAL_S`` (2 s) while a search's LLM
+        completion runs for longer than that. Binding only in the ``finally``
+        filed essentially every search's ``retrieval.candidates`` under
+        ``nodataset/`` while its manifest landed under ``<dataset>/``.
+        """
         self.dataset_id = dataset_id
+        capture_scope = self._capture_scope
+        if capture_scope is not None:
+            capture_scope.set_dataset(dataset_id)
 
     def set_session_id(self, session_id: Optional[str]) -> None:
         """Bind the active session-cache id (joins SessionModelUsage)."""
@@ -197,6 +212,10 @@ async def record_operation(
         with capture_scope_cm as capture_scope:
             if capture_scope is not None:
                 capture_scope.note("operation", operation_name)
+                # So context.set_dataset() reaches the scope as soon as the
+                # caller resolves its dataset; the ``finally`` below is only a
+                # backstop for callers that never call it.
+                context._capture_scope = capture_scope
             try:
                 with parent_run_scope(context.operation_id):
                     yield context
@@ -207,7 +226,8 @@ async def record_operation(
                 raise
             finally:
                 if capture_scope is not None:
-                    # Callers bind the dataset lazily via context.set_dataset().
+                    # Backstop: set_dataset() already forwarded the dataset when
+                    # the caller bound it; this covers a dataset passed at entry.
                     capture_scope.set_dataset(context.dataset_id)
                     capture_scope.note("outcome", outcome.value)
                     # None on success, kept for a stable manifest shape.

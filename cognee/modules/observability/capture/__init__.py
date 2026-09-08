@@ -43,7 +43,16 @@ from .events import (
     RETRIEVAL_KIND_PREFIX,
     CaptureEvent,
 )
-from .hook import drain, emit, is_active, register_capture_sink, should_capture, shutdown
+from .hook import (
+    drain,
+    emit,
+    emit_lazy,
+    has_room,
+    is_active,
+    register_capture_sink,
+    should_capture,
+    shutdown,
+)
 from .manifest import RunScope, bump, current_scope, note, run_scope
 from .prompt_hash import prompt_fingerprint
 from .sinks import CaptureSink, StorageSink
@@ -66,7 +75,9 @@ __all__ = [
     "current_scope",
     "drain",
     "emit",
+    "emit_lazy",
     "get_capture_config",
+    "has_room",
     "is_active",
     "note",
     "prompt_fingerprint",

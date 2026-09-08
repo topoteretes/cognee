@@ -315,14 +315,20 @@ def _emit_storage_delta(
     if not eval_capture.is_active():
         return
 
-    eval_capture.bump("storage.nodes_written", node_count)
-    eval_capture.bump("storage.edges_written", total_edges)
-    eval_capture.emit(
-        eval_capture.KIND_STORAGE_DELTA,
-        _storage_delta_payload(nodes, edge_count, custom_edge_count, pipeline_run_id),
-        payload_kind="json",
-        stage="add_data_points",
-    )
+    # Guarded like every other emit point: the payload reads ``id``/``type`` off
+    # caller-supplied DataPoints, and capture must never break the write it
+    # observes.
+    try:
+        eval_capture.bump("storage.nodes_written", node_count)
+        eval_capture.bump("storage.edges_written", total_edges)
+        eval_capture.emit(
+            eval_capture.KIND_STORAGE_DELTA,
+            _storage_delta_payload(nodes, edge_count, custom_edge_count, pipeline_run_id),
+            payload_kind="json",
+            stage="add_data_points",
+        )
+    except Exception as exc:
+        logger.debug("storage delta capture skipped (%s)", exc)
 
 
 def _storage_delta_payload(

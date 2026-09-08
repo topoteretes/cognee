@@ -101,6 +101,33 @@ async def test_record_operation_emits_manifest_without_draining(
 
 
 @pytest.mark.asyncio
+async def test_set_dataset_reaches_events_flushed_while_the_operation_is_still_running(
+    no_row_writes, fake_capture_sink
+):
+    """The reproduction of the ``nodataset/`` split: search() binds its dataset on
+    the OperationContext before retrieval runs, retrieval emits, and the flusher
+    ticks (every FLUSH_INTERVAL_S) while the LLM completion is still running.
+    Forwarding only in record_operation's ``finally`` filed those events under
+    ``nodataset/`` and the manifest under ``<dataset>/``. The bind must reach the
+    capture scope the moment the caller makes it."""
+    dataset_id = uuid4()
+
+    async with record_operation_mod.record_operation("search") as context:
+        context.set_dataset(dataset_id)
+        assert capture.current_scope().dataset_id == dataset_id
+        capture.emit(KIND_SUMMARY_GENERATED, "candidates", payload_kind="text")
+        # A flush tick lands mid-body, long before the operation ends.
+        await capture.drain()
+        [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
+        assert event["dataset_id"] == str(dataset_id)
+
+    await capture.drain()
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["dataset_id"] == str(dataset_id)
+    assert manifest["payload"]["dataset_id"] == str(dataset_id)
+
+
+@pytest.mark.asyncio
 async def test_record_operation_failure_still_emits_manifest_and_reraises(
     no_row_writes, fake_capture_sink, drain_spy
 ):

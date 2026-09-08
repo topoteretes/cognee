@@ -16,6 +16,9 @@ from functools import lru_cache
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# A leaf module (no cognee imports), so unlike base_config it is safe here.
+from cognee.root_dir import ensure_absolute_path
+
 
 class CaptureConfig(BaseSettings):
     """Knobs for the non-blocking eval capture hook.
@@ -27,7 +30,11 @@ class CaptureConfig(BaseSettings):
 
     cognee_capture_enabled: bool = False
     cognee_capture_dir: str | None = None
-    cognee_capture_queue_size: int = 512
+    # Must not be a fraction of cognify's default ``chunks_per_batch`` (2000):
+    # the per-chunk emit points run over a whole task batch, and a burst past
+    # this bound is dropped newest-first. 2048 covers the default batch with the
+    # flusher draining alongside (``capture_chunk_graphs`` yields every 64).
+    cognee_capture_queue_size: int = 2048
     cognee_capture_batch_size: int = 64
     cognee_capture_flush_interval_s: float = 2.0
     cognee_capture_sample_rate: float = 1.0
@@ -81,6 +88,13 @@ class CaptureConfig(BaseSettings):
 
             base_config = get_base_config()
             self.cognee_capture_dir = os.path.join(base_config.data_root_directory, "capture")
+
+        # Same rule as every other storage root (BaseConfig.validate_paths): a
+        # relative value would resolve against the process CWD and scatter
+        # gzip'd chunk graphs — verbatim entity names — wherever the server or
+        # CLI happened to start, the repo working tree included. Loud at
+        # startup instead; s3:// is absolute by definition.
+        self.cognee_capture_dir = ensure_absolute_path(self.cognee_capture_dir)
 
         return self
 

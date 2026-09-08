@@ -49,9 +49,14 @@ class RunScope:
 
     def set_dataset(self, dataset_id: UUID | str | None) -> None:
         """Bind the dataset late. Because ``CaptureEvent.scope`` is resolved at
-        serialization time, events already buffered for this run pick it up too;
-        only events flushed BEFORE this call (≤ FLUSH_INTERVAL_S window) can land
-        under ``nodataset/`` — the manifest is authoritative."""
+        serialization time, events already buffered for this run pick it up too.
+
+        Only events flushed BEFORE this call can land under ``nodataset/``, so
+        callers bind as soon as they know the dataset — ``OperationContext.
+        set_dataset`` forwards here immediately — never at operation exit, where
+        every flush tick of the body (one per ``FLUSH_INTERVAL_S``) would have
+        filed the run's events under ``nodataset/`` already. The manifest is
+        authoritative either way."""
         self.dataset_id = dataset_id
 
     def resolved_dataset_id(self) -> UUID | str | None:

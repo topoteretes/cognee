@@ -80,21 +80,36 @@ def _remove_duplicate_extracted_nodes_by_id(
             extracted_graph.nodes = list(nodes_by_id.values())
 
         if dropped_node_ids and chunk is not None:
-            eval_capture.emit(
-                eval_capture.KIND_EXTRACTION_DROPPED_DUPLICATES,
-                {
-                    "chunk_id": str(chunk.id),
-                    "chunk_index": chunk_index,
-                    "dropped_node_ids": dropped_node_ids,
-                    "count": len(dropped_node_ids),
-                },
-                payload_kind="json",
-                stage="extract_graph_from_data",
-            )
-            eval_capture.bump("extraction.dropped_duplicate_nodes", len(dropped_node_ids))
+            # Guarded like every other emit point: the chunk is duck-typed (only
+            # ``.text`` is validated upstream), so ``chunk.id`` can raise here on
+            # an input the non-capture path handles fine. Capture never breaks
+            # the extraction it observes — a chunk that will not attribute costs
+            # its own event and nothing else.
+            try:
+                eval_capture.emit(
+                    eval_capture.KIND_EXTRACTION_DROPPED_DUPLICATES,
+                    {
+                        "chunk_id": str(chunk.id),
+                        "chunk_index": chunk_index,
+                        "dropped_node_ids": dropped_node_ids,
+                        "count": len(dropped_node_ids),
+                    },
+                    payload_kind="json",
+                    stage="extract_graph_from_data",
+                )
+                eval_capture.bump("extraction.dropped_duplicate_nodes", len(dropped_node_ids))
+            except Exception as exc:
+                logger.debug("dropped-duplicates capture skipped (%s)", exc)
 
 
-def capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -> None:
+# Yield to the event loop this often while snapshotting a batch: the capture
+# flusher's wake is a loop callback, so a synchronous loop over a whole task
+# batch (``chunks_per_batch``, 2000 by default) would fill the buffer before the
+# flusher could pop a single event. Matches the flusher's default BATCH_SIZE.
+_CAPTURE_YIELD_EVERY = 64
+
+
+async def capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -> None:
     """Snapshot every raw per-chunk graph for eval capture (SDK-529).
 
     Runs right after extraction and BEFORE ``_remove_duplicate_extracted_nodes_by_id``
@@ -104,6 +119,11 @@ def capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -
     fuzzy-match events; ``chunk_index`` is the position in this batch (it restarts at 0
     per batch); ``chunk_size_chars`` records the chunk boundary. A structural no-op (no
     dump, no allocation) when capture is off.
+
+    The snapshot is the one real per-chunk cost of capture, so it is built lazily
+    through ``emit_lazy``: a full buffer costs the drop counter, not a dump per
+    dropped event. The loop also yields every ``_CAPTURE_YIELD_EVERY`` chunks so the
+    flusher can drain while the batch is still being snapshotted.
 
     The whole per-chunk payload build is guarded, because the graph is an object this
     function does not own: the standard route hands it freshly validated LLM output,
@@ -119,8 +139,11 @@ def capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -
         return
 
     for chunk_index, (chunk, chunk_graph) in enumerate(zip(data_chunks, chunk_graphs)):
-        try:
-            payload = {
+        if chunk_index and chunk_index % _CAPTURE_YIELD_EVERY == 0:
+            await asyncio.sleep(0)
+
+        def build_payload(chunk=chunk, chunk_graph=chunk_graph, chunk_index=chunk_index):
+            return {
                 "chunk_id": str(chunk.id),
                 "chunk_index": chunk_index,
                 "chunk_size_chars": len(chunk.text),
@@ -130,17 +153,17 @@ def capture_chunk_graphs(data_chunks: List[DocumentChunk], chunk_graphs: list) -
                     else None
                 ),
             }
-        except Exception as exc:
-            # Capture never breaks the extraction it observes.
-            logger.debug("chunk graph capture skipped (%s)", exc)
-            continue
 
-        eval_capture.emit(
-            eval_capture.KIND_EXTRACTION_CHUNK_GRAPH,
-            payload,
-            payload_kind="json",
-            stage="extract_graph_from_data",
-        )
+        try:
+            eval_capture.emit_lazy(
+                eval_capture.KIND_EXTRACTION_CHUNK_GRAPH,
+                build_payload,
+                payload_kind="json",
+                stage="extract_graph_from_data",
+            )
+        except Exception as exc:
+            # emit_lazy swallows a failing builder itself; this covers everything else.
+            logger.debug("chunk graph capture skipped (%s)", exc)
 
 
 def _note_ontology_config(
@@ -335,7 +358,7 @@ async def extract_graph_from_data(
                 ]
             )
     # Eval capture (SDK-529): snapshot the raw graphs before anything mutates them.
-    capture_chunk_graphs(data_chunks, chunk_graphs)
+    await capture_chunk_graphs(data_chunks, chunk_graphs)
 
     cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
     if callable(cache_entity_embeddings):

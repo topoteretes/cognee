@@ -10,6 +10,7 @@ database.
 
 import importlib
 import json
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -473,15 +474,20 @@ async def test_a_graph_that_cannot_be_dumped_costs_its_event_not_the_run(
     assert events[0]["payload"]["graph"]["nodes"][0]["name"] == "Dave"
 
 
-@pytest.mark.asyncio
-async def test_a_chunk_without_an_id_costs_its_event_not_the_run(fake_capture_sink, no_edge_lookup):
+def _chunk_without_an_id(text="no id here"):
     """extract_graph_from_data validates only ``.text`` on its chunks, so a duck-typed
-    chunk can reach the emit point without an ``id``."""
+    chunk can reach every emit point without an ``id``."""
     bad = MagicMock()
     del bad.id  # everything else a chunk needs, but no id
-    bad.text = "no id here"
+    bad.text = text
     bad.contains = None
     bad.belongs_to_set = []
+    return bad
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_without_an_id_costs_its_event_not_the_run(fake_capture_sink, no_edge_lookup):
+    bad = _chunk_without_an_id()
     good = _make_chunk("fine")
 
     result = await _run_extraction([bad, good], [_clean_graph(), _clean_graph()])
@@ -491,6 +497,65 @@ async def test_a_chunk_without_an_id_costs_its_event_not_the_run(fake_capture_si
     events = _records(fake_capture_sink, KIND_EXTRACTION_CHUNK_GRAPH)
     assert [event["payload"]["chunk_id"] for event in events] == [str(good.id)]
     assert not hasattr(bad, "id")
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_without_an_id_costs_its_dropped_duplicates_event_not_the_run(
+    fake_capture_sink, no_edge_lookup
+):
+    """The dropped-duplicates emit point reads ``chunk.id`` too — and it is only
+    reached for a chunk whose graph actually lost nodes, which the test above never
+    triggers. Unguarded, it turned this working extraction into an AttributeError
+    the moment capture was switched on."""
+    bad = _chunk_without_an_id()
+    good = _make_chunk("fine")
+    graphs = [_graph_with_duplicate(), _graph_with_duplicate()]
+
+    result = await _run_extraction([bad, good], graphs)
+
+    assert result == [bad, good]
+    # Deduplication itself happened for both chunks, capture or not.
+    assert [node.id for node in graphs[0].nodes] == ["dup", "n2"]
+    assert [node.id for node in graphs[1].nodes] == ["dup", "n2"]
+    await capture.drain()
+    events = _records(fake_capture_sink, KIND_EXTRACTION_DROPPED_DUPLICATES)
+    # The good chunk still reports; the id-less one is simply absent.
+    assert [event["payload"]["chunk_id"] for event in events] == [str(good.id)]
+
+
+class _CountingDumpGraph(KnowledgeGraph):
+    """Counts ``model_dump`` calls: the snapshot must not be taken for an event
+    that ``emit()`` would drop on arrival."""
+
+    dumps: ClassVar[int] = 0
+
+    def model_dump(self, *args, **kwargs):
+        type(self).dumps += 1
+        return super().model_dump(*args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_no_snapshot_is_taken_for_a_chunk_graph_the_full_buffer_would_drop(
+    fake_capture_sink, no_edge_lookup
+):
+    """A default cognify batch is 2000 chunks and the snapshot loop is synchronous, so
+    a buffer smaller than the batch used to pay the full ~32 µs dump for every chunk
+    past the bound and then throw the result away. The build is lazy now: a full
+    buffer costs the drop counter only."""
+    from cognee.modules.observability.capture import hook
+
+    hook._configure(queue_size=1, flush_interval_s=60.0)
+    capture.emit(KIND_EXTRACTION_CHUNK_GRAPH, "fills the buffer", payload_kind="text")
+    assert capture.has_room() is False
+    _CountingDumpGraph.dumps = 0
+    chunks = [_make_chunk("a"), _make_chunk("b")]
+    graphs = [_CountingDumpGraph(nodes=[], edges=[]), _CountingDumpGraph(nodes=[], edges=[])]
+
+    result = await _run_extraction(chunks, graphs)
+
+    assert result == chunks
+    assert _CountingDumpGraph.dumps == 0
+    assert hook._dropped == 2  # both chunk graphs, accounted for, never built
 
 
 @pytest.mark.asyncio

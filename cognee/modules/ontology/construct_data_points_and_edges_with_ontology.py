@@ -100,21 +100,28 @@ def _emit_fuzzy_matches(
     """
     from cognee.modules.observability import capture as eval_capture
 
-    matched = sum(1 for resolution in resolutions if resolution["matched"])
-    eval_capture.emit(
-        eval_capture.KIND_EXTRACTION_FUZZY_MATCH,
-        {
-            "chunk_id": str(data_chunk.id),
-            "chunk_index": chunk_index,
-            "matches": resolutions,
-            "lookups": len(resolutions),
-            "count": matched,
-        },
-        payload_kind="json",
-        stage="extract_graph_from_data",
-    )
-    eval_capture.bump("extraction.fuzzy_lookups", len(resolutions))
-    eval_capture.bump("extraction.fuzzy_matches", matched)
+    # Guarded: the caller only ever stores the chunk object and never reads
+    # ``.id`` itself, so a duck-typed chunk without one must not turn a working
+    # ontology pass into a hard failure just because capture is on. Capture
+    # never breaks the extraction it observes.
+    try:
+        matched = sum(1 for resolution in resolutions if resolution["matched"])
+        eval_capture.emit(
+            eval_capture.KIND_EXTRACTION_FUZZY_MATCH,
+            {
+                "chunk_id": str(data_chunk.id),
+                "chunk_index": chunk_index,
+                "matches": resolutions,
+                "lookups": len(resolutions),
+                "count": matched,
+            },
+            payload_kind="json",
+            stage="extract_graph_from_data",
+        )
+        eval_capture.bump("extraction.fuzzy_lookups", len(resolutions))
+        eval_capture.bump("extraction.fuzzy_matches", matched)
+    except Exception as exc:
+        logger.debug("fuzzy-match capture skipped (%s)", exc)
 
 
 def _find_ontology_matches_for_extracted_graphs(

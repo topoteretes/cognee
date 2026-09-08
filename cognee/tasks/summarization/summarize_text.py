@@ -8,10 +8,13 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.extraction.extract_summary import extract_summary_with_provenance
 from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.summarization.models import TextSummary
 
 
 from cognee.modules.pipelines.tasks.task import task_summary
+
+logger = get_logger("summarize_text")
 
 # Stage label on the summary.generated events (SDK-529).
 CAPTURE_STAGE = "summarize_text"
@@ -94,12 +97,18 @@ async def summarize_text(
         source_text_hash: Optional[str] = None
         if active:
             # The sanctioned snapshot cost: sha256 of the chunk text (and of each
-            # distinct prompt) — only while capturing.
-            prompt_fingerprint = prompt_fingerprints.get(prompt_text)
-            if prompt_fingerprint is None:
-                prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
-                prompt_fingerprints[prompt_text] = prompt_fingerprint
-            source_text_hash = eval_capture.prompt_fingerprint(chunk.text)
+            # distinct prompt) — only while capturing. Guarded: the chunk is
+            # duck-typed (only ``.text`` is validated), and a text that will not
+            # hash must cost this chunk's provenance, never the summarization.
+            try:
+                prompt_fingerprint = prompt_fingerprints.get(prompt_text)
+                if prompt_fingerprint is None:
+                    prompt_fingerprint = eval_capture.prompt_fingerprint(prompt_text)
+                    prompt_fingerprints[prompt_text] = prompt_fingerprint
+                source_text_hash = eval_capture.prompt_fingerprint(chunk.text)
+            except Exception as exc:
+                logger.debug("summary provenance capture skipped (%s)", exc)
+                prompt_fingerprint = source_text_hash = None
 
         summary = TextSummary(
             id=uuid5(chunk.id, "TextSummary"),
@@ -133,19 +142,26 @@ def _emit_summary_generated(
     prompt_fingerprint: Optional[str],
     source_text_hash: Optional[str],
 ) -> None:
-    """Buffer one ``summary.generated`` event: ids, fingerprints and a size — no text."""
+    """Buffer one ``summary.generated`` event: ids, fingerprints and a size — no text.
+
+    Guarded like every other emit point: capture never breaks the summarization it
+    observes, so a summary that will not attribute costs its own event and nothing else.
+    """
     from cognee.modules.observability import capture as eval_capture
 
-    eval_capture.emit(
-        eval_capture.KIND_SUMMARY_GENERATED,
-        {
-            "chunk_id": str(chunk.id),
-            "summary_id": str(summary.id),
-            "model": model,
-            "prompt_fingerprint": prompt_fingerprint,
-            "source_text_hash": source_text_hash,
-            "summary_chars": len(summary.text),
-        },
-        payload_kind="json",
-        stage=CAPTURE_STAGE,
-    )
+    try:
+        eval_capture.emit(
+            eval_capture.KIND_SUMMARY_GENERATED,
+            {
+                "chunk_id": str(chunk.id),
+                "summary_id": str(summary.id),
+                "model": model,
+                "prompt_fingerprint": prompt_fingerprint,
+                "source_text_hash": source_text_hash,
+                "summary_chars": len(summary.text),
+            },
+            payload_kind="json",
+            stage=CAPTURE_STAGE,
+        )
+    except Exception as exc:
+        logger.debug("summary capture skipped (%s)", exc)

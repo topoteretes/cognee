@@ -47,7 +47,7 @@ def test_defaults_and_derived_dir(clean_capture_env, monkeypatch, tmp_path):
         get_base_config.cache_clear()
 
     assert config.cognee_capture_enabled is False
-    assert config.cognee_capture_queue_size == 512
+    assert config.cognee_capture_queue_size == 2048
     assert config.cognee_capture_batch_size == 64
     assert config.cognee_capture_flush_interval_s == 2.0
     assert config.cognee_capture_sample_rate == 1.0
@@ -57,13 +57,29 @@ def test_defaults_and_derived_dir(clean_capture_env, monkeypatch, tmp_path):
     assert config.to_dict() == {
         "cognee_capture_enabled": False,
         "cognee_capture_dir": os.path.join(str(tmp_path), "capture"),
-        "cognee_capture_queue_size": 512,
+        "cognee_capture_queue_size": 2048,
         "cognee_capture_batch_size": 64,
         "cognee_capture_flush_interval_s": 2.0,
         "cognee_capture_sample_rate": 1.0,
         "cognee_capture_sink_timeout_s": 30.0,
         "cognee_capture_drain_timeout_s": 5.0,
     }
+
+
+def test_the_default_queue_covers_a_default_cognify_batch(clean_capture_env, monkeypatch, tmp_path):
+    """The per-chunk emit points run over a whole task batch, and a burst past
+    QUEUE_SIZE is dropped newest-first — so the default must not be a fraction
+    of cognify's default ``chunks_per_batch`` (the literal 2000 in
+    ``cognee/api/v1/cognify/cognify.py``), or the first stock cognify of a
+    large document silently loses most of its chunk graphs."""
+    monkeypatch.setenv("DATA_ROOT_DIRECTORY", str(tmp_path))
+    get_base_config.cache_clear()
+    try:
+        config = CaptureConfig()
+    finally:
+        get_base_config.cache_clear()
+
+    assert config.cognee_capture_queue_size >= 2000
 
 
 def test_env_vars_populate_fields(clean_capture_env, monkeypatch):
@@ -80,7 +96,8 @@ def test_env_vars_populate_fields(clean_capture_env, monkeypatch):
     config = get_capture_config()
 
     assert config.cognee_capture_enabled is True
-    assert config.cognee_capture_dir == "/tmp/somewhere"
+    # Normalized like every other storage root (symlinks resolved: /private/tmp on macOS).
+    assert config.cognee_capture_dir == str(Path("/tmp/somewhere").resolve())
     assert config.cognee_capture_queue_size == 8
     assert config.cognee_capture_batch_size == 2
     assert config.cognee_capture_flush_interval_s == 0.5
@@ -98,6 +115,27 @@ def test_sample_rate_out_of_range_raises(clean_capture_env, monkeypatch):
     get_capture_config.cache_clear()
     with pytest.raises(ValueError, match=r"must be in \[0, 1\], got -0\.1"):
         get_capture_config()
+
+
+@pytest.mark.parametrize("relative", ["capture_out", "./evals", "data/capture"])
+def test_relative_capture_dir_is_rejected(clean_capture_env, monkeypatch, relative):
+    """Every other storage root goes through ``ensure_absolute_path``; a relative
+    capture dir would resolve against the process CWD and write gzip'd chunk
+    graphs (verbatim entity names) into the repo working tree or wherever a
+    worker happened to start. Loud at startup instead."""
+    with pytest.raises(ValueError, match="must be absolute"):
+        CaptureConfig(cognee_capture_dir=relative)
+
+    monkeypatch.setenv("COGNEE_CAPTURE_DIR", relative)
+    get_capture_config.cache_clear()
+    with pytest.raises(ValueError, match="must be absolute"):
+        get_capture_config()
+
+
+def test_s3_capture_dir_is_absolute_by_definition(clean_capture_env):
+    config = CaptureConfig(cognee_capture_dir="s3://bucket/cognee/capture")
+
+    assert config.cognee_capture_dir == "s3://bucket/cognee/capture"
 
 
 def test_sink_timeout_must_be_positive(clean_capture_env):
