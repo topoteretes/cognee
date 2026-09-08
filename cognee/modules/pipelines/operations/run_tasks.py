@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from collections.abc import Awaitable, Callable
+from typing import Any, List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -36,17 +37,17 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
 async def run_tasks(
-    tasks: Union[List[Task], Callable[[Any], List[Task]]],
+    tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
-    data: Optional[List[Any]] = None,
-    user: Optional[User] = None,
+    data: list[Any] | None = None,
+    user: User | None = None,
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    extras: Optional[dict] = None,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    extras: dict | None = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
 ):
     """Run a pipeline over a dataset as ONE logical run.
@@ -215,7 +216,7 @@ async def run_tasks(
 
                 # Separate successes from unhandled exceptions
                 results = []
-                first_item_error: Optional[BaseException] = None
+                first_item_error: BaseException | None = None
                 for i, result in enumerate(gathered):
                     if isinstance(result, BaseException):
                         logger.error(f"Item {i} failed: {result}", exc_info=result)

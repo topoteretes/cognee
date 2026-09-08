@@ -61,24 +61,24 @@ def _restore_stubbed_api_functions():
 
 
 def _make_completed(**kwargs):
-    defaults = dict(
-        pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-        dataset_id=MOCK_DATASET_ID,
-        dataset_name="test_dataset",
-        status="completed",
-    )
+    defaults = {
+        "pipeline_run_id": MOCK_PIPELINE_RUN_ID,
+        "dataset_id": MOCK_DATASET_ID,
+        "dataset_name": "test_dataset",
+        "status": "completed",
+    }
     defaults.update(kwargs)
     return PipelineRunCompleted(**defaults)
 
 
 def _make_errored(error="pipeline failed", **kwargs):
-    defaults = dict(
-        pipeline_run_id=MOCK_PIPELINE_RUN_ID,
-        dataset_id=MOCK_DATASET_ID,
-        dataset_name="test_dataset",
-        status="errored",
-        error=error,
-    )
+    defaults = {
+        "pipeline_run_id": MOCK_PIPELINE_RUN_ID,
+        "dataset_id": MOCK_DATASET_ID,
+        "dataset_name": "test_dataset",
+        "status": "errored",
+        "error": error,
+    }
     defaults.update(kwargs)
     return PipelineRunErrored(**defaults)
 

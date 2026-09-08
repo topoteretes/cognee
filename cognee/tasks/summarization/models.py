@@ -17,7 +17,7 @@ class GlobalContextSummary(DataPoint):
     level: int
     is_root: bool = False
     graph_bucket_entity_ids: list[str] | None = None
-    summarized_in: Optional["GlobalContextSummary"] = None
+    summarized_in: GlobalContextSummary | None = None
     metadata: dict = {"index_fields": ["text"]}
 
 
@@ -33,11 +33,11 @@ class TextSummary(DataPoint):
 
     text: str
     made_from: DocumentChunk
-    source_chunk_id: Optional[str] = None
-    summarized_in: Optional[GlobalContextSummary] = None
-    global_context_bucket_id: Optional[str] = None
+    source_chunk_id: str | None = None
+    summarized_in: GlobalContextSummary | None = None
+    global_context_bucket_id: str | None = None
     metadata: dict = {"index_fields": ["text"]}
-    importance_weight: Optional[float] = 0.5
+    importance_weight: float | None = 0.5
 
 
 class CodeSummary(DataPoint):
@@ -51,6 +51,6 @@ class CodeSummary(DataPoint):
     """
 
     text: str
-    summarizes: Union[CodeFile, CodePart]
+    summarizes: CodeFile | CodePart
 
     metadata: dict = {"index_fields": ["text"]}

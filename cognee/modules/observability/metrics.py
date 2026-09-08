@@ -74,8 +74,8 @@ _NULL = _NullInstrument()
 # Global state
 # ---------------------------------------------------------------------------
 
-_meter: Optional[object] = None
-_provider: Optional[object] = None
+_meter: object | None = None
+_provider: object | None = None
 
 # Instruments (populated by setup_metrics / _ensure_instruments)
 _op_duration: object = _NULL
@@ -276,7 +276,7 @@ def _add_http_metric_reader(readers: list, endpoint: str, headers) -> None:
         )
 
 
-def get_meter() -> Optional[object]:
+def get_meter() -> object | None:
     """Return the cognee OTel meter, or None if not configured."""
     return _meter
 
@@ -290,39 +290,39 @@ def record_operation_duration(duration_ms: float, attributes: dict) -> None:
     _op_duration.record(duration_ms, attributes)
 
 
-def increment_items_stored(count: int = 1, attributes: dict = None) -> None:
+def increment_items_stored(count: int = 1, attributes: dict | None = None) -> None:
     _items_stored.add(count, attributes or {})
 
 
-def increment_items_retrieved(count: int = 1, attributes: dict = None) -> None:
+def increment_items_retrieved(count: int = 1, attributes: dict | None = None) -> None:
     _items_retrieved.add(count, attributes or {})
 
 
-def increment_items_deleted(count: int = 1, attributes: dict = None) -> None:
+def increment_items_deleted(count: int = 1, attributes: dict | None = None) -> None:
     _items_deleted.add(count, attributes or {})
 
 
-def record_query_results(count: int, attributes: dict = None) -> None:
+def record_query_results(count: int, attributes: dict | None = None) -> None:
     _query_result_count.record(count, attributes or {})
 
 
-def increment_bytes_stored(byte_count: int, attributes: dict = None) -> None:
+def increment_bytes_stored(byte_count: int, attributes: dict | None = None) -> None:
     _data_bytes_stored.add(byte_count, attributes or {})
 
 
-def increment_vector_searches(attributes: dict = None) -> None:
+def increment_vector_searches(attributes: dict | None = None) -> None:
     _vector_searches.add(1, attributes or {})
 
 
-def increment_graph_edges(count: int = 1, attributes: dict = None) -> None:
+def increment_graph_edges(count: int = 1, attributes: dict | None = None) -> None:
     _graph_edges_added.add(count, attributes or {})
 
 
-def increment_graph_nodes(count: int = 1, attributes: dict = None) -> None:
+def increment_graph_nodes(count: int = 1, attributes: dict | None = None) -> None:
     _graph_nodes_added.add(count, attributes or {})
 
 
-def increment_operation_errors(attributes: dict = None) -> None:
+def increment_operation_errors(attributes: dict | None = None) -> None:
     _op_errors.add(1, attributes or {})
 
 

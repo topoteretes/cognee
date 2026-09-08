@@ -139,10 +139,10 @@ async def main(mock_create_structured_output: AsyncMock):
     )
 
     cognify_result: dict = await cognee.cognify()
-    johns_dataset_id = list(cognify_result.keys())[0]
+    johns_dataset_id = next(iter(cognify_result.keys()))
 
     cognify_result: dict = await cognee.cognify(user=new_user)
-    maries_dataset_id = list(cognify_result.keys())[0]
+    maries_dataset_id = next(iter(cognify_result.keys()))
 
     graph_engine = await get_graph_engine()
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
@@ -161,7 +161,7 @@ async def main(mock_create_structured_output: AsyncMock):
             initial_nodes_by_vector_collection[collection_name] = []
         initial_nodes_by_vector_collection[collection_name].append(node)
 
-    initial_node_ids = set([node[0] for node in initial_nodes])
+    initial_node_ids = {node[0] for node in initial_nodes}
 
     default_user = await get_default_user()
     await datasets.empty_dataset(johns_dataset_id, default_user)  # type: ignore
@@ -177,7 +177,7 @@ async def main(mock_create_structured_output: AsyncMock):
         if "name" in node[1]
     ), "Nodes are not deleted."
 
-    after_first_delete_node_ids = set([node[0] for node in nodes])
+    after_first_delete_node_ids = {node[0] for node in nodes}
 
     after_delete_nodes_by_vector_collection = {}
     for node in initial_nodes:

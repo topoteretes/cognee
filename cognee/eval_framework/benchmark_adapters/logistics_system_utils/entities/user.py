@@ -34,7 +34,7 @@ class User:
         region: str,
         weekend_delivery_eligible: bool,
         default_shipping_range: str,
-    ) -> "User":
+    ) -> User:
         return cls(
             user_id=user_id,
             name=name,

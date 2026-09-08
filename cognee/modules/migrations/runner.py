@@ -69,7 +69,7 @@ logger = logging.getLogger(__name__)
 _GLOBAL_MIGRATION_LOCK_KEY = 0x636F676E6565_01  # "cognee" + 01
 
 
-def _file_lock_path(db_engine, key: int) -> Optional[str]:
+def _file_lock_path(db_engine, key: int) -> str | None:
     """Lock-file path next to the SQLite database, one per ``key``.
 
     All processes on the same store resolve the same file for a given ``key``
@@ -167,7 +167,7 @@ async def migration_lock():
 
 async def _apply(
     context: MigrationContext,
-    stored_revision: Optional[str],
+    stored_revision: str | None,
     target_revision: str = "head",
     stamp=None,
 ) -> list[str]:
@@ -186,9 +186,7 @@ async def _apply(
     return applied
 
 
-def _downgrade_span(
-    stored_revision: Optional[str], target_revision: Optional[str]
-) -> list[Migration]:
+def _downgrade_span(stored_revision: str | None, target_revision: str | None) -> list[Migration]:
     """Validate and return the migrations to revert (may be []).
 
     Raises (unknown stored revision, irreversible span, target ahead of
@@ -214,7 +212,7 @@ async def _revert_span(context: MigrationContext, span: list[Migration], stamp) 
     return reverted
 
 
-async def _stamp_dataset(db_engine, dataset_id: UUID, revision: Optional[str]) -> None:
+async def _stamp_dataset(db_engine, dataset_id: UUID, revision: str | None) -> None:
     """Write the revision on a dataset_database row (short transaction)."""
     async with db_engine.get_async_session() as session:
         record = await session.get(DatasetDatabase, dataset_id)
@@ -223,7 +221,7 @@ async def _stamp_dataset(db_engine, dataset_id: UUID, revision: Optional[str]) -
             await session.commit()
 
 
-async def _stamp_global(db_engine, revision: Optional[str]) -> None:
+async def _stamp_global(db_engine, revision: str | None) -> None:
     """Write the revision on the global_database_version row."""
     async with db_engine.get_async_session() as session:
         record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
@@ -261,7 +259,7 @@ async def _record_global_failure(db_engine, error: Exception) -> None:
         logger.exception("Could not persist global migration failure.")
 
 
-async def _read_deployment_version() -> Optional[str]:
+async def _read_deployment_version() -> str | None:
     """The deployment's recorded Cognee version, or ``None`` if never recorded.
 
     Read BEFORE ``_record_deployment_version`` overwrites it, so a version change
@@ -398,7 +396,7 @@ async def _run_global_migrations(
 
 async def _migrate_dataset(
     db_engine, row, current_version: str, version_changed: bool, target: str
-) -> Optional[dict]:
+) -> dict | None:
     """Run pending migrations for one dataset's database pair.
 
     The caller (run_database_migrations) holds the single migration lock for the
@@ -539,7 +537,7 @@ async def run_database_migrations(target: str = "head") -> list[dict]:
     return summaries
 
 
-async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[dict]:
+async def _downgrade_dataset(db_engine, row, target: str | None) -> dict | None:
     """Revert migrations for one dataset's database pair.
 
     The caller holds the single migration lock for the whole dataset loop. Fast
@@ -578,8 +576,8 @@ async def _downgrade_dataset(db_engine, row, target: Optional[str]) -> Optional[
 
 
 async def downgrade_database_migrations(
-    target_revision: Optional[str] = None,
-    dataset_ids: Optional[list[UUID]] = None,
+    target_revision: str | None = None,
+    dataset_ids: list[UUID] | None = None,
 ) -> list[dict]:
     """Revert data migrations back to ``target_revision``.
 
@@ -668,7 +666,7 @@ async def downgrade_database_migrations(
 
 async def stamp_revisions(
     target: str,
-    dataset_ids: Optional[list[UUID]] = None,
+    dataset_ids: list[UUID] | None = None,
 ) -> list[dict]:
     """Set the stored revision WITHOUT running any migration (alembic `stamp`).
 

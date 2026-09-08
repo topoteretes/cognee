@@ -12,7 +12,7 @@ class MiniEntity(BaseModel):
 
 
 class MiniGraph(BaseModel):
-    nodes: List[MiniEntity]
+    nodes: list[MiniEntity]
 
 
 async def main():

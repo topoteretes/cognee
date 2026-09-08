@@ -40,8 +40,8 @@ class NodeModel(BaseModel):
 
     node_id: str
     name: str
-    default_relationship: Optional[RelationshipModel] = None
-    children: List[Union[Dict[str, Any], "NodeModel"]] = Field(default_factory=list)
+    default_relationship: RelationshipModel | None = None
+    children: list[Union[dict[str, Any], "NodeModel"]] = Field(default_factory=list)
 
 
 NodeModel.model_rebuild()
@@ -118,4 +118,4 @@ class ContradictionList(BaseModel):
     Structured contradiction-detection response: the detected contradictions (possibly empty).
     """
 
-    contradictions: List[Contradiction] = Field(default_factory=list)
+    contradictions: list[Contradiction] = Field(default_factory=list)

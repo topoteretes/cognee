@@ -53,7 +53,7 @@ def create_edge_type_datapoints(edges_data) -> list[EdgeType]:
 
 
 async def index_graph_edges(
-    edges_data: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]] = None,
+    edges_data: list[EdgeData] | list[tuple[str, str, str, dict[str, Any] | None]] | None = None,
     vector_engine=None,
 ):
     """

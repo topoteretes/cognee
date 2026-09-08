@@ -12,9 +12,9 @@ logger = get_logger("cognify_agent_trace_feedback")
 
 async def cognify_agent_trace_feedback(
     data: str,
-    dataset_id: Optional[UUID | str] = None,
+    dataset_id: UUID | str | None = None,
     node_set_name: str = "agent_trace_feedbacks",
-    user: Optional[User] = None,
+    user: User | None = None,
 ) -> None:
     """
     Process and cognify agent trace session text into the knowledge graph.

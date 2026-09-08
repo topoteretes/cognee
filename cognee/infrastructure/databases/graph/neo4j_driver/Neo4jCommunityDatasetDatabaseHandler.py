@@ -66,7 +66,7 @@ class Neo4jCommunityDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         graph_config = get_graph_config()
 
         if graph_config.graph_database_provider != "neo4j":
@@ -88,7 +88,7 @@ class Neo4jCommunityDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         manager = get_container_manager()
         host_port = None
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for _ in range(PORT_ALLOCATION_ATTEMPTS):
             candidate_port = allocate_free_port()
             try:

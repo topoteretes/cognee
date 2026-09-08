@@ -92,8 +92,8 @@ async def _dry_run_update(engine, sql: str) -> int:
 
 
 async def _draft_update(
-    connection: dict[str, Any], instruction: str, evidence: Optional[dict[str, Any]]
-) -> Optional[tuple[str, str, int]]:
+    connection: dict[str, Any], instruction: str, evidence: dict[str, Any] | None
+) -> tuple[str, str, int] | None:
     """Draft, guard, and dry-run one UPDATE.
 
     Returns ``(sql, target_table, estimated_rows)``, or ``None`` when the
@@ -123,7 +123,7 @@ async def _draft_update(
     dialect = write_engine.dialect.name
 
     previous_attempts = ""
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for attempt in range(1, config.text_to_sql_max_attempts + 1):
         system_prompt = render_prompt(
             _WRITE_PROMPT_PATH,
@@ -174,7 +174,7 @@ async def propose_sql_write(
     user_id: UUID,
     connection_name: str,
     instruction: str,
-    evidence: Optional[dict[str, Any]] = None,
+    evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Draft a correction UPDATE and store it as a reviewable proposal.
 
@@ -300,7 +300,7 @@ async def _get_owned_proposal(session, user_id: UUID, proposal_id) -> ToolWriteP
     return row
 
 
-async def list_write_proposals(user_id: UUID, status: Optional[str] = None) -> list[dict[str, Any]]:
+async def list_write_proposals(user_id: UUID, status: str | None = None) -> list[dict[str, Any]]:
     await _ensure_table()
     from cognee.infrastructure.databases.relational import get_relational_engine
 
@@ -342,7 +342,7 @@ async def apply_write_proposal(user_id: UUID, proposal_id: UUID) -> dict[str, An
             config.text_to_sql_statement_timeout_ms,
         )
 
-        error_message: Optional[str] = None
+        error_message: str | None = None
         affected = 0
         try:
             async with write_engine.connect() as db_connection:

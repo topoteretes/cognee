@@ -17,7 +17,7 @@ class LadybugDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Create a new Ladybug instance for the dataset. Return connection info that will be mapped to the dataset.
 

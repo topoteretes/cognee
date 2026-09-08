@@ -43,7 +43,7 @@ _FORBIDDEN_WRITE_KEYWORDS = (
 _UPDATE_TARGET_RE = re.compile(r'^\s*update\s+("?[\w.]+"?)\s+set\b', re.IGNORECASE)
 
 
-def validate_update(sql: str, allowed_tables: Optional[list[str]] = None) -> tuple[str, str]:
+def validate_update(sql: str, allowed_tables: list[str] | None = None) -> tuple[str, str]:
     """Validate a single-table UPDATE with a WHERE clause.
 
     Returns ``(cleaned_sql, target_table)``. Raises :class:`SqlGuardError`

@@ -52,14 +52,14 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
+    belongs_to_set: list[str] = []
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
@@ -70,7 +70,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     def __init__(
         self,
         connection_string: str,
-        api_key: Optional[str],
+        api_key: str | None,
         embedding_engine: EmbeddingEngine,
         schema: str = "",
     ):
@@ -179,7 +179,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         """
         self._metadata = MetaData()
 
-    async def get_table_names(self) -> List[str]:
+    async def get_table_names(self) -> list[str]:
         """List collection tables, scoped to this adapter's schema when pinned.
 
         In shared-database mode this adapter's engine is pinned to a single
@@ -191,7 +191,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         if not self.schema:
             return await super().get_table_names()
 
-        table_names: List[str] = []
+        table_names: list[str] = []
         async with self.engine.begin() as connection:
             metadata = MetaData()
             await connection.run_sync(metadata.reflect, schema=self.schema)
@@ -338,7 +338,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints into `collection_name`, merging belongs_to_set on conflict."""
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
@@ -503,7 +503,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     supports_payload_update = True
 
     async def update_payload(
-        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+        self, collection_name: str, payload_updates: dict[str, dict[str, Any]]
     ) -> None:
         """Update payload fields on existing rows WITHOUT re-embedding.
 
@@ -544,7 +544,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 )
             await session.commit()
 
-    async def retrieve(self, collection_name: str, data_point_ids: List[str]):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from `collection_name` matching any of `data_point_ids`."""
         # Get PGVectorDataPoint Table from database
         try:
@@ -578,14 +578,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: Optional[int] = 15,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-    ) -> List[ScoredResult]:
+    ) -> list[ScoredResult]:
         """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -685,11 +685,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: int = None,
+        query_texts: list[str],
+        limit: int | None = None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         """Run `search` concurrently for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
@@ -737,8 +737,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Strip the given tag names from `belongs_to_set` arrays in every
@@ -780,7 +780,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 candidate_tables.append(table_only)
 
         id_scope_clause = "AND id = ANY(:node_ids)" if node_ids is not None else ""
-        bind_params: Dict[str, Any] = {"tags": list(tags)}
+        bind_params: dict[str, Any] = {"tags": list(tags)}
         if node_ids is not None:
             bind_params["node_ids"] = [str(nid) for nid in node_ids]
 
@@ -845,7 +845,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                             await session.commit()
                             continue
 
-                        scoped_params: Dict[str, Any] = {
+                        scoped_params: dict[str, Any] = {
                             "tags": list(tags),
                             "target_ids": target_ids,
                         }

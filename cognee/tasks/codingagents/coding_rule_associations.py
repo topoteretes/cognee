@@ -21,20 +21,20 @@ class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
     text: str = Field(..., description="The coding rule associated with the conversation")
-    belongs_to_set: Optional[List[NodeSet] | List[str]] = None
+    belongs_to_set: list[NodeSet] | list[str] | None = None
     metadata: dict = {"index_fields": ["rule"]}
 
 
 class RuleSet(DataPoint):
     """Collection of parsed rules."""
 
-    rules: List[Rule] = Field(
+    rules: list[Rule] = Field(
         ...,
         description="List of developer rules extracted from the input text. Each rule represents a coding best practice or guideline.",
     )
 
 
-async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
+async def get_existing_rules(rules_nodeset_name: str) -> list[str]:
     graph_engine = await get_graph_engine()
     nodes_data, _ = await graph_engine.get_nodeset_subgraph(
         node_type=NodeSet, node_name=[rules_nodeset_name]
@@ -52,7 +52,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
     return existing_rules
 
 
-async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
+async def get_origin_edges(data: str, rules: list[Rule]) -> list[Any]:
     vector_engine = await get_vector_engine_async()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)

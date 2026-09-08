@@ -91,10 +91,10 @@ def get_fixed_retriever_options() -> dict[str, type]:
 def build_sweep_config(
     strategy_name: str,
     *,
-    config_name: Optional[str] = None,
-    strategy_kwargs: Optional[dict[str, Any]] = None,
-    qa_prompt_paths: Optional[dict[str, str]] = None,
-    agentic_prompt_paths: Optional[dict[str, str]] = None,
+    config_name: str | None = None,
+    strategy_kwargs: dict[str, Any] | None = None,
+    qa_prompt_paths: dict[str, str] | None = None,
+    agentic_prompt_paths: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     spec = get_answering_strategy_spec(strategy_name)
     kwargs = dict(strategy_kwargs or {})

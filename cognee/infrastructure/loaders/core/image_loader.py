@@ -79,10 +79,9 @@ class ImageLoader(LoaderInterface):
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
-            return True
-
-        return False
+        return bool(
+            extension in self.supported_extensions and mime_type in self.supported_mime_types
+        )
 
     async def load(self, file_path: str, **kwargs: Any) -> "str | LoaderResult":
         """
@@ -240,7 +239,7 @@ class ImageLoader(LoaderInterface):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_exif_metadata(file_path: str) -> Optional[str]:
+    def _extract_exif_metadata(file_path: str) -> str | None:
         """
         Extract human-readable EXIF metadata from an image file.
 
@@ -303,7 +302,7 @@ class ImageLoader(LoaderInterface):
     _seen_hashes: set[str] = set()
 
     @staticmethod
-    def _compute_perceptual_hash(file_path: str) -> Optional[str]:
+    def _compute_perceptual_hash(file_path: str) -> str | None:
         """
         Compute a 64-bit perceptual (difference) hash for the image using
         only PIL — no external ``imagehash`` dependency required.
@@ -367,14 +366,14 @@ def _dhash(image, hash_size: int = 8) -> str:
     return "".join(hex_digits)
 
 
-def _format_gps_info(gps_dict: dict) -> Optional[str]:
+def _format_gps_info(gps_dict: dict) -> str | None:
     """Format GPSInfo dict (tag 34853) into human-readable coordinates."""
     try:
         from PIL.ExifTags import GPSTAGS  # ty: ignore[unresolved-import]
     except ImportError:
         return None
 
-    def _to_decimal(values, ref: str) -> Optional[float]:
+    def _to_decimal(values, ref: str) -> float | None:
         """Convert (degrees, minutes, seconds) tuple to decimal degrees."""
         if not values or len(values) < 3:
             return None

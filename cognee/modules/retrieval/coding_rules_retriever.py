@@ -12,7 +12,7 @@ logger = get_logger("CodingRulesRetriever")
 class CodingRulesRetriever(BaseRetriever):
     """Retriever for handling codeing rule based searches."""
 
-    def __init__(self, rules_nodeset_name: Optional[List[str]] = None):
+    def __init__(self, rules_nodeset_name: list[str] | None = None):
         if isinstance(rules_nodeset_name, list) or rules_nodeset_name is None:
             if not rules_nodeset_name:
                 # If there is no provided nodeset set to coding_agent_rules

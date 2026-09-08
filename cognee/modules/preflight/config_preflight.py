@@ -48,7 +48,7 @@ class ProviderConfigMismatchError(CogneeConfigurationError):
         super().__init__(message, "ProviderConfigMismatchError")
 
 
-def check_provider_config(llm_config=None, embedding_config=None) -> List[str]:
+def check_provider_config(llm_config=None, embedding_config=None) -> list[str]:
     """Return actionable problem descriptions for inconsistent provider config.
 
     Pure and network-free: only reads attributes off the two config objects.
@@ -66,7 +66,7 @@ def check_provider_config(llm_config=None, embedding_config=None) -> List[str]:
 
         embedding_config = get_embedding_context_config()
 
-    problems: List[str] = []
+    problems: list[str] = []
 
     llm_provider = (llm_config.llm_provider or "").lower()
     llm_key = (llm_config.llm_api_key or "").strip()

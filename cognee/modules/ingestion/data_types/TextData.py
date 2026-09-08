@@ -1,6 +1,7 @@
 import hashlib
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, BinaryIO
+from typing import BinaryIO
 
 from .IngestionData import IngestionData
 

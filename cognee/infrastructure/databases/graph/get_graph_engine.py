@@ -128,9 +128,7 @@ class _GraphEngineHandle:
                 )
                 return False
         # Subprocess adapters latch ``_permanently_closed`` on close.
-        if getattr(engine, "_permanently_closed", False):
-            return False
-        return True
+        return not getattr(engine, "_permanently_closed", False)
 
     def _release_stale_pin(self, pinned) -> None:
         """Drop the stale pinned proxy BEFORE re-resolving a replacement.

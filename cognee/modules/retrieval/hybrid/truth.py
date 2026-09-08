@@ -12,9 +12,9 @@ logger = get_logger("HybridRetriever")
 
 
 class TruthContext(NamedTuple):
-    q_coords: Optional[list[float]] = None
-    truth_state_by_id: Optional[dict] = None
-    current_truth_epoch: Optional[int] = None
+    q_coords: list[float] | None = None
+    truth_state_by_id: dict | None = None
+    current_truth_epoch: int | None = None
 
 
 async def build_truth_context(

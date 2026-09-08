@@ -19,7 +19,7 @@ class ServiceNotHealthy(AssertionError):
     """Raised when a service fails to become healthy within the timeout."""
 
 
-def _compose_base_cmd() -> List[str]:
+def _compose_base_cmd() -> list[str]:
     cmd = ["docker", "compose", "-f", CONFIG.compose_file]
     for profile in CONFIG.compose_profiles:
         cmd += ["--profile", profile]
@@ -37,7 +37,7 @@ def compose(*args: str, check: bool = True, capture: bool = False) -> subprocess
     )
 
 
-def service_logs(service: Optional[str] = None) -> str:
+def service_logs(service: str | None = None) -> str:
     """Return logs for a single service (or the whole stack when omitted)."""
     args = ["logs", "--no-color"]
     if service:
@@ -62,9 +62,9 @@ def recreate_service(service: str) -> None:
 def wait_for_http_ok(
     url: str,
     *,
-    timeout: Optional[float] = None,
-    poll_interval: Optional[float] = None,
-    name: Optional[str] = None,
+    timeout: float | None = None,
+    poll_interval: float | None = None,
+    name: str | None = None,
     expect_status: tuple = (200,),
 ) -> requests.Response:
     """Poll ``url`` until it returns an expected status or the timeout elapses."""
@@ -73,7 +73,7 @@ def wait_for_http_ok(
     label = name or url
 
     deadline = time.monotonic() + timeout
-    last_error: Optional[str] = None
+    last_error: str | None = None
     while time.monotonic() < deadline:
         try:
             response = requests.get(url, timeout=10)

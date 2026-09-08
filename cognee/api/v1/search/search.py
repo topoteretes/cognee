@@ -41,36 +41,36 @@ logger = get_logger()
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.HYBRID_COMPLETION,
-    user: Optional[User] = None,
-    datasets: Optional[Union[list[str], str]] = None,
-    dataset_ids: Optional[Union[list[UUID], UUID]] = None,
+    user: User | None = None,
+    datasets: list[str] | str | None = None,
+    dataset_ids: list[UUID] | UUID | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     top_k: int = 15,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     # only_context / verbose inspect retriever-specific shapes. Pin query_type:
     # unspecified hybrid may defer to GRAPH_COMPLETION, and this return value
     # does not include the effective type.
     only_context: bool = False,
-    context_format: Union[ContextFormat, str] = ContextFormat.CONTEXT,
-    session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = None,
-    triplet_distance_penalty: Optional[float] = None,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
+    session_id: str | None = None,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose: bool = False,
-    retriever_specific_config: Optional[dict] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = None,
-    skills: Optional[List[Union[str, Skill]]] = None,
-    tools: Optional[List[str]] = None,
-    max_iter: Optional[int] = None,
+    retriever_specific_config: dict | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = None,
+    skills: list[str | Skill] | None = None,
+    tools: list[str] | None = None,
+    max_iter: int | None = None,
     include_references: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-    code_query: Optional[dict[str, Any]] = None,
-) -> List[SearchResult]:
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+    code_query: dict[str, Any] | None = None,
+) -> list[SearchResult]:
     context_format = ContextFormat.parse(context_format)
     if neighborhood_depth is not None and (
         not isinstance(neighborhood_depth, int) or neighborhood_depth < 1
@@ -291,7 +291,7 @@ async def search(
             _search_start_ns = __import__("time").monotonic_ns()
 
             # We use lists from now on for datasets
-            if isinstance(datasets, UUID) or isinstance(datasets, str):
+            if isinstance(datasets, (UUID, str)):
                 datasets = [datasets]
 
             if (

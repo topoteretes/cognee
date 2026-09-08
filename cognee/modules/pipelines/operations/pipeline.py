@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Union
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, Optional, Union
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
@@ -56,19 +57,19 @@ async def _drive_marking_held(dataset_id: UUID, source: AsyncIterator[Any]) -> A
 
 
 async def run_pipeline(
-    tasks: Optional[Union[list[Task], Callable[[Any], list[Task]]]] = None,
+    tasks: list[Task] | Callable[[Any], list[Task]] | None = None,
     data=None,
-    datasets: Optional[Union[str, list[str], list[UUID]]] = None,
-    user: Optional[User] = None,
+    datasets: str | list[str] | list[UUID] | None = None,
+    user: User | None = None,
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache: bool = False,
-    vector_db_config: Optional[dict] = None,
-    graph_db_config: Optional[dict] = None,
+    vector_db_config: dict | None = None,
+    graph_db_config: dict | None = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
     skip_connection_test: bool = False,
 ):
@@ -110,15 +111,15 @@ async def run_pipeline(
 async def run_pipeline_per_dataset(
     dataset: Dataset,
     user: User,
-    tasks: Optional[Union[list[Task], Callable[[Any], list[Task]]]] = None,
-    data: Optional[list[Data]] = None,
+    tasks: list[Task] | Callable[[Any], list[Task]] | None = None,
+    data: list[Data] | None = None,
     pipeline_name: str = "custom_pipeline",
     use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache=False,
 ):
     # The actual work of a single run, factored out so it can run either under

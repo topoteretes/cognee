@@ -187,7 +187,7 @@ class BeautifulSoupLoader(LoaderInterface):
 
         # Normalize extraction rules
         normalized_rules: list[ExtractionRule] = []
-        for _, rule in extraction_rules.items():
+        for rule in extraction_rules.values():
             r = self._normalize_rule(rule)
             if join_all_matches:
                 r.all = True

@@ -39,14 +39,14 @@ class Person(DataPoint):
 
     name: Annotated[str, Embeddable("Person name"), Dedup()]
     role: str = ""
-    claims: Optional[List[ScientificClaim]] = None
+    claims: list[ScientificClaim] | None = None
 
 
 class AnalysisResult(BaseModel):
     """LLM output model for structured extraction."""
 
-    people: List[Person] = Field(default_factory=list)
-    claims: List[ScientificClaim] = Field(default_factory=list)
+    people: list[Person] = Field(default_factory=list)
+    claims: list[ScientificClaim] = Field(default_factory=list)
 
 
 # -- Pipeline tasks --
@@ -68,15 +68,15 @@ async def extract_entities(text: str) -> AnalysisResult:
 
 
 @task
-async def link_claims_to_people(analysis: AnalysisResult) -> List[Person]:
+async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
     """Associate claims with the people who made them, using LLM."""
 
     class ClaimAssignment(BaseModel):
         person_name: str
-        claim_texts: List[str]
+        claim_texts: list[str]
 
     class Assignments(BaseModel):
-        assignments: List[ClaimAssignment]
+        assignments: list[ClaimAssignment]
 
     assignments = await LLMGateway.acreate_structured_output(
         text_input=(
@@ -103,7 +103,7 @@ async def link_claims_to_people(analysis: AnalysisResult) -> List[Person]:
 
 
 @task
-async def store_and_summarize(people: List[Person]) -> str:
+async def store_and_summarize(people: list[Person]) -> str:
     """Store DataPoints in graph + vector DBs, then return a summary."""
 
     # add_data_points persists nodes and edges to graph DB,

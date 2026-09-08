@@ -99,7 +99,7 @@ async def test_load_success_with_unstructured(
 
     # Verify partition_pdf is called with the correct parameters
     mock_partition_pdf.assert_called_once()
-    call_args, call_kwargs = mock_partition_pdf.call_args
+    _call_args, call_kwargs = mock_partition_pdf.call_args
     assert call_kwargs.get("filename") == test_file_path
     assert call_kwargs.get("strategy") == "auto"  # Default strategy
 

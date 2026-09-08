@@ -133,8 +133,8 @@ class BaseConfig(BaseSettings):
 
         return self
 
-    default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
-    default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
+    default_user_email: str | None = os.getenv("DEFAULT_USER_EMAIL")
+    default_user_password: str | None = os.getenv("DEFAULT_USER_PASSWORD")
 
     # OpenTelemetry / tracing
     cognee_tracing_enabled: bool = os.getenv("COGNEE_TRACING_ENABLED", "false").lower() in (
@@ -143,15 +143,15 @@ class BaseConfig(BaseSettings):
         "yes",
     )
     otel_service_name: str = os.getenv("OTEL_SERVICE_NAME", "cognee")
-    otel_exporter_otlp_endpoint: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    otel_exporter_otlp_headers: Optional[str] = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+    otel_exporter_otlp_endpoint: str | None = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    otel_exporter_otlp_headers: str | None = os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
 
     # Langfuse configuration. Read from the env by pydantic-settings at load time
     # (LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST); host falls back to
     # LANGFUSE_BASE_URL, then Langfuse cloud (see validate_paths).
-    langfuse_public_key: Optional[str] = None
-    langfuse_secret_key: Optional[str] = None
-    langfuse_host: Optional[str] = None
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

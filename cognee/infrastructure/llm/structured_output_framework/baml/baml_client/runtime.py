@@ -28,9 +28,9 @@ from .globals import (
 class BamlCallOptions(typing.TypedDict, total=False):
     tb: typing_extensions.NotRequired[type_builder.TypeBuilder]
     client_registry: typing_extensions.NotRequired[baml_py.baml_py.ClientRegistry]
-    env: typing_extensions.NotRequired[typing.Dict[str, typing.Optional[str]]]
+    env: typing_extensions.NotRequired[dict[str, str | None]]
     collector: typing_extensions.NotRequired[
-        typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
+        baml_py.baml_py.Collector | list[baml_py.baml_py.Collector]
     ]
     abort_controller: typing_extensions.NotRequired[baml_py.baml_py.AbortController]
     on_tick: typing_extensions.NotRequired[
@@ -39,21 +39,21 @@ class BamlCallOptions(typing.TypedDict, total=False):
 
 
 class _ResolvedBamlOptions:
-    tb: typing.Optional[baml_py.baml_py.TypeBuilder]
-    client_registry: typing.Optional[baml_py.baml_py.ClientRegistry]
-    collectors: typing.List[baml_py.baml_py.Collector]
-    env_vars: typing.Dict[str, str]
-    abort_controller: typing.Optional[baml_py.baml_py.AbortController]
-    on_tick: typing.Optional[typing.Callable[[], None]]
+    tb: baml_py.baml_py.TypeBuilder | None
+    client_registry: baml_py.baml_py.ClientRegistry | None
+    collectors: list[baml_py.baml_py.Collector]
+    env_vars: dict[str, str]
+    abort_controller: baml_py.baml_py.AbortController | None
+    on_tick: typing.Callable[[], None] | None
 
     def __init__(
         self,
-        tb: typing.Optional[baml_py.baml_py.TypeBuilder],
-        client_registry: typing.Optional[baml_py.baml_py.ClientRegistry],
-        collectors: typing.List[baml_py.baml_py.Collector],
-        env_vars: typing.Dict[str, str],
-        abort_controller: typing.Optional[baml_py.baml_py.AbortController],
-        on_tick: typing.Optional[typing.Callable[[], None]],
+        tb: baml_py.baml_py.TypeBuilder | None,
+        client_registry: baml_py.baml_py.ClientRegistry | None,
+        collectors: list[baml_py.baml_py.Collector],
+        env_vars: dict[str, str],
+        abort_controller: baml_py.baml_py.AbortController | None,
+        on_tick: typing.Callable[[], None] | None,
     ):
         self.tb = tb
         self.client_registry = client_registry
@@ -124,7 +124,7 @@ class DoNotUseDirectlyCallManager:
         return DoNotUseDirectlyCallManager({**self.__baml_options, **options})
 
     async def call_function_async(
-        self, *, function_name: str, args: typing.Dict[str, typing.Any]
+        self, *, function_name: str, args: dict[str, typing.Any]
     ) -> baml_py.baml_py.FunctionResult:
         resolved_options = self.__resolve()
 
@@ -153,7 +153,7 @@ class DoNotUseDirectlyCallManager:
         )
 
     def call_function_sync(
-        self, *, function_name: str, args: typing.Dict[str, typing.Any]
+        self, *, function_name: str, args: dict[str, typing.Any]
     ) -> baml_py.baml_py.FunctionResult:
         resolved_options = self.__resolve()
 
@@ -186,8 +186,8 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
-    ) -> typing.Tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.FunctionResultStream]:
+        args: dict[str, typing.Any],
+    ) -> tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.FunctionResultStream]:
         resolved_options = self.__resolve()
         ctx = __ctx__manager__.clone_context()
         result = __runtime__.stream_function(
@@ -215,10 +215,8 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
-    ) -> typing.Tuple[
-        baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.SyncFunctionResultStream
-    ]:
+        args: dict[str, typing.Any],
+    ) -> tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.SyncFunctionResultStream]:
         resolved_options = self.__resolve()
         if resolved_options.on_tick is not None:
             raise ValueError(
@@ -251,7 +249,7 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
+        args: dict[str, typing.Any],
         mode: typing_extensions.Literal["stream", "request"],
     ) -> baml_py.baml_py.HTTPRequest:
         resolved_options = self.__resolve()
@@ -274,7 +272,7 @@ class DoNotUseDirectlyCallManager:
         self,
         *,
         function_name: str,
-        args: typing.Dict[str, typing.Any],
+        args: dict[str, typing.Any],
         mode: typing_extensions.Literal["stream", "request"],
     ) -> baml_py.baml_py.HTTPRequest:
         resolved_options = self.__resolve()

@@ -32,7 +32,7 @@ def _safe_close(obj) -> None:
 
 def install_json_extension_local(
     buffer_pool_size: int,
-    max_db_size: Optional[int] = None,
+    max_db_size: int | None = None,
 ) -> None:
     """Install Ladybug's JSON extension via a throwaway database.
 

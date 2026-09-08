@@ -88,7 +88,7 @@ class RemoteLadybugAdapter(LadybugAdapter):
             logger.error(f"API request failed for {endpoint}: {e!s}")
             raise
 
-    async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
+    async def query(self, query: str, params: dict | None = None) -> list[tuple]:
         """Execute a Ladybug query via the REST API."""
         try:
             # Initialize schema if needed

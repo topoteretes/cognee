@@ -221,7 +221,7 @@ def _normalize_rubric(rubric: Any) -> list[str]:
 
 
 def filter_questions_by_type(
-    questions: list[dict[str, Any]], question_types: Optional[list[str]]
+    questions: list[dict[str, Any]], question_types: list[str] | None
 ) -> list[dict[str, Any]]:
     if not question_types:
         return questions

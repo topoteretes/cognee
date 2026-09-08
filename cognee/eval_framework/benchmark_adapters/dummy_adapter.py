@@ -6,11 +6,11 @@ from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import Base
 class DummyAdapter(BaseBenchmarkAdapter):
     def load_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         seed: int = 42,
         load_golden_context: bool = False,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
-    ) -> Tuple[List[str], List[dict[str, Any]]]:
+        instance_filter: str | list[str] | list[int] | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         corpus_list = [
             "The cognee is an AI memory engine that supports different vector and graph databases",
             "Neo4j is a graph database supported by cognee",

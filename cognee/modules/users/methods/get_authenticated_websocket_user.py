@@ -30,7 +30,7 @@ BAD_CREDENTIAL_ERRORS = (
 )
 
 
-async def _read_handshake_user(websocket: WebSocket) -> Optional[User]:
+async def _read_handshake_user(websocket: WebSocket) -> User | None:
     """Resolve a user from the credentials carried by the WebSocket handshake.
 
     Walks the configured authentication backends in registration order and
@@ -96,7 +96,7 @@ async def _read_handshake_user(websocket: WebSocket) -> Optional[User]:
     return None
 
 
-async def get_authenticated_websocket_user(websocket: WebSocket) -> Optional[User]:
+async def get_authenticated_websocket_user(websocket: WebSocket) -> User | None:
     """Authenticate a WebSocket connection. The counterpart of ``get_authenticated_user``.
 
     A WebSocket route cannot depend on ``get_authenticated_user``: every

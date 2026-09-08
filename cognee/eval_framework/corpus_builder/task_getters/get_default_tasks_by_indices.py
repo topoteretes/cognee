@@ -10,8 +10,8 @@ from cognee.tasks.storage import add_data_points
 
 
 async def get_default_tasks_by_indices(
-    indices: List[int], chunk_size: int = None, chunker=TextChunker
-) -> List[Task]:
+    indices: list[int], chunk_size: int | None = None, chunker=TextChunker
+) -> list[Task]:
     """Returns default tasks filtered by the provided indices."""
     all_tasks = await get_default_tasks(chunker=chunker, chunk_size=chunk_size)
 
@@ -24,12 +24,12 @@ async def get_default_tasks_by_indices(
 
 
 async def get_no_summary_tasks(
-    chunk_size: int = None,
+    chunk_size: int | None = None,
     chunker=TextChunker,
     user=None,
     graph_model=KnowledgeGraph,
     ontology_file_path=None,
-) -> List[Task]:
+) -> list[Task]:
     """Returns default tasks without summarization tasks."""
     # Get base tasks (0=classify, 1=extract_chunks)
     base_tasks = await get_default_tasks_by_indices([0, 1], chunk_size, chunker)
@@ -50,8 +50,8 @@ async def get_no_summary_tasks(
 
 
 async def get_just_chunks_tasks(
-    chunk_size: int = None, chunker=TextChunker, user=None
-) -> List[Task]:
+    chunk_size: int | None = None, chunker=TextChunker, user=None
+) -> list[Task]:
     """Returns default tasks with only chunk extraction and data points addition."""
     # Get base tasks (0=classify, 1=extract_chunks)
     base_tasks = await get_default_tasks_by_indices([0, 1], chunk_size, chunker)

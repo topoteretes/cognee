@@ -27,7 +27,7 @@ from .models import ProvenanceEdgeEvidence
 logger = get_logger("provenance.cleanup")
 
 
-def evidence_delete_statement(dataset_id: UUID, data_id: Optional[UUID] = None):
+def evidence_delete_statement(dataset_id: UUID, data_id: UUID | None = None):
     statement = delete(ProvenanceEdgeEvidence).where(
         ProvenanceEdgeEvidence.dataset_id == dataset_id
     )
@@ -36,7 +36,7 @@ def evidence_delete_statement(dataset_id: UUID, data_id: Optional[UUID] = None):
     return statement
 
 
-async def delete_edge_evidence(dataset_id: UUID, data_id: Optional[UUID] = None) -> int:
+async def delete_edge_evidence(dataset_id: UUID, data_id: UUID | None = None) -> int:
     """Remove the evidence rows of a dataset, or of one document in it."""
     try:
         engine = get_relational_engine()

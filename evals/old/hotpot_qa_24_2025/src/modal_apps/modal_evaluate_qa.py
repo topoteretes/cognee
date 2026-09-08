@@ -197,7 +197,7 @@ def calculate_qa_metrics(benchmark_folder: str, filename: str):
 
 
 @app.local_entrypoint()
-def main(benchmark_folder: str = None, limit: int = None):
+def main(benchmark_folder: str | None = None, limit: int | None = None):
     """Entry point that triggers evaluation for a specific benchmark folder."""
     print(f"🚀 Starting evaluation for benchmark folder: {benchmark_folder}")
     print(f"📏 Processing limit: {limit if limit else 'all'} files")

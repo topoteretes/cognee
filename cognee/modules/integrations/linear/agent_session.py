@@ -170,7 +170,7 @@ async def _answer(credential: IntegrationCredential, payload: dict[str, Any]) ->
     return "\n\n".join(facts)
 
 
-def _extract_fact(result: Any) -> Optional[str]:
+def _extract_fact(result: Any) -> str | None:
     """Pull the answer text out of one ``cognee.search()`` result.
 
     Despite the ``List[SearchResult]`` type hint, the public ``search()``

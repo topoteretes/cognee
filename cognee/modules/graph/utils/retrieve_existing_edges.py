@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.provenance import (
 
 async def find_existing_edge_identities(
     edge_identities: Collection[EdgeIdentity],
-    ctx: Optional[Any] = None,
+    ctx: Any | None = None,
     chunk_owned: Collection[EdgeIdentity] = (),
 ) -> set[EdgeIdentity]:
     """Return the supplied edge identities that already exist in graph storage.

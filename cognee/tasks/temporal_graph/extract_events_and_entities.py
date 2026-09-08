@@ -9,7 +9,7 @@ from cognee.tasks.temporal_graph.models import EventList
 
 
 @task_summary("Extracted events from {n} chunk(s)")
-async def extract_events_and_timestamps(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+async def extract_events_and_timestamps(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
     """
     Extracts events and their timestamps from document chunks using an LLM.
 

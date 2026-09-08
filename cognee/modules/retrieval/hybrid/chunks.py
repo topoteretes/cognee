@@ -25,16 +25,16 @@ async def retrieve_hybrid_chunks(
     vector_engine: Any,
     query: str,
     chunks_top_k: int,
-    text_summaries_top_k: Optional[int],
-    node_name: Optional[list[str]],
+    text_summaries_top_k: int | None,
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     use_importance_weight: bool,
-    query_vector: Optional[list[float]] = None,
+    query_vector: list[float] | None = None,
     use_truth_weight: bool = False,
-    q_coords: Optional[list[float]] = None,
-    truth_state_by_id: Optional[dict] = None,
-    current_truth_epoch: Optional[int] = None,
-    personal_weights: Optional[dict] = None,
+    q_coords: list[float] | None = None,
+    truth_state_by_id: dict | None = None,
+    current_truth_epoch: int | None = None,
+    personal_weights: dict | None = None,
     personal_influence: float = 0.0,
 ) -> dict[str, Any]:
     candidate_limit = chunk_candidate_limit(chunks_top_k)
@@ -105,7 +105,7 @@ def chunk_candidate_limit(chunks_top_k: int) -> int:
     return max(0, chunks_top_k * 2)
 
 
-def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: Optional[int]) -> int:
+def summary_candidate_limit(chunks_top_k: int, text_summaries_top_k: int | None) -> int:
     if text_summaries_top_k is None:
         return max(0, chunks_top_k)
     return text_summaries_top_k
@@ -116,11 +116,11 @@ async def search_collection(
     collection_name: str,
     query: str,
     limit: int,
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     *,
     apply_node_filter: bool = True,
-    query_vector: Optional[list[float]] = None,
+    query_vector: list[float] | None = None,
 ) -> list[Any]:
     if limit <= 0:
         return []
@@ -145,7 +145,7 @@ async def search_collection(
 async def load_source_chunks_for_summaries(
     vector_engine: Any,
     chunk_ids: list[str],
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
 ) -> list[Any]:
     chunks = await vector_engine.retrieve("DocumentChunk_text", chunk_ids)
@@ -179,7 +179,7 @@ async def load_source_chunks_for_summaries(
 async def load_summary_text_for_ranked_pairs(
     vector_engine: Any,
     ranked_pairs: list[dict],
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
 ) -> None:
     summary_ids_by_chunk_id = {}

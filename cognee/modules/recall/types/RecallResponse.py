@@ -49,8 +49,8 @@ class ResponseToolEntry(BaseModel):
     question: str
     text: str
     success: bool = True
-    error: Optional[str] = None
-    structured: Optional[dict] = None
+    error: str | None = None
+    structured: dict | None = None
 
 
 class ResponseSkillEntry(BaseModel):
@@ -66,7 +66,7 @@ class ResponseSkillEntry(BaseModel):
     source: Literal["skills"]
     text: str
     skill: dict
-    score: Optional[float] = None
+    score: float | None = None
 
 
 class ResponseMarkerEntry(BaseModel):
@@ -84,8 +84,8 @@ class ResponseMarkerEntry(BaseModel):
     # Populated when status == "build_failed": the root cause of the last
     # errored build, so clients can show WHY memory has no answers instead
     # of an unexplained empty result.
-    error_class: Optional[str] = None
-    error_message: Optional[str] = None
+    error_class: str | None = None
+    error_message: str | None = None
 
 
 RecallResponse = Annotated[

@@ -7,14 +7,14 @@ from cognee.modules.data.models import Dataset
 
 
 async def load_or_create_datasets(
-    dataset_names: List[Union[str, UUID]], existing_datasets: List[Dataset], user
-) -> List[Dataset]:
+    dataset_names: list[str | UUID], existing_datasets: list[Dataset], user
+) -> list[Dataset]:
     """
     Given a list of dataset identifiers (names or UUIDs), return Dataset instances:
       - If an identifier matches an existing Dataset (by name or id), reuse it.
       - Otherwise, create a new Dataset with a unique id.
     """
-    result: List[Dataset] = []
+    result: list[Dataset] = []
 
     for identifier in dataset_names:
         # Try to find a matching dataset in the existing list

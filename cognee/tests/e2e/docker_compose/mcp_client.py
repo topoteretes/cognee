@@ -17,7 +17,7 @@ from config import CONFIG
 
 @dataclass
 class McpToolCall:
-    tools: List[str]
+    tools: list[str]
     result_text: str
     structured: Any
 

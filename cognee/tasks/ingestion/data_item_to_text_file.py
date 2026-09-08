@@ -47,9 +47,9 @@ async def pull_from_s3(file_path, destination_file) -> None:
 
 async def data_item_to_text_file(
     data_item_path: str,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    preferred_loaders: dict[str, dict[str, Any]] | None = None,
     **loader_kwargs: Any,
-) -> Tuple[str, LoaderInterface]:
+) -> tuple[str, LoaderInterface]:
     """Run the loader engine on a data item's file.
 
     ``loader_kwargs`` (ingestion context: dataset_name, dataset_id, user,

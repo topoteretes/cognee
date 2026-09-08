@@ -42,14 +42,14 @@ STRUCTURAL_RELATIONSHIPS = frozenset(
 )
 
 
-def _collect_touched_node_ids(items) -> Set[str]:
+def _collect_touched_node_ids(items) -> set[str]:
     """Collect the ids of the entity/event nodes the current ingestion produced.
 
     The pipeline hands this task ``TextSummary`` objects, which wrap their source
     chunk in ``made_from``; other callers may pass ``DocumentChunk`` objects
     directly. Either way the extracted entities live on the chunk's ``contains``.
     """
-    touched: Set[str] = set()
+    touched: set[str] = set()
     for item in items:
         chunk = getattr(item, "made_from", None) or item
         for entry in getattr(chunk, "contains", None) or []:
@@ -61,7 +61,7 @@ def _collect_touched_node_ids(items) -> Set[str]:
     return touched
 
 
-def _node_names(nodes) -> Dict[str, str]:
+def _node_names(nodes) -> dict[str, str]:
     """Map node id -> display name for nodes that carry a non-empty name.
 
     Internal nodes are omitted, which also drops every edge touching them from
@@ -76,10 +76,10 @@ def _node_names(nodes) -> Dict[str, str]:
 
 def _build_candidate_facts(
     edges,
-    node_names: Dict[str, str],
-    touched_node_ids: Set[str],
+    node_names: dict[str, str],
+    touched_node_ids: set[str],
     limit: int,
-) -> Tuple[List[str], Dict[str, str], Dict[str, Tuple[str, str]]]:
+) -> tuple[list[str], dict[str, str], dict[str, tuple[str, str]]]:
     """Render facts connected to the touched entities into ``[F#] a rel b`` lines.
 
     Only edges with at least one touched endpoint and two named endpoints are
@@ -88,9 +88,9 @@ def _build_candidate_facts(
     Returns the rendered lines, a fact id -> line text map, and a
     fact id -> (source_id, target_id) map.
     """
-    lines: List[str] = []
-    fact_text: Dict[str, str] = {}
-    fact_edge: Dict[str, Tuple[str, str]] = {}
+    lines: list[str] = []
+    fact_text: dict[str, str] = {}
+    fact_edge: dict[str, tuple[str, str]] = {}
     index = 0
     for source_id, target_id, relationship_name, _ in edges:
         if relationship_name in STRUCTURAL_RELATIONSHIPS:
@@ -124,8 +124,8 @@ def _build_candidate_facts(
 
 
 def _contradiction_endpoints(
-    first_edge: Tuple[str, str], second_edge: Tuple[str, str]
-) -> Optional[Tuple[str, str]]:
+    first_edge: tuple[str, str], second_edge: tuple[str, str]
+) -> tuple[str, str] | None:
     """Choose the two nodes to link with a ``contradicts`` edge.
 
     Prefer connecting the differing subjects; when both facts share the same
@@ -143,7 +143,7 @@ def _contradiction_endpoints(
 
 
 @task_summary("Checked {n} item(s) for contradictions")
-async def detect_contradictions(data_points: List[DataPoint], **kwargs) -> List[DataPoint]:
+async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[DataPoint]:
     """Flag facts touched by the current ingestion that contradict each other.
 
     Tuning comes from ``CognifyConfig``: ``contradiction_confidence_threshold``

@@ -772,7 +772,7 @@ async def test_invalidation_during_load_discards_stale_snapshot():
 
 @pytest.mark.asyncio
 async def test_delta_operation_reports_repository_last_delta():
-    engine, graph_patch = _graph_patch()
+    _engine, graph_patch = _graph_patch()
     retriever = CodeRetriever(config={"operation": "delta"})
 
     with graph_patch:
@@ -820,7 +820,7 @@ async def test_delta_operation_repo_filter_and_stamped_payload():
 
 @pytest.mark.asyncio
 async def test_repository_nodes_stay_out_of_fact_operations():
-    engine, graph_patch = _graph_patch()
+    _engine, graph_patch = _graph_patch()
     retriever = CodeRetriever(config={"operation": "query_facts", "limit": 100})
 
     with graph_patch:

@@ -14,9 +14,9 @@ _FileFormat = Literal["cogx", "json", "graphml", "cypher"]
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     format: Literal["pydantic"] = "pydantic",
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
@@ -25,9 +25,9 @@ async def export(
 
 @overload
 async def export(
-    dataset: Union[str, UUID],
+    dataset: str | UUID,
     format: _FileFormat,
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
@@ -36,10 +36,10 @@ async def export(
 
 @overload
 async def export(
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     *,
     format: _FileFormat,
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
@@ -47,13 +47,13 @@ async def export(
 
 
 async def export(
-    dataset: Union[str, UUID] = DEFAULT_DATASET_NAME,
+    dataset: str | UUID = DEFAULT_DATASET_NAME,
     format: str = "pydantic",
-    destination: Optional[Union[str, Path]] = None,
+    destination: str | Path | None = None,
     user=None,
     link_relations: bool = False,
     include_permissions: bool = False,
-) -> Union[ExportResult, GraphSnapshot]:
+) -> ExportResult | GraphSnapshot:
     """Export a dataset's knowledge graph.
 
     Args:

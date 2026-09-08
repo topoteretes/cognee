@@ -69,7 +69,7 @@ async def remember_skill_run_entry(
     entry: SkillRunEntry,
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user=None,
 ) -> tuple[SkillRun, object]:
     """Persist a dataset-scoped SkillRun from the remember() typed-entry path."""

@@ -44,14 +44,14 @@ class CognifyPayloadDTO(InDTO):
     # Examples double as the Swagger try-it-out prefill, which is SUBMITTED
     # as-is on Execute — keep them behavior-neutral (empty/None) for every
     # field where a value changes processing.
-    datasets: Optional[List[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
             "Dataset names to process; resolved against datasets owned by the authenticated user."
         ),
     )
-    dataset_ids: Optional[List[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[[]],
         description=(
@@ -59,7 +59,7 @@ class CognifyPayloadDTO(InDTO):
             "Takes precedence over the datasets name list when both are provided."
         ),
     )
-    run_in_background: Optional[bool] = Field(
+    run_in_background: bool | None = Field(
         default=False,
         description=(
             "If true, the request returns immediately with a pipeline_run_id while the "
@@ -68,7 +68,7 @@ class CognifyPayloadDTO(InDTO):
             "knowledge graph is fully built, which can take minutes for large datasets."
         ),
     )
-    graph_model: Optional[dict] = Field(
+    graph_model: dict | None = Field(
         default=None,
         examples=[{}],
         description=(
@@ -77,7 +77,7 @@ class CognifyPayloadDTO(InDTO):
             "used — a restrictive schema here can produce an empty graph."
         ),
     )
-    custom_prompt: Optional[str] = Field(
+    custom_prompt: str | None = Field(
         default="",
         examples=[""],
         description=(
@@ -86,7 +86,7 @@ class CognifyPayloadDTO(InDTO):
             "concepts and their relationships.'). Leave empty for the default prompt."
         ),
     )
-    chunk_size: Optional[int] = Field(
+    chunk_size: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -95,7 +95,7 @@ class CognifyPayloadDTO(InDTO):
             "chunks give finer-grained extraction at higher LLM cost."
         ),
     )
-    ontology_key: Optional[List[str]] = Field(
+    ontology_key: list[str] | None = Field(
         default=None,
         examples=[[]],
         description=(
@@ -103,7 +103,7 @@ class CognifyPayloadDTO(InDTO):
             "entity extraction. Leave empty to process without an ontology."
         ),
     )
-    chunks_per_batch: Optional[int] = Field(
+    chunks_per_batch: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -111,7 +111,7 @@ class CognifyPayloadDTO(InDTO):
             "parallelism/throughput; leave null for the pipeline default. Higher the value higher the parallelism/throughput"
         ),
     )
-    data_per_batch: Optional[int] = Field(
+    data_per_batch: int | None = Field(
         default=20,
         examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
@@ -123,7 +123,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Dict[UUID, PipelineRunInfo],
+        response_model=dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -308,7 +308,7 @@ def get_cognify_router() -> APIRouter:
     async def subscribe_to_cognify_info(
         websocket: WebSocket,
         pipeline_run_id: str,
-        user: Optional[User] = Depends(get_authenticated_websocket_user),
+        user: User | None = Depends(get_authenticated_websocket_user),
     ):
         """
         Stream one cognify run's progress, then its finished graph.

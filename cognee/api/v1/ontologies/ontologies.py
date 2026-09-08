@@ -28,7 +28,7 @@ class OntologyMetadata:
     filename: str
     size_bytes: int
     uploaded_at: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class OntologyService:
@@ -77,7 +77,7 @@ class OntologyService:
         return user_dir / f"{storage_name}.owl"
 
     async def upload_ontology(
-        self, ontology_key: str, file: UploadFile, user, description: Optional[str] = None
+        self, ontology_key: str, file: UploadFile, user, description: str | None = None
     ) -> OntologyMetadata:
         ontology_key = self._validate_ontology_key(ontology_key)
         if not file.filename:
@@ -117,11 +117,11 @@ class OntologyService:
 
     async def upload_ontologies(
         self,
-        ontology_key: List[str],
-        files: List[UploadFile],
+        ontology_key: list[str],
+        files: list[UploadFile],
         user,
-        descriptions: Optional[List[str]] = None,
-    ) -> List[OntologyMetadata]:
+        descriptions: list[str] | None = None,
+    ) -> list[OntologyMetadata]:
         """
         Upload ontology files with their respective keys.
 
@@ -156,7 +156,7 @@ class OntologyService:
             )
         return results
 
-    def get_ontology_contents(self, ontology_key: List[str], user) -> List[str]:
+    def get_ontology_contents(self, ontology_key: list[str], user) -> list[str]:
         """
         Retrieve ontology content for one or more keys.
 

@@ -34,7 +34,7 @@ class HealthResponse(BaseModel):
     timestamp: str
     version: str
     uptime: int
-    components: Dict[str, ComponentHealth]
+    components: dict[str, ComponentHealth]
 
 
 class HealthChecker:

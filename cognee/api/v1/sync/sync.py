@@ -58,12 +58,12 @@ class LocalFileInfo(BaseModel):
 
     id: str
     name: str
-    mime_type: Optional[str]
-    extension: Optional[str]
+    mime_type: str | None
+    extension: str | None
     raw_data_location: str
     content_hash: str  # MD5 hash
     file_size: int
-    node_set: Optional[str] = None
+    node_set: str | None = None
 
 
 class CheckMissingHashesRequest(BaseModel):
@@ -71,20 +71,20 @@ class CheckMissingHashesRequest(BaseModel):
 
     dataset_id: str
     dataset_name: str
-    hashes: List[str]
+    hashes: list[str]
 
 
 class CheckHashesDiffResponse(BaseModel):
     """Response model for missing hashes check"""
 
-    missing_on_remote: List[str]
-    missing_on_local: List[str]
+    missing_on_remote: list[str]
+    missing_on_local: list[str]
 
 
 class PruneDatasetRequest(BaseModel):
     """Request model for pruning dataset to specific hashes"""
 
-    items: List[str]
+    items: list[str]
 
 
 class SyncResponse(BaseModel):
@@ -92,15 +92,15 @@ class SyncResponse(BaseModel):
 
     run_id: str
     status: str  # "started" for immediate response
-    dataset_ids: List[str]
-    dataset_names: List[str]
+    dataset_ids: list[str]
+    dataset_names: list[str]
     message: str
     timestamp: str
     user_id: str
 
 
 async def sync(
-    datasets: List[Dataset],
+    datasets: list[Dataset],
     user: User,
 ) -> SyncResponse:
     """
@@ -170,7 +170,7 @@ async def sync(
     )
 
 
-async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: User) -> None:
+async def _perform_background_sync(run_id: str, datasets: list[Dataset], user: User) -> None:
     """Perform the actual sync operation in the background for multiple datasets."""
     start_time = datetime.now(timezone.utc)
 
@@ -236,7 +236,7 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
 
 
 async def _sync_to_cognee_cloud(
-    datasets: List[Dataset], user: User, run_id: str
+    datasets: list[Dataset], user: User, run_id: str
 ) -> tuple[int, int, int, int, dict]:
     """
     Sync local data to Cognee Cloud using three-step idempotent process:
@@ -405,13 +405,13 @@ class DatasetSyncResult:
     bytes_uploaded: int
     has_uploads: bool  # Whether any files were uploaded (for cognify decision)
     has_downloads: bool  # Whether any files were downloaded (for cognify decision)
-    uploaded_hashes: List[str]  # Content hashes of files uploaded during sync
-    downloaded_hashes: List[str]  # Content hashes of files downloaded during sync
+    uploaded_hashes: list[str]  # Content hashes of files uploaded during sync
+    downloaded_hashes: list[str]  # Content hashes of files downloaded during sync
 
 
 async def _sync_dataset_files(
     dataset: Dataset, cloud_base_url: str, cloud_auth_token: str, user: User, run_id: str
-) -> Optional[DatasetSyncResult]:
+) -> DatasetSyncResult | None:
     """
     Sync files for a single dataset (2-way: upload to cloud, download from cloud).
     Does NOT trigger cognify - that's done separately once for all datasets.
@@ -479,7 +479,7 @@ async def _sync_dataset_files(
 
 async def _extract_local_files_with_hashes(
     dataset: Dataset, user: User, run_id: str
-) -> List[LocalFileInfo]:
+) -> list[LocalFileInfo]:
     """
     Extract local dataset data with existing MD5 hashes from database.
 
@@ -499,7 +499,7 @@ async def _extract_local_files_with_hashes(
         logger.info(f"Found {len(data_entries)} data entries in dataset")
 
         # Process each data entry to get file info and hash
-        local_files: List[LocalFileInfo] = []
+        local_files: list[LocalFileInfo] = []
         skipped_count = 0
 
         for data_entry in data_entries:
@@ -584,7 +584,7 @@ async def _get_cloud_auth_token(user: User) -> str:
 
 
 async def _check_hashes_diff(
-    cloud_base_url: str, auth_token: str, dataset: Dataset, local_hashes: List[str], run_id: str
+    cloud_base_url: str, auth_token: str, dataset: Dataset, local_hashes: list[str], run_id: str
 ) -> CheckHashesDiffResponse:
     """
     Check which hashes are missing on cloud.
@@ -631,7 +631,7 @@ async def _download_missing_files(
     cloud_base_url: str,
     auth_token: str,
     dataset: Dataset,
-    hashes_missing_on_local: List[str],
+    hashes_missing_on_local: list[str],
     user: User,
 ) -> int:
     """
@@ -748,8 +748,8 @@ async def _upload_missing_files(
     cloud_base_url: str,
     auth_token: str,
     dataset: Dataset,
-    local_files: List[LocalFileInfo],
-    hashes_missing_on_remote: List[str],
+    local_files: list[LocalFileInfo],
+    hashes_missing_on_remote: list[str],
     run_id: str,
 ) -> int:
     """
@@ -821,7 +821,7 @@ async def _upload_missing_files(
 
 
 async def _prune_cloud_dataset(
-    cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: List[str], run_id: str
+    cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: list[str], run_id: str
 ) -> None:
     """
     Prune cloud dataset to match local state.
