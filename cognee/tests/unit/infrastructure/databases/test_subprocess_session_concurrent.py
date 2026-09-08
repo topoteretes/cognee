@@ -11,6 +11,7 @@ Uses a small async-capable worker so the worker-side concurrent dispatch
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 import pickle
 import sys
@@ -27,8 +28,6 @@ from cognee_db_workers.harness import (
     run_worker_loop,
     spawn_without_main,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

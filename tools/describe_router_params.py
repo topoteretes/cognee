@@ -20,13 +20,13 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import os
 import re
 import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-import logging
 
 logger = logging.getLogger(__name__)
 

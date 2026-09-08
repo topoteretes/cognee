@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
@@ -6,7 +7,6 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     sleep_and_retry_async,
     sleep_and_retry_sync,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

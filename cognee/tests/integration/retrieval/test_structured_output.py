@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 
@@ -19,8 +20,6 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.storage import add_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

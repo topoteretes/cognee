@@ -4,7 +4,6 @@ import asyncio
 import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.reference import SupportsCliCommand
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

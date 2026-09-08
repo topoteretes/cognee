@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 
@@ -13,8 +14,6 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization.models import TextSummary
-
-import logging
 
 logger = logging.getLogger(__name__)
 

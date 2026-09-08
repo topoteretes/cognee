@@ -1,3 +1,4 @@
+import logging
 import pathlib
 import re
 import shutil
@@ -12,8 +13,6 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.low_level import setup
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.tasks.storage.exceptions import InvalidDataPointsInAddDataPointsError
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -41,8 +42,6 @@ from cognee.tests.utils.mock_ingestion import (
 from cognee.tests.utils.mock_ingestion import (
     load_mock_data as _load_mock_data,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

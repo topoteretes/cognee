@@ -29,11 +29,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 from pathlib import Path
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -39,11 +39,11 @@ Env:
                            otherwise make them last-writer-wins.
 """
 
+import logging
 import os
 import sys
 
 import duckdb
-import logging
 
 logger = logging.getLogger(__name__)
 

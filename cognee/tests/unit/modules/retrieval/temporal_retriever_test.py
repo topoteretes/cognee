@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from types import SimpleNamespace
@@ -8,8 +9,6 @@ import pytest
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
-
-import logging
 
 logger = logging.getLogger(__name__)
 

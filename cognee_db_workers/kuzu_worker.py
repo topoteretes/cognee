@@ -9,6 +9,8 @@ working without churn.
 
 from __future__ import annotations
 
+import logging
+
 from ._kuzu_helpers import install_json_extension_local
 from .harness import (
     DEFAULT_DISPATCH,
@@ -27,7 +29,6 @@ from .kuzu_protocol import (
     OP_OPEN_CONNECTION,
     OP_OPEN_DATABASE,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

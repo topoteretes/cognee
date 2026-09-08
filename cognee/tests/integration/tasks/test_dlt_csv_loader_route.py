@@ -9,6 +9,7 @@ mocked embeddings (the DLT route makes no LLM calls).
 """
 
 import json
+import logging
 import pathlib
 from unittest.mock import patch
 
@@ -25,8 +26,6 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 from cognee.tasks.ingestion.dlt_utils import is_dlt_source_manifest
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -8,14 +8,13 @@ with guaranteed teardown, and an MCP streamable-HTTP client session.
 from __future__ import annotations
 
 import contextlib
+import logging
 import shutil
 import socket
 import subprocess
 import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Optional
-
-import logging
 
 logger = logging.getLogger(__name__)
 

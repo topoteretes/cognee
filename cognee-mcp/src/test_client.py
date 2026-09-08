@@ -2,13 +2,13 @@
 """Smoke-test the public Cognee MCP memory tools."""
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-import logging
 
 logger = logging.getLogger(__name__)
 

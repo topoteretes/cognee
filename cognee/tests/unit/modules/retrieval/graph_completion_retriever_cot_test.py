@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,8 +9,6 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

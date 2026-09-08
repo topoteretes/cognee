@@ -7,6 +7,7 @@ main process.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -16,8 +17,6 @@ import pytest_asyncio
 from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
 from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 from cognee.shared.data_models import KnowledgeGraph
-
-import logging
 
 logger = logging.getLogger(__name__)
 

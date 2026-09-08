@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
 import logging
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 

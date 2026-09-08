@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, create_model, field_validator
 
 from cognee.infrastructure.engine import DataPoint
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

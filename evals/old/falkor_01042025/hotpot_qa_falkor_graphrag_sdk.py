@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 
@@ -8,7 +9,6 @@ from graphrag_sdk import KnowledgeGraph, Ontology
 from graphrag_sdk.model_config import KnowledgeGraphModelConfig
 from graphrag_sdk.models.litellm import LiteModel
 from graphrag_sdk.source import STRING, URL
-import logging
 
 logger = logging.getLogger(__name__)
 

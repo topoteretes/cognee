@@ -23,7 +23,6 @@ from cognee.cli import DEFAULT_DOCS_URL, SupportsCliCommand, debug
 from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.remediation import find_remediation
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

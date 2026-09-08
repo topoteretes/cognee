@@ -44,7 +44,6 @@ from cognee.eval_framework.beam.preprocessing.loaders import (
     load_beam_10m_dataset,
     load_beam_dataset,
 )
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

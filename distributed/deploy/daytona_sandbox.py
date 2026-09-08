@@ -18,6 +18,7 @@ Usage:
 """
 
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -30,7 +31,6 @@ from daytona import (  # type: ignore[import-untyped]
     Resources,
     SessionExecuteRequest,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

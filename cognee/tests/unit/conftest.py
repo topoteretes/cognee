@@ -15,10 +15,9 @@ Tests that never touch the relational database are unaffected.
 """
 
 import asyncio
+import logging
 
 import pytest
-
-import logging
 
 logger = logging.getLogger(__name__)
 

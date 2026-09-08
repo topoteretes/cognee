@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from typing import Optional, Union
 
@@ -9,8 +10,6 @@ from cognee.exceptions import CogneeValidationError
 from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.tasks.storage import add_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

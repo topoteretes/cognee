@@ -9,7 +9,6 @@ from cognee.modules.observability.tracing import (
     setup_tracing,
     shutdown_tracing,
 )
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

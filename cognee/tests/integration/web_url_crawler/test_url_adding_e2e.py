@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -8,8 +9,6 @@ from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_p
 from cognee.infrastructure.loaders.external.beautiful_soup_loader import BeautifulSoupLoader
 from cognee.infrastructure.loaders.LoaderEngine import LoaderEngine
 from cognee.tasks.ingestion import save_data_item_to_storage
-
-import logging
 
 logger = logging.getLogger(__name__)
 

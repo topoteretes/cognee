@@ -20,14 +20,13 @@ Two complementary checks keep the whole bug class from returning:
 import ast
 import importlib
 import inspect
+import logging
 from pathlib import Path
 
 import pytest
 
 import cognee
 from cognee.exceptions import CogneeApiError
-
-import logging
 
 logger = logging.getLogger(__name__)
 

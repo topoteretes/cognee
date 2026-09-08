@@ -9,6 +9,7 @@ specific tests.
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,8 +25,6 @@ from cognee.infrastructure.databases.provenance import (
     make_source_run_ref,
 )
 from cognee.infrastructure.engine import DataPoint
-
-import logging
 
 logger = logging.getLogger(__name__)
 

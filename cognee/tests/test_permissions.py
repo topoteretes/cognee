@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 from unittest.mock import AsyncMock, patch
@@ -24,8 +25,6 @@ from cognee.modules.users.tenants.methods import (
     remove_user_from_tenant,
     select_tenant,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

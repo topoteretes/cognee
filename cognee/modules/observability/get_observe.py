@@ -1,11 +1,10 @@
 import functools
 
 from cognee.base_config import get_base_config
+from cognee.shared.logging_utils import get_logger
 
 from .exceptions import UnsupportedObserverError
 from .observers import Observer
-
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

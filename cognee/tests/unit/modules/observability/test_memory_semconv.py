@@ -4,11 +4,10 @@ Validates that the core memory operations emit correct spans (with memory.*
 attributes), metrics, and that the log bridge attaches without error.
 """
 
+import logging
 import time
 
 import pytest
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,7 +13,6 @@ from graphiti_core.nodes import EpisodeType
 from langchain_openai import ChatOpenAI
 
 from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
-import logging
 
 logger = logging.getLogger(__name__)
 

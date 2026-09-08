@@ -48,11 +48,12 @@ os.environ["AUTO_FEEDBACK"] = "true"
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 os.environ.setdefault("LOG_LEVEL", "ERROR")
 
+import logging
+
 import cognee
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.memory import TraceEntry
 from cognee.modules.users.methods import get_default_user
-import logging
 
 logger = logging.getLogger(__name__)
 

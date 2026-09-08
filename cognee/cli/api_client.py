@@ -19,7 +19,6 @@ from typing import Any, Optional
 from urllib.parse import urljoin
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

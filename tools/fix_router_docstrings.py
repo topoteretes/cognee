@@ -33,13 +33,14 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import logging
+
 from check_router_docstrings import (  # noqa: E402
     actual_params,
     documented_params,
     iter_api_routes,
     normalize,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

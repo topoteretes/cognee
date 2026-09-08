@@ -1,6 +1,7 @@
 """Integration tests for the public cognee.agent_memory decorator behavior."""
 
 import importlib
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -18,8 +19,6 @@ from cognee.modules.engine.models import NodeSet
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-
-import logging
 
 logger = logging.getLogger(__name__)
 

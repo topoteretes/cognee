@@ -1,3 +1,4 @@
+import logging
 import pathlib
 
 import pytest
@@ -9,8 +10,6 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.tasks.storage import add_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

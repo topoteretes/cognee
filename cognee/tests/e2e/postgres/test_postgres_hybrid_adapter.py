@@ -5,6 +5,7 @@ Connection defaults: DB_HOST=localhost, DB_PORT=5432,
 DB_USERNAME=cognee, DB_PASSWORD=cognee, DB_NAME=cognee_db.
 """
 
+import logging
 import os
 
 import pytest
@@ -14,8 +15,6 @@ from cognee.infrastructure.databases.graph.postgres_demo.adapter import Postgres
 from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -15,11 +15,11 @@ avoids surprising contributors.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import tempfile
 from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 

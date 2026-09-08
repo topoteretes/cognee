@@ -31,11 +31,11 @@ Exit codes mirror ``check_router_docstrings.py``:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
-import logging
 
 logger = logging.getLogger(__name__)
 

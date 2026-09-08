@@ -2,12 +2,12 @@
 Standalone tests for EXIF and perceptual-hash helpers extracted from ImageLoader.
 """
 
+import logging
 import os
 import tempfile
 
 import pytest
 from PIL import Image
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,6 @@
 """End-to-end tests for the public cognee.agent_memory feature."""
 
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -15,8 +16,6 @@ from cognee.modules.data.methods import create_authorized_dataset, get_datasets_
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -14,10 +14,9 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
-
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

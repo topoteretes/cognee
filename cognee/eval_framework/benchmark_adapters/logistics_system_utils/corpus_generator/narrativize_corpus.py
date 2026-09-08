@@ -16,7 +16,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.utils
     load_world,
 )
 from cognee.infrastructure.llm import LLMGateway
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

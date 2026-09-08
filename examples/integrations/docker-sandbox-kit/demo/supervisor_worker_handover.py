@@ -40,13 +40,14 @@ from uuid import UUID
 # The auth posture is resolved when cognee is imported — configure it first.
 os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "true")
 
+import logging
+
 import cognee
 from cognee.infrastructure.databases.relational import create_db_and_tables
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user, get_user_by_email
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-import logging
 
 logger = logging.getLogger(__name__)
 

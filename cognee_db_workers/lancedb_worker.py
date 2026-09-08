@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -28,7 +30,6 @@ from .lancedb_protocol import (
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
-import logging
 
 logger = logging.getLogger(__name__)
 

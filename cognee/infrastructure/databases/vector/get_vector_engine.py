@@ -1,9 +1,9 @@
 import warnings
 
+from cognee.shared.logging_utils import get_logger
+
 from .config import get_vectordb_context_config
 from .create_vector_engine import create_vector_engine
-
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 import sys
@@ -21,8 +22,6 @@ from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
 )
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.users.methods import get_default_user
-
-import logging
 
 logger = logging.getLogger(__name__)
 

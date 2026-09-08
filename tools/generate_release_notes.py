@@ -11,6 +11,7 @@ which can overwrite CI environment variables with .env file placeholders.
 
 import argparse
 import asyncio
+import logging
 import os
 import re
 import subprocess
@@ -18,7 +19,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import logging
 
 logger = logging.getLogger(__name__)
 

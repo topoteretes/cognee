@@ -1,6 +1,7 @@
 """Integration tests for usage logger with real Redis components."""
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -15,8 +16,6 @@ from cognee.infrastructure.databases.cache.get_cache_engine import (
     get_cache_engine,
 )
 from cognee.shared.usage_logger import log_usage
-
-import logging
 
 logger = logging.getLogger(__name__)
 

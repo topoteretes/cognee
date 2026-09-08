@@ -27,7 +27,6 @@ from cognee.infrastructure.session.session_context_models import (
     normalize_content,
     valid_sections_for,
 )
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

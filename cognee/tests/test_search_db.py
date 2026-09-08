@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 from collections import Counter
@@ -28,7 +29,6 @@ from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
-import logging
 
 logger = logging.getLogger(__name__)
 

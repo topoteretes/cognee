@@ -18,6 +18,7 @@ either is absent. Local run:
 
 import collections
 import io
+import logging
 import shutil
 import socket
 import subprocess
@@ -27,8 +28,6 @@ import time
 from pathlib import Path
 
 import pytest
-
-import logging
 
 logger = logging.getLogger(__name__)
 

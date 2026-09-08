@@ -15,7 +15,6 @@ from cognee.eval_framework.beam.preprocessing.conversation_preprocessing import 
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

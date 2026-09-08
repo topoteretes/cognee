@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -15,7 +16,6 @@ from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusB
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 
 from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
-import logging
 
 logger = logging.getLogger(__name__)
 

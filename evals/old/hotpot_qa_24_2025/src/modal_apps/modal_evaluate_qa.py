@@ -1,7 +1,8 @@
+import logging
+
 import modal
 
 from modal_apps.modal_image import image
-import logging
 
 logger = logging.getLogger(__name__)
 

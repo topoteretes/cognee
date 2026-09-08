@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 import pytest
@@ -10,8 +11,6 @@ from cognee.api.client import app
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
 from cognee.modules.users.methods import get_authenticated_user, get_default_user
-
-import logging
 
 logger = logging.getLogger(__name__)
 

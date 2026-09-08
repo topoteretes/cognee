@@ -1,12 +1,11 @@
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-
-import logging
 
 logger = logging.getLogger(__name__)
 

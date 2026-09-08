@@ -11,6 +11,7 @@ Covers the scenarios that used to silently hang or leak:
 
 from __future__ import annotations
 
+import logging
 import multiprocessing as mp
 import sys
 import time
@@ -27,8 +28,6 @@ from cognee_db_workers.harness import (
     run_worker_loop,
     spawn_without_main,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

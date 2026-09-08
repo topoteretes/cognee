@@ -1,3 +1,4 @@
+import logging
 import pathlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,8 +15,6 @@ from cognee.modules.retrieval.graph_completion_decomposition_retriever import (
     QueryDecomposition,
 )
 from cognee.tasks.storage import add_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

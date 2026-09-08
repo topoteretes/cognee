@@ -17,6 +17,7 @@ Locally it can be run against the offline fastembed embedder, e.g.::
     uv run pytest cognee/tests/integration/tasks/test_consolidate_entities_integration.py -v
 """
 
+import logging
 import pathlib
 
 import pytest
@@ -34,8 +35,6 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
 from cognee.tasks.storage.index_data_points import index_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

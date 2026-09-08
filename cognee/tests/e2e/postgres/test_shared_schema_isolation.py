@@ -12,6 +12,7 @@ Postgres relational backend (DB_PROVIDER=postgres), since the shared handlers
 anchor to the relational configuration; it skips otherwise.
 """
 
+import logging
 import os
 import uuid
 
@@ -25,8 +26,6 @@ from cognee.infrastructure.databases.postgres import (
     dataset_schema_name,
     drop_pg_schema_if_exists,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -8,6 +8,7 @@ Test Coverage:
 - test_delete_data_nodes_and_edges_removes_from_all_systems: Verify complete cleanup
 """
 
+import logging
 import os
 import pathlib
 from contextlib import AsyncExitStack
@@ -36,7 +37,6 @@ from cognee.modules.graph.methods import (
 )
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.users.methods import get_default_user
-import logging
 
 logger = logging.getLogger(__name__)
 

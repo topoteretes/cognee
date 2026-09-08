@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 
@@ -10,8 +11,6 @@ from cognee.modules.engine.models import Triplet
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.tasks.storage import add_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

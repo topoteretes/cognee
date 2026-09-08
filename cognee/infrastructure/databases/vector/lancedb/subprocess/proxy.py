@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pyarrow as pa
 
+from cognee.shared.logging_utils import get_logger
 from cognee_db_workers.harness import (
     ReplayStep,
     Request,
@@ -36,8 +37,6 @@ from cognee_db_workers.lancedb_protocol import (
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
 from cognee_db_workers.lancedb_worker import worker_main
-
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

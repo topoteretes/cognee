@@ -6,9 +6,9 @@ an adapter silently dropping ``document_id`` / ``document_name`` / ``chunk_index
 from its payload — which would make chunk Evidence render empty on that backend.
 """
 
-import pytest
-
 import logging
+
+import pytest
 
 logger = logging.getLogger(__name__)
 

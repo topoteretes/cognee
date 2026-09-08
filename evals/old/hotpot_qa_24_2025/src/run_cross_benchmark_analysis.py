@@ -4,6 +4,7 @@ Cross-benchmark analysis orchestration script.
 Downloads qa-benchmarks volume and processes each benchmark folder.
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -11,7 +12,6 @@ from pathlib import Path
 
 import pandas as pd
 from analysis.analyze_single_benchmark import analyze_single_benchmark_folder
-import logging
 
 logger = logging.getLogger(__name__)
 

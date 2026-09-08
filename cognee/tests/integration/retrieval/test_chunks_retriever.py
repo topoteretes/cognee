@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 from typing import List
@@ -14,8 +15,6 @@ from cognee.modules.data.processing.document_types import Document, TextDocument
 from cognee.modules.engine.models import Entity
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.tasks.storage import add_data_points
-
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -1,3 +1,4 @@
+import logging
 import pathlib
 
 import pytest
@@ -10,8 +11,6 @@ from cognee.low_level import setup
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-
-import logging
 
 logger = logging.getLogger(__name__)
 

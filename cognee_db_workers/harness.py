@@ -12,6 +12,7 @@ import concurrent.futures
 import ctypes
 import ctypes.util
 import itertools
+import logging
 import os
 import pickle
 import queue as std_queue
@@ -25,7 +26,6 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
