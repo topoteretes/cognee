@@ -193,21 +193,23 @@ class datasets:
 
         # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
         # on this dataset and exclude concurrent deletes.
-        async with dataset_lock(dataset.id):
-            async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        async with (
+            dataset_lock(dataset.id),
+            set_database_global_context_variables(dataset.id, dataset.owner_id),
+        ):
+            deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-                # Session memory derived from this dataset would keep asserting
-                # the deleted content (stale QA replay / session-context leak),
-                # so drop the attributed sessions with the dataset.
-                await _invalidate_sessions_for_dataset_nonfatal(dataset.id)
-                await _invalidate_sessions_for_deleted_data_nonfatal(
-                    dataset.id, deleted_elements, user.id
-                )
+            # Session memory derived from this dataset would keep asserting
+            # the deleted content (stale QA replay / session-context leak),
+            # so drop the attributed sessions with the dataset.
+            await _invalidate_sessions_for_dataset_nonfatal(dataset.id)
+            await _invalidate_sessions_for_deleted_data_nonfatal(
+                dataset.id, deleted_elements, user.id
+            )
 
-                # delete_dataset removes the dataset's scoped Data rows
-                # (files refcounted by raw_data_location) with the record.
-                result = await delete_dataset(dataset)
+            # delete_dataset removes the dataset's scoped Data rows
+            # (files refcounted by raw_data_location) with the record.
+            result = await delete_dataset(dataset)
 
         return result
 

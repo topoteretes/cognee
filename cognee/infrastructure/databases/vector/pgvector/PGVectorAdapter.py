@@ -837,21 +837,20 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # no `payload::jsonb` column) must not roll back updates already
             # committed for other tables.
             try:
-                async with self._get_write_lock(table_name):
-                    async with self.get_async_session() as session:
-                        target_rows = await session.execute(select_targets_sql, bind_params)
-                        target_ids = [row[0] for row in target_rows.all()]
-                        if not target_ids:
-                            await session.commit()
-                            continue
-
-                        scoped_params: dict[str, Any] = {
-                            "tags": list(tags),
-                            "target_ids": target_ids,
-                        }
-                        await session.execute(update_sql, scoped_params)
-                        await session.execute(delete_empties_sql, {"target_ids": target_ids})
+                async with self._get_write_lock(table_name), self.get_async_session() as session:
+                    target_rows = await session.execute(select_targets_sql, bind_params)
+                    target_ids = [row[0] for row in target_rows.all()]
+                    if not target_ids:
                         await session.commit()
+                        continue
+
+                    scoped_params: dict[str, Any] = {
+                        "tags": list(tags),
+                        "target_ids": target_ids,
+                    }
+                    await session.execute(update_sql, scoped_params)
+                    await session.execute(delete_empties_sql, {"target_ids": target_ids})
+                    await session.commit()
             except exc.SQLAlchemyError as e:
                 logger.debug(
                     "remove_belongs_to_set_tags skipped '%s': %s",

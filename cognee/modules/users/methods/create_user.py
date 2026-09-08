@@ -20,28 +20,30 @@ async def create_user(
     try:
         relational_engine = get_relational_engine()
 
-        async with relational_engine.get_async_session() as session:
-            async with get_user_db_context(session) as user_db:
-                async with get_user_manager_context(user_db) as user_manager:
-                    user = await user_manager.create(
-                        UserCreate(
-                            email=email,
-                            password=password,
-                            is_superuser=is_superuser,
-                            is_active=is_active,
-                            is_verified=is_verified,
-                            parent_user_id=parent_user_id,
-                        )
+        async with (
+            relational_engine.get_async_session() as session,
+            get_user_db_context(session) as user_db,
+        ):
+            async with get_user_manager_context(user_db) as user_manager:
+                user = await user_manager.create(
+                    UserCreate(
+                        email=email,
+                        password=password,
+                        is_superuser=is_superuser,
+                        is_active=is_active,
+                        is_verified=is_verified,
+                        parent_user_id=parent_user_id,
                     )
+                )
 
-                    if auto_login:
-                        await session.refresh(user)
+                if auto_login:
+                    await session.refresh(user)
 
-                    # Update tenants and roles information for User object
-                    _ = await user.awaitable_attrs.tenants
-                    _ = await user.awaitable_attrs.roles
+                # Update tenants and roles information for User object
+                _ = await user.awaitable_attrs.tenants
+                _ = await user.awaitable_attrs.roles
 
-                    return user
+                return user
     except UserAlreadyExists:
         print("A user with this email already exists")
         raise

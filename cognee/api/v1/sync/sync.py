@@ -607,23 +607,25 @@ async def _check_hashes_diff(
     try:
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=payload.dict(), headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    missing_response = CheckHashesDiffResponse(**data)
-                    logger.info(
-                        f"Cloud is missing {len(missing_response.missing_on_remote)} out of {len(local_hashes)} files, local is missing {len(missing_response.missing_on_local)} files"
-                    )
-                    return missing_response
-                else:
-                    error_text = await response.text()
-                    logger.error(
-                        f"Failed to check missing hashes: Status {response.status} - {error_text}"
-                    )
-                    raise ConnectionError(
-                        f"Failed to check missing hashes: {response.status} - {error_text}"
-                    )
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            session.post(url, json=payload.dict(), headers=headers) as response,
+        ):
+            if response.status == 200:
+                data = await response.json()
+                missing_response = CheckHashesDiffResponse(**data)
+                logger.info(
+                    f"Cloud is missing {len(missing_response.missing_on_remote)} out of {len(local_hashes)} files, local is missing {len(missing_response.missing_on_local)} files"
+                )
+                return missing_response
+            else:
+                error_text = await response.text()
+                logger.error(
+                    f"Failed to check missing hashes: Status {response.status} - {error_text}"
+                )
+                raise ConnectionError(
+                    f"Failed to check missing hashes: {response.status} - {error_text}"
+                )
 
     except Exception as e:
         logger.exception("Error checking missing hashes")
@@ -839,22 +841,24 @@ async def _prune_cloud_dataset(
     try:
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.put(url, json=payload.dict(), headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    deleted_entries = data.get("deleted_database_entries", 0)
-                    deleted_files = data.get("deleted_files_from_storage", 0)
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            session.put(url, json=payload.dict(), headers=headers) as response,
+        ):
+            if response.status == 200:
+                data = await response.json()
+                deleted_entries = data.get("deleted_database_entries", 0)
+                deleted_files = data.get("deleted_files_from_storage", 0)
 
-                    logger.info(
-                        f"Cloud dataset pruned successfully: {deleted_entries} entries deleted, {deleted_files} files removed"
-                    )
-                else:
-                    error_text = await response.text()
-                    logger.error(
-                        f"Failed to prune cloud dataset: Status {response.status} - {error_text}"
-                    )
-                    # Don't raise error for prune failures - sync partially succeeded
+                logger.info(
+                    f"Cloud dataset pruned successfully: {deleted_entries} entries deleted, {deleted_files} files removed"
+                )
+            else:
+                error_text = await response.text()
+                logger.error(
+                    f"Failed to prune cloud dataset: Status {response.status} - {error_text}"
+                )
+                # Don't raise error for prune failures - sync partially succeeded
 
     except Exception:
         logger.exception("Error pruning cloud dataset")
@@ -884,25 +888,27 @@ async def _trigger_remote_cognify(
     try:
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    logger.info(f"Cognify processing started successfully: {data}")
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            session.post(url, json=payload, headers=headers) as response,
+        ):
+            if response.status == 200:
+                data = await response.json()
+                logger.info(f"Cognify processing started successfully: {data}")
 
-                    # Extract pipeline run IDs for monitoring if available
-                    if isinstance(data, dict):
-                        for dataset_key, run_info in data.items():
-                            if isinstance(run_info, dict) and "pipeline_run_id" in run_info:
-                                logger.info(
-                                    f"Cognify pipeline run ID for dataset {dataset_key}: {run_info['pipeline_run_id']}"
-                                )
-                else:
-                    error_text = await response.text()
-                    logger.warning(
-                        f"Failed to trigger cognify processing: Status {response.status} - {error_text}"
-                    )
-                    # TODO: consider adding retries
+                # Extract pipeline run IDs for monitoring if available
+                if isinstance(data, dict):
+                    for dataset_key, run_info in data.items():
+                        if isinstance(run_info, dict) and "pipeline_run_id" in run_info:
+                            logger.info(
+                                f"Cognify pipeline run ID for dataset {dataset_key}: {run_info['pipeline_run_id']}"
+                            )
+            else:
+                error_text = await response.text()
+                logger.warning(
+                    f"Failed to trigger cognify processing: Status {response.status} - {error_text}"
+                )
+                # TODO: consider adding retries
 
     except Exception as e:
         logger.warning(f"Error triggering cognify processing: {e!s}", exc_info=True)

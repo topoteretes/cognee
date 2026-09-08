@@ -174,7 +174,9 @@ async def mcp_client_session(mcp_url: str) -> AsyncIterator[object]:
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
-    async with streamablehttp_client(mcp_url) as (read_stream, write_stream, _get_session_id):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            yield session
+    async with (
+        streamablehttp_client(mcp_url) as (read_stream, write_stream, _get_session_id),
+        ClientSession(read_stream, write_stream) as session,
+    ):
+        await session.initialize()
+        yield session

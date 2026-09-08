@@ -85,9 +85,11 @@ async def test_invalid_combinations_raise_before_any_pipeline_work(kwargs, messa
 
 @pytest.mark.asyncio
 async def test_remote_client_raises():
-    with patch.object(serve_state_module, "get_remote_client", return_value=MagicMock()):
-        with pytest.raises(ValueError, match="remote Cognee instance"):
-            await cognify_module.cognify(graph_model=_Directory, chunk_attachment="all")
+    with (
+        patch.object(serve_state_module, "get_remote_client", return_value=MagicMock()),
+        pytest.raises(ValueError, match="remote Cognee instance"),
+    ):
+        await cognify_module.cognify(graph_model=_Directory, chunk_attachment="all")
 
 
 @pytest.mark.asyncio

@@ -164,9 +164,11 @@ class TestCognifyMakesOneCall:
         (call,) = calls
         resolver = call["tasks"]
 
-        with patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"):
-            with pytest.raises(KeyError):
-                resolver(_text_item())
+        with (
+            patch.object(cognify_module, "cognify_route_for", return_value="UNMAPPED_ROUTE"),
+            pytest.raises(KeyError),
+        ):
+            resolver(_text_item())
 
     @pytest.mark.asyncio
     async def test_temporal_swaps_standard_route_only(self):

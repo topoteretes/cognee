@@ -129,9 +129,11 @@ async def test_structured_output_does_not_retry_quota_errors():
         side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
     )
 
-    with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
-        with pytest.raises(RuntimeError, match="insufficient_quota"):
-            await adapter.acreate_structured_output("hi", "system", _Resp)
+    with (
+        patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter),
+        pytest.raises(RuntimeError, match="insufficient_quota"),
+    ):
+        await adapter.acreate_structured_output("hi", "system", _Resp)
 
     assert adapter.aclient.chat.completions.create.await_count == 1
 
