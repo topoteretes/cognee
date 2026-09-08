@@ -22,13 +22,13 @@ from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
+from .config import get_ingestion_config
 from .create_dlt_source import (
+    create_dlt_source_from_connection_string,
     is_connection_string,
     is_csv_path,
     is_csv_upload,
-    create_dlt_source_from_connection_string,
 )
-from .config import get_ingestion_config
 from .data_item import DataItem
 from .dlt_row_data import DltRowData
 from .dlt_utils import document_source_tag
@@ -687,13 +687,13 @@ async def _delete_dlt_orphans(
     and re-ingesting one must not delete the others. Legacy per-row records
     (source == "dlt") predate source attribution and are always migrated away.
     """
-    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.context_global_variables import set_database_global_context_variables
     from cognee.modules.data.methods import get_authorized_existing_datasets
     from cognee.modules.data.methods.delete_data import delete_data
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
     from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
         delete_data_nodes_and_edges,
     )
-    from cognee.context_global_variables import set_database_global_context_variables
 
     # Find the dataset — if it doesn't exist yet this is a first ingestion,
     # so there can be no orphans.

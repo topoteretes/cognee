@@ -32,9 +32,8 @@ missing created_at or id raises: see _require_index_columns.
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c4e8a1f6b3d7"

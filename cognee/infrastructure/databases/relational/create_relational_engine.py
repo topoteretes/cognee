@@ -1,7 +1,8 @@
 from functools import lru_cache
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from sqlalchemy import URL
+
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 

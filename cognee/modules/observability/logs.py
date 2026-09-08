@@ -50,8 +50,8 @@ def setup_log_bridge(console_output: bool = False) -> Optional[object]:
         return None
 
     from cognee.base_config import get_base_config
-    from cognee.version import get_cognee_version
     from cognee.modules.observability.tracing import _parse_otlp_headers
+    from cognee.version import get_cognee_version
 
     config = get_base_config()
     version = get_cognee_version()

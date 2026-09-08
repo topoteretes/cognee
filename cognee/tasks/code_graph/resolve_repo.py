@@ -125,8 +125,7 @@ def code_repo_clone_url(spec) -> Optional[str]:
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return None
     host = parts.hostname.lower()
-    if host.startswith("www."):
-        host = host[len("www.") :]
+    host = host.removeprefix("www.")
     segments = [segment for segment in parts.path.split("/") if segment]
     if len(segments) < 2:
         return None
@@ -165,8 +164,7 @@ def redact_repo_spec(spec: Union[str, Path]) -> str:
 def _clone_slug(url: str) -> str:
     """A stable directory name for a remote URL, e.g. 'github.com-org-repo'."""
     tail = url.split("://")[-1].replace(":", "/").rstrip("/")
-    if tail.endswith(".git"):
-        tail = tail[: -len(".git")]
+    tail = tail.removesuffix(".git")
     return re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
 
 

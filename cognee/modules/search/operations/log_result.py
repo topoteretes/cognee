@@ -1,7 +1,9 @@
 import os
 from typing import Optional
 from uuid import UUID
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+
 from ..models.Result import Result
 
 _LOG_ENABLED = os.getenv("COGNEE_LOG_SEARCH_HISTORY", "true").lower() in ("true", "1", "yes")

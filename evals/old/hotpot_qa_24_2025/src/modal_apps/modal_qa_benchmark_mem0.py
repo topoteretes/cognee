@@ -5,8 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 import modal
-
 from qa.qa_benchmark_mem0 import Mem0Config, QABenchmarkMem0
+
 from modal_apps.modal_image import image
 
 APP_NAME = "qa-benchmark-mem0"

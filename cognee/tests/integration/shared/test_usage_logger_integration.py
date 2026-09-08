@@ -1,19 +1,20 @@
 """Integration tests for usage logger with real Redis components."""
 
-import os
-import pytest
 import asyncio
+import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from uuid import UUID
 from unittest.mock import patch
+from uuid import UUID
 
-from cognee.shared.usage_logger import log_usage
+import pytest
+
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import (
-    get_cache_engine,
     create_cache_engine,
+    get_cache_engine,
 )
+from cognee.shared.usage_logger import log_usage
 
 
 @pytest.fixture

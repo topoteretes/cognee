@@ -1,7 +1,8 @@
 import os
 import uuid
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 with patch("dotenv.load_dotenv"):
     os.environ["REQUIRE_AUTHENTICATION"] = "true"

@@ -7,11 +7,13 @@ frontend can render an activity timeline and trace viewer.
 
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Query, Depends
+
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from cognee.modules.users.models import User
+
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
+from cognee.modules.users.models import User
 from cognee.modules.users.permissions.methods.get_permitted_dataset_ids import (
     get_permitted_dataset_ids,
 )
@@ -112,11 +114,12 @@ def get_activity_router() -> APIRouter:
         2. `parent_operation_id` forms a tree whose token counts already chain
            into the parent. Summing across levels double-counts; sum one level.
         """
+        from sqlalchemy import or_, outerjoin, select
+
         from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.pipelines.models import PipelineRun
         from cognee.modules.data.models.Dataset import Dataset
+        from cognee.modules.pipelines.models import PipelineRun
         from cognee.modules.users.models import User
-        from sqlalchemy import select, outerjoin, or_
 
         if dataset_id is not None:
             # Explicit dataset request stays strict, and needs no empty-result
@@ -219,8 +222,8 @@ def get_activity_router() -> APIRouter:
     async def get_spans(user: User = Depends(get_authenticated_user)):
         """Return in-memory OTEL spans from the CogneeSpanExporter buffer."""
         try:
-            from cognee.modules.observability.tracing import get_exporter
             from cognee.modules.observability.trace_context import is_tracing_enabled
+            from cognee.modules.observability.tracing import get_exporter
 
             # Lazily initialize tracing if enabled but not yet set up
             # (exporter is None until first span or explicit enable_tracing call)
@@ -279,13 +282,15 @@ def get_activity_router() -> APIRouter:
     @router.get("/agents")
     async def get_agents(user: User = Depends(get_authenticated_user)):
         """Return registered agents (users with @cognee.agent emails)."""
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import func, select
+
         from cognee.infrastructure.databases.relational import get_relational_engine
-        from cognee.modules.users.models import User
-        from cognee.modules.users.models.UserApiKey import UserApiKey
         from cognee.modules.data.models.Data import Data
         from cognee.modules.search.models.Query import Query
-        from sqlalchemy import select, func
-        from datetime import datetime, timedelta, timezone
+        from cognee.modules.users.models import User
+        from cognee.modules.users.models.UserApiKey import UserApiKey
 
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
@@ -410,13 +415,15 @@ def get_activity_router() -> APIRouter:
         ## Path Parameters
         - **dataset_id** (UUID): UUID of the dataset (from GET /api/v1/datasets).
         """
-        from fastapi.responses import Response
-        from cognee.modules.data.models.Dataset import Dataset
-        from cognee.modules.data.models.Data import Data
-        from cognee.modules.graph.methods import get_formatted_graph_data
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        from sqlalchemy import select
         from datetime import datetime, timezone
+
+        from fastapi.responses import Response
+        from sqlalchemy import select
+
+        from cognee.infrastructure.databases.relational import get_relational_engine
+        from cognee.modules.data.models.Data import Data
+        from cognee.modules.data.models.Dataset import Dataset
+        from cognee.modules.graph.methods import get_formatted_graph_data
 
         dataset_ids = await get_specific_user_permission_datasets(user.id, "read", [dataset_id])
         dataset_id = dataset_ids[0].id

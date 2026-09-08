@@ -6,7 +6,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-
 # Free-form on purpose: the set of client types keeps growing (Claude Code,
 # Codex, Slack, OpenCode, Cursor, Windsurf, ...) and gating it behind a
 # closed Literal meant every new integration needed a backend code change

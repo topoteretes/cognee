@@ -1,16 +1,17 @@
 import asyncio
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.locks import dataset_lock
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.data.methods import get_dataset_data, has_dataset_data
-from cognee.modules.data.methods import get_authorized_dataset, get_authorized_existing_datasets
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
+from cognee.modules.data.methods import (
+    get_authorized_dataset,
+    get_authorized_existing_datasets,
+    get_dataset_data,
+    has_dataset_data,
+)
 from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
     delete_dataset_nodes_and_edges,
@@ -22,9 +23,12 @@ from cognee.modules.graph.methods.deleted_graph_elements import DeletedGraphElem
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.operations.get_pipeline_status import (
-    get_pipeline_status,
     get_pipeline_progress,
+    get_pipeline_status,
 )
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -129,14 +133,13 @@ class datasets:
 
     @staticmethod
     async def list_data(dataset_id: UUID, user: Optional[User] = None):
-        from cognee.modules.data.methods import get_dataset_data
-
         # Route to the remote instance when connected via serve(): the dataset
         # lives on the server, so the local store would report it missing.
         # Rows are parsed through the same DTO the server serializes them
         # with, so callers read the same attributes (``row.id`` as a UUID,
         # ``row.mime_type`` not ``mimeType``) in both modes.
         from cognee.api.v1.serve.state import get_remote_client
+        from cognee.modules.data.methods import get_dataset_data
 
         client = get_remote_client()
         if client is not None:
@@ -218,7 +221,7 @@ class datasets:
         async with record_operation(
             "delete", user=user, dataset_id=dataset_id
         ) as operation_context:
-            from cognee.modules.data.methods import delete_data, get_data, delete_dataset
+            from cognee.modules.data.methods import delete_data, delete_dataset, get_data
 
             if not user:
                 user = await get_default_user()

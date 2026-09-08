@@ -14,10 +14,9 @@ from typing import Union
 from uuid import UUID
 
 from sqlalchemy import URL, text
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.schema import DDLElement
-
 
 _MAINTENANCE_DB_NAME = "postgres"
 # Dataset databases are named after dataset UUIDs (hyphens, leading digits), so

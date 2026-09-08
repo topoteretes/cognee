@@ -1,19 +1,13 @@
 import asyncio
 import inspect
-from typing import Type, List, Literal, Optional
+from typing import List, Literal, Optional, Type
+
 from pydantic import BaseModel
 
-from cognee.modules.pipelines.tasks.task import task_summary
-from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_configured_ontology_mode,
-    get_configured_ontology_resolver,
-)
-from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
-from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
-    construct_data_points_and_edges_with_ontology,
-)
 from cognee.infrastructure.databases.provenance import EdgeIdentity
+from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     attach_new_edges_to_data_points,
@@ -21,15 +15,22 @@ from cognee.modules.graph.utils import (
     construct_data_points_and_edges,
     find_existing_edge_identities,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
+    construct_data_points_and_edges_with_ontology,
+)
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_mode,
+    get_configured_ontology_resolver,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.extraction import extract_content_graph
-from cognee.infrastructure.llm.pipeline_stage import pipeline_stage
-from cognee.infrastructure.engine import DataPoint
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import (
-    InvalidGraphModelError,
-    InvalidDataChunksError,
     InvalidChunkGraphInputError,
+    InvalidDataChunksError,
+    InvalidGraphModelError,
     InvalidOntologyAdapterError,
 )
 

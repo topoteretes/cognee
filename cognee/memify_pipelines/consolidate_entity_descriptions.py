@@ -1,20 +1,20 @@
 import asyncio
+import json
 import logging
+from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
 
-import cognee
-from typing import Any, Dict, List, Optional, Set
-
-import json
 from pydantic import BaseModel
+
+import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.engine.models.Entity import Entity
-from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.engine.models import EntityType
+from cognee.modules.engine.models.Entity import Entity
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.tasks.storage import add_data_points
 
 prompt_name = "consolidate_entity_details.txt"
 

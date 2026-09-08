@@ -10,7 +10,6 @@ from cognee.api.v1.recall.skill_gate import (
 )
 from cognee.modules.search.types import SearchType
 
-
 # ── gate classification: pure regex, no LLM ──────────────────────────────────
 
 

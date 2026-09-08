@@ -1,12 +1,14 @@
 import asyncio
-from typing import Optional, List
 from datetime import datetime, timezone
+from typing import List, Optional
+
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError, DisconnectionError, OperationalError, TimeoutError
-from cognee.modules.sync.models import SyncOperation, SyncStatus
+from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError, TimeoutError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.calculate_backoff import calculate_backoff
+from cognee.modules.sync.models import SyncOperation, SyncStatus
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("sync.db_operations")
 
@@ -38,19 +40,19 @@ async def _retry_db_operation(operation_func, run_id: str, max_retries: int = 3)
 
             if attempt >= max_retries:
                 logger.error(
-                    f"Database operation failed after {max_retries} attempts for run_id {run_id}: {str(e)}"
+                    f"Database operation failed after {max_retries} attempts for run_id {run_id}: {e!s}"
                 )
                 break
 
             backoff_time = calculate_backoff(attempt - 1)  # calculate_backoff is 0-indexed
             logger.warning(
-                f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {str(e)}"
+                f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {e!s}"
             )
             await asyncio.sleep(backoff_time)
 
         except Exception as e:
             # Non-transient errors should not be retried
-            logger.error(f"Non-retryable database error for run_id {run_id}: {str(e)}")
+            logger.error(f"Non-retryable database error for run_id {run_id}: {e!s}")
             raise
 
     # If we get here, all retries failed
@@ -194,13 +196,13 @@ async def update_sync_operation(
 
             except SQLAlchemyError as e:
                 logger.error(
-                    f"Database error updating sync operation {run_id}: {str(e)}", exc_info=True
+                    f"Database error updating sync operation {run_id}: {e!s}", exc_info=True
                 )
                 await session.rollback()
                 raise
             except Exception as e:
                 logger.error(
-                    f"Unexpected error updating sync operation {run_id}: {str(e)}", exc_info=True
+                    f"Unexpected error updating sync operation {run_id}: {e!s}", exc_info=True
                 )
                 await session.rollback()
                 raise

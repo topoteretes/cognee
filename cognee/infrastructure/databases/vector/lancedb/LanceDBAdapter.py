@@ -4,33 +4,33 @@ import inspect
 import threading
 import types
 from collections import OrderedDict
-from os import path
-from uuid import UUID
 from enum import Enum
-import lancedb
-from pydantic import BaseModel
-from lancedb.pydantic import LanceModel, Vector
+from os import path
 from typing import List, Optional, Union, get_args, get_origin, get_type_hints
+from uuid import UUID
+
+import lancedb
+from lancedb.pydantic import LanceModel, Vector
+from pydantic import BaseModel
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.modules.storage.utils import copy_model
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.infrastructure.databases.vector.pgvector.serialize_data import serialize_data
-from cognee.shared.logging_utils import get_logger
-
-from ..embeddings.EmbeddingEngine import EmbeddingEngine
-from ..models.ScoredResult import ScoredResult
-from ..vector_db_interface import VectorDBInterface
-
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
 )
+from cognee.modules.storage.utils import copy_model
+from cognee.shared.logging_utils import get_logger
+
+from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..models.ScoredResult import ScoredResult
+from ..vector_db_interface import VectorDBInterface
 
 logger = get_logger("LanceDBAdapter")
 _NO_DEFAULT = object()
@@ -1226,10 +1226,10 @@ class LanceDBAdapter(VectorDBInterface):
         deletes them when the array is empty.
         """
         if not tags:
-            return None
+            return
 
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         tag_set = set(tags)
         id_set: Optional[set[str]] = (
@@ -1357,7 +1357,7 @@ class LanceDBAdapter(VectorDBInterface):
                         )
                         raise
 
-        return None
+        return
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         await self.create_collection(
@@ -1459,10 +1459,9 @@ class LanceDBAdapter(VectorDBInterface):
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():
-            if hasattr(field_config, "model_fields"):
-                related_models_fields.append(field_name)
-
-            elif hasattr(field_config.annotation, "model_fields"):
+            if hasattr(field_config, "model_fields") or hasattr(
+                field_config.annotation, "model_fields"
+            ):
                 related_models_fields.append(field_name)
 
             elif (
@@ -1470,12 +1469,12 @@ class LanceDBAdapter(VectorDBInterface):
                 or get_origin(field_config.annotation) is list
             ):
                 models_list = get_args(field_config.annotation)
-                if any(hasattr(model, "model_fields") for model in models_list):
-                    related_models_fields.append(field_name)
-                elif models_list and any(get_args(model) is DataPoint for model in models_list):
-                    related_models_fields.append(field_name)
-                elif models_list and any(
-                    submodel is DataPoint for submodel in get_args(models_list[0])
+                if (
+                    any(hasattr(model, "model_fields") for model in models_list)
+                    or models_list
+                    and any(get_args(model) is DataPoint for model in models_list)
+                    or models_list
+                    and any(submodel is DataPoint for submodel in get_args(models_list[0]))
                 ):
                     related_models_fields.append(field_name)
 

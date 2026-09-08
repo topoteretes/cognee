@@ -8,13 +8,13 @@ for DLT-sourced relational data. Used by both extract_dlt_source_edges
 import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
-from uuid import UUID, uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.modules.engine.models import DltColumn
-from cognee.tasks.schema.models import SchemaTable, SchemaRelationship
-from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.schema.models import SchemaRelationship, SchemaTable
+from cognee.tasks.storage.index_data_points import index_data_points
 
 if TYPE_CHECKING:
     from cognee.modules.pipelines.models import PipelineContext

@@ -146,26 +146,28 @@ async def refresh_access_token(
     domain = domain or _get_auth0_domain()
     client_id = client_id or _get_auth0_client_id()
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession() as session,
+        session.post(
             f"https://{domain}/oauth/token",
             data={
                 "grant_type": "refresh_token",
                 "client_id": client_id,
                 "refresh_token": refresh_token,
             },
-        ) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise RuntimeError(f"Token refresh failed ({resp.status}): {body}")
-            body = await resp.json()
-            return TokenResponse(
-                access_token=body["access_token"],
-                refresh_token=body.get("refresh_token", refresh_token),
-                id_token=body.get("id_token"),
-                token_type=body.get("token_type", "Bearer"),
-                expires_in=body.get("expires_in", 3600),
-            )
+        ) as resp,
+    ):
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Token refresh failed ({resp.status}): {body}")
+        body = await resp.json()
+        return TokenResponse(
+            access_token=body["access_token"],
+            refresh_token=body.get("refresh_token", refresh_token),
+            id_token=body.get("id_token"),
+            token_type=body.get("token_type", "Bearer"),
+            expires_in=body.get("expires_in", 3600),
+        )
 
 
 def extract_email_from_id_token(id_token: str) -> Optional[str]:

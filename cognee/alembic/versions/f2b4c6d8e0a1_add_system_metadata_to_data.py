@@ -17,9 +17,8 @@ whole dict moves to system_metadata and external_metadata is cleared.
 import json
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f2b4c6d8e0a1"

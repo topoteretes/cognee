@@ -23,7 +23,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-
 BENCH_SCRIPT = (Path(__file__).parent / "statistics_percentile" / "bench_cognee.py").resolve()
 RESULTS_DIR = Path(__file__).parent / "results"
 COGNEE_DIR = Path(__file__).resolve().parents[3]

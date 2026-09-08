@@ -18,7 +18,7 @@ collapsed into a closed local vocabulary.
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-from rdflib import Graph, Literal, Namespace, RDF, RDFS, URIRef
+from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef
 
 from cognee.shared.logging_utils import get_logger
 

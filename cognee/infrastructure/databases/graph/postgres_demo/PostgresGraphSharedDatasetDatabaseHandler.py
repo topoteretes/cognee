@@ -1,18 +1,18 @@
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.get_graph_engine import (
     create_graph_engine,
     graph_engine_cache,
 )
-from cognee.infrastructure.databases.relational import get_relational_config
 from cognee.infrastructure.databases.postgres import (
     create_pg_schema_if_not_exists,
-    drop_pg_schema_if_exists,
     dataset_schema_name,
+    drop_pg_schema_if_exists,
 )
-from cognee.modules.users.models import User, DatasetDatabase
+from cognee.infrastructure.databases.relational import get_relational_config
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class PostgresGraphSharedDatasetDatabaseHandler:

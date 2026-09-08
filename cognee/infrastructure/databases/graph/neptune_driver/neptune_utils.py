@@ -5,7 +5,7 @@ connection management, URL parsing, and Neptune-specific configurations.
 """
 
 import re
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from cognee.shared.logging_utils import get_logger
@@ -53,7 +53,7 @@ def parse_neptune_url(url: str) -> Tuple[str, str]:
         return graph_id, region
 
     except Exception as e:
-        raise ValueError(f"Failed to parse Neptune Analytics URL '{url}': {str(e)}") from e
+        raise ValueError(f"Failed to parse Neptune Analytics URL '{url}': {e!s}") from e
 
 
 def validate_graph_id(graph_id: str) -> bool:

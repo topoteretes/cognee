@@ -314,13 +314,12 @@ async def test_budget_exhausted_error_raises_payment_required_without_retry():
 
     mock_acompletion = AsyncMock(side_effect=_PaymentRequiredError("Payment required"))
 
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(LLMPaymentRequiredError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(LLMPaymentRequiredError):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
 
     # Mapped to an actionable, non-retryable error — called exactly once.
     assert mock_acompletion.call_count == 1
@@ -470,11 +469,10 @@ async def test_cancellation_is_not_retried():
     )
 
     mock_acompletion = AsyncMock(side_effect=asyncio.CancelledError())
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(asyncio.CancelledError):
-            await adapter.acreate_structured_output(
-                text_input="t", system_prompt="s", response_model=PersonModel
-            )
+    with patch("litellm.acompletion", mock_acompletion), pytest.raises(asyncio.CancelledError):
+        await adapter.acreate_structured_output(
+            text_input="t", system_prompt="s", response_model=PersonModel
+        )
 
     assert mock_acompletion.call_count == 1
 

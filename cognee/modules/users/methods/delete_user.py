@@ -1,7 +1,9 @@
 from fastapi_users.exceptions import UserNotExists
+
 from cognee.infrastructure.databases.relational import get_relational_engine
-from ..get_user_manager import get_user_manager_context
+
 from ..get_user_db import get_user_db_context
+from ..get_user_manager import get_user_manager_context
 
 
 async def delete_user(email: str):

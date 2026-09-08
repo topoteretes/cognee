@@ -4,8 +4,7 @@ from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
-from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
 
 
@@ -79,7 +78,7 @@ class CsvLoader(LoaderInterface):
         with open(file_path, encoding=encoding, newline="") as file:
             reader = csv.DictReader(file)
             for row in reader:
-                pairs = [f"{str(k)}: {str(v)}" for k, v in row.items()]
+                pairs = [f"{k!s}: {v!s}" for k, v in row.items()]
                 row_text = ", ".join(pairs)
                 row_texts.append(f"Row {row_index}:\n{row_text}\n")
                 row_index += 1

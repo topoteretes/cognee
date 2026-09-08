@@ -18,16 +18,17 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel
+
 from cognee.infrastructure.llm.exceptions import LLMQuotaExceededError
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
-    OpenAIAdapter,
-)
 from cognee.infrastructure.llm.retry_config import (
     LLM_MIN_RETRY_ATTEMPTS,
     LLM_MIN_RETRY_SECONDS,
     is_quota_or_billing_error,
     llm_retry_stop_condition,
     should_retry_llm_exception,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
+    OpenAIAdapter,
 )
 
 _MODULE = (
@@ -147,6 +148,7 @@ async def test_llm_gateway_converts_quota_errors():
     # can resolve to the class instead of the module (order-dependent across Python
     # versions). sys.modules is keyed by name and always gives the module.
     import sys
+
     import cognee.infrastructure.llm.LLMGateway  # noqa: F401 — ensure in sys.modules
     import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client  # noqa: E501,F401
 
@@ -227,9 +229,9 @@ async def test_structured_output_keeps_retrying_until_time_floor():
         patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter),
         patch("asyncio.sleep", _advancing_sleep),
         patch("time.monotonic", _fake_monotonic),
+        pytest.raises(RuntimeError, match="always"),
     ):
-        with pytest.raises(RuntimeError, match="always"):
-            await adapter.acreate_structured_output("hi", "system", _Resp)
+        await adapter.acreate_structured_output("hi", "system", _Resp)
 
     attempts = adapter.aclient.chat.completions.create.await_count
     # With the (8, 128) backoff the attempt floor is reached at ~24s, yet the call

@@ -1,24 +1,24 @@
 from typing import Any, Dict, List, Optional, Type
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
-from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
+from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked
 from cognee.modules.retrieval.utils.references import append_chunk_evidence
-from cognee.base_config import get_base_config
+from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
 from cognee.modules.user_preferences import (
     load_preference_text,
     load_preference_weights,
     personal_factor,
 )
-from cognee.modules.retrieval.utils.evidence import chunk_context_evidence
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CompletionRetriever")
 

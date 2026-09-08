@@ -1,28 +1,25 @@
 """Adapter for Ladybug graph database."""
 
-import os
-import json
 import asyncio
-from contextlib import nullcontext
-import threading
+import json
+import os
 import tempfile
-from uuid import UUID, uuid5, NAMESPACE_OID
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, nullcontext
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from uuid import NAMESPACE_OID, UUID, uuid5
+
+from ladybug import Connection
+from ladybug.database import Database
 
 # Importing this package registers the Windows DLL search path ladybug's native
 # extension needs, so it has to precede the ``ladybug`` imports below. See
 # cognee_db_workers/_windows_openssl.py.
 import cognee_db_workers  # noqa: F401
-from ladybug import Connection
-from ladybug.database import Database
-from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, Union, Optional, Tuple, Type, Set
-from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.exceptions import CogneeValidationError
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
 )
@@ -31,28 +28,31 @@ from cognee.infrastructure.databases.provenance import (
     EdgeIdentity,
     NodeDeleteData,
 )
-from cognee.infrastructure.databases.provenance.source_refs import (
-    get_dataset_id_from_source_ref_key,
-    get_pipeline_run_id_from_source_run_ref,
-    get_source_ref_key_from_source_run_ref,
-)
 from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_attach,
     provenance_after_remove,
     provenance_attach_inputs,
 )
+from cognee.infrastructure.databases.provenance.source_refs import (
+    get_dataset_id_from_source_ref_key,
+    get_pipeline_run_id_from_source_run_ref,
+    get_source_ref_key_from_source_run_ref,
+)
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.storage.utils import JSONEncoder
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
-from cognee.tasks.temporal_graph.models import Timestamp
-from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
-    COGNEE_DB_SYSTEM,
     COGNEE_DB_QUERY,
     COGNEE_DB_ROW_COUNT,
+    COGNEE_DB_SYSTEM,
     redact_secrets,
 )
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -511,7 +511,8 @@ class LadybugAdapter(GraphDBInterface):
                             pass
                     else:
                         import ladybug
-                        from .ladybug_migrate import needs_migration, ladybug_migration
+
+                        from .ladybug_migrate import ladybug_migration, needs_migration
 
                         should_migrate, old_version = needs_migration(
                             self.db_path, ladybug.__version__
@@ -654,7 +655,7 @@ class LadybugAdapter(GraphDBInterface):
 
                     return rows
                 except Exception as e:
-                    logger.error(f"Query execution failed: {str(e)}")
+                    logger.error(f"Query execution failed: {e!s}")
                     raise
 
             try:
@@ -1740,9 +1741,9 @@ class LadybugAdapter(GraphDBInterface):
         node_ids: Optional[List[str]] = None,
     ) -> None:
         if not tags:
-            return None
+            return
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         tag_set = set(tags)
         if node_ids is not None:
@@ -1778,7 +1779,7 @@ class LadybugAdapter(GraphDBInterface):
                 {"rows": updates},
             )
             await self.checkpoint()
-        return None
+        return
 
     async def update_chunk_index(self, chunk_indexes: Dict[str, int]) -> None:
         """Patch ONLY chunk_index inside the stored properties blobs.
@@ -2781,7 +2782,7 @@ class LadybugAdapter(GraphDBInterface):
                     processed_rows = []
                     for i, item in enumerate(row):
                         if isinstance(item, dict):
-                            if "properties" in item and item["properties"]:
+                            if item.get("properties"):
                                 try:
                                     props = json.loads(item["properties"])
                                     item.update(props)
@@ -3356,7 +3357,7 @@ class LadybugAdapter(GraphDBInterface):
             return list(nodes_dict.values()), edges
 
         except Exception as e:
-            logger.error(f"Error during ID-filtered graph data retrieval: {str(e)}")
+            logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
@@ -3886,7 +3887,7 @@ class LadybugAdapter(GraphDBInterface):
         try:
             results = await self.query(query, {"offset": offset, "limit": limit})
         except Exception as e:
-            logger.error(f"Failed to execute triplet query: {str(e)}")
+            logger.error(f"Failed to execute triplet query: {e!s}")
             logger.error(f"Query: {query}")
             logger.error(f"Parameters: offset={offset}, limit={limit}")
             raise

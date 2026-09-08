@@ -8,7 +8,6 @@ import tempfile
 import pytest
 from PIL import Image
 
-
 # ------------------------------------------------------------------
 #  Standalone helper functions (copied from what would be added to image_loader.py)
 # ------------------------------------------------------------------

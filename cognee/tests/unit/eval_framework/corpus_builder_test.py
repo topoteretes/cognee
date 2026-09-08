@@ -1,8 +1,10 @@
-import pytest
-from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from unittest.mock import AsyncMock, patch
-from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+
+import pytest
+
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
+from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 
 benchmark_options = ["HotPotQA", "Dummy", "LogisticsSystem", "TwoWikiMultiHop"]
 

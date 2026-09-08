@@ -1,16 +1,17 @@
 import os
-import pytest
 import pathlib
-import pytest_asyncio
 from typing import Optional, Union
-import cognee
 
-from cognee.low_level import setup, DataPoint
-from cognee.tasks.storage import add_data_points
+import pytest
+import pytest_asyncio
+
+import cognee
+from cognee.low_level import DataPoint, setup
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
+from cognee.tasks.storage import add_data_points
 
 
 @pytest_asyncio.fixture

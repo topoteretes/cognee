@@ -1,11 +1,11 @@
 from typing import Any, List, Optional, Union
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SkillsRetriever")
 

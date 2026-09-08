@@ -14,9 +14,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from cognee.infrastructure.databases.relational import get_relational_engine
 from sqlalchemy import select
 
+from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.integrations.crypto import decrypt_credentials, encrypt_credentials
 from cognee.modules.integrations.models.IntegrationCredential import IntegrationCredential
 

@@ -1,8 +1,10 @@
-from uuid import uuid4, UUID
-from typing import Optional, Iterator, Tuple
-from .chunk_by_word import chunk_by_word
+from typing import Iterator, Optional, Tuple
+from uuid import UUID, uuid4
+
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.shared.logging_utils import get_logger
+
+from .chunk_by_word import chunk_by_word
 
 logger = get_logger(__name__)
 

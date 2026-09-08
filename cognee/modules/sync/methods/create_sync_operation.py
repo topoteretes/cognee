@@ -1,8 +1,9 @@
-from uuid import UUID
-from typing import Optional, List
 from datetime import datetime, timezone
-from cognee.modules.sync.models import SyncOperation, SyncStatus
+from typing import List, Optional
+from uuid import UUID
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.sync.models import SyncOperation, SyncStatus
 
 
 async def create_sync_operation(

@@ -1,7 +1,8 @@
 import os
+
 import pandas as pd
-from analysis.get_results import read_results, validate_folder_results
 from analysis.analyze_results import create_aggregate_metrics_df
+from analysis.get_results import read_results, validate_folder_results
 
 
 def process_results(dir_path: str) -> dict:

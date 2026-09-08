@@ -1,16 +1,16 @@
 import logging
-from uuid import uuid5, NAMESPACE_OID
+from uuid import NAMESPACE_OID, uuid5
+
 from sqlalchemy import text
+
+from cognee.infrastructure.databases.relational.config import get_migration_config
 from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
     get_migration_relational_engine,
 )
-from cognee.infrastructure.databases.relational.config import get_migration_config
-
+from cognee.modules.engine.models import ColumnValue, TableRow, TableType
+from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
-from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
-
-from cognee.modules.engine.models import TableRow, TableType, ColumnValue
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +201,7 @@ async def complete_database_ingestion(schema, migrate_column_data):
                     name=node_id,
                     is_a=table_node,
                     properties=str(row_properties),
-                    description=f'Row in relational database table from the table with the name: "{table_name}" with the following row data {str(row_properties)} where the dictionary key value is the column name and the value is the column value. This row has the id of: {node_id}',
+                    description=f'Row in relational database table from the table with the name: "{table_name}" with the following row data {row_properties!s} where the dictionary key value is the column name and the value is the column value. This row has the id of: {node_id}',
                 )
 
                 # Store the node object in our mapping

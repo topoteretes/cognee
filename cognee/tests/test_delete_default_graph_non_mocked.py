@@ -5,10 +5,10 @@ import pathlib
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import backend_access_control_enabled
-from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger

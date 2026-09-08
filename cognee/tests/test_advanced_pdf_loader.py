@@ -1,5 +1,6 @@
 import sys
-from unittest.mock import patch, MagicMock, AsyncMock, mock_open
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+
 import pytest
 
 from cognee.infrastructure.loaders.external.advanced_pdf_loader import AdvancedPdfLoader

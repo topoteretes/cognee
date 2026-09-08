@@ -299,7 +299,7 @@ def log_database_configuration(logger) -> None:
         logger.info(f"Database storage: {databases_path}")
 
     except Exception as e:
-        logger.debug(f"Could not retrieve database configuration: {str(e)}")
+        logger.debug(f"Could not retrieve database configuration: {e!s}")
 
 
 def cleanup_old_logs(logs_dir, max_files) -> bool:

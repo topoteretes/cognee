@@ -13,7 +13,6 @@ from cognee.modules.tools.context import active_skills_var, opened_skills_var
 from cognee.modules.tools.errors import ToolInvocationError
 from cognee.modules.tools.registry import register_builtin_tool
 
-
 MAX_SKILL_BODY_CHARS = 12_000
 
 TOOL = Tool(

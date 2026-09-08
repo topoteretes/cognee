@@ -1,7 +1,7 @@
 ## The Objective of these tests is to cover the search - prepare search results behavior (later to be removed)
 
 import types
-from uuid import uuid4, uuid5, UUID, NAMESPACE_OID
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import pytest
 from pydantic import BaseModel

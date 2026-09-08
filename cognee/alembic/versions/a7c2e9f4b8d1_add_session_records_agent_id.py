@@ -12,9 +12,8 @@ lifecycle code fills the column on the next touch of the session.
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c2e9f4b8d1"

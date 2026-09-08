@@ -1,8 +1,8 @@
 from typing import Any, Dict, List, Optional
+
 from pydantic import Field
 
 from cognee.infrastructure.engine import DataPoint
-
 
 UNSCORED_SKILL_RUN_SCORE = 0.5
 

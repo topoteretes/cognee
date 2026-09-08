@@ -8,8 +8,8 @@ from .export import (
 
 __all__ = [
     "DEFAULT_BASE_IRI",
-    "graph_data_to_rdf",
     "export_memory_graph_to_rdf",
-    "serialize_memory_graph",
+    "graph_data_to_rdf",
     "query_memory_graph_sparql",
+    "serialize_memory_graph",
 ]

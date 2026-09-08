@@ -1,13 +1,12 @@
 import sys
 import types
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from cognee.infrastructure.databases.relational.create_relational_engine import (
     create_relational_engine,
 )
-
 
 POSTGRES_PARAMS = {
     "db_path": "/tmp",

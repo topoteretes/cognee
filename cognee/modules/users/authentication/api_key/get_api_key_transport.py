@@ -1,10 +1,9 @@
-from typing import Optional, Dict
-from fastapi import Response
-from fastapi.security import APIKeyHeader
-from starlette.requests import HTTPConnection
-from fastapi_users.authentication import Transport
+from typing import Dict, Optional
 
-from fastapi import Request
+from fastapi import Request, Response
+from fastapi.security import APIKeyHeader
+from fastapi_users.authentication import Transport
+from starlette.requests import HTTPConnection
 
 from cognee.modules.users.authentication.websocket_query_param import (
     resolve_websocket_query_param_fallback,

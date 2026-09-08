@@ -1,13 +1,14 @@
 import os
-import pytest
 import pathlib
-import pytest_asyncio
 from typing import Optional, Union
-import cognee
 
-from cognee.low_level import setup, DataPoint
-from cognee.tasks.storage import add_data_points
+import pytest
+import pytest_asyncio
+
+import cognee
+from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.tasks.storage import add_data_points
 
 
 def _detailed_context_check(context: str):

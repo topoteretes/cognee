@@ -1,5 +1,6 @@
-from deepeval.test_case import LLMTestCase
 from typing import Optional
+
+from deepeval.test_case import LLMTestCase
 
 
 class ExactMatchMetric:

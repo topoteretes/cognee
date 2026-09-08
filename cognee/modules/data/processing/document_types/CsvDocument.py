@@ -1,9 +1,10 @@
-import io
 import csv
+import io
 from typing import Type
 
-from cognee.modules.chunking.Chunker import Chunker
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules.chunking.Chunker import Chunker
+
 from .Document import Document
 
 
@@ -21,7 +22,7 @@ class CsvDocument(Document):
                 reader = csv.DictReader(file_like_obj)
 
                 for row in reader:
-                    pairs = [f"{str(k)}: {str(v)}" for k, v in row.items()]
+                    pairs = [f"{k!s}: {v!s}" for k, v in row.items()]
                     row_text = ", ".join(pairs)
                     if not row_text.strip():
                         break

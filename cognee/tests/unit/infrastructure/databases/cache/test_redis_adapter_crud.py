@@ -1,9 +1,10 @@
 """Unit tests for RedisAdapter CRUD operations."""
 
 from datetime import datetime
-from uuid import uuid4
-import pytest
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
+
+import pytest
 
 from cognee.infrastructure.databases.exceptions import (
     CacheConnectionError,

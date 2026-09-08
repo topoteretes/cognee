@@ -7,12 +7,12 @@ from numbers import Number
 from cognee.infrastructure.databases.dataset_queue.pinning import dataset_queue_pin_predicate
 from cognee.infrastructure.databases.utils.closing_lru_cache import closing_lru_cache
 from cognee.infrastructure.databases.utils.engine_cache_ops import EngineCacheOps
-from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
 
-from .kuzu.adapter import DEFAULT_KUZU_BUFFER_POOL_SIZE, DEFAULT_KUZU_MAX_DB_SIZE
 from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
+from .kuzu.adapter import DEFAULT_KUZU_BUFFER_POOL_SIZE, DEFAULT_KUZU_MAX_DB_SIZE
 from .supported_databases import supported_databases
 
 logger = get_logger("GraphEngine")
@@ -376,7 +376,7 @@ def _create_graph_engine(
 
     if graph_database_provider == "neo4j":
         if not graph_database_url:
-            raise EnvironmentError("Missing required Neo4j URL.")
+            raise OSError("Missing required Neo4j URL.")
 
         if graph_dataset_database_handler == "neo4j_community":
             # Per-dataset Neo4j Community containers: the adapter's close()
@@ -415,7 +415,7 @@ def _create_graph_engine(
                 and graph_database_username
                 and graph_database_password
             ):
-                raise EnvironmentError("Missing required Postgres graph credentials.")
+                raise OSError("Missing required Postgres graph credentials.")
 
             connection_string: str = (
                 f"postgresql+asyncpg://{graph_database_username}:{graph_database_password}"
@@ -451,7 +451,7 @@ def _create_graph_engine(
                 db_name = relational_config.db_name
 
                 if not (db_host and db_port and db_name and db_username and db_password):
-                    raise EnvironmentError("Missing required Postgres graph credentials!")
+                    raise OSError("Missing required Postgres graph credentials!")
 
                 connection_string: str = (
                     f"postgresql+asyncpg://{db_username}:{db_password}"
@@ -466,7 +466,7 @@ def _create_graph_engine(
 
     elif graph_database_provider in ("ladybug", "kuzu"):
         if not graph_file_path:
-            raise EnvironmentError("Missing required Ladybug database path.")
+            raise OSError("Missing required Ladybug database path.")
 
         from .ladybug.adapter import LadybugAdapter
 
@@ -487,7 +487,7 @@ def _create_graph_engine(
 
     elif graph_database_provider in ("ladybug-remote", "kuzu-remote"):
         if not graph_database_url:
-            raise EnvironmentError("Missing required Ladybug remote URL.")
+            raise OSError("Missing required Ladybug remote URL.")
 
         from .ladybug.remote_ladybug_adapter import RemoteLadybugAdapter
 
@@ -505,9 +505,9 @@ def _create_graph_engine(
             )
 
         if not graph_database_url:
-            raise EnvironmentError("Missing Neptune endpoint.")
+            raise OSError("Missing Neptune endpoint.")
 
-        from .neptune_driver.adapter import NeptuneGraphDB, NEPTUNE_ENDPOINT_URL
+        from .neptune_driver.adapter import NEPTUNE_ENDPOINT_URL, NeptuneGraphDB
 
         if not graph_database_url.startswith(NEPTUNE_ENDPOINT_URL):
             raise ValueError(
@@ -535,11 +535,11 @@ def _create_graph_engine(
             )
 
         if not graph_database_url:
-            raise EnvironmentError("Missing Neptune endpoint.")
+            raise OSError("Missing Neptune endpoint.")
 
         from ..hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
-            NeptuneAnalyticsAdapter,
             NEPTUNE_ANALYTICS_ENDPOINT_URL,
+            NeptuneAnalyticsAdapter,
         )
 
         if not graph_database_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
@@ -559,13 +559,13 @@ def _create_graph_engine(
         # auto-derived graph_file_path so Turso works out of the box in
         # single-user mode, like the other file-based backends.
         if graph_database_key:
-            raise EnvironmentError(
+            raise OSError(
                 "Remote Turso (embedded-replica sync) is not supported yet; "
                 "unset GRAPH_DATABASE_KEY to use the local libSQL backend."
             )
         db_path = graph_database_url or graph_file_path
         if not db_path:
-            raise EnvironmentError(
+            raise OSError(
                 "Missing Turso database path (set GRAPH_DATABASE_URL to an absolute libSQL "
                 "file path, or rely on the default graph_file_path)."
             )
@@ -586,7 +586,7 @@ def _create_graph_engine(
         "neptune_analytics",
         "turso",
     ]
-    raise EnvironmentError(
+    raise OSError(
         f"Unsupported graph database provider: {graph_database_provider}. "
         f"Supported providers are: {', '.join(all_providers)}"
     )

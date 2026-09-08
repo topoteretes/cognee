@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cognee.cli.api_dispatch import can_dispatch, dispatch, SUPPORTED_COMMANDS
+from cognee.cli.api_dispatch import SUPPORTED_COMMANDS, can_dispatch, dispatch
 
 
 class TestCanDispatch:

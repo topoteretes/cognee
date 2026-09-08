@@ -50,26 +50,11 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.locks import dataset_lock
-from cognee.modules.cognify.config import get_cognify_config
-from cognee.modules.ontology.get_default_ontology_resolver import (
-    get_default_ontology_resolver,
-    get_ontology_resolver_from_env,
-)
-from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
-    log_pipeline_run_complete,
-)
-from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
-from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
-from cognee.modules.pipelines.utils import generate_pipeline_id
-from cognee.shared.utils import send_telemetry
-from cognee.tasks.documents.classify_documents import update_node_set
-from cognee.tasks.graph.detect_contradictions import detect_contradictions
-from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
+from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.chunking.chunk_id import chunk_content_hash
 from cognee.modules.chunking.chunk_policy import (
     DEFAULT_CHUNK_POLICY,
@@ -79,8 +64,10 @@ from cognee.modules.chunking.chunk_policy import (
     IncrementalPlanError,
     stored_chunker_id,
 )
-from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
     get_authorized_dataset,
@@ -91,25 +78,37 @@ from cognee.modules.data.methods import (
     publish_updated_data,
 )
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
-from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.models import Data
 from cognee.modules.data.processing.document_types.Document import Document
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.tasks.documents.classify_documents import document_class_for
 from cognee.modules.graph.methods.delete_chunks_incremental import (
     delete_chunks_incremental,
     edge_endpoints,
 )
 from cognee.modules.ingestion import classify, save_data_to_file
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.modules.pipelines.models.PipelineContext import PipelineContext
-from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
-from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
-from cognee.tasks.ingestion.data_item import DataItem
-from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
+from cognee.modules.pipelines.operations.log_pipeline_run_complete import (
+    log_pipeline_run_complete,
+)
+from cognee.modules.pipelines.operations.log_pipeline_run_error import log_pipeline_run_error
+from cognee.modules.pipelines.operations.log_pipeline_run_start import log_pipeline_run_start
+from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
+from cognee.tasks.documents.classify_documents import document_class_for, update_node_set
+from cognee.tasks.graph.detect_contradictions import detect_contradictions
+from cognee.tasks.graph.extract_graph_and_summarize import extract_graph_and_summarize
+from cognee.tasks.ingestion.data_item import DataItem
+from cognee.tasks.ingestion.data_item_to_text_file import data_item_to_text_file
+from cognee.tasks.ingestion.save_data_item_to_storage import save_data_item_to_storage
 from cognee.tasks.storage.add_data_points import add_data_points
 
 logger = get_logger("incremental_update")

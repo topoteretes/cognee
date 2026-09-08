@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ...ids import create_bucket_id
+from ...models import BucketAssignment, SummaryNode
 from ..common import (
     create_bucket_node,
     mark_bucket_for_persistence,
     record_bucket_assignment,
 )
 from .scoring import entities_weight, weighted_jaccard
-from ...ids import create_bucket_id
-from ...models import BucketAssignment, SummaryNode
 
 
 def rebuild_graph_buckets_for_level(

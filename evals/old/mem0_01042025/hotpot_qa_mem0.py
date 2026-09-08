@@ -1,8 +1,9 @@
-from dotenv import load_dotenv
 import json
 from dataclasses import dataclass
-from openai import OpenAI
+
+from dotenv import load_dotenv
 from mem0 import Memory
+from openai import OpenAI
 from tqdm import tqdm
 
 load_dotenv()

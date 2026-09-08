@@ -28,7 +28,6 @@ from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter imp
 from cognee.modules.data.models import Data
 from cognee.modules.ingestion.identify_many import _CHUNK_SIZE, identify_many
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

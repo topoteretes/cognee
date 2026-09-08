@@ -1,6 +1,7 @@
-from typing import List, Literal, Type, Optional
-from pydantic import BaseModel
 import asyncio
+from typing import List, Literal, Optional, Type
+
+from pydantic import BaseModel
 
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.ontology.ontology_config import Config

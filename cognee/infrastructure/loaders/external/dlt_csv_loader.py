@@ -24,8 +24,8 @@ import dlt  # noqa: F401  # ty:ignore[unresolved-import] — hard gate: without 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
-from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.modules.ingestion.exceptions import IngestionError
 
 
 class DltCsvLoader(LoaderInterface):

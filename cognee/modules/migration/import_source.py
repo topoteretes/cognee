@@ -19,6 +19,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.loader import (
     data_item_from_record,
     store_imported_graph,
@@ -29,7 +30,6 @@ from cognee.modules.migration.loader import (
 from cognee.modules.migration.sources.base import IMPORT_MODES, MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from cognee.api.v1.remember.remember import RememberResult

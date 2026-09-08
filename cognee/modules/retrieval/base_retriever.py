@@ -40,7 +40,6 @@ class BaseRetriever(ABC):
             List[Any]: A list of raw objects (e.g., Edge objects, Document chunks)
                        relevant to the query.
         """
-        pass
 
     @abstractmethod
     async def get_context_from_objects(
@@ -61,7 +60,6 @@ class BaseRetriever(ABC):
             Any: The formatted context (typically a string or a list of strings)
                  to be injected into a prompt.
         """
-        pass
 
     @abstractmethod
     async def get_completion_from_context(
@@ -84,7 +82,6 @@ class BaseRetriever(ABC):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
-        pass
 
     def extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
         """

@@ -60,9 +60,9 @@ import asyncio
 import sys
 from collections import Counter
 
-import cognee
 from sqlalchemy import select
 
+import cognee
 from cognee.api.v1.search import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.graph import get_graph_engine

@@ -14,14 +14,14 @@ contains the repositories they want to traverse.
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict, defaultdict, deque
-from dataclasses import dataclass
 import hashlib
 import json
 import math
 import os
-from threading import RLock
 import time
+from collections import OrderedDict, defaultdict, deque
+from dataclasses import dataclass
+from threading import RLock
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Iterable, Mapping, Optional
 from uuid import UUID
@@ -32,7 +32,6 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.code_graph_diagram import DIAGRAM_FORMATS, render_result_diagram
-
 
 CODE_NODE_TYPES = (
     "ApiEndpoint",

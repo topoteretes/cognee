@@ -1,14 +1,15 @@
-from deepeval.metrics import GEval
+import time
+from typing import Any, Dict, List
+
+from deepeval.metrics import ContextualRelevancyMetric, GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
+from cognee.eval_framework.evaluation.metrics.context_coverage import ContextCoverageMetric
 from cognee.eval_framework.evaluation.metrics.exact_match import ExactMatchMetric
 from cognee.eval_framework.evaluation.metrics.f1 import F1ScoreMetric
-from cognee.eval_framework.evaluation.metrics.context_coverage import ContextCoverageMetric
 from cognee.eval_framework.evaluation.metrics.rubric import RubricMetric
-from typing import Any, Dict, List
-from deepeval.metrics import ContextualRelevancyMetric
-import time
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

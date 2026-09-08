@@ -2,22 +2,22 @@
 
 import asyncio
 import json
-from uuid import UUID
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union, Optional, Tuple, Type
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Type, Union
+from uuid import UUID
 
-from sqlalchemy import text, event
+from sqlalchemy import event, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
 
-from .tables import _meta, _node_table, _edge_table
+from .tables import _edge_table, _meta, _node_table
 
 logger = get_logger()
 
@@ -202,22 +202,21 @@ class TursoAdapter(GraphDBInterface):
         # the conflicting row first, which fires graph_edge's ON DELETE CASCADE and
         # would wipe a node's edges every time it is re-added; DO UPDATE edits in
         # place, preserving edges and created_at. Mirrors the Postgres adapter.
-        async with self._write_lock:
-            async with self._session() as session:
-                for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
-                    chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                    stmt = sqlite_insert(_node_table).values(chunk)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={
-                            "name": stmt.excluded.name,
-                            "type": stmt.excluded.type,
-                            "properties": stmt.excluded.properties,
-                            "updated_at": stmt.excluded.updated_at,
-                        },
-                    )
-                    await session.execute(stmt)
-                await session.commit()
+        async with self._write_lock, self._session() as session:
+            for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
+                chunk = rows[i : i + _WRITE_CHUNK_SIZE]
+                stmt = sqlite_insert(_node_table).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "type": stmt.excluded.type,
+                        "properties": stmt.excluded.properties,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                await session.execute(stmt)
+            await session.commit()
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a single node. Delegates to delete_nodes."""
@@ -228,12 +227,9 @@ class TursoAdapter(GraphDBInterface):
         if not node_ids:
             return
         subquery, params = _id_subquery("did", node_ids)
-        async with self._write_lock:
-            async with self._session() as session:
-                await session.execute(
-                    text(f"DELETE FROM graph_node WHERE id IN {subquery}"), params
-                )
-                await session.commit()
+        async with self._write_lock, self._session() as session:
+            await session.execute(text(f"DELETE FROM graph_node WHERE id IN {subquery}"), params)
+            await session.commit()
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single node by ID."""
@@ -300,20 +296,19 @@ class TursoAdapter(GraphDBInterface):
         )
 
         # ON CONFLICT DO UPDATE, not INSERT OR REPLACE (see add_nodes for why).
-        async with self._write_lock:
-            async with self._session() as session:
-                for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
-                    chunk = rows[i : i + _WRITE_CHUNK_SIZE]
-                    stmt = sqlite_insert(_edge_table).values(chunk)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["source_id", "target_id", "relationship_name"],
-                        set_={
-                            "properties": stmt.excluded.properties,
-                            "updated_at": stmt.excluded.updated_at,
-                        },
-                    )
-                    await session.execute(stmt)
-                await session.commit()
+        async with self._write_lock, self._session() as session:
+            for i in range(0, len(rows), _WRITE_CHUNK_SIZE):
+                chunk = rows[i : i + _WRITE_CHUNK_SIZE]
+                stmt = sqlite_insert(_edge_table).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["source_id", "target_id", "relationship_name"],
+                    set_={
+                        "properties": stmt.excluded.properties,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                await session.execute(stmt)
+            await session.commit()
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         """Check whether a single edge exists."""
@@ -804,11 +799,10 @@ class TursoAdapter(GraphDBInterface):
     async def delete_graph(self) -> None:
         """Delete all nodes and edges from the graph."""
         await self.initialize()
-        async with self._write_lock:
-            async with self._session() as session:
-                await session.execute(text("DELETE FROM graph_edge"))
-                await session.execute(text("DELETE FROM graph_node"))
-                await session.commit()
+        async with self._write_lock, self._session() as session:
+            await session.execute(text("DELETE FROM graph_edge"))
+            await session.execute(text("DELETE FROM graph_node"))
+            await session.commit()
 
     async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
         """Retrieve a batch of (source, relationship, target) triplets."""
@@ -870,9 +864,9 @@ class TursoAdapter(GraphDBInterface):
         is a read-filter-write over that array. Mirrors the Postgres adapter.
         """
         if not tags:
-            return None
+            return
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         tag_set = set(tags)
         async with self._session() as session:
@@ -896,15 +890,14 @@ class TursoAdapter(GraphDBInterface):
 
         if updates:
             now = datetime.now(timezone.utc)
-            async with self._write_lock:
-                async with self._session() as session:
-                    for update in updates:
-                        await session.execute(
-                            text(
-                                "UPDATE graph_node SET properties = :p, updated_at = :now "
-                                "WHERE id = :id"
-                            ),
-                            {"id": update["id"], "p": update["properties"], "now": now},
-                        )
-                    await session.commit()
-        return None
+            async with self._write_lock, self._session() as session:
+                for update in updates:
+                    await session.execute(
+                        text(
+                            "UPDATE graph_node SET properties = :p, updated_at = :now "
+                            "WHERE id = :id"
+                        ),
+                        {"id": update["id"], "p": update["properties"], "now": now},
+                    )
+                await session.commit()
+        return

@@ -35,7 +35,6 @@ from cognee.modules.tools.resolve_skills import resolve_skills
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger("AgenticRetriever")
 MAX_TOOL_OUTPUT_CHARS = 8_000
 
@@ -310,9 +309,9 @@ class AgenticRetriever(GraphCompletionRetriever):
         """Persist one SkillRun node per active skill after a retrieval call."""
         from cognee.modules.engine.models import NodeSet
         from cognee.modules.engine.models.SkillRun import (
+            UNSCORED_SKILL_RUN_SCORE,
             CandidateSkill,
             SkillRun,
-            UNSCORED_SKILL_RUN_SCORE,
         )
         from cognee.modules.engine.utils.generate_node_id import generate_node_id
         from cognee.modules.pipelines.models import PipelineContext

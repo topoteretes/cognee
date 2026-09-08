@@ -1,6 +1,7 @@
-from cognee.infrastructure.engine import DataPoint
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from cognee.infrastructure.engine import DataPoint
 
 
 class WebPage(DataPoint):

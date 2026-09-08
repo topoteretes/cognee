@@ -1,7 +1,8 @@
 import json
 from collections import defaultdict
-import numpy as np
 from typing import Dict, List, Tuple
+
+import numpy as np
 
 
 def bootstrap_ci(scores, num_samples=10000, confidence_level=0.95):

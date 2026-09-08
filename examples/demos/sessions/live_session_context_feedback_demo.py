@@ -238,15 +238,15 @@ async def setup_existing_demo_data():
 
 
 async def configure_demo_storage(*, reset_storage: bool):
-    from cognee.infrastructure.databases.relational.create_db_and_tables import (
-        create_db_and_tables,
-    )
     from cognee.base_config import get_base_config
     from cognee.infrastructure.databases.cache.config import get_cache_config
     from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
     from cognee.infrastructure.databases.graph.config import get_graph_config
     from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
     from cognee.infrastructure.databases.relational import get_relational_config
+    from cognee.infrastructure.databases.relational.create_db_and_tables import (
+        create_db_and_tables,
+    )
     from cognee.infrastructure.databases.vector import get_vectordb_config
     from cognee.infrastructure.databases.vector.get_vector_engine import create_vector_engine
 
@@ -313,7 +313,7 @@ def print_turn_snapshot(
     response: Any,
     evidence: dict,
 ):
-    print("", file=sys.stderr)
+    print(file=sys.stderr)
     print(f"--- Turn {turn_number}: {label} ---", file=sys.stderr)
     print(f"user: {preview_text(user_message, max_chars=700)}", file=sys.stderr)
     for text in response_texts(response):

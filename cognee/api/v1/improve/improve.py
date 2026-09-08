@@ -1,5 +1,5 @@
+from typing import Any, List, Optional, Type, Union
 from uuid import UUID
-from typing import Union, Optional, List, Type, Any
 
 try:
     from typing import Unpack
@@ -8,17 +8,17 @@ except ImportError:
 
 from typing_extensions import TypedDict
 
-from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability import (
+    COGNEE_DATASET_NAME,
+    COGNEE_IMPROVE_STAGES,
+    COGNEE_SESSION_ID,
+    new_span,
+)
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_DATASET_NAME,
-    COGNEE_SESSION_ID,
-    COGNEE_IMPROVE_STAGES,
-)
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("improve")
 
@@ -103,8 +103,8 @@ async def improve(
         # Enrich graph only (no session bridging)
         await cognee.improve(dataset="docs")
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     stages_run = []
 

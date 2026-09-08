@@ -1,7 +1,9 @@
+from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
-from typing import List, Dict, Optional, Any, Union
 from pydantic import BaseModel, ConfigDict, field_serializer
-from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
+
+from cognee.modules.graph.exceptions import DimensionOutOfRangeError, InvalidDimensionsError
 
 
 class Node(BaseModel):

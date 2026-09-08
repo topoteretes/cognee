@@ -5,11 +5,11 @@ from uuid import uuid5
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.logging_utils import get_logger
 
-from .config import get_translation_config, TranslationProviderType
-from .detect_language import detect_language_async, LanguageDetectionResult
-from .exceptions import TranslationError, LanguageDetectionError
-from .models import TranslatedContent, LanguageMetadata
-from .providers import get_translation_provider, TranslationResult
+from .config import TranslationProviderType, get_translation_config
+from .detect_language import LanguageDetectionResult, detect_language_async
+from .exceptions import LanguageDetectionError, TranslationError
+from .models import LanguageMetadata, TranslatedContent
+from .providers import TranslationResult, get_translation_provider
 
 logger = get_logger(__name__)
 

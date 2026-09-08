@@ -392,7 +392,6 @@ class TestExportDatasetSelfLoops:
         import cognee.context_global_variables as global_variables
         import cognee.infrastructure.databases.graph as graph_module
         import cognee.modules.data.methods as data_methods
-
         from cognee.modules.migration.export import export_dataset
 
         nodes, edges = sample_graph()

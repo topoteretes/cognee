@@ -1,25 +1,20 @@
 """Neo4j Adapter for Graph Database"""
 
-import json
 import asyncio
-from uuid import UUID
-from textwrap import dedent
-from neo4j import AsyncSession
-from neo4j import AsyncGraphDatabase
-from neo4j.exceptions import Neo4jError
+import json
 from contextlib import asynccontextmanager, nullcontext
-from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
-from cognee.modules.observability import OtelStatusCode as StatusCode
-from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
-from cognee.tasks.temporal_graph.models import Timestamp
-from cognee.shared.logging_utils import get_logger, ERROR
+from datetime import datetime, timezone
+from textwrap import dedent
+from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple, Type
+from uuid import UUID
+
+from neo4j import AsyncGraphDatabase, AsyncSession
+from neo4j.exceptions import Neo4jError
+
+from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
 )
-from cognee.infrastructure.databases.exceptions import DatabaseCredentialsError
-from cognee.modules.storage.utils import JSONEncoder
-from datetime import datetime, timezone
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
@@ -33,26 +28,29 @@ from cognee.infrastructure.databases.provenance.source_ref_state import (
     provenance_after_remove,
     provenance_attach_inputs,
 )
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.modules.observability import OtelStatusCode as StatusCode
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_QUERY,
+    COGNEE_DB_ROW_COUNT,
+    COGNEE_DB_SYSTEM,
+    redact_secrets,
+)
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import ERROR, get_logger
+from cognee.tasks.temporal_graph.models import Timestamp
 
-
+from .deadlock_retry import deadlock_retry
 from .neo4j_metrics_utils import (
+    count_self_loops,
     get_avg_clustering,
     get_edge_density,
     get_num_connected_components,
     get_shortest_path_lengths,
     get_size_of_connected_components,
-    count_self_loops,
 )
-from .deadlock_retry import deadlock_retry
-
-from cognee.modules.observability import new_span
-from cognee.modules.observability.tracing import (
-    COGNEE_DB_SYSTEM,
-    COGNEE_DB_QUERY,
-    COGNEE_DB_ROW_COUNT,
-    redact_secrets,
-)
-
 
 logger = get_logger("Neo4jAdapter")
 
@@ -216,7 +214,7 @@ class Neo4jAdapter(GraphDBInterface):
         Initializes the database: adds uniqueness constraint on id and performs indexing
         """
         await self.query(
-            (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
+            f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;"
         )
 
     @asynccontextmanager
@@ -463,10 +461,10 @@ class Neo4jAdapter(GraphDBInterface):
         members) remains.
         """
         if not tags:
-            return None
+            return
 
         if node_ids is not None and not node_ids:
-            return None
+            return
 
         id_filter = "AND n.id IN $node_ids" if node_ids is not None else ""
         node_scope_clause = "WHERE n.id IN $node_ids" if node_ids is not None else ""
@@ -495,7 +493,7 @@ class Neo4jAdapter(GraphDBInterface):
         if node_ids is not None:
             params["node_ids"] = [str(nid) for nid in node_ids]
         await self.query(query, params)
-        return None
+        return
 
     async def extract_node(self, node_id: str):
         """
@@ -1885,7 +1883,7 @@ class Neo4jAdapter(GraphDBInterface):
             return (nodes, edges)
 
         except Exception as e:
-            logger.error(f"Error during graph data retrieval: {str(e)}")
+            logger.error(f"Error during graph data retrieval: {e!s}")
             raise
 
     async def get_neighborhood(
@@ -1972,7 +1970,7 @@ class Neo4jAdapter(GraphDBInterface):
             return (nodes, edges)
 
         except Exception as e:
-            logger.error(f"Error during neighborhood retrieval: {str(e)}")
+            logger.error(f"Error during neighborhood retrieval: {e!s}")
             raise
 
     async def get_id_filtered_graph_data(self, target_ids: list[str]):
@@ -2029,7 +2027,7 @@ class Neo4jAdapter(GraphDBInterface):
             return list(nodes_dict.values()), edges
 
         except Exception as e:
-            logger.error(f"Error during ID-filtered graph data retrieval: {str(e)}")
+            logger.error(f"Error during ID-filtered graph data retrieval: {e!s}")
             raise
 
     async def get_nodeset_subgraph(
@@ -2138,7 +2136,7 @@ class Neo4jAdapter(GraphDBInterface):
             return nodes, edges
 
         except Exception as e:
-            logger.error(f"Error during nodeset subgraph retrieval: {str(e)}")
+            logger.error(f"Error during nodeset subgraph retrieval: {e!s}")
             raise
 
     async def get_filtered_graph_data(self, attribute_filters):

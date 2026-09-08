@@ -255,10 +255,10 @@ DEFAULT_CHUNK_POLICY: ChunkPolicy = diff_region_policy
 
 
 __all__ = [
+    "DEFAULT_CHUNK_POLICY",
     "ChunkPlan",
     "ChunkPlanRequest",
     "ChunkPolicy",
-    "DEFAULT_CHUNK_POLICY",
     "IncrementalPlanError",
     "diff_region_policy",
     "stored_chunker_id",

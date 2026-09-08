@@ -104,8 +104,9 @@ class LinearIntegration(OAuthIntegration):
 
     async def exchange_code(self, code: str) -> dict[str, Any]:
         """Exchange the OAuth code for the workspace's agent token."""
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            session.post(
                 _TOKEN_URL,
                 data={
                     "code": code,
@@ -114,10 +115,11 @@ class LinearIntegration(OAuthIntegration):
                     "client_secret": require("client_secret"),
                     "grant_type": "authorization_code",
                 },
-            ) as response:
-                if response.status != 200:
-                    raise RuntimeError(f"Linear code exchange failed: HTTP {response.status}")
-                payload: dict[str, Any] = await response.json()
+            ) as response,
+        ):
+            if response.status != 200:
+                raise RuntimeError(f"Linear code exchange failed: HTTP {response.status}")
+            payload: dict[str, Any] = await response.json()
 
         if not payload.get("access_token"):
             raise RuntimeError("Linear code exchange returned no access_token")
@@ -209,16 +211,16 @@ class LinearIntegration(OAuthIntegration):
         """
         try:
             token = access_token_for(credential)
-            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-                async with session.post(
-                    _REVOKE_URL, headers={"Authorization": f"Bearer {token}"}
-                ) as response:
-                    if response.status != 200:
-                        logger.warning(
-                            "Linear token revoke for organization %s failed: HTTP %s",
-                            credential.provider_account_id,
-                            response.status,
-                        )
+            async with (
+                aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+                session.post(_REVOKE_URL, headers={"Authorization": f"Bearer {token}"}) as response,
+            ):
+                if response.status != 200:
+                    logger.warning(
+                        "Linear token revoke for organization %s failed: HTTP %s",
+                        credential.provider_account_id,
+                        response.status,
+                    )
         except Exception:  # noqa: BLE001 - disconnect must proceed no matter what happens here
             logger.exception(
                 "Linear token revoke for organization %s failed", credential.provider_account_id

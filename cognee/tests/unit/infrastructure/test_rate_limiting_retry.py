@@ -1,11 +1,12 @@
-import time
 import asyncio
-from cognee.shared.logging_utils import get_logger
+import time
+
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    sleep_and_retry_sync,
-    sleep_and_retry_async,
     is_rate_limit_error,
+    sleep_and_retry_async,
+    sleep_and_retry_sync,
 )
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -117,7 +118,7 @@ def test_sync_retry():
 
         print("✅ PASS: Synchronous retry mechanism is working correctly")
     except Exception as e:
-        print(f"❌ FAIL: Test encountered an unexpected error: {str(e)}")
+        print(f"❌ FAIL: Test encountered an unexpected error: {e!s}")
         raise
 
 
@@ -150,7 +151,7 @@ async def test_async_retry():
 
         print("✅ PASS: Asynchronous retry mechanism is working correctly")
     except Exception as e:
-        print(f"❌ FAIL: Test encountered an unexpected error: {str(e)}")
+        print(f"❌ FAIL: Test encountered an unexpected error: {e!s}")
         raise
 
 
@@ -170,7 +171,7 @@ async def test_retry_max_exceeded():
         await always_fails()
         print("❌ FAIL: Function should have failed but succeeded")
     except Exception as e:
-        print(f"Expected error after max retries: {str(e)}")
+        print(f"Expected error after max retries: {e!s}")
         print("✅ PASS: Function correctly failed after max retries exceeded")
 
 

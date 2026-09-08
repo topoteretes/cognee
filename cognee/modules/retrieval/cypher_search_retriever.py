@@ -1,10 +1,11 @@
 from typing import Any, Optional
+
 from fastapi.encoders import jsonable_encoder
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.exceptions import CypherSearchError, SearchTypeNotSupported
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.exceptions import SearchTypeNotSupported, CypherSearchError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CypherSearchRetriever")

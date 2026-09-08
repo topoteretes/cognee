@@ -1,7 +1,9 @@
-from typing import BinaryIO
 from contextlib import asynccontextmanager
-from cognee.infrastructure.files import get_file_metadata, FileMetadata
+from typing import BinaryIO
+
+from cognee.infrastructure.files import FileMetadata, get_file_metadata
 from cognee.infrastructure.utils.run_sync import run_sync
+
 from .IngestionData import IngestionData
 
 

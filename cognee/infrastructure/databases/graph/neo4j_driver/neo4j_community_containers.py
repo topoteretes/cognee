@@ -28,12 +28,12 @@ This module deliberately has no neo4j / heavy imports so it is safe to import
 from the eagerly-loaded dataset-database-handler registry.
 """
 
+import asyncio
 import os
 import shutil
 import socket
 import subprocess
 import threading
-import asyncio
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 

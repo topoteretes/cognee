@@ -1,10 +1,11 @@
-from typing import List
-from cognee.infrastructure.engine import DataPoint
-from cognee.tasks.storage.add_data_points import add_data_points
-import cognee
-from cognee.infrastructure.databases.graph import get_graph_engine
 import json
 from pathlib import Path
+from typing import List
+
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.engine import DataPoint
+from cognee.tasks.storage.add_data_points import add_data_points
 
 
 class Document(DataPoint):

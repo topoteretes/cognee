@@ -3,10 +3,10 @@ import asyncio
 import json
 from uuid import UUID
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.reference import SupportsCliCommand
 
 
 class AgentsCommand(SupportsCliCommand):
@@ -157,7 +157,7 @@ Subcommands:
             fmt.echo(f"{'Agent ID':<38} {'Agent Email':<40} {'API Key Label'}")
             fmt.echo("-" * 100)
             for a in agents:
-                fmt.echo(f"{str(a['agent_id']):<38} {a['agent_email']:<40} {a['api_key_label']}")
+                fmt.echo(f"{a['agent_id']!s:<38} {a['agent_email']:<40} {a['api_key_label']}")
 
         asyncio.run(run())
 
@@ -247,9 +247,9 @@ Subcommands:
                 fmt.echo("-" * 100)
                 for a in agents:
                     fmt.echo(
-                        f"{str(a.get('agent_id', '')):<38} "
-                        f"{str(a.get('agent_session_name', '')):<30} "
-                        f"{str(a.get('status', '')):<12} "
+                        f"{a.get('agent_id', '')!s:<38} "
+                        f"{a.get('agent_session_name', '')!s:<30} "
+                        f"{a.get('status', '')!s:<12} "
                         f"{a.get('last_active_at', '')}"
                     )
 

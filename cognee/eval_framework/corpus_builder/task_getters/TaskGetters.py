@@ -1,14 +1,15 @@
 from enum import Enum
-from typing import Callable, Awaitable, List
+from typing import Awaitable, Callable, List
+
 from cognee.api.v1.cognify.cognify import get_default_tasks
-from cognee.modules.pipelines.tasks.task import Task
 from cognee.eval_framework.corpus_builder.task_getters.get_cascade_graph_tasks import (
     get_cascade_graph_tasks,
 )
 from cognee.eval_framework.corpus_builder.task_getters.get_default_tasks_by_indices import (
-    get_no_summary_tasks,
     get_just_chunks_tasks,
+    get_no_summary_tasks,
 )
+from cognee.modules.pipelines.tasks.task import Task
 
 
 class TaskGetters(Enum):

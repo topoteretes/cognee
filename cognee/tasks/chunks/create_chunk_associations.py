@@ -15,7 +15,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import graph_provenance_write_kwargs
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import index_graph_edges
 

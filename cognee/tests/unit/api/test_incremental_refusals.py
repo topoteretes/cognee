@@ -102,7 +102,7 @@ def test_wrapped_user_named_upload_requires_full_update_when_renamed():
 
 @pytest.mark.asyncio
 async def test_v1_chunk_ownership_refuses_incremental_baseline(monkeypatch):
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     dataset_id, data_id, chunk_id = uuid4(), uuid4(), uuid4()
     snapshot = SimpleNamespace(source_ref_keys=[make_source_ref_key(dataset_id, data_id)])
@@ -119,7 +119,7 @@ async def test_v1_chunk_ownership_refuses_incremental_baseline(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_v2_chunk_ownership_is_an_incremental_baseline(monkeypatch):
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     dataset_id, data_id, chunk_id = uuid4(), uuid4(), uuid4()
     snapshot = SimpleNamespace(
@@ -144,7 +144,7 @@ def test_stored_chunks_must_tile_the_stored_text():
 
 @pytest.mark.asyncio
 async def test_same_name_upload_uses_isolated_staging_path(monkeypatch, tmp_path):
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     current_original = tmp_path / "report.txt"
     current_original.write_bytes(b"old content")
@@ -186,7 +186,7 @@ async def test_unsupported_backend_refuses_before_touching_anything(monkeypatch)
     Refusing here — before permissions, before staging — is what keeps the
     fallback cheap for backends that can never take this path.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     class _StubAdapter:
         supports_incremental_chunk_updates = False
@@ -211,7 +211,7 @@ async def test_declaring_the_capability_is_enough_to_pass_the_gate(monkeypatch):
     never participate. Provenance and vector capabilities are checked later,
     inside the selected dataset context.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     class _CommunityAdapter:
         supports_incremental_chunk_updates = True
@@ -233,7 +233,7 @@ async def test_declaring_the_capability_is_enough_to_pass_the_gate(monkeypatch):
 @pytest.mark.asyncio
 async def test_unmarked_graph_refuses_before_incremental_work(monkeypatch):
     """Legacy relational-ledger graphs stay on the full update path."""
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     data_id, dataset_id = uuid4(), uuid4()
 
@@ -322,7 +322,7 @@ def test_neo4j_declares_the_capability():
 
 def test_the_provider_name_gate_is_gone():
     """The name set could not see a runtime-registered adapter; it must not return."""
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     assert not hasattr(incremental, "SUPPORTED_GRAPH_PROVIDERS")
 
@@ -336,7 +336,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
     "stored chunk 0 does not tile the stored document text" — the same error a
     never-cognified document produces.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     stored = [{"id": str(uuid4()), "text": "para\n", "chunk_index": 0, "chunker_id": "other_v1"}]
 
@@ -379,7 +379,7 @@ async def test_a_document_built_by_another_chunker_is_refused_by_name(monkeypatc
 
 @pytest.mark.asyncio
 async def test_changed_content_with_changed_metadata_refuses_before_planning(monkeypatch):
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     data_id, dataset_id = uuid4(), uuid4()
     old_data = SimpleNamespace(
@@ -440,7 +440,7 @@ async def test_write_without_delete_permission_is_denied(monkeypatch):
     Without the delete check, the permission update() demanded depended on
     which branch it happened to take, and the faster branch was the weaker one.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
     from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
     from cognee.modules.users.exceptions import PermissionDeniedError
 
@@ -477,7 +477,7 @@ async def test_a_dataset_collaborator_may_update_a_row_they_do_not_own(monkeypat
     demanded depend on which branch it took — and the incremental branch, the
     default one, was the stricter.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     data_id, dataset_id, owner_id = uuid4(), uuid4(), uuid4()
     collaborator = SimpleNamespace(id=uuid4())
@@ -545,7 +545,7 @@ async def test_the_recorded_budget_lookup_reads_the_dataset_owners_store(monkeyp
     document at the current default, which is the granularity drift this
     helper exists to prevent.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
 
     data_id, dataset_id, owner_id = uuid4(), uuid4(), uuid4()
     collaborator = SimpleNamespace(id=uuid4())
@@ -587,8 +587,7 @@ async def test_the_recorded_budget_lookup_reads_the_dataset_owners_store(monkeyp
 @pytest.mark.asyncio
 async def test_the_recorded_budget_lookup_never_fails_the_update(monkeypatch):
     """It is an optimization on the fallback path, so it degrades, never raises."""
-    import cognee.api.v1.update.incremental as incremental
-
+    from cognee.api.v1.update import incremental
     from cognee.modules.users.exceptions import PermissionDeniedError
 
     monkeypatch.setattr(
@@ -613,7 +612,7 @@ async def test_fresh_chunks_are_extracted_in_bounded_batches(monkeypatch):
     most of a large document sends every replacement chunk into a single call
     with no intermediate progress.
     """
-    import cognee.api.v1.update.incremental as incremental
+    from cognee.api.v1.update import incremental
     from cognee.modules.chunking.chunk_policy import ChunkPlan
 
     batches = []

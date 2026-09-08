@@ -19,5 +19,3 @@ class CliCommandException(Exception):
 
 class CliCommandInnerException(Exception):
     """Inner exception for wrapping other exceptions in CLI context"""
-
-    pass

@@ -1,10 +1,11 @@
-from typing import AsyncGenerator, Dict, Any, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.modules.engine.utils import generate_node_id
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.modules.engine.models import Triplet
+from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage import index_data_points
 
 logger = get_logger("get_triplet_datapoints")

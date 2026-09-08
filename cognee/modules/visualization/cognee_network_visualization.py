@@ -23,9 +23,11 @@ import os
 from dataclasses import asdict
 from typing import Optional
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
+from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
 from cognee.modules.visualization.preprocessor import preprocess
+from cognee.modules.visualization.semantic_clusters import compute_clusters
 from cognee.modules.visualization.views import (
     inspector,
     memory_map,
@@ -34,9 +36,7 @@ from cognee.modules.visualization.views import (
     story_view,
     ui_chrome,
 )
-from cognee.modules.visualization.layouts import pipeline_layout, semantic_layout
-from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
-from cognee.modules.visualization.semantic_clusters import compute_clusters
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -262,8 +262,8 @@ async def aggregate_multi_user_graphs(user_dataset_pairs):
         ``get_graph_data()``, with nodes tagged with ``source_user`` from
         the owning user's email.
     """
-    from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.context_global_variables import set_database_global_context_variables
+    from cognee.infrastructure.databases.graph import get_graph_engine
 
     all_nodes: dict = {}
     all_edges: list = []

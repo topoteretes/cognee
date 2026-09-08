@@ -1,9 +1,10 @@
-from cognee.shared.logging_utils import get_logger
 from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
-from cognee.tasks.chunks import chunk_by_paragraph
 from cognee.modules.chunking.Chunker import Chunker
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.chunks import chunk_by_paragraph
+
 from .models.DocumentChunk import DocumentChunk
 
 logger = get_logger()
@@ -74,7 +75,7 @@ class TextChunkerWithOverlap(Chunker):
         try:
             return DocumentChunk(
                 chunker_id=self.chunker_id,
-                id=chunk_id or uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"),
+                id=chunk_id or uuid5(NAMESPACE_OID, f"{self.document.id!s}-{self.chunk_index}"),
                 text=text,
                 chunk_size=size,
                 is_part_of=self.document,

@@ -396,7 +396,7 @@ class _LeasedCacheEntry:
 class _LeasedValueProxy:
     """Proxy that keeps a cache entry alive while callers hold it."""
 
-    __slots__ = ("_entry", "_finalizer", "__weakref__")
+    __slots__ = ("__weakref__", "_entry", "_finalizer")
 
     def __init__(self, entry: _LeasedCacheEntry):
         object.__setattr__(self, "_entry", entry)
@@ -492,8 +492,7 @@ class ClosingLRUCache:
         runs under the cache lock and must not re-enter the cache.
         """
         if isinstance(maxsize, int):
-            if maxsize < 0:
-                maxsize = 0
+            maxsize = max(maxsize, 0)
         elif maxsize is not None:
             raise TypeError("maxsize must be an int or None")
         self._cache: OrderedDict = OrderedDict()

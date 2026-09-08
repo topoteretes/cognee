@@ -8,7 +8,6 @@ from uuid import UUID
 from cognee.modules.engine.models import Skill
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger("cognee.tools.resolve_skills")
 
 

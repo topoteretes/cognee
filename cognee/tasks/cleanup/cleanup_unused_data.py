@@ -7,19 +7,21 @@ efficiency and storage optimization through whole-document removal.
 """
 
 import json
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
-from uuid import UUID
 import os
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data
-from cognee.shared.logging_utils import get_logger
-from sqlalchemy import select, or_
-import cognee
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
+from uuid import UUID
+
 import sqlalchemy as sa
+from sqlalchemy import or_, select
+
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.modules.data.models import Data
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

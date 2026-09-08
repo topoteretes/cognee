@@ -1,13 +1,14 @@
 import json
 from typing import Any, Optional
-from cognee.shared.logging_utils import get_logger
+
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NaturalLanguageRetriever")
 
@@ -153,7 +154,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
             except Exception as e:
                 previous_attempts += f"Query: {cypher_query if 'cypher_query' in locals() else 'Not generated'} -> Executed with error: {e}\n"
-                logger.error(f"Error executing query: {str(e)}")
+                logger.error(f"Error executing query: {e!s}")
 
         logger.warning(
             f"Failed to get results after {self.max_attempts} attempts for query: '{query[:50]}...'"

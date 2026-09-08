@@ -1,6 +1,7 @@
-from uuid import UUID
-from pydantic import BaseModel
 from typing import Any, Optional
+from uuid import UUID
+
+from pydantic import BaseModel
 
 
 class SearchResultDataset(BaseModel):

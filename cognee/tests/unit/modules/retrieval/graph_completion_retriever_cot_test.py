@@ -1,12 +1,13 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
 )
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 @pytest.fixture(autouse=True)
@@ -647,7 +648,6 @@ async def test_get_completion_batch_queries(mock_edge):
     assert completion[0] == "Generated answer" and completion[1] == "Generated answer"
 
 
-#
 @pytest.mark.asyncio
 async def test_get_completion_batch_queries_with_response_model(mock_edge):
     """Test get_completion of batch queries with custom response model."""

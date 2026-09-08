@@ -5,9 +5,9 @@ from typing import Optional
 
 from cognee.modules.observability.tracing import (
     CogneeTrace,
+    get_exporter,
     setup_tracing,
     shutdown_tracing,
-    get_exporter,
 )
 
 _tracing_enabled: bool = False

@@ -3,8 +3,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from cognee.infrastructure.engine import DataPoint, Embeddable, LLMContext, Dedup
-
+from cognee.infrastructure.engine import DataPoint, Dedup, Embeddable, LLMContext
 
 PermissionVerb = Literal["read", "write", "execute", "delete", "share"]
 

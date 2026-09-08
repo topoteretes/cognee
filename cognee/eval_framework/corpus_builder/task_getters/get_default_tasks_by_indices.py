@@ -1,11 +1,12 @@
 from typing import List
+
 from cognee.api.v1.cognify.cognify import get_default_tasks
-from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 async def get_default_tasks_by_indices(

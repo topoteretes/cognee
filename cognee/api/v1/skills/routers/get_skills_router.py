@@ -13,13 +13,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from cognee import __version__ as cognee_version
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 

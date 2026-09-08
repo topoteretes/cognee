@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field, field_validator
+
 from cognee.modules.agent_memory.sanitization import (
     MAX_SERIALIZED_VALUE_LENGTH,
     sanitize_value,

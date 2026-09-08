@@ -1,9 +1,9 @@
 from typing import List
 
-from cognee.modules.engine.models import Entity, EntityType
 from cognee.infrastructure.entities.BaseEntityExtractor import (
     BaseEntityExtractor,
 )
+from cognee.modules.engine.models import Entity, EntityType
 
 
 class DummyEntityExtractor(BaseEntityExtractor):

@@ -17,7 +17,6 @@ class MatchingStrategy(ABC):
         Returns:
             The best matching candidate name, or None if no match found
         """
-        pass
 
 
 class FuzzyMatchingStrategy(MatchingStrategy):

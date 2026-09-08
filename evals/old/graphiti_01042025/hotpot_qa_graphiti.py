@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
+from graphiti_core import Graphiti
+from graphiti_core.nodes import EpisodeType
 from langchain_openai import ChatOpenAI
 from openai import OpenAI
 from tqdm import tqdm
-
-from graphiti_core import Graphiti
-from graphiti_core.nodes import EpisodeType
 
 load_dotenv()
 

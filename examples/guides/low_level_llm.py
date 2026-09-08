@@ -1,7 +1,8 @@
 import asyncio
+from typing import List
 
 from pydantic import BaseModel
-from typing import List
+
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 

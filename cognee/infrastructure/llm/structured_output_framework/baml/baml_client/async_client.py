@@ -11,13 +11,14 @@
 # baml-cli is available with the baml package.
 
 import typing
-import typing_extensions
-import baml_py
 
-from . import stream_types, types, type_builder
-from .parser import LlmResponseParser, LlmStreamParser
-from .runtime import DoNotUseDirectlyCallManager, BamlCallOptions
+import baml_py
+import typing_extensions
+
+from . import stream_types, type_builder, types
 from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__
+from .parser import LlmResponseParser, LlmStreamParser
+from .runtime import BamlCallOptions, DoNotUseDirectlyCallManager
 
 
 class BamlAsyncClient:

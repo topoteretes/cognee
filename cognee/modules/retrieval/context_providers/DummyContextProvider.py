@@ -1,9 +1,9 @@
 from typing import List
 
-from cognee.modules.engine.models import Entity
 from cognee.infrastructure.context.BaseContextProvider import (
     BaseContextProvider,
 )
+from cognee.modules.engine.models import Entity
 
 
 class DummyContextProvider(BaseContextProvider):
