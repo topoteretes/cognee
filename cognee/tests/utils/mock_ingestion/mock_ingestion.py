@@ -73,6 +73,70 @@ def load_mock_data(path: Path) -> dict:
     return by_title
 
 
+def _default_instance(model):
+    """Best-effort valid instance of an arbitrary response model.
+
+    The replay map only covers KnowledgeGraph and SummarizedContent; every
+    other structured-output call lands here. ``model()`` alone raises for
+    pydantic models with required fields, so synthesize a neutral value per
+    annotation instead. Imports stay local, matching this module's
+    version-portability rule.
+    """
+    import enum
+    import typing
+    from uuid import NAMESPACE_OID, uuid5
+
+    from pydantic import BaseModel
+
+    def default_for(ann):
+        if ann is None or ann is type(None):
+            return None
+        origin = typing.get_origin(ann)
+        if origin is typing.Union or str(origin) == "types.UnionType":
+            args = [a for a in typing.get_args(ann) if a is not type(None)]
+            return default_for(args[0]) if args else None
+        if origin is typing.Literal:
+            return typing.get_args(ann)[0]
+        if origin in (list, set, frozenset, tuple):
+            return origin()
+        if origin is dict:
+            return {}
+        if isinstance(ann, type):
+            if issubclass(ann, BaseModel):
+                return _default_instance(ann)
+            if issubclass(ann, enum.Enum):
+                return next(iter(ann))
+            if issubclass(ann, bool):
+                return False
+            if issubclass(ann, str):
+                return ""
+            if issubclass(ann, int):
+                return 0
+            if issubclass(ann, float):
+                return 0.0
+            if ann.__name__ == "UUID":
+                return uuid5(NAMESPACE_OID, "mock")
+        return None
+
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        try:
+            return model()
+        except Exception:  # noqa: BLE001 - any construction failure routes to synthesis
+            required = {
+                name: default_for(field.annotation)
+                for name, field in model.model_fields.items()
+                if field.is_required()
+            }
+            return model.model_construct(**required)
+    value = default_for(model)
+    if value is not None or model is type(None):
+        return value
+    try:
+        return model()
+    except Exception:  # noqa: BLE001 - a mock must never raise; None is the last resort
+        return None
+
+
 def install_mocks(mock_data: dict[str, dict], mock_embeddings: bool = True) -> None:
     """Mock the LLM (structured-output replay) and, by default, embeddings via
     cognee's built-in MOCK_EMBEDDING switch.
@@ -114,7 +178,7 @@ def install_mocks(mock_data: dict[str, dict], mock_embeddings: bool = True) -> N
                 return SummarizedContent(**entry["summary"])
             return SummarizedContent(summary="Mock summary.", description="")
 
-        return response_model()
+        return _default_instance(response_model)
 
     LLMGateway.acreate_structured_output = _mock_acreate
 
