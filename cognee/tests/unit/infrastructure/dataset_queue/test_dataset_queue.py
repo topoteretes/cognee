@@ -3,10 +3,15 @@
 The Dataset Queue is a semaphore-based concurrency limiter that restricts
 the number of parallel dataset operations (search, run_pipeline_per_dataset).
 
+The queue only engages when backend access control is on
+(ENABLE_BACKEND_ACCESS_CONTROL, the default); with access control off the
+flag is a no-op.
+
 Configuration via environment variables:
-- DATASET_QUEUE_ENABLED: Enable/disable the queue (default: False)
-- DATABASE_MAX_LRU_CACHE_SIZE: Maximum concurrent dataset operations
-  (default: 128, sourced from cognee.shared.lru_cache)
+- DATASET_QUEUE_ENABLED: Enable/disable the queue (default: true)
+- DATASET_QUEUE_MAX_CONCURRENT: Maximum concurrent dataset operations
+  (defaults to DATABASE_MAX_LRU_CACHE_SIZE, which defaults to 6, sourced
+  from cognee.shared.lru_cache)
 """
 
 import asyncio
