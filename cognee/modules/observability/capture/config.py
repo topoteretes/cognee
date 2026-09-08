@@ -26,6 +26,15 @@ class CaptureConfig(BaseSettings):
     Read once per process by ``hook._ensure_initialized()``; never on the emit
     path. Directory defaults to ``<data_root>/capture`` (not ``evals``, which
     collides with ``cognee/eval_framework`` artifacts).
+
+    Enabling capture writes derived user content to that directory: the raw
+    per-chunk graphs (extracted entity names, descriptions, relationships),
+    the names looked up against the ontology, and retrieval candidate ids —
+    filed per dataset and run. It inherits the directory's permissions and is
+    not removed when a dataset is forgotten, so a deployment that turns it on
+    owns the same retention and access-control obligations for it as for the
+    data root. ``COGNEE_CAPTURE_RETRIEVAL_SAMPLE_RATE`` samples only the
+    ``retrieval.*`` payloads; the extraction kinds are always captured in full.
     """
 
     cognee_capture_enabled: bool = False
@@ -37,7 +46,7 @@ class CaptureConfig(BaseSettings):
     cognee_capture_queue_size: int = 2048
     cognee_capture_batch_size: int = 64
     cognee_capture_flush_interval_s: float = 2.0
-    cognee_capture_sample_rate: float = 1.0
+    cognee_capture_retrieval_sample_rate: float = 1.0
     # Upper bound on one sink write; a wedged sink (S3 under partition) must not
     # pin the flusher and every later drain().
     cognee_capture_sink_timeout_s: float = 30.0
@@ -51,10 +60,10 @@ class CaptureConfig(BaseSettings):
 
     @pydantic.model_validator(mode="after")
     def fill_derived(self):
-        if not 0.0 <= self.cognee_capture_sample_rate <= 1.0:
+        if not 0.0 <= self.cognee_capture_retrieval_sample_rate <= 1.0:
             raise ValueError(
-                "COGNEE_CAPTURE_SAMPLE_RATE must be in [0, 1], "
-                f"got {self.cognee_capture_sample_rate}"
+                "COGNEE_CAPTURE_RETRIEVAL_SAMPLE_RATE must be in [0, 1], "
+                f"got {self.cognee_capture_retrieval_sample_rate}"
             )
         if self.cognee_capture_sink_timeout_s <= 0:
             raise ValueError(
@@ -106,7 +115,7 @@ class CaptureConfig(BaseSettings):
             "cognee_capture_queue_size": self.cognee_capture_queue_size,
             "cognee_capture_batch_size": self.cognee_capture_batch_size,
             "cognee_capture_flush_interval_s": self.cognee_capture_flush_interval_s,
-            "cognee_capture_sample_rate": self.cognee_capture_sample_rate,
+            "cognee_capture_retrieval_sample_rate": self.cognee_capture_retrieval_sample_rate,
             "cognee_capture_sink_timeout_s": self.cognee_capture_sink_timeout_s,
             "cognee_capture_drain_timeout_s": self.cognee_capture_drain_timeout_s,
         }

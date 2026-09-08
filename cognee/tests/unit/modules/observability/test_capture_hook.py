@@ -160,7 +160,7 @@ def test_auto_registers_storage_sink_from_env(monkeypatch, tmp_path):
 
 def test_initialization_failure_leaves_capture_off(monkeypatch):
     monkeypatch.setenv("COGNEE_CAPTURE_ENABLED", "true")
-    monkeypatch.setenv("COGNEE_CAPTURE_SAMPLE_RATE", "7")
+    monkeypatch.setenv("COGNEE_CAPTURE_RETRIEVAL_SAMPLE_RATE", "7")
     get_capture_config.cache_clear()
     fake_logger = MagicMock()
     monkeypatch.setattr(hook, "logger", fake_logger)

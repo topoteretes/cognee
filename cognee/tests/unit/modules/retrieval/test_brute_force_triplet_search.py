@@ -1362,7 +1362,7 @@ async def test_capture_off_builds_no_retrieval_payload(monkeypatch, capture_rese
 @pytest.mark.asyncio
 async def test_sampled_out_search_records_notes_without_event(monkeypatch, fake_capture_sink):
     """(b) A run sampled out still records the bounding settings; no event, no payload."""
-    capture.hook._configure(sample_rate=0.0)
+    capture.hook._configure(retrieval_sample_rate=0.0)
     builder = MagicMock(side_effect=AssertionError("payload built for a sampled-out run"))
     monkeypatch.setattr(bfts_module, "_retrieval_candidates_payload", builder)
 

@@ -130,7 +130,7 @@ _FIELDS = CaptureConfig.model_fields
 QUEUE_SIZE: int = _FIELDS["cognee_capture_queue_size"].default
 BATCH_SIZE: int = _FIELDS["cognee_capture_batch_size"].default
 FLUSH_INTERVAL_S: float = _FIELDS["cognee_capture_flush_interval_s"].default
-SAMPLE_RATE: float = _FIELDS["cognee_capture_sample_rate"].default
+RETRIEVAL_SAMPLE_RATE: float = _FIELDS["cognee_capture_retrieval_sample_rate"].default
 SINK_TIMEOUT_S: float = _FIELDS["cognee_capture_sink_timeout_s"].default
 DRAIN_TIMEOUT_S: float = _FIELDS["cognee_capture_drain_timeout_s"].default
 # Floor for the interval tick: a non-positive interval would spin the flusher.
@@ -213,7 +213,7 @@ def _configure(
     queue_size: int | None = None,
     batch_size: int | None = None,
     flush_interval_s: float | None = None,
-    sample_rate: float | None = None,
+    retrieval_sample_rate: float | None = None,
     sink_timeout_s: float | None = None,
     drain_timeout_s: float | None = None,
 ) -> None:
@@ -224,15 +224,21 @@ def _configure(
     nothing without ever suspending would monopolise its event loop; a
     non-positive interval would spin the flusher.
     """
-    global QUEUE_SIZE, BATCH_SIZE, FLUSH_INTERVAL_S, SAMPLE_RATE, SINK_TIMEOUT_S, DRAIN_TIMEOUT_S
+    global \
+        QUEUE_SIZE, \
+        BATCH_SIZE, \
+        FLUSH_INTERVAL_S, \
+        RETRIEVAL_SAMPLE_RATE, \
+        SINK_TIMEOUT_S, \
+        DRAIN_TIMEOUT_S
     if queue_size is not None:
         QUEUE_SIZE = max(1, queue_size)
     if batch_size is not None:
         BATCH_SIZE = max(1, batch_size)
     if flush_interval_s is not None:
         FLUSH_INTERVAL_S = max(_MIN_FLUSH_INTERVAL_S, flush_interval_s)
-    if sample_rate is not None:
-        SAMPLE_RATE = sample_rate
+    if retrieval_sample_rate is not None:
+        RETRIEVAL_SAMPLE_RATE = retrieval_sample_rate
     if sink_timeout_s is not None:
         SINK_TIMEOUT_S = sink_timeout_s
     if drain_timeout_s is not None:
@@ -244,7 +250,7 @@ def _load_knobs(config: CaptureConfig) -> None:
         queue_size=config.cognee_capture_queue_size,
         batch_size=config.cognee_capture_batch_size,
         flush_interval_s=config.cognee_capture_flush_interval_s,
-        sample_rate=config.cognee_capture_sample_rate,
+        retrieval_sample_rate=config.cognee_capture_retrieval_sample_rate,
         sink_timeout_s=config.cognee_capture_sink_timeout_s,
         drain_timeout_s=config.cognee_capture_drain_timeout_s,
     )
@@ -1089,14 +1095,14 @@ def should_capture(kind: str) -> bool:
     """Per-run sampling gate for retrieval kinds; every other kind is captured.
 
     Inside a ``run_scope`` the decision was made ONCE at scope entry (no
-    per-emit RNG); without a scope fall back to ``SAMPLE_RATE``.
+    per-emit RNG); without a scope fall back to ``RETRIEVAL_SAMPLE_RATE``.
     """
     if not kind.startswith(RETRIEVAL_KIND_PREFIX):
         return True
     scope = _current_scope.get()
     if scope is not None:
         return scope.sampled
-    return random.random() < SAMPLE_RATE
+    return random.random() < RETRIEVAL_SAMPLE_RATE
 
 
 # ---------------------------------------------------------------------------
@@ -1125,7 +1131,7 @@ def _reset_for_tests() -> None:
         queue_size=_FIELDS["cognee_capture_queue_size"].default,
         batch_size=_FIELDS["cognee_capture_batch_size"].default,
         flush_interval_s=_FIELDS["cognee_capture_flush_interval_s"].default,
-        sample_rate=_FIELDS["cognee_capture_sample_rate"].default,
+        retrieval_sample_rate=_FIELDS["cognee_capture_retrieval_sample_rate"].default,
         sink_timeout_s=_FIELDS["cognee_capture_sink_timeout_s"].default,
         drain_timeout_s=_FIELDS["cognee_capture_drain_timeout_s"].default,
     )

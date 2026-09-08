@@ -176,7 +176,7 @@ def run_scope(
 ) -> Iterator[RunScope]:
     """Bracket one run; enqueue its manifest on exit when the run is sampled.
 
-    Sampling is per run: operation scopes roll ``SAMPLE_RATE`` once here,
+    Sampling is per run: operation scopes roll ``RETRIEVAL_SAMPLE_RATE`` once here,
     pipeline scopes are always sampled. Entry also starts the running loop's
     flusher so emits from worker threads during the run are flushed on the
     interval tick even if nothing ever emits on-loop.
@@ -185,7 +185,7 @@ def run_scope(
         run_id=run_id,
         dataset_id=dataset_id,
         kind=kind,
-        sampled=(kind != "operation") or random.random() < hook.SAMPLE_RATE,
+        sampled=(kind != "operation") or random.random() < hook.RETRIEVAL_SAMPLE_RATE,
         started_at=time.time(),
         parent=hook._current_scope.get(),
     )

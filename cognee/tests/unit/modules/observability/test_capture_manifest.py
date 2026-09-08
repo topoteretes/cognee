@@ -315,7 +315,7 @@ async def test_note_cannot_overwrite_envelope_keys(fake_capture_sink):
 
 @pytest.mark.asyncio
 async def test_sample_rate_zero_unsamples_operation_scopes_only(fake_capture_sink):
-    hook._configure(sample_rate=0.0)
+    hook._configure(retrieval_sample_rate=0.0)
 
     with capture.run_scope(uuid4(), kind="operation") as scope:
         assert scope.sampled is False
@@ -342,7 +342,7 @@ async def test_sample_rate_zero_unsamples_operation_scopes_only(fake_capture_sin
 
 @pytest.mark.asyncio
 async def test_sample_rate_one_keeps_everything(fake_capture_sink):
-    hook._configure(sample_rate=1.0)
+    hook._configure(retrieval_sample_rate=1.0)
 
     for _ in range(5):
         with capture.run_scope(uuid4(), kind="operation") as scope:

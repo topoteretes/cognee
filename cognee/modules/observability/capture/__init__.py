@@ -29,6 +29,23 @@ rest, so pipeline emit points check ``is_active()`` alone)::
 Payloads are plain JSON (dicts/lists of scalars) or back-reference-free pydantic
 models - never graph elements, scored results or DataPoint instances. Consumers
 read the chunk graph at ``payload["graph"]`` next to its join keys.
+
+What lands on disk, and who may read it
+----------------------------------------
+Capture writes derived user content, not just metrics. ``extraction.chunk_graph``
+carries the raw per-chunk graph verbatim - entity names, types, descriptions and
+relationship labels the LLM extracted from the user's documents; ``extraction.
+fuzzy_match`` carries the extracted names it looked up; ``retrieval.candidates``
+carries candidate ids and scores (not the query text, which ``record_operation``
+already logs elsewhere); ``summary.generated`` carries hashes and sizes only.
+Everything is filed under ``<COGNEE_CAPTURE_DIR>/<dataset_id>/<run_id>/`` so it can
+be retained, exported or deleted per dataset, and inherits the permissions of
+that directory (``<DATA_ROOT_DIRECTORY>/capture`` by default: the same protection
+as the ingested files themselves). A deployment that enables capture takes on
+the same retention and access-control obligations for this directory as for the
+data root - in particular, forgetting a dataset does not remove its capture
+files. ``COGNEE_CAPTURE_RETRIEVAL_SAMPLE_RATE`` samples only ``retrieval.*``
+payloads; the extraction kinds are always captured in full while capture is on.
 """
 
 from .config import CaptureConfig, get_capture_config
