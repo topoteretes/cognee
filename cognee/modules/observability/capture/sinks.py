@@ -12,7 +12,8 @@ qualify. Delivery is at-least-once: a flush cancelled or cut off by
 ``drain()``'s budget mid-write is re-buffered and written again later, so a
 sink may receive the same records twice (``StorageSink`` never overwrites —
 blob names are collision-free — so consumers that need exactly-once counts
-should dedupe on ``(run_id, kind, ts)``). Sinks must raise ``Exception``
+dedupe on the record's ``event_id``, which is the same on both copies). Sinks
+must raise ``Exception``
 subclasses only: a ``BaseException`` from a sink re-buffers the batch and ends
 the flusher (the next emit starts a replacement). ``KeyboardInterrupt`` and
 ``SystemExit`` are the exception to that: asyncio's ``Task.__step`` re-raises
@@ -135,9 +136,10 @@ class StorageSink:
         {dataset or "nodataset"}/{run or "norun"}/{kind}/batch-{ts_ns}-{pid}-{seq:06d}.jsonl.gz
         {dataset or "nodataset"}/{run or "norun"}/manifest.json   (kind run.manifest, pretty JSON)
 
-    Every file carries the same record envelope (``kind``, ``run_id``,
-    ``dataset_id``, ``stage``, ``ts``, ``payload``); the manifest's fields live
-    under ``payload``. Nothing is written to the relational DB.
+    Every file carries the same record envelope (``schema_version``,
+    ``event_id``, ``kind``, ``run_id``, ``dataset_id``, ``stage``, ``ts``,
+    ``payload``); the manifest's fields live under ``payload``. Nothing is
+    written to the relational DB.
 
     Runs on the flusher task only, never on an emit path. Each write — the
     encode and the ``store()`` call — runs as one unit on a worker thread

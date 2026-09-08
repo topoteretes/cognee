@@ -262,7 +262,7 @@ async def test_overflow_drops_newest_and_reports_delta(fake_capture_sink):
     delivered = [r["payload"] for r in records if r["kind"] == KIND_SUMMARY_GENERATED]
     assert delivered == ["s0", "s1", "s2"]
     [manifest] = [r for r in records if r["kind"] == KIND_RUN_MANIFEST]
-    assert manifest["payload"]["dropped_events"] == 2
+    assert manifest["payload"]["events_dropped"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +517,7 @@ async def test_failing_sink_is_logged_at_debug_and_next_batch_delivered(monkeypa
     fake_logger.debug.assert_any_call("capture sink failed, %d event(s) dropped (%s)", 1, ANY)
     assert hook._in_flight_total() == 0
     # The event the sink rejected is gone: it must be accounted for, not hidden,
-    # or the run manifest reports dropped_events = 0 while records were lost.
+    # or the run manifest reports events_dropped = 0 while records were lost.
     assert hook._dropped == 1
     assert not hook._buffer
 
@@ -1116,7 +1116,7 @@ def test_atexit_hook_persists_leftovers_after_asyncio_run(tmp_path):
     run_dir = tmp_path / "ds-1" / "run-1"
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["payload"]["kind"] == "pipeline"
-    assert manifest["payload"]["dropped_events"] == 0
+    assert manifest["payload"]["events_dropped"] == 0
     [blob] = (run_dir / KIND_SUMMARY_GENERATED).glob("batch-*.jsonl.gz")
     with gzip.open(blob, "rt", encoding="utf-8") as lines:
         payloads = [json.loads(line)["payload"] for line in lines if line.strip()]
@@ -1151,6 +1151,99 @@ async def test_drain_is_bounded_even_when_a_sink_swallows_its_cancellation():
 
     # The budget plus at most one cancellation grace, not 30s.
     assert elapsed < 0.2 + hook._CANCEL_GRACE_S + 1.0
+
+
+# ---------------------------------------------------------------------------
+# Envelope: schema_version and a stable, process-unique event_id
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_records_carry_a_schema_version_and_a_sequenced_event_id(fake_capture_sink):
+    from cognee.modules.observability.capture.events import CAPTURE_SCHEMA_VERSION
+
+    capture.emit(KIND_SUMMARY_GENERATED, "a", payload_kind="text")
+    capture.emit(KIND_SUMMARY_GENERATED, "b", payload_kind="text")
+    await capture.drain()
+
+    first, second = fake_capture_sink.records
+    assert set(first) == {
+        "schema_version",
+        "event_id",
+        "kind",
+        "run_id",
+        "dataset_id",
+        "stage",
+        "ts",
+        "payload",
+    }
+    assert first["schema_version"] == CAPTURE_SCHEMA_VERSION == 1
+    prefix_a, seq_a = first["event_id"].rsplit("-", 1)
+    prefix_b, seq_b = second["event_id"].rsplit("-", 1)
+    assert prefix_a == prefix_b == hook._PROCESS_ID
+    assert int(seq_b) == int(seq_a) + 1
+
+
+@pytest.mark.asyncio
+async def test_event_id_survives_a_requeue_and_redelivery(monkeypatch, fake_capture_sink):
+    """Delivery is at-least-once, so a consumer dedupes on event_id — which only
+    works if the id is assigned at emit and a requeued event keeps it, rather
+    than being minted afresh each time the record is serialized."""
+    hook._configure(batch_size=1, flush_interval_s=60.0)
+    entered = threading.Event()
+    release = threading.Event()
+    real_serialize = hook._serialize_batch
+
+    def blocking_serialize(batch):
+        entered.set()
+        release.wait(timeout=5.0)
+        return real_serialize(batch)
+
+    monkeypatch.setattr(hook, "_serialize_batch", blocking_serialize)
+    try:
+        capture.emit(KIND_SUMMARY_GENERATED, "one", payload_kind="text")
+        [event] = hook._buffer
+        seq = event.seq
+        flusher = hook._flushers[asyncio.get_running_loop()]
+        await _wait_until(entered.is_set)
+
+        flusher.task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await flusher.task
+
+        [requeued] = hook._buffer
+        assert requeued is event and requeued.seq == seq
+    finally:
+        release.set()
+
+    monkeypatch.setattr(hook, "_serialize_batch", real_serialize)
+    await capture.drain()
+    [record] = fake_capture_sink.records
+    assert record["event_id"] == f"{hook._PROCESS_ID}-{seq}"
+
+
+def test_delivery_is_credited_to_a_run_once_even_when_delivered_twice():
+    from cognee.modules.observability.capture.manifest import RunScope
+
+    scope = RunScope(run_id="r")
+    event = hook.CaptureEvent(
+        kind=KIND_SUMMARY_GENERATED,
+        payload="x",
+        payload_kind="text",
+        run_id=None,
+        dataset_id=None,
+        scope=scope,
+        stage=None,
+        ts=0.0,
+        seq=1,
+    )
+
+    hook._account_delivered([event, None, event])
+    hook._account_delivered([event])
+
+    assert scope.delivered == 1
+    assert hook._account_dropped([event, None]) == 1
+    assert scope.dropped == 1
 
 
 # ---------------------------------------------------------------------------

@@ -619,7 +619,17 @@ async def test_env_enabled_capture_persists_the_run_through_the_storage_sink(
     # Every persisted record carries the full envelope and points at its own run.
     records = [record for group in persisted.values() for record in group]
     for record in records:
-        assert set(record) == {"kind", "run_id", "dataset_id", "stage", "ts", "payload"}
+        assert set(record) == {
+            "schema_version",
+            "event_id",
+            "kind",
+            "run_id",
+            "dataset_id",
+            "stage",
+            "ts",
+            "payload",
+        }
+        assert record["schema_version"] == 1
         assert record["dataset_id"] == dataset
         _assert_flat(record["payload"])
 
@@ -632,7 +642,7 @@ async def test_env_enabled_capture_persists_the_run_through_the_storage_sink(
     assert manifest["summarization.model"] and manifest["summarization.prompt_fingerprint"]
     assert manifest["ontology.mode"] == "annotate"
     assert manifest["counters"]["storage.nodes_written"] > 0
-    assert manifest["dropped_events"] == 0
+    assert manifest["events_dropped"] == 0
 
     chunk_graph_records = [
         record for record in records if record["kind"] == KIND_EXTRACTION_CHUNK_GRAPH

@@ -16,7 +16,7 @@ from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.exceptions import PipelineRunFailedError
 from cognee.tasks.ingestion import resolve_data_directories
 from cognee.modules.pipelines.layers.validate_pipeline_tasks import validate_pipeline_tasks
-from cognee.modules.pipelines.models import PipelineContext
+from cognee.modules.pipelines.models import OperationOutcome, PipelineContext
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -34,6 +34,26 @@ from ..tasks.task import Task
 
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
+
+
+async def _close_capture_run(eval_capture, capture_scope) -> None:
+    """Deliver the run's events, then its manifest — in that order (SDK-529).
+
+    The manifest carries the run's own capture accounting (``events_delivered``,
+    ``capture_complete``), so it is finished only after the drain that delivers
+    the run's events: a sink failure during that drain is then charged to the
+    run before its manifest is written, instead of after. The manifest is
+    drained inline too, but only when the first drain finished — under a wedged
+    sink, or with a concurrent run's events still arriving, it is left to the
+    flusher / the atexit hook rather than adding a second full budget to the
+    pipeline's tail. Both drains are bounded by DRAIN_TIMEOUT_S and swallow
+    their own exceptions.
+    """
+    complete = await eval_capture.drain()
+    if capture_scope is not None:
+        capture_scope.finish()
+        if complete:
+            await eval_capture.drain()
 
 
 async def run_tasks(
@@ -92,8 +112,11 @@ async def run_tasks(
     # Eval capture (SDK-529): lazy import keeps ``import cognee`` free of the
     # capture package. Pipeline scopes are always sampled. The scope encloses
     # the terminal yield, so its exit runs only after the consumer finishes the
-    # generator — later than the drain below; capture_scope.finish() before
-    # each drain gets the manifest in ahead of it (exit then skips the duplicate).
+    # generator — later than the drains below; _close_capture_run finishes the
+    # scope between them so the manifest is delivered before the terminal
+    # yield (exit then skips the duplicate). The manifest mirrors the pipeline
+    # log's attribution (pipeline_name, outcome, error_class), like an
+    # operation manifest mirrors its pipeline_runs row.
     from cognee.modules.observability import capture as eval_capture
 
     with (
@@ -105,6 +128,8 @@ async def run_tasks(
             else nullcontext()
         ) as capture_scope,
     ):
+        if capture_scope is not None:
+            capture_scope.note("pipeline_name", pipeline_name)
         async with set_database_global_context_variables(
             dataset.id,
             dataset.owner_id,
@@ -290,8 +315,10 @@ async def run_tasks(
                 # hook) and swallows its own exceptions.
                 if eval_capture.is_active():
                     if capture_scope is not None:
-                        capture_scope.finish()
-                    await eval_capture.drain()
+                        capture_scope.note("outcome", OperationOutcome.SUCCEEDED.value)
+                        # None on success, kept for a stable manifest shape.
+                        capture_scope.note("error_class", None)
+                    await _close_capture_run(eval_capture, capture_scope)
 
                 yield PipelineRunCompleted(
                     pipeline_run_id=pipeline_run_id,
@@ -340,8 +367,9 @@ async def run_tasks(
                 # Same bound as on the success path: within drain()'s timeout.
                 if eval_capture.is_active():
                     if capture_scope is not None:
-                        capture_scope.finish()
-                    await eval_capture.drain()
+                        capture_scope.note("outcome", OperationOutcome.FAILED.value)
+                        capture_scope.note("error_class", type(error).__name__)
+                    await _close_capture_run(eval_capture, capture_scope)
 
                 yield PipelineRunErrored(
                     pipeline_run_id=pipeline_run_id,

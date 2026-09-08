@@ -1,6 +1,7 @@
 """run_scope / RunScope manifest contract and per-run sampling (SDK-529)."""
 
 import asyncio
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -55,7 +56,10 @@ async def test_manifest_carries_fields_counters_and_timing(fake_capture_sink):
     assert payload["counters"] == {"chunks": 3, "nodes": 5}
     assert payload["ended_at"] >= payload["started_at"]
     assert payload["duration_s"] >= 0
-    assert payload["dropped_events"] == 0
+    assert payload["events_emitted"] == 0
+    assert payload["events_dropped"] == 0
+    assert payload["events_delivered"] == 0
+    assert payload["capture_complete"] is True
 
 
 @pytest.mark.asyncio
@@ -170,7 +174,85 @@ async def test_manifest_survives_a_full_buffer_and_reports_the_drops(fake_captur
 
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["run_id"] == str(run_id)
-    assert manifest["payload"]["dropped_events"] == 3
+    assert manifest["payload"]["events_emitted"] == 2
+    assert manifest["payload"]["events_dropped"] == 3
+    assert manifest["payload"]["capture_complete"] is False
+
+
+# ---------------------------------------------------------------------------
+# 7b: per-run accounting is exact, not a delta of the process counter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_drops_are_charged_to_the_run_that_emitted_them(fake_capture_sink):
+    """Two runs share the process (an operation recorded inside a pipeline task
+    here; concurrent requests in a server). A delta of the process-wide counter
+    charged the inner run's overflow to the outer run too; the counts are per
+    run now, via the scope each event was emitted under."""
+    hook._configure(queue_size=2, flush_interval_s=60.0)
+
+    with capture.run_scope("pipeline", kind="pipeline") as outer:
+        capture.emit(KIND_SUMMARY_GENERATED, "outer", payload_kind="text")
+        with capture.run_scope("operation", kind="operation") as inner:
+            for index in range(3):
+                capture.emit(KIND_RETRIEVAL_CANDIDATES, f"inner{index}", payload_kind="text")
+
+    assert (outer.emitted, outer.dropped) == (1, 0)
+    assert (inner.emitted, inner.dropped) == (1, 2)
+    assert hook._dropped == 2
+
+    await capture.drain()
+
+    manifests = {m["run_id"]: m["payload"] for m in _manifests(fake_capture_sink)}
+    assert manifests["pipeline"]["events_dropped"] == 0
+    assert manifests["pipeline"]["capture_complete"] is True
+    assert manifests["operation"]["events_emitted"] == 1
+    assert manifests["operation"]["events_dropped"] == 2
+    assert manifests["operation"]["capture_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_sink_failure_is_charged_to_the_run_and_marks_it_incomplete(monkeypatch):
+    """Drops happen on the flusher's side too (a sink that rejects a batch).
+    They reach the run through the event's own scope — the flusher runs
+    outside the run's context, so the contextvar would say nothing."""
+    monkeypatch.setattr(hook, "logger", MagicMock())
+    calls = []
+
+    async def flaky_sink(records):
+        calls.append(records)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+
+    capture.register_capture_sink(flaky_sink)
+
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        capture.emit(KIND_SUMMARY_GENERATED, "lost", payload_kind="text")
+        await capture.drain()  # the sink rejects the batch
+        assert (scope.emitted, scope.dropped, scope.delivered) == (1, 1, 0)
+
+    await capture.drain()
+
+    [manifest] = [r for call in calls for r in call if r["kind"] == KIND_RUN_MANIFEST]
+    assert manifest["payload"]["events_dropped"] == 1
+    assert manifest["payload"]["events_delivered"] == 0
+    assert manifest["payload"]["capture_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_drained_run_reports_every_event_delivered(fake_capture_sink):
+    with capture.run_scope(uuid4(), kind="pipeline") as scope:
+        capture.emit(KIND_SUMMARY_GENERATED, "a", payload_kind="text")
+        capture.emit(KIND_SUMMARY_GENERATED, "b", payload_kind="text")
+        assert (scope.emitted, scope.dropped, scope.delivered) == (2, 0, 0)
+        await capture.drain()
+        assert (scope.emitted, scope.dropped, scope.delivered) == (2, 0, 2)
+
+    await capture.drain()
+    [manifest] = _manifests(fake_capture_sink)
+    assert manifest["payload"]["events_delivered"] == manifest["payload"]["events_emitted"] == 2
+    assert manifest["payload"]["capture_complete"] is True
 
 
 def test_manifests_are_bounded_past_queue_size(fake_capture_sink):

@@ -33,7 +33,7 @@ foreign thread wakes getters via loop-owned futures, so it is rejected. The
 ``len() >= QUEUE_SIZE`` check is a soft bound across threads (harmless). Run
 manifests get headroom past the bound (``_emit_manifest``, up to
 ``2 * QUEUE_SIZE`` buffered events in total): the manifest is the record that
-carries ``dropped_events``, so drop-newest must not eat it while there is room,
+carries ``events_dropped``, so drop-newest must not eat it while there is room,
 but the buffer stays finite under a wedged sink.
 
 Flushing
@@ -81,8 +81,20 @@ the head of the buffer for the flusher / the atexit hook.
 Delivery is at-least-once: a cancelled flush (``asyncio.run`` teardown, uvicorn
 shutdown), a drain whose budget ran out mid-write, or a batch recovered from a
 dead loop re-buffers the group that was being written along with the rest, so
-a consumer may see the same record twice. Blob names are collision-free, so
-nothing is overwritten.
+a consumer may see the same record twice — under the same ``event_id``, which
+is assigned at emit and is what consumers dedupe on. Blob names are
+collision-free, so nothing is overwritten.
+
+Accounting
+----------
+Every event is, at any moment, in exactly one of: the buffer, a tracked
+in-flight batch, the sink, or dropped. Drops are counted twice over: on the
+process-wide ``_dropped`` (diagnostics) and on the run the event belongs to
+(``RunScope.dropped``, via ``event.scope``) — the latter from whichever thread
+drops it, the emit path or the flusher — so a manifest's ``events_dropped``
+is that run's own count, not a delta of a shared counter that concurrent runs
+pollute. ``RunScope.delivered`` is credited on the sink's first
+acknowledgement of each event.
 """
 
 from __future__ import annotations
@@ -90,18 +102,19 @@ from __future__ import annotations
 import asyncio
 import atexit
 import collections
+import itertools
 import random
 import threading
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypeVar
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Iterable, TypeVar
+from uuid import UUID, uuid4
 
 from cognee.shared.logging_utils import get_logger
 
 from .config import CaptureConfig, get_capture_config
-from .events import RETRIEVAL_KIND_PREFIX, CaptureEvent
+from .events import CAPTURE_SCHEMA_VERSION, RETRIEVAL_KIND_PREFIX, CaptureEvent
 from .sinks import CaptureSink, StorageSink, run_off_loop
 
 if TYPE_CHECKING:
@@ -153,6 +166,13 @@ _atexit_registered: bool = False
 # The active manifest scope (owned here so manifest.py can import it without a
 # runtime cycle; manifest.py owns RunScope and run_scope()).
 _current_scope: ContextVar[RunScope | None] = ContextVar("cognee_capture_scope", default=None)
+
+# Event ids: "<process>-<seq>". The prefix is unique per process (and restart),
+# the sequence is an itertools.count — next() is atomic under the GIL and
+# ~40 ns, so a worker-thread emit needs no lock. Formatted at serialization,
+# never on the emit path.
+_PROCESS_ID: str = uuid4().hex
+_event_seq = itertools.count(1)
 
 
 @dataclass(slots=True)
@@ -373,10 +393,13 @@ def emit(
     if sink is None:
         return
 
+    scope = _current_scope.get()
     if len(_buffer) >= QUEUE_SIZE:
         # Drop-NEWEST: the buffer is a bounded observation window, not a queue
-        # the pipeline waits on.
+        # the pipeline waits on. Counted on the run too (see Accounting).
         _dropped += 1
+        if scope is not None:
+            scope.dropped += 1
         return
 
     _enqueue(
@@ -386,11 +409,14 @@ def emit(
             payload_kind=payload_kind,
             run_id=run_id,
             dataset_id=dataset_id,
-            scope=_current_scope.get(),
+            scope=scope,
             stage=stage,
             ts=time.time(),
+            seq=next(_event_seq),
         )
     )
+    if scope is not None:
+        scope.emitted += 1
 
 
 def has_room() -> bool:
@@ -426,8 +452,11 @@ def emit_lazy(
     global _dropped
     if _sink is None:
         return
+    scope = _current_scope.get()
     if len(_buffer) >= QUEUE_SIZE:
         _dropped += 1
+        if scope is not None:
+            scope.dropped += 1
         return
     try:
         payload = build_payload()
@@ -441,11 +470,14 @@ def emit_lazy(
             payload_kind=payload_kind,
             run_id=run_id,
             dataset_id=dataset_id,
-            scope=_current_scope.get(),
+            scope=scope,
             stage=stage,
             ts=time.time(),
+            seq=next(_event_seq),
         )
     )
+    if scope is not None:
+        scope.emitted += 1
 
 
 def _emit_manifest(
@@ -459,7 +491,7 @@ def _emit_manifest(
     """``emit()`` with headroom past ``QUEUE_SIZE`` — for run manifests only.
 
     A run that overflowed the buffer must still land its manifest: it is the
-    record carrying ``dropped_events`` and the authoritative dataset
+    record carrying ``events_dropped`` and the authoritative dataset
     attribution, so plain drop-newest would make overflow unobservable
     offline. The headroom is a second ``QUEUE_SIZE`` — the buffer never holds
     more than ``2 * QUEUE_SIZE`` events. Manifests accumulate as fast as runs
@@ -473,6 +505,8 @@ def _emit_manifest(
     if len(_buffer) >= 2 * QUEUE_SIZE:
         _dropped += 1
         return
+    # Not counted on the run: its manifest is the record carrying the counts,
+    # taken before this call.
     _enqueue(
         CaptureEvent(
             kind=kind,
@@ -483,6 +517,7 @@ def _emit_manifest(
             scope=_current_scope.get(),
             stage=None,
             ts=time.time(),
+            seq=next(_event_seq),
         )
     )
 
@@ -762,6 +797,8 @@ def _serialize_batch(batch: list[CaptureEvent]) -> list[dict]:
         )
         records.append(
             {
+                "schema_version": CAPTURE_SCHEMA_VERSION,
+                "event_id": f"{_PROCESS_ID}-{event.seq}",
                 "kind": event.kind,
                 "run_id": None if run_id is None else str(run_id),
                 "dataset_id": None if dataset_id is None else str(dataset_id),
@@ -771,6 +808,30 @@ def _serialize_batch(batch: list[CaptureEvent]) -> list[dict]:
             }
         )
     return records
+
+
+def _account_dropped(events: Iterable[CaptureEvent | None]) -> int:
+    """Count events as lost — on their run's ``dropped`` — and return how many."""
+    lost = 0
+    for event in events:
+        if event is None:
+            continue
+        lost += 1
+        scope = event.scope
+        if scope is not None:
+            scope.dropped += 1
+    return lost
+
+
+def _account_delivered(events: Iterable[CaptureEvent | None]) -> None:
+    """Credit each event's run once, even when at-least-once delivers it twice."""
+    for event in events:
+        if event is None or event.delivered:
+            continue
+        event.delivered = True
+        scope = event.scope
+        if scope is not None:
+            scope.delivered += 1
 
 
 def _requeue(pending: list[CaptureEvent | None]) -> None:
@@ -824,7 +885,7 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
     if sink is None:
         # Sink cleared after these were queued: nothing to deliver to. Account
         # for the loss instead of hiding it.
-        _dropped += len(batch)
+        _dropped += _account_dropped(batch)
         logger.debug("capture sink cleared, %d buffered event(s) dropped", len(batch))
         return len(batch)
 
@@ -857,22 +918,27 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
                         break
                     bound = min(bound, remaining)
                 group = [records[index] for index in indexes]
+                slots = [pending[index] for index in indexes]
+                delivered = False
                 try:
                     await _wait_bounded(sink(group), bound)
+                    delivered = True
                 except asyncio.TimeoutError as exc:
                     if deadline is not None and time.monotonic() >= deadline:
                         break  # the caller's budget ran out, not the sink's: retry later
                     # The sink blew SINK_TIMEOUT_S; its write was cancelled and
                     # the slots are blanked below, so these events are gone.
                     # Account for the loss instead of hiding it: a run whose sink
-                    # is wedged must not report dropped_events = 0.
-                    _dropped += len(indexes)
+                    # is wedged must not report events_dropped = 0.
+                    _dropped += _account_dropped(slots)
                     logger.debug(
                         "capture sink timed out, %d event(s) dropped (%s)", len(indexes), exc
                     )
                 except Exception as exc:
-                    _dropped += len(indexes)
+                    _dropped += _account_dropped(slots)
                     logger.debug("capture sink failed, %d event(s) dropped (%s)", len(indexes), exc)
+                if delivered:
+                    _account_delivered(slots)
                 for index in indexes:
                     pending[index] = None
                 # Let other coroutines interleave between sink writes.
@@ -883,7 +949,7 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
     except Exception as exc:
         # Not re-queued: a deterministic failure would pin the head of the
         # buffer forever. Account for the loss instead of hiding it.
-        lost = sum(1 for event in pending if event is not None)
+        lost = _account_dropped(pending)
         _dropped += lost
         logger.debug("capture flush failed, %d event(s) dropped (%s)", lost, exc)
     except BaseException:
@@ -905,7 +971,7 @@ async def _flush_one_batch(deadline: float | None = None) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def _drain_until(deadline: float) -> None:
+async def _drain_until(deadline: float) -> bool:
     # Batches stranded on loops closed since the last pass go back to the
     # buffer first, so this drain covers them too.
     _prune_closed_loops()
@@ -928,9 +994,10 @@ async def _drain_until(deadline: float) -> None:
     # the process into a full timeout.
     while _in_flight_live() > 0 and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
+    return not _buffer and _in_flight_live() == 0
 
 
-async def drain(timeout: float | None = None) -> None:
+async def drain(timeout: float | None = None) -> bool:
     """Flush the events buffered so far, then wait for in-flight batches.
 
     ``timeout=None`` (the default) means the configured budget:
@@ -945,13 +1012,20 @@ async def drain(timeout: float | None = None) -> None:
     ``_CANCEL_GRACE_S``: a write cut off by the budget is cancelled, and a sink
     that does not let that cancel land is abandoned after the grace rather than
     waited on forever.
+
+    Returns True when nothing is left buffered or in flight on this process —
+    every event was delivered or accounted as dropped — and False when the
+    budget ran out or a concurrent producer kept the buffer non-empty. The
+    pipeline wiring uses it to decide whether its manifest can be drained
+    inline too.
     """
     if timeout is None:
         timeout = DRAIN_TIMEOUT_S
     try:
-        await _drain_until(time.monotonic() + timeout)
+        return await _drain_until(time.monotonic() + timeout)
     except Exception as exc:
         logger.debug("capture drain failed (%s)", exc)
+        return False
 
 
 async def shutdown(timeout: float = 5.0) -> None:

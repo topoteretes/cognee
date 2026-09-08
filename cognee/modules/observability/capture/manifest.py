@@ -30,7 +30,17 @@ from .events import KIND_RUN_MANIFEST
 
 @dataclass
 class RunScope:
-    """Mutable per-run accumulator; the payload source of the run manifest."""
+    """Mutable per-run accumulator; the payload source of the run manifest.
+
+    ``emitted`` / ``dropped`` / ``delivered`` are this run's own capture
+    accounting, kept by the hook (``emit()`` and the flusher, via
+    ``CaptureEvent.scope``), so the manifest reports exact per-run counts
+    rather than a delta of a process-wide counter that concurrent runs
+    pollute. Manifests themselves are not counted. The one imprecision:
+    ``dropped`` is bumped from both the emitting thread (buffer full) and the
+    flusher's thread (sink failure), and a simultaneous pair of unlocked
+    increments can lose one — a lock on the emit path is not worth that.
+    """
 
     run_id: UUID | str | None
     # Mutable — bound late via set_dataset() by record_operation's callers.
@@ -42,7 +52,10 @@ class RunScope:
     started_at: float = field(default_factory=time.time)
     fields: dict[str, Any] = field(default_factory=dict)
     counters: Counter[str] = field(default_factory=Counter)
-    dropped_at_enter: int = 0
+    # Per-run capture accounting; see the class docstring.
+    emitted: int = 0
+    dropped: int = 0
+    delivered: int = 0
     parent: RunScope | None = None
     # Set by finish(): the manifest has been enqueued, exit must not emit again.
     finished: bool = False
@@ -101,8 +114,18 @@ class RunScope:
             "ended_at": ended_at,
             "duration_s": ended_at - self.started_at,
             "counters": dict(self.counters),
-            # Process-global counter delta: an approximation under concurrent runs.
-            "dropped_events": max(0, hook._dropped - self.dropped_at_enter),
+            # Exact per-run accounting (see the class docstring). A consumer
+            # verifies completeness by comparing the records it finds under the
+            # run with events_emitted; capture_complete says whether capture
+            # itself lost anything by the time this manifest was written.
+            # Pipeline runs drain before finishing, so for them every emitted
+            # event is delivered or dropped here and events_delivered equals
+            # events_emitted when complete; an operation run (never drained)
+            # reports what the sink had acknowledged so far.
+            "events_emitted": self.emitted,
+            "events_dropped": self.dropped,
+            "events_delivered": self.delivered,
+            "capture_complete": self.dropped == 0,
         }
 
     def finish(self) -> None:
@@ -114,7 +137,7 @@ class RunScope:
         by that drain rather than left to the interval tick or the atexit hook.
         Manifests get headroom past the queue bound (up to ``2 * QUEUE_SIZE``
         buffered events in total): an overflowing run must still report
-        ``dropped_events``, but the buffer stays finite under a wedged sink.
+        ``events_dropped``, but the buffer stays finite under a wedged sink.
 
         An unsampled run still gets its manifest. Sampling gates ``retrieval.*``
         payloads (see ``should_capture``), not the record that identifies the run:
@@ -164,7 +187,6 @@ def run_scope(
         kind=kind,
         sampled=(kind != "operation") or random.random() < hook.SAMPLE_RATE,
         started_at=time.time(),
-        dropped_at_enter=hook._dropped,
         parent=hook._current_scope.get(),
     )
     token = hook._current_scope.set(scope)

@@ -167,7 +167,7 @@ async def _drive(run_tasks_module_, dataset):
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log(
+async def test_run_tasks_drains_its_events_then_its_manifest_after_the_terminal_log(
     monkeypatch, runner_plumbing, fake_capture_sink
 ):
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
@@ -177,9 +177,9 @@ async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log
     logs.complete.side_effect = lambda *args, **kwargs: order.append("complete")
     real_drain = capture.drain
 
-    async def spy_drain(timeout=5.0):
+    async def spy_drain(timeout=None):
         order.append("drain")
-        await real_drain(timeout)
+        return await real_drain(timeout)
 
     monkeypatch.setattr(capture, "drain", spy_drain)
 
@@ -187,6 +187,7 @@ async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log
 
     async def fake_item(*args, **kwargs):
         seen_scopes.append(capture.current_scope())
+        capture.emit(KIND_SUMMARY_GENERATED, "from a task", payload_kind="text")
         return {"run_info": "ok"}
 
     monkeypatch.setattr(run_tasks_module, "run_tasks_data_item", fake_item)
@@ -194,7 +195,9 @@ async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log
     events = await _drive(run_tasks_module, dataset)
     pipeline_run_id = events[0].pipeline_run_id
 
-    assert order == ["complete", "drain"]
+    # Events first, then — once that drain completed — the manifest, so its
+    # accounting describes what actually reached the sink.
+    assert order == ["complete", "drain", "drain"]
     [scope] = seen_scopes
     assert scope.kind == "pipeline"
     assert scope.run_id == pipeline_run_id
@@ -203,20 +206,29 @@ async def test_run_tasks_opens_pipeline_scope_and_drains_once_after_terminal_log
     assert scope.finished is True
     assert capture.current_scope() is None
 
-    # The run's own drain covered its manifest (finish() ran before it); the
-    # scope's exit — after the terminal yield — did not enqueue a duplicate.
+    # The scope's exit — after the terminal yield — did not enqueue a duplicate.
     assert not capture.hook._buffer
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["run_id"] == str(pipeline_run_id)
     assert manifest["dataset_id"] == str(dataset.id)
-    assert manifest["payload"]["kind"] == "pipeline"
-    assert manifest["payload"]["sampled"] is True
+    payload = manifest["payload"]
+    assert payload["kind"] == "pipeline"
+    assert payload["sampled"] is True
+    # The pipeline log's attribution, mirrored like an operation manifest mirrors its row.
+    assert payload["pipeline_name"] == "cognify_pipeline"
+    assert payload["outcome"] == "succeeded"
+    assert payload["error_class"] is None
+    # Exact per-run accounting, taken after the run's events were delivered.
+    assert payload["events_emitted"] == 1
+    assert payload["events_delivered"] == 1
+    assert payload["events_dropped"] == 0
+    assert payload["capture_complete"] is True
     await real_drain()
     assert len(_manifests(fake_capture_sink)) == 1
 
 
 @pytest.mark.asyncio
-async def test_run_tasks_drains_once_on_the_error_path(
+async def test_run_tasks_reports_the_failure_on_the_error_path(
     monkeypatch, runner_plumbing, fake_capture_sink
 ):
     dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
@@ -226,9 +238,9 @@ async def test_run_tasks_drains_once_on_the_error_path(
     logs.error.side_effect = lambda *args, **kwargs: order.append("error")
     real_drain = capture.drain
 
-    async def spy_drain(timeout=5.0):
+    async def spy_drain(timeout=None):
         order.append("drain")
-        await real_drain(timeout)
+        return await real_drain(timeout)
 
     monkeypatch.setattr(capture, "drain", spy_drain)
 
@@ -240,13 +252,46 @@ async def test_run_tasks_drains_once_on_the_error_path(
     with pytest.raises(RuntimeError, match="item exploded"):
         await _drive(run_tasks_module, dataset)
 
-    assert order == ["error", "drain"]
+    assert order == ["error", "drain", "drain"]
     logs.complete.assert_not_awaited()
-    # The error path finishes the scope before draining too.
+    # A failed run is identifiable from its manifest alone: an eval must be able
+    # to exclude a cognify that died halfway without joining back to the logs.
     [manifest] = _manifests(fake_capture_sink)
     assert manifest["payload"]["kind"] == "pipeline"
+    assert manifest["payload"]["pipeline_name"] == "cognify_pipeline"
+    assert manifest["payload"]["outcome"] == "failed"
+    assert manifest["payload"]["error_class"] == "RuntimeError"
     await real_drain()
     assert len(_manifests(fake_capture_sink)) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_tasks_leaves_the_manifest_to_the_flusher_when_its_drain_did_not_finish(
+    monkeypatch, runner_plumbing, fake_capture_sink
+):
+    """Under a wedged sink the first drain runs out of budget; a second full
+    budget for the manifest would double the pipeline's tail latency, so the
+    manifest is finished but left to the flusher / atexit hook instead."""
+    dataset = SimpleNamespace(id=uuid4(), name="ds", owner_id=uuid4())
+    runner_plumbing(run_tasks_module, dataset)
+
+    drains = []
+
+    async def incomplete_drain(timeout=None):
+        drains.append(timeout)
+        return False
+
+    monkeypatch.setattr(capture, "drain", incomplete_drain)
+    monkeypatch.setattr(
+        run_tasks_module, "run_tasks_data_item", AsyncMock(return_value={"run_info": "ok"})
+    )
+
+    await _drive(run_tasks_module, dataset)
+
+    assert len(drains) == 1
+    # Finished (so exit will not emit a duplicate) and buffered, not delivered.
+    assert [event.kind for event in capture.hook._buffer] == [KIND_RUN_MANIFEST]
+    assert _manifests(fake_capture_sink) == []
 
 
 @pytest.mark.asyncio
@@ -286,6 +331,8 @@ async def test_run_tasks_manifest_is_in_the_sink_before_the_terminal_yield(
     # The task's event and the manifest share the run id: joinable offline.
     [event] = [r for r in fake_capture_sink.records if r["kind"] == KIND_SUMMARY_GENERATED]
     assert event["run_id"] == manifest["run_id"]
+    # And the event was delivered before the manifest counted it.
+    assert manifest["payload"]["events_delivered"] == manifest["payload"]["events_emitted"] == 1
 
 
 @pytest.mark.asyncio
