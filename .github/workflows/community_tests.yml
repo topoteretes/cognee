@@ -54,6 +54,9 @@ jobs:
       # pass/continue, G201 exc_info logging, TRY201 verbose raise, TRY002 vanilla
       # Exception raise.
       - name: Ruff exception-handling rules (strict, noqa ignored)
+        # Runs even when the general check above fails: this gate must report on
+        # its own while the wider lint backlog is still being worked down.
+        if: ${{ !cancelled() }}
         run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa
 
       - name: Ruff format check
