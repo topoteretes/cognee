@@ -2,6 +2,10 @@ import re
 
 from cognee.exceptions.exceptions import CogneeValidationError
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 class ContentPolicyFilterError(CogneeValidationError):
     pass
@@ -90,7 +94,7 @@ def _is_budget_exhausted_link(e: BaseException) -> bool:
                 if isinstance(error, dict) and error.get("type") == "budget_exceeded":
                     return True
             except Exception:
-                pass
+                logger.debug("Ignoring exception in _is_budget_exhausted_link", exc_info=True)
 
     # Case 4: message text, the wrapper-proof fallback. ``str()`` is guarded
     # because this runs inside tenacity's retry predicate, where an exception
@@ -98,6 +102,7 @@ def _is_budget_exhausted_link(e: BaseException) -> bool:
     try:
         text = str(e)
     except Exception:
+        logger.debug("Ignoring exception in _is_budget_exhausted_link", exc_info=True)
         return False
     return _has_budget_message(text)
 
@@ -141,6 +146,7 @@ def budget_exhaustion_detail(e: BaseException) -> str | None:
         try:
             text = str(current)
         except Exception:
+            logger.debug("Ignoring exception in budget_exhaustion_detail", exc_info=True)
             text = ""
         match = _BUDGET_SENTENCE_RE.search(text)
         if match:

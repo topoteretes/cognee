@@ -134,7 +134,9 @@ class TapesCacheAdapter(FSCacheAdapter):
                     resp.text[:200],
                 )
         except Exception as e:
-            logger.warning("Tapes mirror failed, continuing with FS cache only: %s", e)
+            logger.warning(
+                "Tapes mirror failed, continuing with FS cache only: %s", e, exc_info=True
+            )
 
     async def create_qa_entry(
         self,
@@ -170,6 +172,6 @@ class TapesCacheAdapter(FSCacheAdapter):
             try:
                 await self._tapes_client.aclose()
             except Exception as e:
-                logger.debug("Error closing tapes HTTP client: %s", e)
+                logger.debug("Error closing tapes HTTP client: %s", e, exc_info=True)
             self._tapes_client = None
         await super().close()

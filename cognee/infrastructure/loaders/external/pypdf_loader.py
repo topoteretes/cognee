@@ -78,7 +78,9 @@ class PyPdfLoader(LoaderInterface):
                             page_texts.append(page_text)
                             content_parts.append(f"Page {page_num}:\n{page_text}\n")
                     except Exception as e:
-                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
+                        logger.warning(
+                            f"Failed to extract text from page {page_num}: {e}", exc_info=True
+                        )
                         continue
 
                 # Combine all content
@@ -95,4 +97,4 @@ class PyPdfLoader(LoaderInterface):
 
         except Exception as e:
             logger.error(f"Failed to process PDF {file_path}: {e}")
-            raise Exception(f"PDF processing failed: {e}") from e
+            raise RuntimeError(f"PDF processing failed: {e}") from e

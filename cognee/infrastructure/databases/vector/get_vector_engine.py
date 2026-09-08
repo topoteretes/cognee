@@ -3,6 +3,10 @@ import warnings
 from .config import get_vectordb_context_config
 from .create_vector_engine import create_vector_engine
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 class _VectorEngineHandle:
     """Stable reference to the current vector engine that survives cache invalidation.
@@ -54,6 +58,9 @@ class _VectorEngineHandle:
                 if not active():
                     return False
             except Exception:
+                logger.debug(
+                    "Ignoring exception in _VectorEngineHandle._pin_is_live", exc_info=True
+                )
                 return False
         return not getattr(engine, "_permanently_closed", False)
 

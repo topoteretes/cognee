@@ -43,7 +43,7 @@ def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> in
                     if dim:
                         return int(dim)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _resolve_embedding_dimensions", exc_info=True)
         # Fall through to litellm in case the model is dual-registered
         # (rare, but cheap to try).
 
@@ -55,7 +55,7 @@ def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> in
             if info and "output_vector_size" in info:
                 return int(info["output_vector_size"])
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_embedding_dimensions", exc_info=True)
 
     return None
 

@@ -129,8 +129,8 @@ class RemoteLadybugAdapter(LadybugAdapter):
                 {"query": "MATCH (n:Node) RETURN COUNT(n) > 0", "parameters": {}},
             )
             return bool(response.get("data") and response["data"][0][0])
-        except Exception as e:
-            logger.error(f"Failed to check schema: {e}")
+        except Exception:
+            logger.exception("Failed to check schema")
             return False
 
     async def _create_schema(self):

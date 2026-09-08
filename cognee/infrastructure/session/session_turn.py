@@ -73,7 +73,7 @@ async def load_preference_lines_safe() -> list[str]:
     try:
         return await load_active_preference_lines()
     except Exception as error:
-        logger.debug("Session turn: preference lookup failed open: %s", error)
+        logger.debug("Session turn: preference lookup failed open: %s", error, exc_info=True)
         return []
 
 
@@ -128,7 +128,7 @@ async def select_session_history(
                 include_context=False,
             )
     except Exception as error:
-        logger.warning("Session history: hybrid selection failed open: %s", error)
+        logger.warning("Session history: hybrid selection failed open: %s", error, exc_info=True)
 
     history = await session_manager.get_session(
         user_id=user_id,
@@ -253,7 +253,7 @@ async def build_active_context_block_safe(
             stamp_served=stamp_served,
         )
     except Exception as e:
-        logger.warning("Active session-context block failed: %s", e)
+        logger.warning("Active session-context block failed: %s", e, exc_info=True)
         return "", []
 
 
@@ -282,7 +282,7 @@ async def load_served_context_payload(
                 by_id[str(entry_id)] = row.get("content", "")
         return [{"id": cid, "content": by_id[cid]} for cid in served_ids if cid in by_id]
     except Exception as e:
-        logger.warning("Session turn: load served context failed: %s", e)
+        logger.warning("Session turn: load served context failed: %s", e, exc_info=True)
         return []
 
 
@@ -332,9 +332,10 @@ async def apply_served_context_ratings(
                 )
                 counts[entry_id] = next_counts
             except Exception:
+                logger.debug("Ignoring exception in apply_served_context_ratings", exc_info=True)
                 continue
     except Exception as e:
-        logger.warning("Session turn: served-context rating update failed: %s", e)
+        logger.warning("Session turn: served-context rating update failed: %s", e, exc_info=True)
 
 
 async def apply_session_turn_analysis(
@@ -399,7 +400,7 @@ async def apply_session_turn_analysis(
         )
         return touched_ids
     except Exception as e:
-        logger.warning("Session turn: feedback application failed: %s", e)
+        logger.warning("Session turn: feedback application failed: %s", e, exc_info=True)
         return []
 
 
@@ -461,7 +462,7 @@ async def prepare_session_turn(
             served_context=served_context,
         )
     except Exception as error:
-        logger.warning("Session turn preparation failed open: %s", error)
+        logger.warning("Session turn preparation failed open: %s", error, exc_info=True)
         return _empty_turn_preparation(query)
 
     try:
@@ -475,7 +476,7 @@ async def prepare_session_turn(
             served_ids=[str(entry_id) for entry_id in previous_served_ids],
         )
     except Exception as error:
-        logger.warning("Session turn analysis application failed open: %s", error)
+        logger.warning("Session turn analysis application failed open: %s", error, exc_info=True)
         accepted_context_ids = []
 
     query_to_answer = (analysis.query_to_answer or "").strip()
