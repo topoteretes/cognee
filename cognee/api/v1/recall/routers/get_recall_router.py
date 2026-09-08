@@ -184,9 +184,9 @@ def get_recall_router() -> APIRouter:
         try:
             history = await get_history(user.id, limit=0)
             return history
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Recall history error: %s", error, exc_info=True)
+            logger.exception("Recall history error")
             return JSONResponse(
                 status_code=500,
                 content={"error": "An error occurred while fetching recall history."},
@@ -340,9 +340,9 @@ def get_recall_router() -> APIRouter:
                     f"{sorted(_VALID_SCOPES)}."
                 },
             )
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Recall endpoint error: %s", error, exc_info=True)
+            logger.exception("Recall endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during recall."},

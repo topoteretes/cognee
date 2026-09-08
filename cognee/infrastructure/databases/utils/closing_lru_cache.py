@@ -580,13 +580,12 @@ class ClosingLRUCache:
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but still
             # proceed: a creator must not fail over close bookkeeping.
-            logger.error(
+            logger.exception(
                 "BUG: unexpected error while waiting for pending close of cache key %s — "
                 "registry futures must only ever resolve with None (see _start_close), so "
                 "the closing-registry contract was violated and must be root-caused "
                 "(the operation itself continues safely)",
                 _key_id(key),
-                exc_info=True,
             )
 
     def _track_close(self, key, value) -> None:
@@ -663,13 +662,12 @@ class ClosingLRUCache:
             # a result, never an exception (see _start_close). Getting here
             # means that invariant broke — surface it loudly, but let the
             # caller proceed: failing it over close bookkeeping is worse.
-            logger.error(
+            logger.exception(
                 "BUG: unexpected error while waiting for pending close of cache key %s — "
                 "registry futures must only ever resolve with None (see _start_close), so "
                 "the closing-registry contract was violated and must be root-caused "
                 "(the operation itself continues safely)",
                 _key_id(key),
-                exc_info=True,
             )
 
     def _wrap_cached_value(self, entry):

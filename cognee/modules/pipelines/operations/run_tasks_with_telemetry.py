@@ -48,12 +48,10 @@ async def run_tasks_with_telemetry(
             }
             | config,
         )
-    except Exception as error:
-        logger.error(
-            "Pipeline run errored: `%s`\n%s\n",
+    except Exception:
+        logger.exception(
+            "Pipeline run errored: `%s`\n",
             pipeline_name,
-            str(error),
-            exc_info=True,
         )
         send_telemetry(
             "Pipeline Run Errored",
@@ -66,4 +64,4 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        raise error
+        raise

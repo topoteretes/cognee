@@ -42,8 +42,8 @@ def get_validate_router() -> APIRouter:
             report = await validate(dataset=dataset, user=user)
             status_code = 503 if report.status == ValidationStatus.UNHEALTHY else 200
             return JSONResponse(status_code=status_code, content=report.model_dump(mode="json"))
-        except Exception as error:
-            logger.error("validate() failed: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("validate() failed")
             return JSONResponse(
                 status_code=500,
                 content={"status": "error", "reason": "validation failed; see server logs."},

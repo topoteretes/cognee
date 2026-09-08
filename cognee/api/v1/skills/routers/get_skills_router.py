@@ -135,8 +135,8 @@ def get_skills_router() -> APIRouter:
                 **({"dataset_id": payload.dataset_id} if payload.dataset_id else {}),
             )
             return jsonable_encoder(result.to_dict())
-        except Exception as exc:
-            logger.error("ingest skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("ingest skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to ingest skill"})
 
     @router.get(
@@ -194,8 +194,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("list skills failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list skills failed")
             return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
 
     @router.get(
@@ -232,8 +232,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("get skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("get skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
 
     @router.delete(
@@ -270,8 +270,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("delete skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("delete skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})
 
     return router

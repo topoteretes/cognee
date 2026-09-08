@@ -275,8 +275,8 @@ class Neo4jAdapter(GraphDBInterface):
             except Neo4jError as error:
                 otel_span.set_status(StatusCode.ERROR, str(error))
                 otel_span.record_exception(error)
-                logger.error("Neo4j query error: %s", error, exc_info=True)
-                raise error
+                logger.exception("Neo4j query error")
+                raise
 
     async def has_node(self, node_id: str) -> bool:
         """
@@ -1117,9 +1117,9 @@ class Neo4jAdapter(GraphDBInterface):
                 for result in results
                 if result["edge_exists"]
             ]
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        except Neo4jError:
+            logger.exception("Neo4j query error")
+            raise
 
     async def add_edge(
         self,
@@ -1274,9 +1274,9 @@ class Neo4jAdapter(GraphDBInterface):
             ):
                 results = await self.query(query, {"edges": edges, **provenance_params})
             return results
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        except Neo4jError:
+            logger.exception("Neo4j query error")
+            raise
 
     async def get_edges(self, node_id: str):
         """
@@ -1470,7 +1470,7 @@ class Neo4jAdapter(GraphDBInterface):
             return [_strip_provenance(row["properties"]) for row in result] if result else []
         except Exception as exc:
             logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
-            raise exc
+            raise
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """

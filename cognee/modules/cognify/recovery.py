@@ -105,10 +105,8 @@ async def recover_stale_cognify_runs_on_startup() -> None:
                 pipeline_run.pipeline_run_id,
                 pipeline_run.dataset_id,
             )
-        except Exception as error:
-            logger.error(
-                "Startup recovery failed for cognify run %s: %s",
+        except Exception:
+            logger.exception(
+                "Startup recovery failed for cognify run %s",
                 pipeline_run.pipeline_run_id,
-                error,
-                exc_info=True,
             )

@@ -116,9 +116,9 @@ def get_forget_router() -> APIRouter:
                     "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
                 },
             )
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Forget endpoint error: %s", error, exc_info=True)
+            logger.exception("Forget endpoint error")
             return JSONResponse(
                 status_code=500,
                 content={"error": "An error occurred during deletion."},

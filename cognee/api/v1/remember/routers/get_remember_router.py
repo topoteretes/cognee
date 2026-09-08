@@ -91,16 +91,16 @@ async def _import_cogx_archives(
         # and actionable message; the global handler in cognee/api/client.py
         # returns them.
         raise
-    except (ValueError, tarfile.TarError) as error:
+    except (ValueError, tarfile.TarError):
         # Log the detail server-side; the response stays generic so exception
         # text / stack frames are not exposed to the caller (CodeQL py/stack-trace-exposure).
-        logger.error("COGX archive import validation error: %s", error, exc_info=True)
+        logger.exception("COGX archive import validation error")
         return JSONResponse(
             status_code=400,
             content={"error": "Invalid COGX archive."},
         )
-    except Exception as error:
-        logger.error("COGX archive import error: %s", error, exc_info=True)
+    except Exception:
+        logger.exception("COGX archive import error")
         return JSONResponse(
             status_code=409,
             content={"error": "An error occurred during COGX archive import."},
@@ -599,13 +599,13 @@ def get_remember_router() -> APIRouter:
             # the global handler in cognee/api/client.py returns them.
             raise
         except ValueError as error:
-            logger.error("Remember endpoint validation error: %s", error, exc_info=True)
+            logger.exception("Remember endpoint validation error")
             return JSONResponse(
                 status_code=409,
                 content={"error": f"Invalid request data for remember operation: {error}"},
             )
         except Exception as error:
-            logger.error("Remember endpoint error: %s", error, exc_info=True)
+            logger.exception("Remember endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": f"An error occurred during remember: {error}"},
@@ -705,8 +705,8 @@ def get_remember_router() -> APIRouter:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
             raise
-        except Exception as error:
-            logger.error("Remember entry endpoint error: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("Remember entry endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during remember."},

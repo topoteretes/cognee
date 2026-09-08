@@ -172,11 +172,10 @@ async def run_tasks(
                             total_items=total_items,
                             current_stage=progress_state["current_stage"],
                         )
-                    except Exception as progress_error:
+                    except Exception:
                         # Progress reporting must never fail the pipeline run.
-                        logger.error(
-                            f"Failed to log pipeline run progress: {progress_error}",
-                            exc_info=True,
+                        logger.exception(
+                            "Failed to log pipeline run progress",
                         )
 
                 async def _run_item(data_item, item_tasks):
@@ -310,8 +309,8 @@ async def run_tasks(
                             data_ingestion_info=locals().get("results"),
                             error=error,
                         )
-                    except Exception as rollback_error:
-                        logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+                    except Exception:
+                        logger.exception("Rollback errored")
 
                 # Per-item failures arrive wrapped in a generic
                 # PipelineRunFailedError; record and surface the ROOT cause so
@@ -347,4 +346,4 @@ async def run_tasks(
 
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
-                    raise error
+                    raise

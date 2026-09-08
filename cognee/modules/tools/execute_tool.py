@@ -84,5 +84,5 @@ async def execute_tool(
     except (ToolPermissionError, ToolScopeError):
         raise
     except Exception as exc:
-        logger.error("Tool %s raised during execution", tool_name, exc_info=True)
+        logger.exception("Tool %s raised during execution", tool_name)
         raise ToolInvocationError(f"{tool_name} failed: {exc}") from exc
