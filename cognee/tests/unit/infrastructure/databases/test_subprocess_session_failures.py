@@ -488,7 +488,7 @@ def test_unpicklable_return_surfaces_error():
         # The worker's pickle of the Response will fail when putting on the
         # queue. mp.Queue raises at put time. We just want to ensure it
         # doesn't hang the session.
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 - transport or timeout error depending on platform; the test guards against a hang
             session.call(Request(op=OP_RETURN_UNPICKLABLE, args=()), timeout=5.0)
     finally:
         session.shutdown()
