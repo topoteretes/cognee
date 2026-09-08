@@ -22,12 +22,11 @@ def format_relationship(
         edge_properties.get("relationship_name") or relationship[2],
     )
 
-    if relationship[2] == "contains":
-        if not relationship_name or relationship_name == "contains":
-            relationship_name = get_contains_edge_text(
-                generate_node_name(node["name"]),
-                node["description"],
-            )
+    if relationship[2] == "contains" and (not relationship_name or relationship_name == "contains"):
+        relationship_name = get_contains_edge_text(
+            generate_node_name(node["name"]),
+            node["description"],
+        )
 
     return {str(EdgeType.id_for(relationship_name)): relationship_name}
 

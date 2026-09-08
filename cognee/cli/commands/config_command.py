@@ -149,10 +149,9 @@ Configuration changes will affect how cognee processes and stores data.
             import cognee
 
             # Confirm unset unless forced
-            if not args.force:
-                if not fmt.confirm(f"Unset configuration key '{args.key}'?"):
-                    fmt.echo("Unset cancelled.")
-                    return
+            if not args.force and not fmt.confirm(f"Unset configuration key '{args.key}'?"):
+                fmt.echo("Unset cancelled.")
+                return
 
             # Since the config system doesn't have explicit unset methods, we
             # map config keys to their default values and reuse the generic
@@ -211,10 +210,9 @@ Configuration changes will affect how cognee processes and stores data.
 
     def _handle_reset(self, args: argparse.Namespace) -> None:
         try:
-            if not args.force:
-                if not fmt.confirm("Reset all configuration to defaults?"):
-                    fmt.echo("Reset cancelled.")
-                    return
+            if not args.force and not fmt.confirm("Reset all configuration to defaults?"):
+                fmt.echo("Reset cancelled.")
+                return
 
             fmt.note("Configuration reset not fully implemented yet")
             fmt.echo("This would reset all settings to their default values")

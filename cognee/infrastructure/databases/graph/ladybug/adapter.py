@@ -2785,16 +2785,13 @@ class LadybugAdapter(GraphDBInterface):
                 if row and len(row) == 3:
                     processed_rows = []
                     for i, item in enumerate(row):
-                        if isinstance(item, dict):
-                            if item.get("properties"):
-                                try:
-                                    props = json.loads(item["properties"])
-                                    item.update(props)
-                                    del item["properties"]
-                                except json.JSONDecodeError:
-                                    logger.warning(
-                                        f"Failed to parse JSON properties for node/edge {i}"
-                                    )
+                        if isinstance(item, dict) and item.get("properties"):
+                            try:
+                                props = json.loads(item["properties"])
+                                item.update(props)
+                                del item["properties"]
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse JSON properties for node/edge {i}")
                         processed_rows.append(item)
                     edges.append(tuple(processed_rows))
             return edges if edges else []  # Always return a list, even if empty

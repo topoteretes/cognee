@@ -31,9 +31,12 @@ def _index_name_for_column(
 ) -> str | None:
     for index in inspector.get_indexes(table):
         column_names = index.get("column_names") or []
-        if len(column_names) == 1 and column_names[0] == column:
-            if unique is None or bool(index.get("unique")) is unique:
-                return index.get("name")
+        if (
+            len(column_names) == 1
+            and column_names[0] == column
+            and (unique is None or bool(index.get("unique")) is unique)
+        ):
+            return index.get("name")
     return None
 
 

@@ -32,9 +32,8 @@ def classify(
     except ImportError:
         S3File = None
 
-    if S3File is not None:
-        if isinstance(data, S3File):
-            return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
+    if S3File is not None and isinstance(data, S3File):
+        return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
 
     raise IngestionError(
         message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or s3fs is not installed: {type(data)}"

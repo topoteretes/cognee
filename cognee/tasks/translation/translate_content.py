@@ -115,16 +115,15 @@ async def translate_content(
             )
 
             # Skip if already in target language
-            if not detection.requires_translation:
-                if skip_if_target_language:
-                    logger.debug(
-                        f"Skipping chunk {chunk.id}: already in target language "
-                        f"({detection.language_code})"
-                    )
-                    # Add language metadata to chunk
-                    _add_to_chunk_contains(chunk, language_metadata)
-                    processed_chunks.append(chunk)
-                    continue
+            if not detection.requires_translation and skip_if_target_language:
+                logger.debug(
+                    f"Skipping chunk {chunk.id}: already in target language "
+                    f"({detection.language_code})"
+                )
+                # Add language metadata to chunk
+                _add_to_chunk_contains(chunk, language_metadata)
+                processed_chunks.append(chunk)
+                continue
 
             # Translate the content
             logger.debug(
