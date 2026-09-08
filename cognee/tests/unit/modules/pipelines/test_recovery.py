@@ -14,13 +14,21 @@ Covered here:
 - the summarized run_info is carried through rather than summarized again
 - a stale cognify run is rolled back inside its dataset's database context,
   and a pipeline with no rollback policy never enters it
-- a failing rollback leaves the run open for the next startup to retry, and a
-  failing dataset lookup does not stop the sweep
+- a failing rollback or a failing close leaves that one run open for the next
+  startup to retry, without costing the other candidates
+- the sweep's own read is not guarded: it propagates, and nothing is half
+  done
+- whatever one dataset fails with, the other datasets still recover and its
+  own run stays open for the next attempt
+- the batched read is keyed by id and survives its own chunk boundary
+- datasets recover concurrently and each under its own lock, and one dataset's
+  bug does not leave the others half-recovered
 - a missing dataset, and a run younger than the staleness threshold, are
   skipped
 - the staleness threshold survives a misconfigured env var
 """
 
+import asyncio
 import importlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -30,11 +38,13 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from cognee.infrastructure.databases.relational import Base
 from cognee.infrastructure.databases.relational.create_relational_engine import (
     create_relational_engine,
 )
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.exceptions import AbandonedPipelineRunError
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
@@ -154,7 +164,7 @@ async def test_a_stale_add_run_ends_up_terminal(recovery_db):
     before = await get_pipeline_status([dataset.id], "add_pipeline")
     assert before[str(dataset.id)] == STARTED
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     after = await get_pipeline_status([dataset.id], "add_pipeline")
     assert after[str(dataset.id)] == ERRORED
@@ -185,7 +195,7 @@ async def test_every_abandoned_run_of_one_pipeline_is_closed(recovery_db):
     runs = [_started_run(dataset.id, "cognify_pipeline", hours_ago=hours) for hours in (4, 3, 2)]
     await _insert(recovery_db.engine, dataset, *runs)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     closed = await _rows(recovery_db.engine, status=ERRORED)
     assert {row.pipeline_run_id for row in closed} == {run.pipeline_run_id for run in runs}
@@ -201,8 +211,8 @@ async def test_a_closed_run_is_not_reopened_on_the_next_boot(recovery_db):
     stale_run = _started_run(dataset.id, "cognify_pipeline")
     await _insert(recovery_db.engine, dataset, stale_run)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     closed = await _rows(recovery_db.engine, status=ERRORED)
     assert len(closed) == 1
@@ -220,7 +230,7 @@ async def test_attribution_falls_back_to_the_dataset_owner(recovery_db):
     stale_run = _started_run(dataset.id, "add_pipeline", user_id=None)
     await _insert(recovery_db.engine, owner, dataset, stale_run)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     closed = await _rows(recovery_db.engine, run_id=stale_run.pipeline_run_id, status=ERRORED)
     assert closed[0].user_id == owner.id
@@ -237,7 +247,7 @@ async def test_run_info_data_is_carried_through_untouched(recovery_db):
     stale_run = _started_run(dataset.id, "add_pipeline", run_info={"data": data_ids})
     await _insert(recovery_db.engine, dataset, stale_run)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     closed = await _rows(recovery_db.engine, run_id=stale_run.pipeline_run_id, status=ERRORED)
     assert closed[0].run_info["data"] == data_ids
@@ -249,7 +259,7 @@ async def test_a_stale_cognify_run_is_rolled_back_in_its_dataset_context(recover
     stale_run = _started_run(dataset.id, "cognify_pipeline")
     await _insert(recovery_db.engine, dataset, stale_run)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     assert len(recovery_db.calls.rollbacks) == 1
     assert recovery_db.calls.rollbacks[0]["pipeline_run_id"] == stale_run.pipeline_run_id
@@ -269,41 +279,110 @@ async def test_a_failing_rollback_leaves_the_run_open_and_continues(recovery_db,
     await _insert(recovery_db.engine, dataset, cognify_run, add_run)
 
     async def _failing_rollback(**_kwargs):
-        raise RuntimeError("graph unavailable")
+        raise EntityNotFoundError(message="Could not find user")
 
     monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _failing_rollback)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     closed = await _rows(recovery_db.engine, status=ERRORED)
     assert [row.pipeline_run_id for row in closed] == [add_run.pipeline_run_id]
 
 
 @pytest.mark.asyncio
-async def test_a_dataset_lookup_failure_does_not_stop_the_sweep(recovery_db, monkeypatch):
-    """The lookup runs inside the per-run guard, so a transient relational
-    error costs that one run, not the whole sweep, and not the API startup the
-    sweep is blocking."""
+async def test_a_read_failure_propagates_instead_of_being_swallowed(recovery_db, monkeypatch):
+    """The sweep's own read is not wrapped in error handling. If it fails there
+    is no recovery to speak of, so the caller that started the sweep hears
+    about it rather than a log line nobody is watching. Nothing is half done
+    either way."""
+    dataset = _dataset()
+    await _insert(recovery_db.engine, dataset, _started_run(dataset.id, "cognify_pipeline"))
+
+    async def _failing_load(_pipeline_runs):
+        raise OperationalError("SELECT datasets", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(recovery_module, "_load_datasets_and_users", _failing_load)
+
+    with pytest.raises(OperationalError):
+        await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert await _rows(recovery_db.engine, status=ERRORED) == []
+    assert recovery_db.calls.rollbacks == []
+
+
+@pytest.mark.asyncio
+async def test_a_failing_close_leaves_the_run_open_and_continues(recovery_db, monkeypatch):
+    """The other half of the per-run guard. A write that fails must not cost the
+    remaining candidates, and the run has to stay open so the next boot closes
+    it."""
     dataset = _dataset()
     first = _started_run(dataset.id, "add_pipeline", hours_ago=3)
     second = _started_run(dataset.id, "memify_pipeline", hours_ago=2)
     await _insert(recovery_db.engine, dataset, first, second)
 
-    real_loader = recovery_module._load_dataset_and_user
+    real_writer = recovery_module.log_pipeline_run_error
     seen = []
 
-    async def _flaky_loader(pipeline_run):
-        seen.append(pipeline_run.pipeline_run_id)
+    async def _flaky_writer(**kwargs):
+        seen.append(kwargs["pipeline_run_id"])
         if len(seen) == 1:
-            raise RuntimeError("database is locked")
-        return await real_loader(pipeline_run)
+            raise OperationalError("INSERT INTO pipeline_runs", {}, Exception("disk I/O error"))
+        return await real_writer(**kwargs)
 
-    monkeypatch.setattr(recovery_module, "_load_dataset_and_user", _flaky_loader)
+    monkeypatch.setattr(recovery_module, "log_pipeline_run_error", _flaky_writer)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     closed = await _rows(recovery_db.engine, status=ERRORED)
     assert [row.pipeline_run_id for row in closed] == [second.pipeline_run_id]
+
+
+@pytest.mark.asyncio
+async def test_the_batched_read_covers_every_candidate(recovery_db):
+    """The batch is keyed by id, not by position, so runs of different datasets
+    and users cannot be handed each other's dataset."""
+    first_owner = User(id=uuid4(), email=f"{uuid4().hex[:8]}@example.com", hashed_password="x")
+    second_owner = User(id=uuid4(), email=f"{uuid4().hex[:8]}@example.com", hashed_password="x")
+    first_dataset = _dataset(owner_id=first_owner.id)
+    second_dataset = _dataset(owner_id=second_owner.id)
+    first_run = _started_run(first_dataset.id, "add_pipeline", hours_ago=3)
+    second_run = _started_run(
+        second_dataset.id, "add_pipeline", hours_ago=2, user_id=second_owner.id
+    )
+    await _insert(
+        recovery_db.engine,
+        first_owner,
+        second_owner,
+        first_dataset,
+        second_dataset,
+        first_run,
+        second_run,
+    )
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    closed = {row.pipeline_run_id: row for row in await _rows(recovery_db.engine, status=ERRORED)}
+    assert set(closed) == {first_run.pipeline_run_id, second_run.pipeline_run_id}
+    assert closed[first_run.pipeline_run_id].dataset_id == first_dataset.id
+    assert closed[first_run.pipeline_run_id].user_id == first_owner.id
+    assert closed[second_run.pipeline_run_id].dataset_id == second_dataset.id
+    assert closed[second_run.pipeline_run_id].user_id == second_owner.id
+
+
+@pytest.mark.asyncio
+async def test_more_candidates_than_one_chunk(recovery_db, monkeypatch):
+    """The id lists are chunked for the driver's parameter ceiling, so the
+    chunk boundary must not drop or duplicate a run."""
+    monkeypatch.setattr(recovery_module, "_LOOKUP_CHUNK_SIZE", 3)
+
+    datasets = [_dataset() for _ in range(7)]
+    runs = [_started_run(dataset.id, "add_pipeline") for dataset in datasets]
+    await _insert(recovery_db.engine, *datasets, *runs)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert {row.pipeline_run_id for row in closed} == {run.pipeline_run_id for run in runs}
 
 
 @pytest.mark.asyncio
@@ -311,7 +390,7 @@ async def test_a_missing_dataset_is_skipped(recovery_db):
     stale_run = _started_run(uuid4(), "cognify_pipeline")
     await _insert(recovery_db.engine, stale_run)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     assert await _rows(recovery_db.engine, status=ERRORED) == []
     assert recovery_db.calls.rollbacks == []
@@ -325,7 +404,7 @@ async def test_a_recent_run_is_left_alone(recovery_db):
     recent_run = _started_run(dataset.id, "cognify_pipeline", hours_ago=0)
     await _insert(recovery_db.engine, dataset, recent_run)
 
-    await recovery_module.recover_stale_pipeline_runs_on_startup()
+    await recovery_module.recover_abandoned_pipeline_runs()
 
     assert await _rows(recovery_db.engine, status=ERRORED) == []
     assert recovery_db.calls.rollbacks == []
@@ -352,3 +431,92 @@ def test_the_staleness_threshold_survives_a_bad_env_var(monkeypatch, raw, expect
         monkeypatch.setenv("COGNEE_STALE_RUN_RECOVERY_MIN_AGE_SECONDS", raw)
 
     assert recovery_module._read_stale_run_min_age() == expected
+
+
+@pytest.mark.asyncio
+async def test_each_dataset_is_recovered_under_its_own_lock(recovery_db, monkeypatch):
+    """The lock every pipeline run, delete and update takes. Holding it per
+    dataset is what keeps a recovery from racing an ordinary operation on that
+    dataset, which is the precondition for ever moving this sweep off the boot
+    path."""
+    first_dataset, second_dataset = _dataset(), _dataset()
+    first_run = _started_run(first_dataset.id, "cognify_pipeline")
+    second_run = _started_run(second_dataset.id, "add_pipeline")
+    await _insert(recovery_db.engine, first_dataset, second_dataset, first_run, second_run)
+
+    locked = []
+
+    @asynccontextmanager
+    async def _recording_lock(dataset_id):
+        locked.append(dataset_id)
+        yield
+
+    monkeypatch.setattr(recovery_module, "dataset_lock", _recording_lock)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert sorted(locked, key=str) == sorted([first_dataset.id, second_dataset.id], key=str)
+    assert len(await _rows(recovery_db.engine, status=ERRORED)) == 2
+
+
+@pytest.mark.asyncio
+async def test_datasets_recover_concurrently(recovery_db, monkeypatch):
+    """Two datasets must not wait for each other. Proven by making each
+    rollback block until the other has started: sequential recovery deadlocks
+    this and the wait_for times out."""
+    first_dataset, second_dataset = _dataset(), _dataset()
+    await _insert(
+        recovery_db.engine,
+        first_dataset,
+        second_dataset,
+        _started_run(first_dataset.id, "cognify_pipeline"),
+        _started_run(second_dataset.id, "cognify_pipeline"),
+    )
+
+    started = asyncio.Event()
+    both_in_flight = asyncio.Event()
+    in_flight = 0
+
+    async def _rollback_that_waits_for_its_peer(**_kwargs):
+        nonlocal in_flight
+        in_flight += 1
+        if in_flight == 2:
+            both_in_flight.set()
+        started.set()
+        await asyncio.wait_for(both_in_flight.wait(), timeout=5)
+
+    monkeypatch.setattr(
+        recovery_module, "cognify_rollback_handler", _rollback_that_waits_for_its_peer
+    )
+
+    await asyncio.wait_for(recovery_module.recover_abandoned_pipeline_runs(), timeout=10)
+
+    assert len(await _rows(recovery_db.engine, status=ERRORED)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_dataset_that_fails_does_not_cost_the_others_their_recovery(
+    recovery_db, monkeypatch
+):
+    """The guard around one dataset's attempt is what makes the sweep useful at
+    all: whatever one dataset's graph store does, and whatever kind of failure
+    it is, every other dataset still gets recovered and the failed run stays
+    open for the next attempt."""
+    healthy_dataset, broken_dataset = _dataset(), _dataset()
+    healthy_run = _started_run(healthy_dataset.id, "add_pipeline")
+    broken_run = _started_run(broken_dataset.id, "cognify_pipeline")
+    await _insert(recovery_db.engine, healthy_dataset, broken_dataset, healthy_run, broken_run)
+
+    async def _buggy_rollback(**_kwargs):
+        raise TypeError("rollback handler called with the wrong shape")
+
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _buggy_rollback)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [healthy_run.pipeline_run_id]
+
+    # And the one that failed is still selectable, so a later attempt sees it.
+    still_open = await recovery_module.get_unclosed_pipeline_runs([broken_dataset.id])
+    assert [run.pipeline_run_id for run in still_open] == [broken_run.pipeline_run_id]

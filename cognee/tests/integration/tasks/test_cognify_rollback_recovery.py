@@ -19,7 +19,7 @@ from cognee.context_global_variables import (
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.pipelines.recovery import recover_stale_pipeline_runs_on_startup
+from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
 from cognee.modules.cognify.rollback import cognify_rollback_handler
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
@@ -391,7 +391,7 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
         await session.commit()
 
     await assert_graph_nodes_present(recovery_nodes)
-    await recover_stale_pipeline_runs_on_startup()
+    await recover_abandoned_pipeline_runs()
     await assert_graph_nodes_not_present(recovery_nodes)
 
     nodes_after, edges_after = await _count_nodes_edges_for_run(dataset.id, stale_run_id)
@@ -421,7 +421,7 @@ async def test_cognify_startup_recovery_rolls_back_stale_started_runs(clean_test
 
     # And a second boot leaves it alone: only runs without a terminal row of
     # their own are candidates, so the rollback never repeats.
-    await recover_stale_pipeline_runs_on_startup()
+    await recover_abandoned_pipeline_runs()
 
     async with db_engine.get_async_session() as session:
         rows_after_second_boot = (

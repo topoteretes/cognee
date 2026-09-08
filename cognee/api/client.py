@@ -1,10 +1,11 @@
 """FastAPI server for the Cognee API."""
 
+import asyncio
 import os
 
 import uvicorn
 from traceback import format_exc
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from fastapi import Request
 from fastapi import FastAPI, status
 from fastapi.encoders import jsonable_encoder
@@ -80,6 +81,28 @@ install_websocket_query_param_redaction()
 app_environment = os.getenv("ENV", "prod")
 
 
+def _report_recovery_outcome(task: "asyncio.Task") -> None:
+    """Report how the background recovery ended.
+
+    A background task's exception is otherwise only surfaced by asyncio's
+    "Task exception was never retrieved" warning at garbage-collection time.
+    This is the task boundary, not error handling: nothing is recovered from
+    here, the failure is reported as the failure it is.
+    """
+    if task.cancelled():
+        logger.info("Recovery of abandoned pipeline runs was cancelled by shutdown")
+        return
+
+    error = task.exception()
+    if error is not None:
+        logger.error(
+            "Recovery of abandoned pipeline runs failed (%s: %s)",
+            type(error).__name__,
+            error,
+            exc_info=error,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # from cognee.modules.data.deletion import prune_system, prune_data
@@ -100,21 +123,29 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
-    from cognee.modules.pipelines.recovery import recover_stale_pipeline_runs_on_startup
+    from cognee.modules.pipelines.recovery import recover_abandoned_pipeline_runs
 
-    try:
-        await recover_stale_pipeline_runs_on_startup()
-    except Exception:
-        # Recovery is housekeeping for runs a previous process abandoned.
-        # It handles its own per-run failures; anything that still escapes
-        # (a relational error mid-sweep) must not keep the server down,
-        # because the next boot will find the same rows waiting.
-        logger.error("Startup recovery of abandoned pipeline runs failed", exc_info=True)
+    # Recovery of runs a previous process abandoned runs in the background, so
+    # a boot that finds work to do does not hold the port closed while it does
+    # it. Each dataset is recovered under that dataset's lock, so operations
+    # arriving for a dataset queue behind its recovery instead of racing it
+    # (in this process: the lock is asyncio, see infrastructure/locks).
+    recovery_task = asyncio.create_task(recover_abandoned_pipeline_runs())
+    recovery_task.add_done_callback(_report_recovery_outcome)
 
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
     yield
+
+    # The sweep is resumable by design (it only closes runs that still have no
+    # terminal row), so cancelling an unfinished one costs nothing but the
+    # work already done. Leaving it running into the engine teardown below
+    # does cost something.
+    if not recovery_task.done():
+        recovery_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await recovery_task
 
     # Flush and close all cached database adapters so Ladybug can
     # CHECKPOINT its WAL before the process exits.  Without this,
