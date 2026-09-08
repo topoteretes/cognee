@@ -183,7 +183,7 @@ async def _search_and_respond(response_url: str, team_id: str, user_id: UUID, te
             user=owner,
             datasets=None,  # search across every dataset the owner can read
         )
-    except Exception:  # noqa: BLE001 - any search failure must degrade to a chat message, not a crash
+    except Exception:  # any search failure must degrade to a chat message, not a crash
         logger.exception("Search failed for Slack team %s", team_id)
         await post_to_response_url(
             response_url, _ephemeral("Search failed. Please try again.", replace_original=True)

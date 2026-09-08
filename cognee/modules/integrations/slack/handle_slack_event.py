@@ -89,5 +89,5 @@ async def _publish_home_view(team_id: str, slack_user_id: str | None) -> None:
         access_token = decrypt_token_payload(credential).get("access_token")
         if access_token:
             await publish_home_view(access_token, slack_user_id)
-    except Exception:  # noqa: BLE001 - a broken Home tab must never fail the event ack
+    except Exception:  # a broken Home tab must never fail the event ack
         logger.exception("Failed to publish App Home view for team %s", team_id)

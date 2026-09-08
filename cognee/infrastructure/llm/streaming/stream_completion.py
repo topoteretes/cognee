@@ -112,7 +112,7 @@ async def stream_text_completion(
             if aclose is not None:
                 try:
                     await aclose()
-                except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                except Exception:  # cleanup must not mask the real error
                     logger.debug("Failed to close LLM stream", exc_info=True)
 
     # An empty result is returned, never raised. The blocking path is

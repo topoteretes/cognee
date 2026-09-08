@@ -18,7 +18,7 @@ os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
 
-from cognee.eval_framework.beam.eval.sweep import (  # noqa: E402
+from cognee.eval_framework.beam.eval.sweep import (
     build_beam_eval_params,
     build_registry_base_configs,
     filter_questions_by_type,
@@ -27,13 +27,13 @@ from cognee.eval_framework.beam.eval.sweep import (  # noqa: E402
     make_timestamped_output_dir,
     resolve_beam_sweep_config,
 )
-from cognee.eval_framework.benchmark_adapters.beam_adapter import (  # noqa: E402
+from cognee.eval_framework.benchmark_adapters.beam_adapter import (
     load_beam_row,
     parse_beam_probing_questions,
     truncate_beam_chat_batches,
 )
-from cognee.eval_framework.reporting.io import write_json  # noqa: E402
-from cognee.eval_framework.sweeps.retriever_sweep_runner import (  # noqa: E402
+from cognee.eval_framework.reporting.io import write_json
+from cognee.eval_framework.sweeps.retriever_sweep_runner import (
     RetrieverSweepSettings,
     _run_retriever_all_runs,
     validate_retriever_configs,

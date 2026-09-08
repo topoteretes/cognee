@@ -110,7 +110,7 @@ async def test_carried_item_is_not_saved_or_read_again():
         }
     )
     save_mock = AsyncMock(side_effect=AssertionError("item was uploaded a second time"))
-    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(  # noqa: E731
+    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("item was read back from storage")
     )
 
@@ -144,7 +144,7 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
     )
     # The pass-through save is I/O-free and returns the path with no metadata.
     save_mock = AsyncMock(return_value=StoredFile(file_path="/tmp/doc.txt", metadata=None))
-    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(  # noqa: E731
+    open_mock = lambda *_a, **_k: (_ for _ in ()).throw(
         AssertionError("metadata was recomputed by re-reading the file")
     )
 

@@ -17,7 +17,7 @@ from ladybug.database import Database
 # Importing this package registers the Windows DLL search path ladybug's native
 # extension needs, so it has to precede the ``ladybug`` imports below. See
 # cognee_db_workers/_windows_openssl.py.
-import cognee_db_workers  # noqa: F401
+import cognee_db_workers
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (

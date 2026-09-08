@@ -14,7 +14,7 @@ class Tenant(Principal):
 
     owner_id = Column(UUID, index=True)
 
-    users: Mapped[list["User"]] = relationship(  # noqa: F821
+    users: Mapped[list["User"]] = relationship(
         "User",
         secondary=UserTenant.__tablename__,
         back_populates="tenants",

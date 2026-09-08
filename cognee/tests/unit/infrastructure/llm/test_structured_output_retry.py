@@ -149,8 +149,8 @@ async def test_llm_gateway_converts_quota_errors():
     # versions). sys.modules is keyed by name and always gives the module.
     import sys
 
-    import cognee.infrastructure.llm.LLMGateway  # noqa: F401 — ensure in sys.modules
-    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client  # noqa: E501,F401
+    import cognee.infrastructure.llm.LLMGateway  # ensure in sys.modules
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client
 
     gateway_module = sys.modules["cognee.infrastructure.llm.LLMGateway"]
     get_llm_client_module = sys.modules[

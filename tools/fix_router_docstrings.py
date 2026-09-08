@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
 
-from check_router_docstrings import (  # noqa: E402
+from check_router_docstrings import (
     actual_params,
     documented_params,
     iter_api_routes,

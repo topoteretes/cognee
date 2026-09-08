@@ -102,7 +102,7 @@ def _spawn_background(coro, *, description: str) -> None:
     async def _guarded():
         try:
             await coro
-        except Exception:  # noqa: BLE001 - detached work must log, not crash the loop
+        except Exception:  # detached work must log, not crash the loop
             logger.exception("%s failed", description)
 
     task = asyncio.create_task(_guarded())
@@ -529,7 +529,7 @@ def get_integrations_router():
                 logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
                 return _frontend_redirect(integration, "error_already_connected")
-            except Exception:  # noqa: BLE001 - any exchange/parse failure must redirect, not 500
+            except Exception:  # any exchange/parse failure must redirect, not 500
                 # Full trace server-side; the browser only learns that it failed.
                 logger.exception("%s OAuth exchange failed for user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_exchange_failed")
@@ -632,7 +632,7 @@ def get_integrations_router():
 
             try:
                 await integration.revoke_remote(credential)
-            except Exception:  # noqa: BLE001 - a remote-revoke failure must never block disconnect
+            except Exception:  # a remote-revoke failure must never block disconnect
                 logger.exception(
                     "%s revoke_remote raised for account %s",
                     provider,

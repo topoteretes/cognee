@@ -298,6 +298,10 @@ exclude = [
 ]
 
 [tool.ruff.lint]
+# E402 is not in ruff 0.16's default set, but the pre-commit hook (ruff 0.15) has
+# enforced it all along; select it so CI and the hook agree and the `# noqa: E402`
+# comments that satisfy the hook are not reported as stale.
+extend-select = ["E402"]
 ignore = [
     "F401",
     # N999: module names like LanceDBAdapter.py and DTO.py are public import paths.

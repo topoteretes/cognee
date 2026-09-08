@@ -94,7 +94,7 @@ async def dlt_csv_from_s3():
     """
     import uuid
 
-    import dlt  # noqa: F401 — hard requirement; the CI job installs the extra
+    import dlt  # hard requirement; the CI job installs the extra
     import s3fs
 
     from cognee.context_global_variables import set_database_global_context_variables

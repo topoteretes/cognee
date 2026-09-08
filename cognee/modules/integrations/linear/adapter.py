@@ -221,7 +221,7 @@ class LinearIntegration(OAuthIntegration):
                         credential.provider_account_id,
                         response.status,
                     )
-        except Exception:  # noqa: BLE001 - disconnect must proceed no matter what happens here
+        except Exception:  # disconnect must proceed no matter what happens here
             logger.exception(
                 "Linear token revoke for organization %s failed", credential.provider_account_id
             )

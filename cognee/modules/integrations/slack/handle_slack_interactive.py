@@ -134,7 +134,7 @@ async def _handle_remember_this(payload: dict[str, Any]) -> None:
             ),
         )
         return
-    except Exception:  # noqa: BLE001 - any remember failure must degrade to a chat message, not a crash
+    except Exception:  # any remember failure must degrade to a chat message, not a crash
         logger.exception("Failed to remember a Slack message for team %s", team_id)
         await post_to_response_url(
             response_url, _ephemeral("Could not save that message. Please try again.")

@@ -195,7 +195,7 @@ class RecallStream:
                 results = pending.result()
             except (asyncio.CancelledError, GeneratorExit):
                 raise
-            except Exception as error:  # noqa: BLE001 - the client already has a 200
+            except Exception as error:  # the client already has a 200
                 logger.exception("Streaming recall failed")
                 if not self._errored:
                     # Only if the engine has not already reported it: a second
@@ -205,7 +205,7 @@ class RecallStream:
                 return
             try:
                 final = encode_sse("final", {"results": jsonable_encoder(_validate(results))})
-            except Exception as error:  # noqa: BLE001 - never abort mid-body
+            except Exception as error:  # never abort mid-body
                 # _validate deliberately passes a mismatched payload through
                 # unvalidated, which is exactly the shape jsonable_encoder can
                 # fail on. Letting that propagate would truncate the response
@@ -247,7 +247,7 @@ def _validate(results: Any) -> Any:
     """
     try:
         return _RESULTS_ADAPTER.validate_python(results)
-    except Exception:  # noqa: BLE001 - a preview must not fail on a shape mismatch
+    except Exception:  # a preview must not fail on a shape mismatch
         logger.warning("Streamed recall payload did not match the response model", exc_info=True)
         return results
 

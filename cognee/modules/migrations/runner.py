@@ -243,7 +243,7 @@ async def _record_dataset_failure(db_engine, dataset_id: UUID, error: Exception)
             if record is not None:
                 record.migration_last_error = _error_text(error)
                 await session.commit()
-    except Exception:  # noqa: BLE001 - never let bookkeeping mask the real failure
+    except Exception:  # never let bookkeeping mask the real failure
         logger.exception("Could not persist migration failure for dataset '%s'.", dataset_id)
 
 
@@ -255,7 +255,7 @@ async def _record_global_failure(db_engine, error: Exception) -> None:
             if record is not None:
                 record.global_migration_last_error = _error_text(error)
                 await session.commit()
-    except Exception:  # noqa: BLE001 - never let bookkeeping mask the real failure
+    except Exception:  # never let bookkeeping mask the real failure
         logger.exception("Could not persist global migration failure.")
 
 
@@ -446,7 +446,7 @@ async def _migrate_dataset(
                     record.cognee_version = current_version
                     record.migration_last_error = None
                     await session.commit()
-        except Exception:  # noqa: BLE001 - audit only
+        except Exception:  # audit only
             logger.exception(
                 "Could not record audit fields for dataset '%s' (migrations applied fine).",
                 row.dataset_id,

@@ -139,7 +139,7 @@ class CogneeApiClient:
             for item in data_items:
                 if os.path.isfile(item):
                     mime, _ = mimetypes.guess_type(item)
-                    fh = open(item, "rb")  # noqa: SIM115
+                    fh = open(item, "rb")
                     opened.append(fh)
                     files.append(
                         ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))
@@ -276,7 +276,7 @@ class CogneeApiClient:
             for item in data_items:
                 if os.path.isfile(item):
                     mime, _ = mimetypes.guess_type(item)
-                    fh = open(item, "rb")  # noqa: SIM115
+                    fh = open(item, "rb")
                     opened.append(fh)
                     files.append(
                         ("data", (os.path.basename(item), fh, mime or "application/octet-stream"))

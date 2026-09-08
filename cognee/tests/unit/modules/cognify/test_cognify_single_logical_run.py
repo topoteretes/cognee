@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.api.v1.cognify.cognify  # noqa: F401 — ensure the module (not the re-exported function) is importable via sys.modules
+import cognee.api.v1.cognify.cognify  # ensure the module (not the re-exported function) is importable via sys.modules
 import cognee.modules.pipelines.operations.run_tasks as run_tasks_module
 from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.pipelines.models.PipelineRunInfo import (
