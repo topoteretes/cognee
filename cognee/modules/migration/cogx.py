@@ -14,7 +14,7 @@ import math
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 from typing_extensions import Self
@@ -157,15 +157,9 @@ class COGXRawNode(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
 
 
-COGXRecord = Union[
-    COGXDocument,
-    COGXEpisode,
-    COGXEntity,
-    COGXFact,
-    COGXMemory,
-    COGXMemoryBlock,
-    COGXRawNode,
-]
+COGXRecord = (
+    COGXDocument | COGXEpisode | COGXEntity | COGXFact | COGXMemory | COGXMemoryBlock | COGXRawNode
+)
 
 _record_adapter: TypeAdapter = TypeAdapter(COGXRecord)
 
