@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -116,7 +116,7 @@ def wait_for_server(url: str, timeout: float = 240.0) -> None:
 
 
 def log(msg: str) -> None:
-    ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     print(f"[{ts}] {msg}", flush=True)
 
 

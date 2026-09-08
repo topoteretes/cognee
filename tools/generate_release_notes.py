@@ -16,7 +16,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -415,7 +415,7 @@ def format_release_notes(
     compat_info: dict[str, str] | None = None,
 ) -> str:
     """Format structured release notes into markdown."""
-    date_str = datetime.now().astimezone().strftime("%Y-%m-%d")
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     md = f"# {get_release_title(notes, version)}\n\n"
     md += f"**Release Date:** {date_str}\n"
