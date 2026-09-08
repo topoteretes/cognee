@@ -140,7 +140,7 @@ async def test_router_does_not_inherit_ambient_context(monkeypatch):
 
     async def operation(**kwargs):
         assert secret.get() is None
-        return catalog.SourceChoices()
+        return catalog.RoutingChoices()
 
     monkeypatch.setattr(LLMGateway, "acreate_structured_output", operation)
     try:

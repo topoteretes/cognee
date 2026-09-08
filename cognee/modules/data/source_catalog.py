@@ -8,6 +8,7 @@ rank its descriptors, but only the server resolves IDs into search targets.
 import asyncio
 import json
 from contextvars import Context
+from typing import Literal, TypedDict
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,21 @@ from cognee.modules.users.permissions.methods import get_all_user_permission_dat
 
 MAX_METADATA_ROWS = 50000
 ROUTING_BATCH = 64
+
+
+class SourceDescriptor(TypedDict):
+    id: str
+    name: str
+    dataset_id: str
+    dataset_name: str
+    node_sets: list[str]
+    kind: Literal["dataset", "node_set"]
+    descriptions: list[str]
+    aliases: list[str]
+    sample_labels: list[str]
+    documents: int
+    source_name: str | None
+    capabilities: list[str]
 
 
 def node_names(value):
@@ -35,9 +51,9 @@ def target_id(dataset_id, node_set=None):
     return str(uuid5(NAMESPACE_URL, json.dumps([str(dataset_id), node_set])))
 
 
-def build_catalog(datasets, rows):
+def build_catalog(datasets, rows) -> list[SourceDescriptor]:
     """rows contain only projected, permitted metadata, never raw document text."""
-    items = {}
+    items: dict[str, SourceDescriptor] = {}
     for dataset in datasets:
         ident = target_id(dataset.id)
         items[ident] = {
@@ -89,18 +105,18 @@ def build_catalog(datasets, rows):
                 item["source_name"] = source_name
             elif item["source_name"] != source_name:
                 item["source_name"] = None
-            for field, value, cap in (
-                ("aliases", source, 12),
-                ("descriptions", description, 3),
-                ("sample_labels", label, 3),
+            for values, value, cap in (
+                (item["aliases"], source, 12),
+                (item["descriptions"], description, 3),
+                (item["sample_labels"], label, 3),
             ):
                 if (
                     isinstance(value, str)
                     and value
-                    and value[:300] not in item[field]
-                    and len(item[field]) < cap
+                    and value[:300] not in values
+                    and len(values) < cap
                 ):
-                    item[field].append(value[:300])
+                    values.append(value[:300])
     return sorted(items.values(), key=lambda i: (i["dataset_id"], i["kind"], i["name"]))
 
 
@@ -179,12 +195,13 @@ async def rank_descriptors(query, source_hint, candidates):
         "to bypass a narrower explicit source hint. Relevance must be calibrated from 0 to 1."
     )
 
-    async def run():
-        return await operation(
+    async def run() -> RoutingChoices:
+        result = await operation(
             text_input=payload, system_prompt=prompt, response_model=RoutingChoices
         )
+        return RoutingChoices.model_validate(result)
 
-    response = await Context().run(asyncio.create_task, run())
+    response = await Context().run(lambda: asyncio.create_task(run()))
     if any(choice.index >= len(candidates) for choice in response.choices):
         raise ValueError("Source router returned an unknown catalog index.")
     return SourceChoices(
