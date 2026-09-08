@@ -336,6 +336,8 @@ def _rehydrate_chunk(document: Document, node: dict, chunk_index: int) -> Docume
         chunk_index=chunk_index,
         cut_type=str(node.get("cut_type", "paragraph_end")),
         is_part_of=document,
+        belongs_to_set=document.belongs_to_set,
+        source_node_set=document.source_node_set,
         contains=[],
         importance_weight=node.get("importance_weight", document.importance_weight),
         document_id=str(document.id),
@@ -896,6 +898,11 @@ async def _write_and_publish(
     batch_size = cognify_config.chunks_per_batch or DEFAULT_CHUNKS_PER_BATCH
     for start in range(0, len(plan.fresh), batch_size):
         batch = plan.fresh[start : start + batch_size]
+        # Match extract_chunks_from_documents: policies plan content, while
+        # the writer carries document membership into graph and vector storage.
+        for chunk in batch:
+            chunk.belongs_to_set = document.belongs_to_set
+            chunk.source_node_set = document.source_node_set
         summaries = await extract_graph_and_summarize(
             batch,
             graph_model=graph_model,
