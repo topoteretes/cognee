@@ -495,7 +495,7 @@ def setup_logging(log_level=None, name=None) -> bool:
                 exc_info=(exc_type, exc_value, tb),
             )
         except Exception:
-            logging.debug(
+            logging.getLogger(__name__).debug(
                 "Rich traceback rendering failed, printing the plain traceback", exc_info=True
             )
             print("\n[Warning] Could not render rich traceback. Falling back to plain traceback.\n")
