@@ -1,7 +1,6 @@
 """Public tracing API: enable/disable tracing and retrieve traces."""
 
 import os
-from typing import Optional
 
 from cognee.modules.observability.tracing import (
     CogneeTrace,

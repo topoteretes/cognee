@@ -9,7 +9,6 @@ import sys
 from collections import deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
-from typing import Deque, List, Optional, Tuple
 
 import uvicorn
 from fastmcp import FastMCP

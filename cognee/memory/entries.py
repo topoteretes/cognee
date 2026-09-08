@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator

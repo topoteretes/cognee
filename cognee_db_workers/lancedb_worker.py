@@ -94,7 +94,7 @@ def _relax_nullability(schema):
 
 
 async def _op_create_table(registry: HandleRegistry, req: Request):
-    import pyarrow as pa  # noqa: F401  # ensure pyarrow is resolved in-worker
+    import pyarrow as pa  # ensure pyarrow is resolved in-worker
 
     conn = _get_connection(registry)
     name = req.args[0]

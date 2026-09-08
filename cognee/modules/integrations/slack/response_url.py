@@ -73,5 +73,5 @@ async def post_to_response_url(response_url: str, payload: dict[str, Any]) -> No
             async with session.post(response_url, json=payload, allow_redirects=False) as response:
                 if response.status != 200:
                     logger.warning("Slack response_url POST returned %s", response.status)
-    except Exception:  # noqa: BLE001 - nothing left to report to if delivery itself fails
+    except Exception:  # nothing left to report to if delivery itself fails
         logger.exception("Failed to deliver a message via Slack response_url")

@@ -51,9 +51,11 @@ class TestGetDefaultUserDatabaseNotCreated:
     )
     async def test_fresh_install_errors_become_database_not_created(self, message):
         engine = _engine_raising(_sqlite_operational_error(message))
-        with patch.object(gdu_mod, "get_relational_engine", return_value=engine):
-            with pytest.raises(DatabaseNotCreatedError):
-                await gdu_mod.get_default_user()
+        with (
+            patch.object(gdu_mod, "get_relational_engine", return_value=engine),
+            pytest.raises(DatabaseNotCreatedError),
+        ):
+            await gdu_mod.get_default_user()
 
     @pytest.mark.asyncio
     async def test_unrelated_operational_error_propagates_unchanged(self):
@@ -61,16 +63,20 @@ class TestGetDefaultUserDatabaseNotCreated:
         # converting it would make the recovery path mask real contention issues.
         error = _sqlite_operational_error("database is locked")
         engine = _engine_raising(error)
-        with patch.object(gdu_mod, "get_relational_engine", return_value=engine):
-            with pytest.raises(OperationalError):
-                await gdu_mod.get_default_user()
+        with (
+            patch.object(gdu_mod, "get_relational_engine", return_value=engine),
+            pytest.raises(OperationalError),
+        ):
+            await gdu_mod.get_default_user()
 
     @pytest.mark.asyncio
     async def test_non_operational_error_propagates_unchanged(self):
         engine = _engine_raising(RuntimeError("unable to open database file lookalike"))
-        with patch.object(gdu_mod, "get_relational_engine", return_value=engine):
-            with pytest.raises(RuntimeError):
-                await gdu_mod.get_default_user()
+        with (
+            patch.object(gdu_mod, "get_relational_engine", return_value=engine),
+            pytest.raises(RuntimeError),
+        ):
+            await gdu_mod.get_default_user()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -92,9 +98,11 @@ class TestGetDefaultUserDatabaseNotCreated:
         import cognee.exceptions.exceptions as exc_mod
 
         engine = _engine_raising(_sqlite_operational_error(message))
-        with patch.object(gdu_mod, "get_relational_engine", return_value=engine):
-            with patch.object(exc_mod, "logger") as mock_logger:
-                with pytest.raises(DatabaseNotCreatedError):
-                    await gdu_mod.get_default_user()
+        with (
+            patch.object(gdu_mod, "get_relational_engine", return_value=engine),
+            patch.object(exc_mod, "logger") as mock_logger,
+        ):
+            with pytest.raises(DatabaseNotCreatedError):
+                await gdu_mod.get_default_user()
         mock_logger.error.assert_not_called()
         mock_logger.warning.assert_not_called()

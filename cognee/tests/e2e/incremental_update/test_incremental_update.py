@@ -34,7 +34,7 @@ def incremental_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_incr_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),

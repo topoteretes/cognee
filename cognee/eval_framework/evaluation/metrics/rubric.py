@@ -10,7 +10,7 @@ Unlike DeepEval's GEval, this metric:
   - Does not require deepeval's GEval infrastructure
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 

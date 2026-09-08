@@ -396,7 +396,7 @@ if __name__ == "__main__":
             *sys.argv[1:],
         ]
 
-        rc = subprocess.run(cmd, env=env).returncode
+        rc = subprocess.run(cmd, env=env, check=False).returncode
     finally:
         try:
             os.killpg(server_proc.pid, signal.SIGTERM)

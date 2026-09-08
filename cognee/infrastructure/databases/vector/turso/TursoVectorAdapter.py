@@ -3,7 +3,7 @@
 import asyncio
 import json
 import threading
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError

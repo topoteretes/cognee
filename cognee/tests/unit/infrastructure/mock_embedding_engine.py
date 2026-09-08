@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,

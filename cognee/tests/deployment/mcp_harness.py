@@ -14,7 +14,6 @@ import socket
 import subprocess
 import time
 from collections.abc import AsyncIterator, Iterator
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +43,7 @@ def image_exists(tag: str) -> bool:
         subprocess.run(
             ["docker", "image", "inspect", tag],
             capture_output=True,
+            check=False,
         ).returncode
         == 0
     )
@@ -101,6 +101,7 @@ class MCPContainer:
             ["docker", "logs", self.name],
             capture_output=True,
             text=True,
+            check=False,
         )
         return result.stdout + result.stderr
 
@@ -134,7 +135,7 @@ def run_mcp_http_container(
     for key, value in env.items():
         env_args += ["-e", f"{key}={value}"]
 
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
     subprocess.run(
         [
@@ -164,7 +165,7 @@ def run_mcp_http_container(
             raise
         yield container
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
 
 
 @contextlib.asynccontextmanager
@@ -173,7 +174,9 @@ async def mcp_client_session(mcp_url: str) -> AsyncIterator[object]:
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
 
-    async with streamablehttp_client(mcp_url) as (read_stream, write_stream, _get_session_id):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            yield session
+    async with (
+        streamablehttp_client(mcp_url) as (read_stream, write_stream, _get_session_id),
+        ClientSession(read_stream, write_stream) as session,
+    ):
+        await session.initialize()
+        yield session

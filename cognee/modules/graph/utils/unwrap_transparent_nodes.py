@@ -6,7 +6,7 @@ its DataPoint children. Nothing here stores anything - resolution happens before
 walk decides what to write.
 """
 
-from typing import Any, List, Optional
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.extract_field_relationships import (

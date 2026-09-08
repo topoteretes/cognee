@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from typing import List
 from uuid import UUID
 
 from sqlalchemy import and_, or_, update

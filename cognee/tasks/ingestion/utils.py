@@ -1,7 +1,7 @@
 import inspect
 from tempfile import SpooledTemporaryFile
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem

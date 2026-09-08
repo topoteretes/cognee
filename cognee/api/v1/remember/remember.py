@@ -1,7 +1,7 @@
 import asyncio
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
 
 try:

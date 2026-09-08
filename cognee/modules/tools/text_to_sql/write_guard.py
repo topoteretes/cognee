@@ -10,7 +10,6 @@ Pure functions, no I/O.
 """
 
 import re
-from typing import Optional
 
 from cognee.modules.tools.errors import SqlGuardError
 from cognee.modules.tools.text_to_sql.sql_guard import _STRING_LITERAL_RE, strip_sql

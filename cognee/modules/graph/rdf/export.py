@@ -15,7 +15,7 @@ edges without ``predicate_uri`` keep minted cognee predicate IRIs. Nothing is
 collapsed into a closed local vocabulary.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import quote
 
 from rdflib import RDF, RDFS, Graph, Literal, Namespace, URIRef

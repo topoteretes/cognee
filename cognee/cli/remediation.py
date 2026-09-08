@@ -25,8 +25,6 @@ the runtime error text), not on env-var spellings a message may not contain.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 # Ordering matters: the first match wins, so narrower patterns come first.
 # An invalid key ("authenticationerror") beats the generic missing-key row.
 # Each entry is (needles, hint); the hint fires when any needle is a

@@ -29,8 +29,6 @@ break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
 document degrade to entries with ``source_ref_key=None``, never a raise.
 """
 
-from typing import List, Optional
-
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model

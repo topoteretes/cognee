@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, List, Optional, Union
+from typing import Any, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status

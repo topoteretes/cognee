@@ -21,7 +21,7 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.eval_framework.eval_config import EvalConfig
 from cognee.shared.logging_utils import get_logger

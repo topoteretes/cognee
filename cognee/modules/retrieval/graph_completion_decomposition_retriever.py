@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, List, Optional, Type
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine

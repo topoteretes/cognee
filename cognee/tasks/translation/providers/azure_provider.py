@@ -1,5 +1,3 @@
-from typing import Optional
-
 import aiohttp
 
 from cognee.shared.logging_utils import get_logger

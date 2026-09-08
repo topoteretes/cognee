@@ -27,7 +27,7 @@ actual access cut-off.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp

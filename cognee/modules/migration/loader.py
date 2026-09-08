@@ -16,7 +16,7 @@ from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from cognee.modules.engine.models import Entity, EntityType

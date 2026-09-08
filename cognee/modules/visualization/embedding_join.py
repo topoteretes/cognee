@@ -24,7 +24,7 @@ render must never break because the semantic tab couldn't fetch vectors.
 import inspect
 import random
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 

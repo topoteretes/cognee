@@ -6,7 +6,6 @@ Minimal CLI entry point for cognee that avoids early initialization
 import os
 import sys
 from collections.abc import Sequence
-from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 

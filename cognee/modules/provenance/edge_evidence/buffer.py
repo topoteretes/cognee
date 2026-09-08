@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.infrastructure.databases.provenance import data_item_id

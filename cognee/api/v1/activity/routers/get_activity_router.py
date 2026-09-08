@@ -5,7 +5,6 @@ record per non-pipeline operation — plus in-memory OTEL spans, so the
 frontend can render an activity timeline and trace viewer.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -299,7 +298,7 @@ def get_activity_router() -> APIRouter:
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             # Get all users (agents have @cognee.agent, but show all non-default)
-            users_q = select(User).filter(User.is_active.is_(True))  # noqa: E712
+            users_q = select(User).filter(User.is_active.is_(True))
             users_result = await session.execute(users_q)
             all_users = users_result.scalars().all()
 

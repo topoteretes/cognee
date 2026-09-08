@@ -10,7 +10,7 @@ Pass ``full=True`` to render the entire graph (legacy behavior).
 """
 
 from collections import deque
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData, Node
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch

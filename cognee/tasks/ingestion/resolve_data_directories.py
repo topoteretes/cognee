@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import BinaryIO, List, Union
+from typing import BinaryIO
 from urllib.parse import urlparse
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config

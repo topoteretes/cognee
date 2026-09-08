@@ -11,7 +11,7 @@ helpers are deliberately strict so tests catch malformed stored data and scoring
 """
 
 from datetime import datetime, timezone
-from typing import List, Protocol, Tuple
+from typing import Protocol
 from uuid import uuid4
 
 from pydantic import TypeAdapter

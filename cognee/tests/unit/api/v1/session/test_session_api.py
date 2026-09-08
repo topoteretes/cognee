@@ -18,7 +18,7 @@ def _user(id_: str):
 
 def _session_module():
     """The real session.py module (package __init__ replaces session with a SimpleNamespace)."""
-    import cognee.api.v1.session  # noqa: F401 - ensures session.py is in sys.modules
+    import cognee.api.v1.session  # ensures session.py is in sys.modules
 
     return sys.modules["cognee.api.v1.session.session"]
 

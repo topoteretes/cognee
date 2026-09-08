@@ -1,4 +1,4 @@
-from typing import List, Optional, cast
+from typing import cast
 from uuid import UUID
 
 from cognee.context_global_variables import session_user

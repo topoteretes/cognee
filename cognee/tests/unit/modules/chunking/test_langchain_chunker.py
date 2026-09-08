@@ -21,9 +21,9 @@ import pytest
 
 pytest.importorskip("langchain_text_splitters")
 
-from cognee.modules.chunking.LangchainChunker import LangchainChunker  # noqa: E402
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk  # noqa: E402
-from cognee.modules.data.processing.document_types import Document  # noqa: E402
+from cognee.modules.chunking.LangchainChunker import LangchainChunker
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.processing.document_types import Document
 
 
 class _WordCountTokenizer:

@@ -2,7 +2,6 @@
 
 import os
 from functools import lru_cache
-from typing import Optional
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.cache.config import get_cache_config

@@ -6,7 +6,7 @@ skill is relevant. Active skills for the current turn live in a ContextVar so
 the handler does not need another graph round-trip.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from cognee.modules.engine.models import Tool
 from cognee.modules.tools.context import active_skills_var, opened_skills_var

@@ -42,10 +42,12 @@ class TestResolveCliUser:
         mock_get_user = AsyncMock(side_effect=EntityNotFoundError("User not found"))
         mock_get_default = AsyncMock(return_value=default_user)
 
-        with patch("cognee.modules.users.methods.get_user", mock_get_user):
-            with patch("cognee.modules.users.methods.get_default_user", mock_get_default):
-                with patch("cognee.cli.echo.warning") as mock_warn:
-                    result = asyncio.run(resolve_cli_user(uid))
-                    assert result is default_user
-                    mock_warn.assert_called_once()
-                    assert "falling back" in mock_warn.call_args[0][0].lower()
+        with (
+            patch("cognee.modules.users.methods.get_user", mock_get_user),
+            patch("cognee.modules.users.methods.get_default_user", mock_get_default),
+        ):
+            with patch("cognee.cli.echo.warning") as mock_warn:
+                result = asyncio.run(resolve_cli_user(uid))
+                assert result is default_user
+                mock_warn.assert_called_once()
+                assert "falling back" in mock_warn.call_args[0][0].lower()

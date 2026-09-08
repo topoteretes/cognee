@@ -11,7 +11,6 @@ the prefilter catalog.
 """
 
 from contextvars import ContextVar
-from typing import Dict, Optional, Set
 
 from cognee.modules.engine.models import Skill
 

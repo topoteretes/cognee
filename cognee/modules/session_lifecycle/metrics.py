@@ -22,7 +22,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
 from uuid import UUID as UUIDType
 
 from sqlalchemy import and_, case, func, or_, select, update

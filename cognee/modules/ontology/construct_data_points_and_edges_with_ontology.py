@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import EdgeIdentity

@@ -20,7 +20,7 @@ so no property is lost.
 
 import json
 from collections.abc import Iterable
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, create_model, field_validator
 

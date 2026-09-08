@@ -1,6 +1,5 @@
 import string
 from collections import Counter
-from typing import List
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS

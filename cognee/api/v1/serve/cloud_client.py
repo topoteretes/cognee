@@ -2,7 +2,7 @@
 
 import io
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 import aiohttp

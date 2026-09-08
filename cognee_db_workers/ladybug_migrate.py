@@ -127,6 +127,7 @@ def _try_create_env(python_exe: str, base: str, package_name: str, version: str)
         [py_bin, "-m", "pip", "install", f"{package_name}=={version}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         return py_bin
@@ -196,6 +197,7 @@ conn.execute({cypher!r})
         text=True,
         cwd=tempfile.gettempdir(),
         env=env,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"{cypher} failed:\n{proc.stderr}")

@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 from cognee.context_global_variables import current_dataset_id
 from cognee.modules.retrieval.hybrid.chunks import chunk_candidate_limit, search_collection

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cognee.api.v1.visualize.visualize import get_live_events as _get_live_events  # noqa: F401,E501
+from cognee.api.v1.visualize.visualize import get_live_events as _get_live_events
 from cognee.modules.users.exceptions import PermissionDeniedError
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]

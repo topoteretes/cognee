@@ -161,9 +161,8 @@ async def _invalidate_session_entries(
         used = entry.used_graph_element_ids or {}
         used_nodes = set(used.get("node_ids") or [])
         used_edges = set(used.get("edge_ids") or [])
-        if (used_nodes & deleted_node_ids) or (used_edges & deleted_edge_ids):
-            if entry.qa_id:
-                contaminated_qa_ids.add(entry.qa_id)
+        if ((used_nodes & deleted_node_ids) or (used_edges & deleted_edge_ids)) and entry.qa_id:
+            contaminated_qa_ids.add(entry.qa_id)
 
     if not contaminated_qa_ids:
         return (0, 0)
@@ -189,10 +188,13 @@ async def _invalidate_session_entries(
                 if set(context_entry.get("referenced_qa_ids") or []) & contaminated_qa_ids:
                     contaminated_feedback_ids.add(entry_id)
                     changed = True
-            elif kind == "context" and entry_id not in contaminated_context_ids:
-                if set(context_entry.get("source_feedback_ids") or []) & contaminated_feedback_ids:
-                    contaminated_context_ids.add(entry_id)
-                    changed = True
+            elif (
+                kind == "context"
+                and entry_id not in contaminated_context_ids
+                and set(context_entry.get("source_feedback_ids") or []) & contaminated_feedback_ids
+            ):
+                contaminated_context_ids.add(entry_id)
+                changed = True
         for entry in entries:
             if not entry.qa_id or entry.qa_id in contaminated_qa_ids:
                 continue

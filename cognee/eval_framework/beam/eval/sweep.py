@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from cognee.eval_framework.beam.eval.registry import ANSWERING_STRATEGIES
 from cognee.eval_framework.eval_config import EvalConfig

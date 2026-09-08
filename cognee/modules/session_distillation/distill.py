@@ -14,7 +14,6 @@ work, never the whole run.
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables

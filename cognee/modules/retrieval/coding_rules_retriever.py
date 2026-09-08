@@ -1,6 +1,6 @@
 import asyncio
 from functools import reduce
-from typing import Any, List, Optional
+from typing import Any
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.shared.logging_utils import get_logger

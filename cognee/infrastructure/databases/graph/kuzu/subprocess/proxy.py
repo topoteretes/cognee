@@ -8,7 +8,7 @@ so the child never imports cognee.
 from __future__ import annotations
 
 import multiprocessing as mp
-from typing import Any, Dict, Optional
+from typing import Any
 
 from cognee_db_workers.harness import (
     ReplayStep,

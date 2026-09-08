@@ -4,7 +4,6 @@ Exposes the skills SDK helpers over HTTP with explicit response schemas and
 caller-scoped authorization, mirroring the schema-inventory router.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query

@@ -8,7 +8,7 @@ empty list.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway

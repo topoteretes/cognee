@@ -5,7 +5,6 @@ import re
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from threading import RLock
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.agents.models import (
