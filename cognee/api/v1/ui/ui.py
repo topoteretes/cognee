@@ -572,7 +572,7 @@ def start_ui(
                 docker_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                start_new_session=True,
             )
 
             _stream_process_output(mcp_process, "stdout", "[MCP]", "\033[34m")  # Blue
@@ -606,7 +606,7 @@ def start_ui(
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                start_new_session=True,
             )
 
             # Start threads to stream backend output with prefix
@@ -714,7 +714,7 @@ def start_ui(
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                    start_new_session=True,
                 )
             else:
                 process = subprocess.Popen(
@@ -723,7 +723,7 @@ def start_ui(
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                    start_new_session=True,
                 )
 
         # Start threads to stream frontend output with prefix

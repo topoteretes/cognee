@@ -26,7 +26,7 @@ class TestCogneeServerStart(unittest.TestCase):
                 "--port",
                 "8000",
             ],
-            preexec_fn=os.setsid,
+            start_new_session=True,
         )
         # Give the server some time to start
         time.sleep(120)

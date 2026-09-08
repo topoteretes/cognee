@@ -296,7 +296,7 @@ async def _rekey_chunk_scoped_provenance(graph_engine, fork_rows: list) -> None:
         except UnsupportedProvenanceCapability:
             return
 
-        def _forked_v2_refs(ref_map: dict) -> dict:
+        def _forked_v2_refs(ref_map: dict, *, dataset_id=dataset_id, id_map=id_map) -> dict:
             """old v2 ref key -> (new v2 ref key, holder ids)."""
             moves: dict = {}
             for holder, refs in ref_map.items():
@@ -542,9 +542,9 @@ async def _rekey_graph_nodes(
 
     # Graph last: re-key the document nodes themselves (also updates each
     # node's own document_id property when it mirrors the node id).
-    for old_id in id_map:
+    for old_id, new_id in id_map.items():
         if str(properties_by_id[old_id].get("document_id")) == old_id:
-            properties_by_id[old_id]["document_id"] = id_map[old_id]
+            properties_by_id[old_id]["document_id"] = new_id
     remapped_edges = await _migrate_graph(graph_engine, id_map, properties_by_id, normalized_edges)
     logger.info(
         "rekey_fork_document_ids: re-keyed %d fork document node(s), %d edge(s)",

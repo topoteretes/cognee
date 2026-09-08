@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field, TypeAdapter
+from typing_extensions import Self
 
 COGX_VERSION = "0.1"
 
@@ -234,7 +235,7 @@ class COGXArchiveWriter:
         self.migration_revision: str | None = None
         self._handles: dict[str, Any] = {}
 
-    def __enter__(self) -> "COGXArchiveWriter":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:

@@ -907,7 +907,7 @@ class SubprocessSession:
                         f"Subprocess response queue broken: {e!r}"
                     )
                     break
-                except (pickle.UnpicklingError, EOFError) as e:
+                except pickle.UnpicklingError as e:
                     # The worker emitted a value we couldn't deserialize
                     # (corrupted queue payload, partial write, etc.).
                     # Treat as a transport failure too — every pending

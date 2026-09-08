@@ -50,8 +50,8 @@ class DefaultUrlCrawler:
         *,
         concurrency: int = 5,
         crawl_delay: float = 0.5,
-        max_crawl_delay: float | None = float(os.getenv("WEB_SCRAPER_MAX_DELAY", 10.0)),
-        timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", 15.0)),
+        max_crawl_delay: float | None = float(os.getenv("WEB_SCRAPER_MAX_DELAY", "10.0")),
+        timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", "15.0")),
         max_retries: int = 2,
         retry_delay_factor: float = 0.5,
         headers: dict[str, str] | None = None,
@@ -111,8 +111,9 @@ class DefaultUrlCrawler:
         """Exit the context manager, closing the HTTP client."""
         await self.close()
 
+    @staticmethod
     @lru_cache(maxsize=1024)
-    def _domain_from_url(self, url: str) -> str:
+    def _domain_from_url(url: str) -> str:
         """Extract the domain (netloc) from a URL.
 
         Args:
@@ -129,8 +130,9 @@ class DefaultUrlCrawler:
             )
             return url
 
+    @staticmethod
     @lru_cache(maxsize=1024)
-    def _get_domain_root(self, url: str) -> str:
+    def _get_domain_root(url: str) -> str:
         """Get the root URL (scheme and netloc) from a URL.
 
         Args:
@@ -455,13 +457,11 @@ class DefaultUrlCrawler:
         logger.info(f"Creating {len(urls)} async tasks for concurrent fetching")
         tasks = [asyncio.create_task(_task(u, position)) for position, u in enumerate(urls, 1)]
         results = {}
-        completed = 0
         total = len(tasks)
 
-        for coro in asyncio.as_completed(tasks):
+        for completed, coro in enumerate(asyncio.as_completed(tasks), 1):
             url, html = await coro
             results[url] = html
-            completed += 1
             logger.info(f"Progress: {completed}/{total} URLs processed")
 
         logger.info(f"Completed fetching all {len(results)} URL(s)")

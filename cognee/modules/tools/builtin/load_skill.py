@@ -37,7 +37,7 @@ async def handler(args: dict[str, Any], **_) -> str:
     if not name:
         raise ToolInvocationError("load_skill requires a 'name' argument")
 
-    skills = active_skills_var.get()
+    skills = active_skills_var.get({})
     skill = skills.get(name)
     if skill is None:
         available = ", ".join(sorted(skills)) or "(none in scope)"
