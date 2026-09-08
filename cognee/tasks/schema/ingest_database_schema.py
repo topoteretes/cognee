@@ -76,7 +76,9 @@ async def ingest_database_schema(
                 )
                 row_count_estimate = estimate.scalar() or 0
             else:
-                count_result = await cursor.execute(text(f"SELECT COUNT(*) FROM {tn};"))  # tn is fully quoted
+                count_result = await cursor.execute(
+                    text(f"SELECT COUNT(*) FROM {tn};")
+                )  # tn is fully quoted
                 row_count_estimate = count_result.scalar()
 
             schema_table = SchemaTable(

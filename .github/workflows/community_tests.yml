@@ -41,10 +41,14 @@ jobs:
       - name: Run pre-commit hooks
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
 
+      # Each check below reports on its own: a red step earlier in the job no longer
+      # hides the later ones.
       - name: Install dependencies
+        if: ${{ !cancelled() }}
         run: uv sync --extra dev
 
       - name: Ruff check
+        if: ${{ !cancelled() }}
         run: uv run ruff check .
 
       # Exception-handling rules are enforced without escape hatch: `--ignore-noqa`
@@ -60,9 +64,11 @@ jobs:
         run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa
 
       - name: Ruff format check
+        if: ${{ !cancelled() }}
         run: uv run ruff format --check .
 
       - name: Ty type check
+        if: ${{ !cancelled() }}
         run: uv run ty check .
 
   unit-tests:
