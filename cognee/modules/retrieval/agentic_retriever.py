@@ -148,7 +148,9 @@ class AgenticRetriever(GraphCompletionRetriever):
             graph_engine = await get_graph_engine()
             _, edges = await graph_engine.get_graph_data()
         except Exception as exc:
-            logger.warning("Unable to inspect graph edges before agentic retrieval: %s", exc)
+            logger.warning(
+                "Unable to inspect graph edges before agentic retrieval: %s", exc, exc_info=True
+            )
             return True
         return bool(edges)
 
@@ -363,7 +365,9 @@ class AgenticRetriever(GraphCompletionRetriever):
         try:
             await add_data_points(runs, ctx=ctx)
         except Exception as exc:
-            logger.warning("Failed to record SkillRun(s) after agentic retrieval: %s", exc)
+            logger.warning(
+                "Failed to record SkillRun(s) after agentic retrieval: %s", exc, exc_info=True
+            )
 
     async def _get_session_history(self) -> str:
         """Return formatted session history for the active user, if caching is available."""
@@ -389,7 +393,7 @@ class AgenticRetriever(GraphCompletionRetriever):
             )
             return history if isinstance(history, str) else ""
         except Exception as exc:
-            logger.warning("Failed to load agentic session history: %s", exc)
+            logger.warning("Failed to load agentic session history: %s", exc, exc_info=True)
             return ""
 
     async def _maybe_active_context_block(self, query: str | None) -> tuple[str, list]:
@@ -427,7 +431,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 query=query or "",
             )
         except Exception as exc:
-            logger.warning("Agentic active session-context block failed: %s", exc)
+            logger.warning("Agentic active session-context block failed: %s", exc, exc_info=True)
             return "", []
 
     async def _store_session_qa(
@@ -464,7 +468,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 used_session_context_ids=served_ids,
             )
         except Exception as exc:
-            logger.warning("Failed to store agentic session QA: %s", exc)
+            logger.warning("Failed to store agentic session QA: %s", exc, exc_info=True)
 
     async def _run_tool_loop(
         self,

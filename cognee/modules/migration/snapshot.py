@@ -26,6 +26,10 @@ from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, create_model,
 
 from cognee.infrastructure.engine import DataPoint
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 # Edge properties that are internal bookkeeping rather than knowledge content.
 _SKIP_EDGE_KEYS = ("source_node_id", "target_node_id", "relationship_name")
 
@@ -127,8 +131,8 @@ def rehydrate_node(
     if known is not None:
         try:
             return known(**props)
-        except Exception:  # noqa: BLE001 — fall back to a dynamic model
-            pass
+        except Exception:  # — fall back to a dynamic model
+            logger.debug("Ignoring exception in rehydrate_node", exc_info=True)
 
     # Carry the record's properties and embeddable fields onto the dynamic
     # CLASS so they survive downstream field iteration and copy_model
@@ -139,8 +143,8 @@ def rehydrate_node(
     try:
         # Created lazily: only when the registered class is absent or fails.
         return _dynamic_model(type_name, props, index_fields)(**props)
-    except Exception:  # noqa: BLE001 — final fallback below
-        pass
+    except Exception:  # — final fallback below
+        logger.debug("Ignoring exception in rehydrate_node", exc_info=True)
 
     base_safe = {key: value for key, value in props.items() if key in _BASE_FIELDS}
     return _dynamic_model(type_name, base_safe, index_fields)(**base_safe)

@@ -231,7 +231,9 @@ async def get_agent_connection_detail(
             recent_traces = [_entry_to_dict(entry) for entry in traces[-20:]]
             recent_sessions = [{"session_id": agent.session_id, "user_id": agent.user_id}]
         except Exception as error:
-            logger.debug("Failed to hydrate agent detail from session cache: %s", error)
+            logger.debug(
+                "Failed to hydrate agent detail from session cache: %s", error, exc_info=True
+            )
 
     return AgentDetailResponse(
         agent=agent,

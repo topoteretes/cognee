@@ -182,4 +182,4 @@ async def record_llm_call(
             model=model,
         )
     except Exception as exc:
-        logger.debug("record_llm_call: accumulate failed (%s)", exc)
+        logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)

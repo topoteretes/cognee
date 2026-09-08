@@ -190,6 +190,7 @@ async def _fast_move_provenance_ladybug(graph_engine, old_key: str, new_key: str
             "rekey_fork_document_ids: fast provenance move unavailable (%s), "
             "using the generic path",
             error,
+            exc_info=True,
         )
         return False
     return True

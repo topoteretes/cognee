@@ -154,7 +154,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
             except Exception as e:
                 previous_attempts += f"Query: {cypher_query if 'cypher_query' in locals() else 'Not generated'} -> Executed with error: {e}\n"
-                logger.error(f"Error executing query: {e!s}")
+                logger.exception("Error executing query")
 
         logger.warning(
             f"Failed to get results after {self.max_attempts} attempts for query: '{query[:50]}...'"

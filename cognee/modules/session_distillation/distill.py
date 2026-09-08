@@ -189,7 +189,7 @@ async def curate_batch(batch_text: str) -> list[ProposedLesson]:
         )
         return list(result.lessons)
     except Exception as error:
-        logger.warning("Distillation curator batch failed open: %s", error)
+        logger.warning("Distillation curator batch failed open: %s", error, exc_info=True)
         return []
 
 
@@ -229,7 +229,7 @@ async def search_payload_texts(
             node_name=node_name,
         )
     except Exception as error:
-        logger.debug("Distillation search on %s failed open: %s", collection, error)
+        logger.debug("Distillation search on %s failed open: %s", collection, error, exc_info=True)
         return []
 
     texts: list[str] = []
@@ -289,7 +289,7 @@ async def write_or_reject(
             response_model=WrittenLesson,
         )
     except Exception as error:
-        logger.warning("Distillation writer call failed open: %s", error)
+        logger.warning("Distillation writer call failed open: %s", error, exc_info=True)
         return None
 
 

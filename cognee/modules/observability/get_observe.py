@@ -5,6 +5,10 @@ from cognee.base_config import get_base_config
 from .exceptions import UnsupportedObserverError
 from .observers import Observer
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 # Cap span input/output like the DB adapters cap query text (redact_secrets(query[:500])).
 _MAX_OBSERVED_CHARS = 8000
 
@@ -63,6 +67,7 @@ def _generation_input_payload(func, args, kwargs):
         }
         return json.dumps(payload, default=str) if payload else None
     except Exception:
+        logger.debug("Ignoring exception in _generation_input_payload", exc_info=True)
         return None
 
 
@@ -83,7 +88,7 @@ def _set_generation_output(span, result) -> None:
             LANGFUSE_OBSERVATION_OUTPUT, redact_secrets(output[:_MAX_OBSERVED_CHARS])
         )
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _set_generation_output", exc_info=True)
 
 
 def _wrap_with_otel(inner_decorator):

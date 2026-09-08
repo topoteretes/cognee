@@ -794,6 +794,7 @@ async def _edges_needing_reassert(graph_engine, at_risk: list) -> list:
             "%d at-risk edge(s)",
             error,
             len(at_risk),
+            exc_info=True,
         )
         return at_risk
 

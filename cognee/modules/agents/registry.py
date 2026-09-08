@@ -184,8 +184,8 @@ async def register_agent_connection(
             from cognee.modules.session_lifecycle.metrics import set_session_agent
 
             await set_session_agent(session_id=session_id, user_id=user_id, agent_id=connection.id)
-        except Exception as error:  # noqa: BLE001 — attribution must not break registration
-            logger.debug("Session agent attribution skipped: %s", error)
+        except Exception as error:  # — attribution must not break registration
+            logger.debug("Session agent attribution skipped: %s", error, exc_info=True)
 
     return connection
 

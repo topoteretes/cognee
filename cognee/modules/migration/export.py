@@ -127,8 +127,10 @@ async def _stored_migration_revision(dataset_id) -> str | None:
         async with db_engine.get_async_session() as session:
             record = await session.get(GlobalDatabaseVersion, GLOBAL_DATABASE_VERSION_ROW_ID)
         return record.global_migration_revision if record else None
-    except Exception as error:  # noqa: BLE001 — manifest metadata is best effort
-        logger.debug("Could not determine migration revision for manifest: %s", error)
+    except Exception as error:  # — manifest metadata is best effort
+        logger.debug(
+            "Could not determine migration revision for manifest: %s", error, exc_info=True
+        )
         return None
 
 
@@ -271,8 +273,10 @@ async def export_dataset(
             )
 
             embedding_model = get_embedding_context_config().embedding_model
-        except Exception as error:  # noqa: BLE001 — manifest metadata is best effort
-            logger.debug("Could not determine embedding model for manifest: %s", error)
+        except Exception as error:  # — manifest metadata is best effort
+            logger.debug(
+                "Could not determine embedding model for manifest: %s", error, exc_info=True
+            )
         _write_cogx(
             nodes,
             edges,

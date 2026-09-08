@@ -62,7 +62,11 @@ async def _semantic_payload(pre) -> tuple[dict | None, dict | None]:
         clusters = compute_clusters(nodes, embeddings)
         return positions, clusters
     except Exception as exc:
-        logger.warning("Semantic map: payload computation failed (%s); tab shows empty state.", exc)
+        logger.warning(
+            "Semantic map: payload computation failed (%s); tab shows empty state.",
+            exc,
+            exc_info=True,
+        )
         return None, None
 
 

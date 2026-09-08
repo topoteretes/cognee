@@ -10,6 +10,10 @@ from cognee.modules.observability.tracing import (
     shutdown_tracing,
 )
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 _tracing_enabled: bool = False
 
 
@@ -28,13 +32,13 @@ def enable_tracing(console_output: bool = False) -> None:
 
         setup_metrics(console_output=console_output)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in enable_tracing", exc_info=True)
     try:
         from cognee.modules.observability.logs import setup_log_bridge
 
         setup_log_bridge(console_output=console_output)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in enable_tracing", exc_info=True)
     _tracing_enabled = True
 
 
@@ -47,13 +51,13 @@ def disable_tracing() -> None:
 
         shutdown_metrics()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in disable_tracing", exc_info=True)
     try:
         from cognee.modules.observability.logs import shutdown_log_bridge
 
         shutdown_log_bridge()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in disable_tracing", exc_info=True)
     _tracing_enabled = False
 
 

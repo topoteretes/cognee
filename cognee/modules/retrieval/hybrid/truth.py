@@ -60,7 +60,9 @@ async def build_truth_context(
         truth_state_by_id = await unified_engine.graph.get_node_truth_state(candidate_chunk_ids)
         return TruthContext(q_coords, truth_state_by_id, current_truth_epoch)
     except Exception as error:
-        logger.debug("Truth-subspace lookup failed; using baseline ranking: %s", error)
+        logger.debug(
+            "Truth-subspace lookup failed; using baseline ranking: %s", error, exc_info=True
+        )
         return TruthContext()
 
 

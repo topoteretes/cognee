@@ -97,13 +97,17 @@ async def _query_tool_nodes(dataset_id: UUID | None) -> list[Tool]:
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception as exc:
-        logger.warning("Unable to import graph engine while resolving tools: %s", exc)
+        logger.warning(
+            "Unable to import graph engine while resolving tools: %s", exc, exc_info=True
+        )
         return []
 
     try:
         graph_engine = await get_graph_engine()
     except Exception as exc:
-        logger.warning("Unable to initialize graph engine while resolving tools: %s", exc)
+        logger.warning(
+            "Unable to initialize graph engine while resolving tools: %s", exc, exc_info=True
+        )
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -118,7 +122,7 @@ async def _query_tool_nodes(dataset_id: UUID | None) -> list[Tool]:
         else:
             raw_nodes, _ = await get_graph_data()
     except Exception as exc:
-        logger.warning("Graph-backed Tool lookup failed: %s", exc)
+        logger.warning("Graph-backed Tool lookup failed: %s", exc, exc_info=True)
         return []
     if isinstance(raw_nodes, tuple) and len(raw_nodes) == 2:
         raw_nodes = raw_nodes[0]
@@ -154,4 +158,5 @@ def _coerce_tool(raw) -> Tool | None:
     try:
         return Tool.model_validate(data)
     except Exception:
+        logger.debug("Ignoring exception in _coerce_tool", exc_info=True)
         return None

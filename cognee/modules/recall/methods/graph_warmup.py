@@ -219,7 +219,9 @@ async def assess_memory_readiness(user, dataset_ids: list[UUID] | None) -> Warmu
             _warmup_cache[key] = (probe, time.monotonic() + config.recall_warmup_cache_ttl)
         return probe
     except Exception as error:
-        logger.warning("Graph warm-up probe failed; treating memory as warm: %s", error)
+        logger.warning(
+            "Graph warm-up probe failed; treating memory as warm: %s", error, exc_info=True
+        )
         return WarmupProbe(STATE_WARM, _WARM_COUNT)
 
 
