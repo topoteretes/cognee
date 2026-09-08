@@ -84,8 +84,49 @@ def test_processing_status_returns_counts(authenticated_client, monkeypatch):
     response = authenticated_client.get(f"/api/v1/datasets/{dataset_id}/processing-status")
 
     assert response.status_code == 200
+    # Exactly the three counts: the optional items field must not leak as null.
     assert response.json() == {"total": 10, "completed": 7, "pending": 3}
-    helper.assert_awaited_once_with(dataset_id, pipeline_name="cognify_pipeline")
+    helper.assert_awaited_once_with(
+        dataset_id, pipeline_name="cognify_pipeline", include_items=False
+    )
+
+
+def test_processing_status_include_items_returns_breakdown(authenticated_client, monkeypatch):
+    dataset_id = uuid.uuid4()
+    done_id, pending_id = uuid.uuid4(), uuid.uuid4()
+    _authorize_datasets(monkeypatch, [SimpleNamespace(id=dataset_id)])
+
+    helper = AsyncMock(
+        return_value={
+            "total": 2,
+            "completed": 1,
+            "pending": 1,
+            "items": [
+                {"id": done_id, "name": "done.pdf", "completed": True},
+                {"id": pending_id, "name": "fresh.md", "completed": False},
+            ],
+        }
+    )
+    _patch_status_helper(monkeypatch, helper)
+
+    response = authenticated_client.get(
+        f"/api/v1/datasets/{dataset_id}/processing-status",
+        params={"include_items": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 2,
+        "completed": 1,
+        "pending": 1,
+        "items": [
+            {"id": str(done_id), "name": "done.pdf", "completed": True},
+            {"id": str(pending_id), "name": "fresh.md", "completed": False},
+        ],
+    }
+    helper.assert_awaited_once_with(
+        dataset_id, pipeline_name="cognify_pipeline", include_items=True
+    )
 
 
 def test_processing_status_empty_dataset(authenticated_client, monkeypatch):
@@ -114,7 +155,7 @@ def test_processing_status_forwards_pipeline_query_param(authenticated_client, m
     )
 
     assert response.status_code == 200
-    helper.assert_awaited_once_with(dataset_id, pipeline_name="add_pipeline")
+    helper.assert_awaited_once_with(dataset_id, pipeline_name="add_pipeline", include_items=False)
 
 
 def test_processing_status_unknown_or_unauthorized_dataset_is_404(

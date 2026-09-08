@@ -78,12 +78,25 @@ class PipelineRunStatusWithProgress(BaseModel):
     )
 
 
+class DataItemProcessingStatusDTO(OutDTO):
+    """One data item's completion state for the requested pipeline."""
+
+    id: UUID
+    name: str
+    completed: bool
+
+
 class DatasetProcessingStatusDTO(OutDTO):
     """Item-level completion counts for one dataset and one pipeline."""
 
     total: int = Field(description="Number of data items in the dataset")
     completed: int = Field(description="Items carrying the per-item completion stamp")
     pending: int = Field(description="Items without the stamp (total - completed)")
+    # Only present when the caller asks for it (include_items=true); the route
+    # excludes None so the default body stays the bare three counts.
+    items: Optional[List[DataItemProcessingStatusDTO]] = Field(
+        default=None, description="Per-item breakdown, present only with include_items=true"
+    )
 
 
 class DatasetDTO(OutDTO):
@@ -453,6 +466,7 @@ def get_datasets_router() -> APIRouter:
     @router.get(
         "/{dataset_id}/processing-status",
         response_model=DatasetProcessingStatusDTO,
+        response_model_exclude_none=True,
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def get_dataset_processing_status(
@@ -467,6 +481,13 @@ def get_datasets_router() -> APIRouter:
                 " (default), 'add_pipeline', or 'code_graph_pipeline'."
             ),
             examples=["cognify_pipeline"],
+        ),
+        include_items: bool = Query(
+            False,
+            description=(
+                "Also list every item with its id, name and completed flag."
+                " Off by default so the response stays the bare counts."
+            ),
         ),
         user: User = Depends(get_authenticated_user),
     ):
@@ -484,14 +505,19 @@ def get_datasets_router() -> APIRouter:
         ## Query Parameters
         - **pipeline** (str, optional): Pipeline name to inspect. Defaults to
           `cognify_pipeline`.
+        - **include_items** (bool, optional): Add a per-item breakdown. Defaults to
+          `false`.
 
         ## Response
         - **total**: Number of data items in the dataset
         - **completed**: Items whose per-item status for the pipeline is completed
           (both the legacy string and the dict status representation are recognised)
         - **pending**: `total - completed`
+        - **items** (only with `include_items=true`): `[{id, name, completed}]`, one
+          entry per data item, in the same order as `GET /datasets/{id}/data`
 
-        Per-item errored state is not persisted, so it is not reported.
+        Per-item errored state is not persisted, so it is not reported: a pending
+        item may be untouched, in progress, or failed.
 
         ## Error Codes
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
@@ -504,6 +530,7 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"GET /v1/datasets/{dataset_id!s}/processing-status",
                 "dataset_id": str(dataset_id),
                 "pipeline": pipeline,
+                "include_items": include_items,
                 "cognee_version": cognee_version,
             },
         )
@@ -522,7 +549,9 @@ def get_datasets_router() -> APIRouter:
             )
 
         try:
-            return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
+            return await get_dataset_processing_status(
+                dataset[0].id, pipeline_name=pipeline, include_items=include_items
+            )
         except Exception as error:
             logger.error("Error retrieving dataset processing status: %s", error)
             return JSONResponse(

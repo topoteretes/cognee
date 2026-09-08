@@ -21,8 +21,8 @@ module = importlib.import_module("cognee.modules.data.methods.get_dataset_proces
 COMPLETED = "DATA_ITEM_PROCESSING_COMPLETED"
 
 
-def _row(pipeline_status):
-    return SimpleNamespace(pipeline_status=pipeline_status)
+def _row(pipeline_status, name="doc.txt"):
+    return SimpleNamespace(id=uuid.uuid4(), name=name, pipeline_status=pipeline_status)
 
 
 def _completed_row(dataset_id, pipeline="cognify_pipeline", value=COMPLETED):
@@ -133,3 +133,44 @@ async def test_pipeline_name_override(monkeypatch):
 
     assert result == {"total": 2, "completed": 1, "pending": 1}
     module.get_dataset_data.assert_awaited_once_with(dataset_id)
+
+
+@pytest.mark.asyncio
+async def test_counts_only_by_default_has_no_items_key(monkeypatch):
+    dataset_id = uuid.uuid4()
+    _patch_rows(monkeypatch, [_completed_row(dataset_id)])
+
+    result = await get_dataset_processing_status(dataset_id)
+
+    assert "items" not in result
+
+
+@pytest.mark.asyncio
+async def test_include_items_lists_each_row_in_storage_order(monkeypatch):
+    dataset_id = uuid.uuid4()
+    done = _row({"cognify_pipeline": {str(dataset_id): COMPLETED}}, name="done.pdf")
+    fresh = _row({}, name="fresh.md")
+    legacy_null = _row(None, name="legacy.txt")
+    _patch_rows(monkeypatch, [done, fresh, legacy_null])
+
+    result = await get_dataset_processing_status(dataset_id, include_items=True)
+
+    assert result == {
+        "total": 3,
+        "completed": 1,
+        "pending": 2,
+        "items": [
+            {"id": done.id, "name": "done.pdf", "completed": True},
+            {"id": fresh.id, "name": "fresh.md", "completed": False},
+            {"id": legacy_null.id, "name": "legacy.txt", "completed": False},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_include_items_on_empty_dataset(monkeypatch):
+    _patch_rows(monkeypatch, [])
+
+    result = await get_dataset_processing_status(uuid.uuid4(), include_items=True)
+
+    assert result == {"total": 0, "completed": 0, "pending": 0, "items": []}
