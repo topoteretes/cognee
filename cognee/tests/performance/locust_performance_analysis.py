@@ -330,7 +330,8 @@ if __name__ == "__main__":
             time.sleep(0.5)
         raise SystemExit(f"Cognee server at {url} did not become ready in {timeout}s")
 
-    key_path = tempfile.NamedTemporaryFile(suffix=".key", delete=False).name
+    with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as key_file:
+        key_path = key_file.name
     try:
         # Generate API key in a separate process to avoid any potential issues with locust's monkey-patching of libraries like gevent.
         perf_dir = str(Path(__file__).resolve().parent)

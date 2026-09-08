@@ -54,9 +54,9 @@ def _patch_identify_engine(engine):
 
 async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
     """Spin up a throwaway SQLite engine and seed it with the given Data rows."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
 
     async with engine.get_async_session() as session:
@@ -64,7 +64,7 @@ async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
             session.add(Data(**row))
         await session.commit()
 
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _user(tenant_id=None):
