@@ -11,6 +11,7 @@ from cognee.context_global_variables import (
     set_database_global_context_variables,
     vector_db_config,
 )
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.infrastructure.llm.config import LLMConfig
@@ -391,46 +392,120 @@ async def test_uuid_string_dataset_is_rejected(monkeypatch):
             pass
 
 
+class _RecordingDatasetQueue:
+    """Dataset queue that records slot traffic, so a leak is visible to a test."""
+
+    acquired: list = []
+    released: list = []
+
+    @classmethod
+    def reset(cls):
+        cls.acquired = []
+        cls.released = []
+
+    async def ensure_slot(self, dataset):
+        type(self).acquired.append(dataset)
+
+    async def release_slot_for(self, dataset):
+        type(self).released.append(dataset)
+
+
+def _arrange_access_control(monkeypatch):
+    """Multi-tenant path with a recording queue; that is the path taking slots."""
+    _RecordingDatasetQueue.reset()
+    monkeypatch.setattr(
+        "cognee.context_global_variables.backend_access_control_enabled", lambda: True
+    )
+    monkeypatch.setattr(
+        "cognee.infrastructure.databases.dataset_queue.dataset_queue", _RecordingDatasetQueue
+    )
+
+
 @pytest.mark.asyncio
-async def test_failure_after_the_queue_slot_releases_it(monkeypatch):
-    """A slot taken on the way in must not outlive a failed entry.
+async def test_failed_enter_releases_the_queue_slot(monkeypatch):
+    """A raise after ensure_slot must not leave the slot held.
 
-    Everything after ensure_slot can raise: a dataset whose owner user was
-    deleted (get_user), a provisioning or connection failure. When it does,
-    __aenter__ never returns, so __aexit__ never runs, and without the release
-    the permit is held for the life of the task. In a long-lived task (the API
-    lifespan) that is the life of the process, and enough of them wedge every
-    later ensure_slot (SDK-577).
+    __aexit__ never runs when __aenter__ raises, so without this the slot is
+    held until the task ends -- for the API lifespan task, until the process
+    does, and enough of those wedge the queue.
     """
-    import cognee.context_global_variables as context_module
+    _arrange_access_control(monkeypatch)
 
-    monkeypatch.setenv("ENABLE_BACKEND_ACCESS_CONTROL", "true")
+    async def boom(_dataset_id):
+        raise RuntimeError("dataset owner was deleted")
 
+    monkeypatch.setattr("cognee.context_global_variables._get_dataset_owner_id", boom)
     dataset_id = uuid4()
-    slots = []
-    released = []
 
-    class _FakeQueue:
-        async def ensure_slot(self, dataset):
-            slots.append(dataset)
-
-        async def release_slot_for(self, dataset=None):
-            released.append(dataset)
-
-    monkeypatch.setattr(
-        "cognee.infrastructure.databases.dataset_queue.dataset_queue", lambda: _FakeQueue()
-    )
-
-    async def _boom(*_args, **_kwargs):
-        raise RuntimeError("dataset owner is gone")
-
-    monkeypatch.setattr(
-        context_module.DatabaseContextManager, "_apply_dataset_databases", _boom, raising=True
-    )
-
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="dataset owner was deleted"):
         async with set_database_global_context_variables(dataset_id, uuid4()):
             pass
 
-    assert slots == [dataset_id]
-    assert released == [dataset_id]
+    assert _RecordingDatasetQueue.acquired == [dataset_id]
+    assert _RecordingDatasetQueue.released == [dataset_id], "queue slot leaked on failed enter"
+
+
+@pytest.mark.asyncio
+async def test_failure_before_slot_acquisition_releases_nothing(monkeypatch):
+    """Only an acquired slot is released.
+
+    A cleanup that ran regardless would decrement the counter for a slot this
+    apply never took -- dropping the permit an outer, still-live scope holds
+    for the same dataset.
+    """
+    _arrange_access_control(monkeypatch)
+
+    # dataset=None under access control raises before ensure_slot is reached.
+    with pytest.raises(CogneeValidationError):
+        async with set_database_global_context_variables(None, uuid4()):
+            pass
+
+    assert _RecordingDatasetQueue.acquired == []
+    assert _RecordingDatasetQueue.released == [], "released a slot that was never acquired"
+
+
+@pytest.mark.asyncio
+async def test_successful_enter_keeps_the_slot_until_exit(monkeypatch):
+    """The release must not fire on the happy path, only on exit."""
+    _arrange_access_control(monkeypatch)
+    dataset_id = uuid4()
+    user_id = uuid4()
+
+    async def fake_get_user(_user_id):
+        return SimpleNamespace(id=user_id, tenant_id=None)
+
+    async def fake_owner(_dataset_id):
+        return user_id
+
+    async def fake_get_or_create(_dataset, _user):
+        return SimpleNamespace(
+            vector_database_provider="lancedb",
+            vector_database_url="",
+            vector_database_key="",
+            vector_database_name="test_vector_db",
+            vector_database_connection_info={},
+            graph_database_provider="ladybug",
+            graph_database_url="",
+            graph_database_key="",
+            graph_database_name="test_graph_db",
+            graph_database_connection_info={},
+            graph_dataset_database_handler="ladybug",
+        )
+
+    async def fake_resolve(dataset_database):
+        return dataset_database
+
+    monkeypatch.setattr("cognee.context_global_variables.get_user", fake_get_user)
+    monkeypatch.setattr("cognee.context_global_variables._get_dataset_owner_id", fake_owner)
+    monkeypatch.setattr(
+        "cognee.context_global_variables.get_or_create_dataset_database", fake_get_or_create
+    )
+    monkeypatch.setattr(
+        "cognee.context_global_variables.resolve_dataset_database_connection_info", fake_resolve
+    )
+
+    async with set_database_global_context_variables(dataset_id, user_id):
+        assert _RecordingDatasetQueue.released == [], "slot released while the block was running"
+
+    assert _RecordingDatasetQueue.acquired == [dataset_id]
+    assert _RecordingDatasetQueue.released == [dataset_id]
