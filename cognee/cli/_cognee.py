@@ -203,7 +203,7 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
                 parser.description = Markdown(parser.description, style="argparse.text")
             for action in parser._actions:
                 if isinstance(action, argparse._SubParsersAction):
-                    for _subcmd, subparser in action.choices.items():
+                    for subparser in action.choices.values():
                         add_formatter_class(subparser)
 
         add_formatter_class(parser)

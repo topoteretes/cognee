@@ -32,12 +32,12 @@ def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
             go.Bar(
                 x=[metric],
                 y=[mean_score],
-                error_y=dict(
-                    type="data",
-                    array=[upper - mean_score],
-                    arrayminus=[mean_score - lower],
-                    visible=True,
-                ),
+                error_y={
+                    "type": "data",
+                    "array": [upper - mean_score],
+                    "arrayminus": [mean_score - lower],
+                    "visible": True,
+                },
                 name=metric,
             )
         )

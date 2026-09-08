@@ -489,7 +489,7 @@ async def test_get_connections(adapter):
 
     connections = await adapter.get_connections("cn1")
     assert len(connections) == 1
-    src, edge, tgt = connections[0]
+    _src, edge, _tgt = connections[0]
     assert edge["relationship_name"] == "LINKED"
 
 

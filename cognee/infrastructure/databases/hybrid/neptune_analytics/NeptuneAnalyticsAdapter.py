@@ -190,12 +190,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             # Fetch properties
             properties = self._serialize_properties(data_point.model_dump())
             properties[self._COLLECTION_PREFIX] = collection_name
-            params = dict(
-                node_id=str(node_id),
-                properties=properties,
-                embedding=data_vector,
-                collection_name=collection_name,
-            )
+            params = {
+                "node_id": str(node_id),
+                "properties": properties,
+                "embedding": data_vector,
+                "collection_name": collection_name,
+            }
 
             # Compose the query and send
             query_string = (
@@ -226,7 +226,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - data_point_ids (list[str]): A list of IDs of the data points to retrieve.
         """
         # Do the fetch for each node
-        params = dict(node_ids=data_point_ids, collection_name=collection_name)
+        params = {"node_ids": data_point_ids, "collection_name": collection_name}
         query_string = (
             f"MATCH( n :{self._VECTOR_NODE_LABEL}) "
             f"WHERE id(n) in $node_ids AND "
@@ -313,7 +313,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             embedding = data_vectors[0]
 
         # Compose the parameters map
-        params = dict(embedding=embedding, param_topk=limit)
+        params = {"embedding": embedding, "param_topk": limit}
         # Compose the query
         query_string = f"""
         CALL neptune.algo.vectors.topKByEmbeddingWithFiltering({{
@@ -426,7 +426,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
               points.
             - data_point_ids (list[str]): A list of IDs of the data points to delete.
         """
-        params = dict(node_ids=data_point_ids, collection_name=collection_name)
+        params = {"node_ids": data_point_ids, "collection_name": collection_name}
         query_string = (
             f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
             f"WHERE id(n) IN $node_ids "

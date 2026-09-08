@@ -74,13 +74,11 @@ def _uses_nvidia_nim(provider: Optional[str], model: Optional[str]) -> bool:
     """
     if provider and provider.lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT:
         return True
-    if (
+    return bool(
         model
         and "/" in model
         and model.split("/", 1)[0].lower() in _PROVIDERS_WITHOUT_DIMENSIONS_SUPPORT
-    ):
-        return True
-    return False
+    )
 
 
 class LiteLLMEmbeddingEngine(EmbeddingEngine):

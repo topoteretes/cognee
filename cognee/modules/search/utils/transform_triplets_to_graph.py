@@ -10,17 +10,13 @@ def transform_triplets_to_graph(input_triplets: List[Edge]):
     for triplet in input_triplets:
         nodes[triplet.node1.id] = {
             "id": triplet.node1.id,
-            "label": triplet.node1.attributes["name"]
-            if "name" in triplet.node1.attributes
-            else triplet.node1.id,
+            "label": triplet.node1.attributes.get("name", triplet.node1.id),
             "type": triplet.node1.attributes["type"],
             "attributes": triplet.node1.attributes,
         }
         nodes[triplet.node2.id] = {
             "id": triplet.node2.id,
-            "label": triplet.node2.attributes["name"]
-            if "name" in triplet.node2.attributes
-            else triplet.node2.id,
+            "label": triplet.node2.attributes.get("name", triplet.node2.id),
             "type": triplet.node2.attributes["type"],
             "attributes": triplet.node2.attributes,
         }

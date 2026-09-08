@@ -738,7 +738,7 @@ class TursoAdapter(GraphDBInterface):
 
         # SQLite has no unnest(); seed the recursion from a JSON array (one bound
         # param, no per-seed variable cap).
-        seed_subquery, seed_params = _id_subquery("seeds", node_ids)
+        _seed_subquery, seed_params = _id_subquery("seeds", node_ids)
 
         query_str = f"""
             WITH RECURSIVE neighborhood(id, hops) AS (

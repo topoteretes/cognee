@@ -10,7 +10,7 @@ async def assert_graph_edges_present(relationships: List[Tuple[UUID, UUID, str, 
 
     nodes_by_id = {str(node[0]): node[1] for node in nodes}
 
-    edge_ids = set([f"{edge[0]!s}_{edge[2]}_{edge[1]!s}" for edge in edges])
+    edge_ids = {f"{edge[0]!s}_{edge[2]}_{edge[1]!s}" for edge in edges}
 
     for relationship in relationships:
         relationship_id = f"{relationship[0]!s}_{relationship[2]}_{relationship[1]!s}"

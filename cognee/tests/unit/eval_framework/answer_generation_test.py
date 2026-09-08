@@ -11,7 +11,7 @@ from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
 @pytest.mark.asyncio
 async def test_answer_generation():
     limit = 1
-    corpus_list, qa_pairs = DummyAdapter().load_corpus(limit=limit)
+    _corpus_list, qa_pairs = DummyAdapter().load_corpus(limit=limit)
 
     mock_retriever = AsyncMock()
     mock_retriever.get_retrieved_objects = AsyncMock(return_value=[])

@@ -87,8 +87,8 @@ def get_settings() -> SettingsDict:
     ]
 
     return SettingsDict.model_validate(
-        dict(
-            llm={
+        {
+            "llm": {
                 "provider": llm_config.llm_provider,
                 "model": llm_config.llm_model,
                 "endpoint": llm_config.llm_endpoint,
@@ -180,7 +180,7 @@ def get_settings() -> SettingsDict:
                     ],
                 },
             },
-            vector_db={
+            "vector_db": {
                 "provider": vector_config.vector_db_provider,
                 "url": vector_config.vector_db_url,
                 "api_key": (
@@ -189,5 +189,5 @@ def get_settings() -> SettingsDict:
                 ),
                 "providers": vector_dbs,
             },
-        )
+        }
     )

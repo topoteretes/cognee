@@ -129,7 +129,7 @@ async def test_path_item_reuses_wrapper_metadata_after_identity_changes():
     wrapper_saw = "/tmp/doc.txt"  # the string the wrapper inspected
     # Built at runtime: a compile-time concat would be constant-folded into the
     # same interned object, silently reintroducing the id() match.
-    task_receives = "".join(["/tmp/doc", ".txt"])
+    task_receives = "/tmp/doc.txt"
     assert wrapper_saw == task_receives and wrapper_saw is not task_receives
 
     ctx = SimpleNamespace(

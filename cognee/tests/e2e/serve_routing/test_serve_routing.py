@@ -54,18 +54,18 @@ DEFAULT_PASSWORD = "serve-routing-e2e-password"
 
 def _client_env(root: Path) -> dict:
     """Isolation for the CLIENT half — its local store must stay empty."""
-    return dict(
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        DB_PROVIDER="sqlite",
-        DB_NAME="serve_routing_client.db",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="ladybug",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        COGNEE_SKIP_CONNECTION_TEST="true",
-        LLM_API_KEY="sk-mocked-never-called",
-    )
+    return {
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "DB_PROVIDER": "sqlite",
+        "DB_NAME": "serve_routing_client.db",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "ladybug",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "COGNEE_SKIP_CONNECTION_TEST": "true",
+        "LLM_API_KEY": "sk-mocked-never-called",
+    }
 
 
 def _reset_config_caches() -> None:
@@ -256,7 +256,7 @@ def test_serve_routes_every_proxied_endpoint(api_key):
             "add() + cognify() are proxied", bool(cognify_result), f"{len(cognify_result)} run(s)"
         )
 
-        dataset_id = UUID(str(list(cognify_result.keys())[0]))
+        dataset_id = UUID(str(next(iter(cognify_result.keys()))))
 
         datasets_local, data_local = _local_row_counts()
         record(

@@ -118,12 +118,12 @@ class RemoteKuzuDatabase:
         self._session = session
         self._handle_id: Optional[int] = None
         self._db_path = db_path
-        self._open_kwargs = dict(
-            database_path=db_path,
-            buffer_pool_size=buffer_pool_size,
-            max_num_threads=max_num_threads,
-            max_db_size=max_db_size,
-        )
+        self._open_kwargs = {
+            "database_path": db_path,
+            "buffer_pool_size": buffer_pool_size,
+            "max_num_threads": max_num_threads,
+            "max_db_size": max_db_size,
+        }
         self._initialized = False
         # Tracks replay steps THIS proxy registered with the session, so
         # ``close()`` can deregister them. Without this, a worker respawn

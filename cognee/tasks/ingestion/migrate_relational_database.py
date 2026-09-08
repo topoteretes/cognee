@@ -97,11 +97,11 @@ async def schema_only_ingestion(schema):
                 table_node_id,
                 database_node_id,
                 "is_part_of",
-                dict(
-                    source_node_id=table_node_id,
-                    target_node_id=database_node_id,
-                    relationship_name="is_part_of",
-                ),
+                {
+                    "source_node_id": table_node_id,
+                    "target_node_id": database_node_id,
+                    "relationship_name": "is_part_of",
+                },
             )
         )
     table_name_to_id = {t.name: t.id for t in schema_tables}
@@ -118,11 +118,11 @@ async def schema_only_ingestion(schema):
                 source_table_id,
                 relationship_id,
                 "has_relationship",
-                dict(
-                    source_node_id=source_table_id,
-                    target_node_id=relationship_id,
-                    relationship_name=rel.relationship_type,
-                ),
+                {
+                    "source_node_id": source_table_id,
+                    "target_node_id": relationship_id,
+                    "relationship_name": rel.relationship_type,
+                },
             )
         )
         edge_mapping.append(
@@ -130,11 +130,11 @@ async def schema_only_ingestion(schema):
                 relationship_id,
                 target_table_id,
                 "has_relationship",
-                dict(
-                    source_node_id=relationship_id,
-                    target_node_id=target_table_id,
-                    relationship_name=rel.relationship_type,
-                ),
+                {
+                    "source_node_id": relationship_id,
+                    "target_node_id": target_table_id,
+                    "relationship_name": rel.relationship_type,
+                },
             )
         )
         edge_mapping.append(
@@ -142,11 +142,11 @@ async def schema_only_ingestion(schema):
                 source_table_id,
                 target_table_id,
                 rel.relationship_type,
-                dict(
-                    source_node_id=source_table_id,
-                    target_node_id=target_table_id,
-                    relationship_name=rel.relationship_type,
-                ),
+                {
+                    "source_node_id": source_table_id,
+                    "target_node_id": target_table_id,
+                    "relationship_name": rel.relationship_type,
+                },
             )
         )
     return node_mapping, edge_mapping
@@ -213,11 +213,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                         row_node.id,
                         table_node.id,
                         "is_part_of",
-                        dict(
-                            relationship_name="is_part_of",
-                            source_node_id=row_node.id,
-                            target_node_id=table_node.id,
-                        ),
+                        {
+                            "relationship_name": "is_part_of",
+                            "source_node_id": row_node.id,
+                            "target_node_id": table_node.id,
+                        },
                     )
                 )
 
@@ -249,11 +249,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                                 row_node.id,
                                 column_node.id,
                                 key,
-                                dict(
-                                    relationship_name=key,
-                                    source_node_id=row_node.id,
-                                    target_node_id=column_node.id,
-                                ),
+                                {
+                                    "relationship_name": key,
+                                    "source_node_id": row_node.id,
+                                    "target_node_id": column_node.id,
+                                },
                             )
                         )
 
@@ -299,11 +299,11 @@ async def complete_database_ingestion(schema, migrate_column_data):
                             source_node.id,
                             target_node.id,
                             fk["column"],
-                            dict(
-                                source_node_id=source_node.id,
-                                target_node_id=target_node.id,
-                                relationship_name=fk["column"],
-                            ),
+                            {
+                                "source_node_id": source_node.id,
+                                "target_node_id": target_node.id,
+                                "relationship_name": fk["column"],
+                            },
                         )
                     )
         return node_mapping, edge_mapping

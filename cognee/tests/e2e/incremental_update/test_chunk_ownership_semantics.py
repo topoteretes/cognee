@@ -31,6 +31,7 @@ from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
 )
+import itertools
 
 CHUNK_TOKENS = 8
 NOUN = re.compile(r"\b[A-Z][a-z]{3,}\b")
@@ -42,7 +43,7 @@ def _nouns(text: str) -> list:
 
 def _pairs(text: str) -> set:
     names = _nouns(text)
-    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
+    return {(a, b) for a, b in itertools.pairwise(names) if a != b}
 
 
 @pytest.fixture(scope="module")

@@ -38,12 +38,12 @@ def create_ci_plot(ci_results: Dict[str, Tuple[float, float, float]]) -> str:
             go.Bar(
                 x=[metric],
                 y=[mean_score],
-                error_y=dict(
-                    type="data",
-                    array=[upper - mean_score],
-                    arrayminus=[mean_score - lower],
-                    visible=True,
-                ),
+                error_y={
+                    "type": "data",
+                    "array": [upper - mean_score],
+                    "arrayminus": [mean_score - lower],
+                    "visible": True,
+                },
                 name=metric,
             )
         )
@@ -77,7 +77,7 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
             )
 
     for metric, details in metric_details.items():
-        formatted_column_names = [key.replace("_", " ").title() for key in details[0].keys()]
+        formatted_column_names = [key.replace("_", " ").title() for key in details[0]]
         details_html.append(f"<h3>{html.escape(str(metric))} Details</h3>")
         details_html.append(f"""
             <table class="metric-table">

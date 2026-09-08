@@ -101,24 +101,24 @@ def s3_env():
                 pass
 
     mp = pytest.MonkeyPatch()
-    for key, value in dict(
-        DB_PROVIDER="sqlite",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        STORAGE_BACKEND="s3",
-        STORAGE_BUCKET_NAME="bench",
-        AWS_REGION="us-east-1",
-        AWS_ACCESS_KEY_ID="testing",
-        AWS_SECRET_ACCESS_KEY="testing",
-        AWS_ENDPOINT_URL=endpoint,
-        DATA_ROOT_DIRECTORY="s3://bench/tenant-x/data",
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "STORAGE_BACKEND": "s3",
+        "STORAGE_BUCKET_NAME": "bench",
+        "AWS_REGION": "us-east-1",
+        "AWS_ACCESS_KEY_ID": "testing",
+        "AWS_SECRET_ACCESS_KEY": "testing",
+        "AWS_ENDPOINT_URL": endpoint,
+        "DATA_ROOT_DIRECTORY": "s3://bench/tenant-x/data",
         # System (sqlite, cache) stays local: this test budgets the DATA path.
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        CACHE_ROOT_DIRECTORY=str(root / "cache"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
-        COGNEE_SKIP_CONNECTION_TEST="true",
-    ).items():
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "CACHE_ROOT_DIRECTORY": str(root / "cache"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
+        "COGNEE_SKIP_CONNECTION_TEST": "true",
+    }.items():
         mp.setenv(key, value)
     clear_config_caches()
 

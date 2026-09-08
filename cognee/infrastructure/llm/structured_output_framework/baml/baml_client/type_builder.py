@@ -28,12 +28,10 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(
-            classes=set(
-                [
-                    "ResponseModel",
-                ]
-            ),
-            enums=set([]),
+            classes={
+                "ResponseModel",
+            },
+            enums=set(),
             runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME,
         )
 
@@ -64,7 +62,7 @@ class ResponseModelAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ResponseModel")
-        self._properties: typing.Set[str] = set([])
+        self._properties: typing.Set[str] = set()
         self._props = ResponseModelProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:

@@ -1297,7 +1297,7 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN n, r, m
         """
 
-        results = await self.query(query, dict(node_id=node_id))
+        results = await self.query(query, {"node_id": node_id})
 
         return [
             (result["n"]["id"], result["m"]["id"], {"relationship_name": result["r"][1]})
@@ -1374,9 +1374,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             results = await self.query(
                 query,
-                dict(
-                    node_id=node_id,
-                ),
+                {
+                    "node_id": node_id,
+                },
             )
 
             return [result["predecessor"] for result in results]
@@ -1389,9 +1389,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             results = await self.query(
                 query,
-                dict(
-                    node_id=node_id,
-                ),
+                {
+                    "node_id": node_id,
+                },
             )
 
             return [result["predecessor"] for result in results]
@@ -1420,10 +1420,10 @@ class Neo4jAdapter(GraphDBInterface):
 
             results = await self.query(
                 query,
-                dict(
-                    node_id=node_id,
-                    edge_label=edge_label,
-                ),
+                {
+                    "node_id": node_id,
+                    "edge_label": edge_label,
+                },
             )
 
             return [result["successor"] for result in results]
@@ -1436,9 +1436,9 @@ class Neo4jAdapter(GraphDBInterface):
 
             results = await self.query(
                 query,
-                dict(
-                    node_id=node_id,
-                ),
+                {
+                    "node_id": node_id,
+                },
             )
 
             return [result["successor"] for result in results]
@@ -1659,8 +1659,8 @@ class Neo4jAdapter(GraphDBInterface):
         """
 
         predecessors, successors = await asyncio.gather(
-            self.query(predecessors_query, dict(node_id=str(node_id))),
-            self.query(successors_query, dict(node_id=str(node_id))),
+            self.query(predecessors_query, {"node_id": str(node_id)}),
+            self.query(successors_query, {"node_id": str(node_id)}),
         )
 
         connections = []
@@ -1773,7 +1773,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             await self.query(query)
 
-    def serialize_properties(self, properties=dict()):
+    def serialize_properties(self, properties={}):
         """
         Convert properties of a node or edge into a serializable format suitable for storage.
 

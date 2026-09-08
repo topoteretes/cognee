@@ -47,17 +47,17 @@ def _search_response(result=None):
 
 
 def _args(**overrides):
-    base = dict(
-        query_text="",
-        query_type="CODE",
-        datasets=["shop"],
-        top_k=10,
-        system_prompt=None,
-        output_format="pretty",
-        code_query=None,
-        diagram=None,
-        diagram_out=None,
-    )
+    base = {
+        "query_text": "",
+        "query_type": "CODE",
+        "datasets": ["shop"],
+        "top_k": 10,
+        "system_prompt": None,
+        "output_format": "pretty",
+        "code_query": None,
+        "diagram": None,
+        "diagram_out": None,
+    }
     base.update(overrides)
     return argparse.Namespace(**base)
 

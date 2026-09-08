@@ -19,7 +19,7 @@ async def assert_nodes_vector_index_not_present(data_points: List[DataPoint]):
         data_points_by_vector_collection[collection_name].append(data_point)
 
     for collection_name, collection_data_points in data_points_by_vector_collection.items():
-        query_data_point_ids = set([str(data_point.id) for data_point in collection_data_points])
+        query_data_point_ids = {str(data_point.id) for data_point in collection_data_points}
 
         vector_items = await vector_engine.retrieve(collection_name, list(query_data_point_ids))
 

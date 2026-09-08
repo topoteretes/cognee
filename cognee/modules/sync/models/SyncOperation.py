@@ -117,7 +117,7 @@ class SyncOperation(Base):
         all_hashes = set()
         dataset_hashes = self.dataset_sync_hashes or {}
 
-        for dataset_id, operations in dataset_hashes.items():
+        for operations in dataset_hashes.values():
             if isinstance(operations, dict):
                 all_hashes.update(operations.get("uploaded", []))
                 all_hashes.update(operations.get("downloaded", []))

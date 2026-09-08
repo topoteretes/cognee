@@ -54,6 +54,7 @@ from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,
 )
+import itertools
 
 FIXTURE = Path(__file__).parent / "test_data" / "alice_in_wonderland.txt"
 PARAGRAPHS_USED = 120
@@ -90,7 +91,7 @@ def _kind(name: str) -> str:
 def _pairs(text: str) -> set:
     """Consecutive distinct entities in a chunk: the relationships it states."""
     names = _nouns_ordered(text)
-    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
+    return {(a, b) for a, b in itertools.pairwise(names) if a != b}
 
 
 def _setup_environment() -> None:

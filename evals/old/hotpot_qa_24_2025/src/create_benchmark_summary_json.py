@@ -406,7 +406,7 @@ def validate_output_data(results: List[Dict[str, Any]]) -> bool:
 
         # Check that we have metric data
         metric_count = 0
-        for key in result.keys():
+        for key in result:
             if key != "system" and not key.endswith(" Error"):
                 metric_count += 1
 

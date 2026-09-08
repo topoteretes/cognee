@@ -178,7 +178,7 @@ def generate_provenance_colors(values):
     verbatim so existing string-token tests continue to pass.
     """
     color_map = {}
-    unique = sorted(set(v for v in values if v))
+    unique = sorted({v for v in values if v})
     for i, name in enumerate(unique):
         hue = (i * 137.5) % 360
         r, g, b = colorsys.hls_to_rgb(hue / 360, 0.6, 0.65)
@@ -473,7 +473,7 @@ def extract_type_schema_fields(type_nodes):
 
     for key in ordered_field_names[:5]:
         count = field_counts[key]
-        coverage = int(round(count / max(1, len(type_nodes)) * 100))
+        coverage = round(count / max(1, len(type_nodes)) * 100)
         fields.append(
             {
                 "name": key,
@@ -1302,7 +1302,7 @@ def preprocess(graph_data, schema_data: Optional[Dict[str, Any]] = None) -> Prep
             node_info["provenance"] = prov
 
         rank = node_info.get("topological_rank")
-        if (isinstance(rank, int) or isinstance(rank, float)) and rank not in (None, 0):
+        if (isinstance(rank, (int, float))) and rank not in (None, 0):
             has_meaningful_rank = True
 
         nodes.append(node_info)

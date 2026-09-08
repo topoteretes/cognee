@@ -155,7 +155,7 @@ def test_relationship_edges_are_owned_by_exactly_the_chunks_that_yield_them():
 
 
 def test_chunk_owns_itself_and_its_structural_edges():
-    chunks, entities = _build_chain()
+    chunks, _entities = _build_chain()
     dataset_id, data_id = uuid4(), uuid4()
 
     ownership = asyncio.run(collect_chunk_ownership(chunks, dataset_id, data_id))

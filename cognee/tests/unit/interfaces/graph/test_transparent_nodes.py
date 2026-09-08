@@ -183,7 +183,7 @@ async def test_nested_transparent_wrappers_resolve_recursively():
 @pytest.mark.asyncio
 async def test_mid_graph_wrapper_keeps_parent_field_name():
     """Case 4 (A4): the ``groups`` edge lands on each child."""
-    alice, bob, acme = _people()
+    alice, bob, _acme = _people()
     department = Department(name="Engineering", groups=[MemberGroup(members=[alice, bob])])
 
     nodes, edges = await get_graph_from_model(department)

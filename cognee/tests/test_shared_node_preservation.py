@@ -176,7 +176,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
 
     # Cognify both documents
     cognify_result: dict = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Extract expected entities
     bmw_document = TextDocument(
@@ -219,11 +219,11 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     netherlands_entities = extract_entities(netherlands_kg)
 
     # Find the shared Germany entity
-    [e for e in bmw_entities if e.name == "Germany"][0]
-    [e for e in netherlands_entities if e.name == "Germany"][0]
+    next(e for e in bmw_entities if e.name == "Germany")
+    next(e for e in netherlands_entities if e.name == "Germany")
 
-    [e for e in bmw_entities if e.name == "BMW"][0]
-    [e for e in netherlands_entities if e.name == "Netherlands"][0]
+    next(e for e in bmw_entities if e.name == "BMW")
+    next(e for e in netherlands_entities if e.name == "Netherlands")
 
     # Verify both documents created nodes in the graph
     graph_engine = await get_graph_engine()
@@ -433,7 +433,7 @@ async def test_dataset_deletion_removes_files():
 
     # Cognify to create graph
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     # Check that files/data exist in storage
     from cognee.modules.data.methods import get_data

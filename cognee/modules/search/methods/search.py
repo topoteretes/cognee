@@ -387,29 +387,29 @@ async def search_in_datasets_context(
         # Run search without setting database context in case access control is disabled
         # Needed for low level pipelines that need to run search without dataset context.
         dataset = search_datasets[0] if len(search_datasets) == 1 else None
-        retriever_kwargs = dict(
-            query_type=query_type,
-            query_text=query_text,
-            user=user,
-            dataset=dataset,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
-            only_context=only_context,
-            context_format=context_format,
-            shared_history=shared_history,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-            include_references=include_references,
-        )
+        retriever_kwargs = {
+            "query_type": query_type,
+            "query_text": query_text,
+            "user": user,
+            "dataset": dataset,
+            "system_prompt_path": system_prompt_path,
+            "system_prompt": system_prompt,
+            "top_k": top_k,
+            "node_type": node_type,
+            "node_name": node_name,
+            "node_name_filter_operator": node_name_filter_operator,
+            "only_context": only_context,
+            "context_format": context_format,
+            "shared_history": shared_history,
+            "session_id": session_id,
+            "wide_search_top_k": wide_search_top_k,
+            "triplet_distance_penalty": triplet_distance_penalty,
+            "feedback_influence": feedback_influence,
+            "retriever_specific_config": retriever_specific_config,
+            "neighborhood_depth": neighborhood_depth,
+            "neighborhood_seed_top_k": neighborhood_seed_top_k,
+            "include_references": include_references,
+        }
 
         async def _search_without_context() -> SearchResultPayload:
             # No dataset DB context to set when access control is disabled, but

@@ -32,7 +32,7 @@ async def resolve_authorized_user_datasets(
         user = await get_default_user()
 
     # Convert datasets to list
-    if isinstance(datasets, str) or isinstance(datasets, UUID):
+    if isinstance(datasets, (str, UUID)):
         datasets = [datasets]
 
     # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)

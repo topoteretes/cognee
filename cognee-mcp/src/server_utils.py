@@ -59,9 +59,7 @@ def parse_cognify_data(data: str) -> ParsedCognifyData:
 def looks_like_file_path(data: str) -> bool:
     """Return True when a string appears to be a local file path."""
     data = data.strip()
-    return (
-        data.startswith("/") or bool(re.match(r"^[A-Za-z]:\\", data)) or data.startswith("file://")
-    )
+    return data.startswith(("/", "file://")) or bool(re.match(r"^[A-Za-z]:\\", data))
 
 
 def validate_file_path(

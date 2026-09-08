@@ -12,7 +12,7 @@ def discover_directory_datasets(root_dir_path: str, parent_dir: str = None):
                 path.join(root_dir_path, file_or_dir), dataset_name
             )
 
-            for dataset in nested_datasets.keys():
+            for dataset in nested_datasets:
                 datasets[dataset] = nested_datasets[dataset]
         else:
             if parent_dir not in datasets:

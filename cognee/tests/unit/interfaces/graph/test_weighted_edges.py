@@ -65,7 +65,7 @@ async def test_single_weight_edge():
 
     # Check edge properties contain weight
     for edge in edges:
-        source_id, target_id, relationship_name, edge_properties = edge
+        _source_id, _target_id, _relationship_name, edge_properties = edge
         assert "weight" in edge_properties, "Edge should contain weight property"
         assert edge_properties["weight"] == 0.8, (
             f"Expected weight 0.8, got {edge_properties['weight']}"
@@ -110,7 +110,7 @@ async def test_multiple_weights_edge():
 
     # Check edge properties contain multiple weights
     for edge in edges:
-        source_id, target_id, relationship_name, edge_properties = edge
+        _source_id, _target_id, _relationship_name, edge_properties = edge
         assert edge_properties["relationship_name"] == "interested_in"
 
         # Check individual weight fields
@@ -232,14 +232,14 @@ async def test_complex_weighted_relationships():
     multi_weighted_edges = 0
 
     for edge in edges:
-        source_id, target_id, relationship_name, edge_properties = edge
+        _source_id, _target_id, relationship_name, edge_properties = edge
         edge_types.add(relationship_name)
 
         if "weight" in edge_properties:
             weighted_edges += 1
 
         # Count edges with multiple weights
-        multi_weight_fields = [k for k in edge_properties.keys() if k.startswith("weight_")]
+        multi_weight_fields = [k for k in edge_properties if k.startswith("weight_")]
         if len(multi_weight_fields) > 1:
             multi_weighted_edges += 1
 
@@ -331,7 +331,7 @@ async def test_edge_metadata_preservation():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
+    _nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
 
     assert len(edges) == 1, "Should have exactly one edge"
 
@@ -389,5 +389,5 @@ async def test_no_weights_edge():
 
     # Should not have weight fields
     assert "weight" not in edge_properties
-    weight_fields = [k for k in edge_properties.keys() if k.startswith("weight_")]
+    weight_fields = [k for k in edge_properties if k.startswith("weight_")]
     assert len(weight_fields) == 0, f"Should have no weight fields, but found: {weight_fields}"

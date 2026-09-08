@@ -291,7 +291,7 @@ async def search(
             _search_start_ns = __import__("time").monotonic_ns()
 
             # We use lists from now on for datasets
-            if isinstance(datasets, UUID) or isinstance(datasets, str):
+            if isinstance(datasets, (UUID, str)):
                 datasets = [datasets]
 
             if (
