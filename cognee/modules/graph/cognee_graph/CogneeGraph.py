@@ -277,7 +277,7 @@ class CogneeGraph(CogneeAbstractGraph):
         except EntityNotFoundError:
             raise
         except Exception:
-            logger.error("Error during graph projection", exc_info=True)
+            logger.exception("Error during graph projection")
             raise
 
     async def project_neighborhood_from_db(
@@ -332,7 +332,7 @@ class CogneeGraph(CogneeAbstractGraph):
             )
 
         except Exception:
-            logger.error("Error during neighborhood projection", exc_info=True)
+            logger.exception("Error during neighborhood projection")
             raise
 
     async def map_vector_distances_to_graph_nodes(

@@ -43,6 +43,6 @@ async def create_user(
                     _ = await user.awaitable_attrs.roles
 
                     return user
-    except UserAlreadyExists as error:
+    except UserAlreadyExists:
         print("A user with this email already exists")
-        raise error
+        raise

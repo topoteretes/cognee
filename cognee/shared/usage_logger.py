@@ -230,8 +230,8 @@ async def _log_usage_async(
             ttl=config.usage_logging_ttl,
         )
         logger.info(f"Successfully logged usage for {function_name} (user_id={user_id})")
-    except Exception as e:
-        logger.error(f"Failed to log usage for {function_name}: {e!s}", exc_info=True)
+    except Exception:
+        logger.exception(f"Failed to log usage for {function_name}")
 
 
 def _is_streaming_response(result: Any) -> bool:
@@ -283,10 +283,9 @@ def _wrap_streaming_result(result: Any, emit, function_name: str):
             # for the same reason — CancelledError is not an Exception.
             try:
                 await asyncio.shield(asyncio.ensure_future(emit(None, success, error)))
-            except BaseException as log_error:  # noqa: BLE001
-                logger.error(
-                    f"Failed to log usage for {function_name}: {log_error!s}",
-                    exc_info=True,
+            except BaseException:  # noqa: BLE001
+                logger.exception(
+                    f"Failed to log usage for {function_name}",
                 )
 
     result.body_iterator = _logged()
@@ -407,10 +406,9 @@ def log_usage(function_name: str | None = None, log_type: str = "function"):
                 if not deferred_to_stream:
                     try:
                         await _emit(result, success, error)
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to log usage for {resolved_function_name}: {e!s}",
-                            exc_info=True,
+                    except Exception:
+                        logger.exception(
+                            f"Failed to log usage for {resolved_function_name}",
                         )
 
         return async_wrapper

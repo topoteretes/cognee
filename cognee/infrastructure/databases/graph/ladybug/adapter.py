@@ -569,7 +569,7 @@ class LadybugAdapter(GraphDBInterface):
             logger.debug("Ladybug database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Ladybug database: {e}")
-            raise e
+            raise
 
     async def push_to_s3(self) -> None:
         if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
@@ -3962,8 +3962,8 @@ class LadybugAdapter(GraphDBInterface):
 
                 triplets.append(triplet)
 
-            except Exception as e:
-                logger.error(f"Error processing triplet at index {idx}: {e}", exc_info=True)
+            except Exception:
+                logger.exception(f"Error processing triplet at index {idx}")
                 continue
 
         return triplets

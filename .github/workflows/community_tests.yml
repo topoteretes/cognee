@@ -47,6 +47,15 @@ jobs:
       - name: Ruff check
         run: uv run ruff check .
 
+      # Exception-handling rules are enforced without escape hatch: `--ignore-noqa`
+      # makes a `# noqa` comment on these rules count as a finding, so a silent
+      # `except Exception` has to be fixed (log with traceback, re-raise, or narrow
+      # the type), not suppressed. Scope: BLE001 blind except, S110/S112 try-except
+      # pass/continue, G201 exc_info logging, TRY201 verbose raise, TRY002 vanilla
+      # Exception raise.
+      - name: Ruff exception-handling rules (strict, noqa ignored)
+        run: uv run ruff check . --select BLE001,S110,S112,G201,TRY201,TRY002 --ignore-noqa
+
       - name: Ruff format check
         run: uv run ruff format --check .
 

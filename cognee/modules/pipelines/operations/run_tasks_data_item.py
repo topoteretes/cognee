@@ -277,7 +277,7 @@ async def run_tasks_data_item_incremental(
         }
 
         if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
-            raise error
+            raise
 
 
 async def run_tasks_data_item_regular(
@@ -401,11 +401,9 @@ async def run_tasks_data_item(
         # edge evidence also fails; rollback still has graph-native run refs.
         try:
             await flush_context_provenance(ctx)
-        except Exception as provenance_error:
-            logger.error(
-                "Failed to persist provenance for an errored data item: %s",
-                provenance_error,
-                exc_info=True,
+        except Exception:
+            logger.exception(
+                "Failed to persist provenance for an errored data item",
             )
         raise
 

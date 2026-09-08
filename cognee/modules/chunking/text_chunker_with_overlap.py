@@ -88,7 +88,7 @@ class TextChunkerWithOverlap(Chunker):
             )
         except Exception as e:
             logger.error(e)
-            raise e
+            raise
 
     def _create_chunk_from_accumulation(self):
         """Create a DocumentChunk from current accumulated chunk_data."""

@@ -283,10 +283,9 @@ async def get_triplet_datapoints(
                 )
                 break
 
-        except Exception as e:
-            logger.error(
-                f"Error retrieving triplet batch {batch_number} at offset {offset}: {e}",
-                exc_info=True,
+        except Exception:
+            logger.exception(
+                f"Error retrieving triplet batch {batch_number} at offset {offset}",
             )
             raise
 

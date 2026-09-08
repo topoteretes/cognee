@@ -313,7 +313,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [pooled.tolist()]
 
             logger.error("Embedding input exceeds the model's max length: %s", str(error))
-            raise error
+            raise
 
         except asyncio.TimeoutError as e:
             # Per-attempt timeout – likely an unreachable endpoint
