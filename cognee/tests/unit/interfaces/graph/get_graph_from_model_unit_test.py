@@ -13,13 +13,6 @@ class Document(DataPoint):
     metadata: dict = {"index_fields": []}
 
 
-class DocumentChunk(DataPoint):
-    part_of: Document
-    text: str
-    contains: List["Entity"] = None
-    metadata: dict = {"index_fields": ["text"]}
-
-
 class EntityType(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"]}
@@ -29,6 +22,16 @@ class Entity(DataPoint):
     name: str
     is_type: EntityType
     metadata: dict = {"index_fields": ["name"]}
+
+
+# Defined after Entity so the annotation needs no forward reference: a quoted
+# name inside a builtin generic is not resolvable when the model is copied
+# into another module on Python 3.10.
+class DocumentChunk(DataPoint):
+    part_of: Document
+    text: str
+    contains: List[Entity] = None
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class Company(DataPoint):

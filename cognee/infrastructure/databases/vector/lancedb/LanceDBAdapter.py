@@ -44,7 +44,7 @@ _SIMPLE_TYPE_DEFAULTS = {
 }
 _ORIGIN_DEFAULT_FACTORIES = {
     list: list,
-    List: list,
+    List: list,  # noqa: UP006 - typing.List is a distinct origin key, not an annotation
     dict: dict,
     set: set,
     tuple: tuple,
@@ -1465,7 +1465,9 @@ class LanceDBAdapter(VectorDBInterface):
                 related_models_fields.append(field_name)
 
             elif (
-                get_origin(field_config.annotation) == Union
+                # `Optional[X]` / `Union[...]` have origin typing.Union; the PEP 604
+                # spelling `X | None` has origin types.UnionType. Treat both alike.
+                get_origin(field_config.annotation) in (Union, types.UnionType)
                 or get_origin(field_config.annotation) is list
             ):
                 models_list = get_args(field_config.annotation)
