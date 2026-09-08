@@ -23,7 +23,7 @@ class ApiKeySettings(BaseSettings):
 apiKeySettings = ApiKeySettings()
 
 
-async def create_api_key(user: User, name: str = None):
+async def create_api_key(user: User, name: str | None = None):
     existing_api_keys = await get_api_keys(user)
 
     if len(existing_api_keys) >= apiKeySettings.max_user_api_keys:

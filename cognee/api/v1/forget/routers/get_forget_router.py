@@ -19,19 +19,19 @@ class ForgetPayloadDTO(InDTO):
         json_schema_extra={"examples": [{"dataset": "main_dataset", "memoryOnly": True}]},
     )
 
-    data_id: Optional[UUID] = Field(
+    data_id: UUID | None = Field(
         default=None,
         examples=[""],
         description="UUID of a single data item to remove. "
         "Requires `dataset` or `datasetId` to also be set.",
     )
-    dataset: Optional[str] = Field(
+    dataset: str | None = Field(
         default=None,
         examples=["default_dataset"],
         description="Dataset name to delete (or clear with memoryOnly). "
         "Provide either `dataset` or `datasetId`, not both.",
     )
-    dataset_id: Optional[UUID] = Field(
+    dataset_id: UUID | None = Field(
         default=None,
         examples=[""],
         description="Dataset UUID, alternative to `dataset`. "
@@ -116,9 +116,9 @@ def get_forget_router() -> APIRouter:
                     "error": "Invalid request parameters. Specify dataset or dataset_id, data_id+dataset, or everything=True."
                 },
             )
-        except Exception as error:
+        except Exception:
             logger = get_logger()
-            logger.error("Forget endpoint error: %s", error, exc_info=True)
+            logger.exception("Forget endpoint error")
             return JSONResponse(
                 status_code=500,
                 content={"error": "An error occurred during deletion."},

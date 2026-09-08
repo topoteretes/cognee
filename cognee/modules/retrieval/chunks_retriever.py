@@ -23,8 +23,8 @@ class ChunksRetriever(BaseRetriever):
 
     def __init__(
         self,
-        top_k: Optional[int] = 5,
-        node_name: Optional[List[str]] = None,
+        top_k: int | None = 5,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -47,7 +47,7 @@ class ChunksRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a completion using document chunks context.
         In case of the Chunks Retriever, we do not generate a completion, we just return

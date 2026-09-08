@@ -18,7 +18,7 @@ _CREDENTIALS_FILE = _CREDENTIALS_DIR / "cloud_credentials.json"
 @dataclass
 class CloudCredentials:
     access_token: str
-    refresh_token: Optional[str] = None
+    refresh_token: str | None = None
     expires_at: float = 0.0  # Unix timestamp
     service_url: str = ""
     api_key: str = ""
@@ -32,7 +32,7 @@ def get_credentials_path() -> Path:
     return _CREDENTIALS_FILE
 
 
-def load_credentials() -> Optional[CloudCredentials]:
+def load_credentials() -> CloudCredentials | None:
     path = get_credentials_path()
     if not path.exists():
         return None

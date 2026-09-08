@@ -10,7 +10,7 @@ from ..models import Dataset
 
 async def get_authorized_dataset_by_name(
     dataset_name: str, user: User, permission_type: str
-) -> Optional[Dataset]:
+) -> Dataset | None:
     """
     Get a specific dataset with the given name, with permissions for a given user.
 

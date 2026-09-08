@@ -83,7 +83,7 @@ class TextChunker(Chunker):
                             )
                         except Exception as e:
                             logger.error(e)
-                            raise e
+                            raise
                         paragraph_chunks = [chunk_data]
                         self.chunk_size = chunk_data["chunk_size"]
 
@@ -111,4 +111,4 @@ class TextChunker(Chunker):
                 )
             except Exception as e:
                 logger.error(e)
-                raise e
+                raise

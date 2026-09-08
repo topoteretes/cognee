@@ -184,7 +184,7 @@ class LinearIntegration(OAuthIntegration):
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 
-    def webhook_verifier(self) -> Optional[WebhookVerifier]:
+    def webhook_verifier(self) -> WebhookVerifier | None:
         return LinearWebhookVerifier()
 
     async def handle_webhook(self, raw_body: bytes, headers: dict[str, str]) -> None:

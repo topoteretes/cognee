@@ -126,9 +126,9 @@ class AuthorizeUrlDTO(OutDTO):
 
 class ConnectionStatusDTO(OutDTO):
     connected: bool
-    account_label: Optional[str] = None
-    provider_account_id: Optional[str] = None
-    connected_at: Optional[datetime] = None
+    account_label: str | None = None
+    provider_account_id: str | None = None
+    connected_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
@@ -145,19 +145,19 @@ class PluginProvisionDTO(OutDTO):
 class IntegrationStatusItemDTO(OutDTO):
     provider: str
     connected: bool
-    account_label: Optional[str] = None
-    provider_account_id: Optional[str] = None
-    connected_at: Optional[datetime] = None
+    account_label: str | None = None
+    provider_account_id: str | None = None
+    connected_at: datetime | None = None
 
 
 class PluginStatusItemDTO(OutDTO):
     key: str
     connected: bool
-    agent_id: Optional[UUID] = None
-    provisioned_at: Optional[datetime] = None
-    last_active_at: Optional[datetime] = None
+    agent_id: UUID | None = None
+    provisioned_at: datetime | None = None
+    last_active_at: datetime | None = None
     session_count: int = 0
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class IntegrationsStatusDTO(OutDTO):
@@ -183,7 +183,7 @@ def _plugin_session_name(plugin_key: str) -> str:
     return f"plugin:{plugin_key}"
 
 
-async def _find_plugin_agent(user: User, plugin_key: str) -> Optional[User]:
+async def _find_plugin_agent(user: User, plugin_key: str) -> User | None:
     """Resolve the agent sub-user provisioned for ``(user, plugin_key)``.
 
     ``create_agent`` derives the agent's internal email deterministically

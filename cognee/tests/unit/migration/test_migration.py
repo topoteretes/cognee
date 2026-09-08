@@ -532,7 +532,7 @@ class TestTranslateRecords:
         assert {"Alice", "Berlin", "Person"} <= node_names
 
         assert len(batch["edges"]) == 1
-        source_id, target_id, relationship, properties = batch["edges"][0]
+        source_id, _target_id, relationship, properties = batch["edges"][0]
         assert relationship == "lives_in"
         assert properties["edge_text"] == "Alice lives in Berlin"
         assert properties["valid_at"].startswith("2024-02-01")

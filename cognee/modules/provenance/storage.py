@@ -17,7 +17,8 @@ graceful-degradation catch lives one level up and writes nothing on failure.
 """
 
 import asyncio
-from typing import AsyncIterator, Awaitable, Callable, Dict, List, Optional, Tuple
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Dict, List, Optional, Tuple
 from weakref import WeakKeyDictionary
 
 from sqlalchemy import delete, distinct, func, select, text
@@ -52,7 +53,7 @@ async def _acquire_chain_write_lock(session: AsyncSession) -> None:
         await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _PG_ADVISORY_KEY})
 
 
-async def get_chain_head(session: AsyncSession) -> Optional[Tuple[int, Optional[str]]]:
+async def get_chain_head(session: AsyncSession) -> tuple[int, str | None] | None:
     """Return (sequence_id, checksum) of the newest chained entry, or None if empty."""
     row = (
         await session.execute(
@@ -65,10 +66,10 @@ async def get_chain_head(session: AsyncSession) -> Optional[Tuple[int, Optional[
     return (row[0], row[1]) if row else None
 
 
-_WriteFn = Callable[[AsyncSession, int, Optional[str]], Awaitable[Optional[ProvenanceEntry]]]
+_WriteFn = Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry | None]]
 
 
-async def append_chained_many(write_fns: List[_WriteFn]) -> List[Optional[ProvenanceEntry]]:
+async def append_chained_many(write_fns: list[_WriteFn]) -> list[ProvenanceEntry | None]:
     """Run many logical chained writes as ONE transaction claiming consecutive slots.
 
     This is the batching seam: one lock acquisition, one head read, and one
@@ -95,7 +96,7 @@ async def append_chained_many(write_fns: List[_WriteFn]) -> List[Optional[Proven
                         head = await get_chain_head(session)
                         next_seq = head[0] + 1 if head else 1
                         prev_checksum = head[1] if head else None
-                        results: List[Optional[ProvenanceEntry]] = []
+                        results: list[ProvenanceEntry | None] = []
                         for write_fn in write_fns:
                             entry = await write_fn(session, next_seq, prev_checksum)
                             if entry is not None and entry.sequence_id == next_seq:
@@ -115,7 +116,7 @@ async def append_chained(write_fn: _WriteFn) -> ProvenanceEntry:
     return (await append_chained_many([write_fn]))[0]
 
 
-async def retrieve_row(session: AsyncSession, entity_id: str) -> Optional[ProvenanceEntryRow]:
+async def retrieve_row(session: AsyncSession, entity_id: str) -> ProvenanceEntryRow | None:
     return await session.get(ProvenanceEntryRow, entity_id)
 
 
@@ -130,13 +131,13 @@ async def find_free_archive_id(session: AsyncSession, entity_id: str, last_updat
     return candidate
 
 
-async def retrieve(entity_id: str) -> Optional[ProvenanceEntry]:
+async def retrieve(entity_id: str) -> ProvenanceEntry | None:
     async with get_async_session() as session:
         row = await retrieve_row(session, entity_id)
         return ProvenanceEntry.from_row(row) if row else None
 
 
-async def retrieve_many(entity_ids: List[str]) -> List[Optional[ProvenanceEntry]]:
+async def retrieve_many(entity_ids: list[str]) -> list[ProvenanceEntry | None]:
     """Fetch several entries in one session, preserving input order (None gaps)."""
     if not entity_ids:
         return []
@@ -150,7 +151,7 @@ async def retrieve_many(entity_ids: List[str]) -> List[Optional[ProvenanceEntry]
     return [by_id.get(entity_id) for entity_id in entity_ids]
 
 
-async def retrieve_all() -> List[ProvenanceEntry]:
+async def retrieve_all() -> list[ProvenanceEntry]:
     """Materialize the whole ledger. Small ledgers / tests only — the audit
     walks (``verify_chain``/``check``) use the paged iterators below."""
     async with get_async_session() as session:
@@ -164,7 +165,7 @@ async def iter_chained(page_size: int = 1000) -> AsyncIterator[ProvenanceEntry]:
     Keyset pagination on the unique partial index — constant memory no matter
     how large the append-only ledger has grown.
     """
-    last_sequence_id: Optional[int] = None
+    last_sequence_id: int | None = None
     async with get_async_session() as session:
         while True:
             statement = select(ProvenanceEntryRow).where(
@@ -183,7 +184,7 @@ async def iter_chained(page_size: int = 1000) -> AsyncIterator[ProvenanceEntry]:
 
 async def iter_all(page_size: int = 1000) -> AsyncIterator[ProvenanceEntry]:
     """Stream every ledger entry (keyset pagination on the PK), constant memory."""
-    last_entity_id: Optional[str] = None
+    last_entity_id: str | None = None
     async with get_async_session() as session:
         while True:
             statement = select(ProvenanceEntryRow)
@@ -216,7 +217,7 @@ async def retrieve_all_activity_ids() -> set:
         return set(result.scalars())
 
 
-async def aggregate_statistics() -> Dict:
+async def aggregate_statistics() -> dict:
     """DB-side ledger statistics — no client-side full-table load."""
     async with get_async_session() as session:
         total = (
@@ -248,16 +249,16 @@ async def aggregate_statistics() -> Dict:
     }
 
 
-async def trace_lineage(entity_id: str, max_depth: Optional[int] = None) -> List[ProvenanceEntry]:
+async def trace_lineage(entity_id: str, max_depth: int | None = None) -> list[ProvenanceEntry]:
     """Batched BFS over parent_entity_id + used_entities links, seed at depth 0.
 
     One SELECT per level (``WHERE entity_id IN (frontier)``), output in BFS
     order. Matching semantica's depth semantics: with ``max_depth`` set, only
     nodes at depth < max_depth are visited.
     """
-    lineage: List[ProvenanceEntry] = []
+    lineage: list[ProvenanceEntry] = []
     visited: set = set()
-    frontier: List[str] = [entity_id]
+    frontier: list[str] = [entity_id]
     depth = 0
 
     async with get_async_session() as session:
@@ -272,7 +273,7 @@ async def trace_lineage(entity_id: str, max_depth: Optional[int] = None) -> List
             ).scalars()
             by_id = {row.entity_id: ProvenanceEntry.from_row(row) for row in rows}
 
-            next_frontier: List[str] = []
+            next_frontier: list[str] = []
             for current_id in frontier:
                 if current_id in visited:
                     continue

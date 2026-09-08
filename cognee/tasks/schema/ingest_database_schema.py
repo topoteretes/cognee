@@ -16,7 +16,7 @@ from cognee.tasks.schema.models import DatabaseSchema, SchemaRelationship, Schem
 async def ingest_database_schema(
     schema,
     max_sample_rows: int = 0,
-) -> Dict[str, List[DataPoint] | DataPoint]:
+) -> dict[str, list[DataPoint] | DataPoint]:
     """
     Extract database schema metadata (optionally with sample data) and return DataPoint models for graph construction.
 

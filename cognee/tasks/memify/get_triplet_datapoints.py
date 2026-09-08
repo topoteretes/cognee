@@ -1,4 +1,5 @@
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any, Dict, List, Optional
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.engine import DataPoint, is_internal_node
@@ -11,7 +12,7 @@ from cognee.tasks.storage import index_data_points
 logger = get_logger("get_triplet_datapoints")
 
 
-def _build_datapoint_type_index_mapping() -> Dict[str, List[str]]:
+def _build_datapoint_type_index_mapping() -> dict[str, list[str]]:
     """
     Build a mapping of DataPoint type names to their index_fields.
 
@@ -42,7 +43,7 @@ def _build_datapoint_type_index_mapping() -> Dict[str, List[str]]:
     return datapoint_type_index_property
 
 
-def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[str]) -> str:
+def _extract_embeddable_text(node_or_edge: dict[str, Any], index_fields: list[str]) -> str:
     """
     Extract and concatenate embeddable properties from a node or edge dictionary.
 
@@ -71,7 +72,7 @@ def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[st
 
 
 def _extract_relationship_text(
-    relationship: Dict[str, Any], datapoint_type_index_property: Dict[str, List[str]]
+    relationship: dict[str, Any], datapoint_type_index_property: dict[str, list[str]]
 ) -> str:
     """
     Extract relationship text from edge properties.
@@ -98,11 +99,11 @@ def _extract_relationship_text(
 
 
 def _process_single_triplet(
-    triplet_datapoint: Dict[str, Any],
-    datapoint_type_index_property: Dict[str, List[str]],
+    triplet_datapoint: dict[str, Any],
+    datapoint_type_index_property: dict[str, list[str]],
     offset: int,
     idx: int,
-) -> tuple[Optional[Triplet], Optional[str]]:
+) -> tuple[Triplet | None, str | None]:
     """
     Process a single triplet and create a Triplet object.
 
@@ -283,10 +284,9 @@ async def get_triplet_datapoints(
                 )
                 break
 
-        except Exception as e:
-            logger.error(
-                f"Error retrieving triplet batch {batch_number} at offset {offset}: {e}",
-                exc_info=True,
+        except Exception:
+            logger.exception(
+                f"Error retrieving triplet batch {batch_number} at offset {offset}",
             )
             raise
 

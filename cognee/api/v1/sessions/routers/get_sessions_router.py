@@ -37,7 +37,7 @@ logger = get_logger("sessions_api")
 _RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
 
-def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
+def _range_since(range_key: _RangeLiteral) -> datetime | None:
     now = datetime.now(timezone.utc)
     if range_key == "24h":
         return now - timedelta(hours=24)
@@ -61,7 +61,7 @@ def get_sessions_router() -> APIRouter:
             ),
             examples=["30d"],
         ),
-        status: Optional[str] = Query(
+        status: str | None = Query(
             None,
             description=(
                 "Filter by effective status: 'running', 'completed', 'failed', or 'abandoned'. "
@@ -131,8 +131,8 @@ def get_sessions_router() -> APIRouter:
                     "has_more": page.has_more,
                 }
             )
-        except Exception as exc:
-            logger.error("list_sessions failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list_sessions failed")
             return JSONResponse(status_code=500, content={"error": "list failed"})
 
     @router.get("/stats")
@@ -316,7 +316,7 @@ def get_sessions_router() -> APIRouter:
             description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
             examples=["30d"],
         ),
-        status: Optional[str] = Query(
+        status: str | None = Query(
             None,
             description="Effective-status filter: running, completed, failed, or abandoned.",
         ),
@@ -369,8 +369,8 @@ def get_sessions_router() -> APIRouter:
             # message; the global handler in cognee/api/client.py returns
             # them to the caller.
             raise
-        except Exception as exc:
-            logger.error("list_sessions_with_agent_info failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list_sessions_with_agent_info failed")
             return JSONResponse(status_code=500, content={"error": "list failed"})
 
     @router.get("/cost-by-user-agent")
@@ -406,8 +406,8 @@ def get_sessions_router() -> APIRouter:
             # message; the global handler in cognee/api/client.py returns
             # them to the caller.
             raise
-        except Exception as exc:
-            logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("cost_by_user_agent failed")
             return JSONResponse(status_code=500, content={"error": "aggregation failed"})
 
     @router.get("/{session_id}")

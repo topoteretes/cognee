@@ -26,9 +26,9 @@ logger = get_logger("purge_stale_dlt_source_artifacts")
 
 
 async def purge_stale_dlt_source_artifacts(
-    documents: List[Document],
+    documents: list[Document],
     ctx: Optional["PipelineContext"] = None,
-) -> List[Document]:
+) -> list[Document]:
     manifest_docs = [doc for doc in documents if isinstance(doc, DltSourceDocument)]
     if not manifest_docs:
         return documents

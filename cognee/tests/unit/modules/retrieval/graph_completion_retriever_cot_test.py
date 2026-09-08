@@ -214,7 +214,7 @@ async def test_run_cot_completion_with_conversation_history(mock_edge):
         ) as mock_generate,
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
             conversation_history="Previous conversation",
         )
@@ -247,7 +247,7 @@ async def test_run_cot_completion_with_response_model(mock_edge):
         ),
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"]
         )
 
@@ -273,7 +273,7 @@ async def test_run_cot_completion_empty_conversation_history(mock_edge):
         ) as mock_generate,
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
             conversation_history="",
         )

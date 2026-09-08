@@ -93,7 +93,7 @@ async def main():
     # Extract dataset_ids from cognify results
     def extract_dataset_id_from_cognify(cognify_result):
         """Extract dataset_id from cognify output dictionary"""
-        for dataset_id, pipeline_result in cognify_result.items():
+        for dataset_id in cognify_result:
             return dataset_id  # Return the first (and likely only) dataset_id
         return None
 

@@ -11,7 +11,7 @@ async def log_pipeline_run_initiated(
     pipeline_name: str,
     dataset_id: UUID,
     *,
-    user_id: Optional[UUID] = None,
+    user_id: UUID | None = None,
 ):
     pipeline_run = PipelineRun(
         pipeline_run_id=generate_pipeline_run_id(pipeline_id, dataset_id),

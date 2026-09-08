@@ -37,12 +37,12 @@ class TextToSqlResult:
     dialect: str
     question: str
     success: bool
-    sql: Optional[str] = None
+    sql: str | None = None
     rows: list[dict[str, Any]] = field(default_factory=list)
     row_count: int = 0
     truncated: bool = False
     attempts: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
     def render_text(self) -> str:
         """Compact human-readable rendering for the recall entry text."""

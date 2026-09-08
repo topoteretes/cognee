@@ -34,7 +34,7 @@ class HealthResponse(BaseModel):
     timestamp: str
     version: str
     uptime: int
-    components: Dict[str, ComponentHealth]
+    components: dict[str, ComponentHealth]
 
 
 class HealthChecker:
@@ -69,7 +69,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"Relational DB health check failed: {e!s}", exc_info=True)
+            logger.exception("Relational DB health check failed")
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
@@ -105,7 +105,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"Vector DB health check failed: {e!s}", exc_info=True)
+            logger.exception("Vector DB health check failed")
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
@@ -137,7 +137,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"Graph DB health check failed: {e!s}", exc_info=True)
+            logger.exception("Graph DB health check failed")
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
@@ -216,7 +216,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
-            logger.error(f"LLM provider health check failed: {e!s}", exc_info=True)
+            logger.exception("LLM provider health check failed")
             return ComponentHealth(
                 status=HealthStatus.DEGRADED,
                 provider="unknown",

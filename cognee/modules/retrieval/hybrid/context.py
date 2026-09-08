@@ -34,7 +34,7 @@ def format_hybrid_context_batch(global_contexts, retrieved_objects_list) -> list
     ]
 
 
-def extract_context_object_ids(retrieved_objects: Any) -> Optional[dict[str, list[str]]]:
+def extract_context_object_ids(retrieved_objects: Any) -> dict[str, list[str]] | None:
     # Facts are EdgeType vector rows, not graph nodes, so they stay excluded.
     # Rendered entity edges contribute edge_object_id when the graph stamped one.
     if not isinstance(retrieved_objects, dict):

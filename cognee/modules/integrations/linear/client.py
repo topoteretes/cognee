@@ -44,7 +44,7 @@ def _operation_label(query: str) -> str:
 
 
 async def graphql(
-    access_token: str, query: str, variables: Optional[dict[str, Any]] = None
+    access_token: str, query: str, variables: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """Run one GraphQL operation as the app user and return its ``data`` dict.
 

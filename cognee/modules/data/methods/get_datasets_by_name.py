@@ -8,9 +8,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import Dataset
 
 
-async def get_datasets_by_name(
-    dataset_names: Union[str, list[str]], user_id: UUID
-) -> list[Dataset]:
+async def get_datasets_by_name(dataset_names: str | list[str], user_id: UUID) -> list[Dataset]:
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

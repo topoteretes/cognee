@@ -15,6 +15,6 @@ async def delete_user(email: str):
                 async with get_user_manager_context(user_db) as user_manager:
                     user = await user_manager.get_by_email(email)
                     await user_manager.delete(user)
-    except UserNotExists as error:
+    except UserNotExists:
         print(f"User {email} doesn't exist")
-        raise error
+        raise

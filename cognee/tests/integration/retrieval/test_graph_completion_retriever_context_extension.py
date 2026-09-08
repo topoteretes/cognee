@@ -101,7 +101,7 @@ async def setup_test_environment_complex():
     class Person(DataPoint):
         name: str
         works_for: Company
-        owns: Optional[list[Union[Car, Home]]] = None
+        owns: list[Car | Home] | None = None
         metadata: dict = {"index_fields": ["name"]}
 
     company1 = Company(name="Figma")

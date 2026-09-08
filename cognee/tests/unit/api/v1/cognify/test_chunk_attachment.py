@@ -24,7 +24,7 @@ class _Person(DataPoint):
 
 
 class _Directory(DataPoint):
-    people: List[_Person]
+    people: list[_Person]
     metadata: dict = {"index_fields": []}
 
 

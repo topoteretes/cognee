@@ -15,16 +15,16 @@ logger = get_logger(__name__)
 S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 
 
-def create_s3_binary_data(s3_path: str, name: Optional[str] = None) -> "S3BinaryData":
+def create_s3_binary_data(s3_path: str, name: str | None = None) -> "S3BinaryData":
     return S3BinaryData(s3_path, name=name)
 
 
 class S3BinaryData(IngestionData):
-    name: Optional[str] = None
+    name: str | None = None
     s3_path: str = None
-    metadata: Optional[FileMetadata] = None
+    metadata: FileMetadata | None = None
 
-    def __init__(self, s3_path: str, name: Optional[str] = None):
+    def __init__(self, s3_path: str, name: str | None = None):
         self.s3_path = s3_path
         self.name = name
 
@@ -32,7 +32,7 @@ class S3BinaryData(IngestionData):
         metadata = self.get_metadata()
         return metadata["content_hash"]
 
-    def get_metadata(self) -> Optional[FileMetadata]:
+    def get_metadata(self) -> FileMetadata | None:
         run_sync(self.ensure_metadata())
         return self.metadata
 
@@ -40,7 +40,7 @@ class S3BinaryData(IngestionData):
         metadata = await self.aget_metadata()
         return metadata["content_hash"]
 
-    async def aget_metadata(self) -> Optional[FileMetadata]:
+    async def aget_metadata(self) -> FileMetadata | None:
         await self.ensure_metadata()
         return self.metadata
 
@@ -66,14 +66,13 @@ class S3BinaryData(IngestionData):
             async with file_storage.open(file_path, "rb") as file:
                 self.metadata = await get_file_metadata(file)
         except (OSError, ValueError, ClientError, NoCredentialsError) as error:
-            logger.error(
+            logger.exception(
                 "S3 metadata fetch failed",
                 extra={
                     "s3_path": self.s3_path,
                     "file_path": file_path,
                     "error": str(error),
                 },
-                exc_info=True,
             )
             raise
 

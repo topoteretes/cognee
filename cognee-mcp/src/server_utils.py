@@ -3,8 +3,9 @@
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 MAX_TOP_K = 100
 COMPLETION_SEARCH_TYPES = {
@@ -59,9 +60,7 @@ def parse_cognify_data(data: str) -> ParsedCognifyData:
 def looks_like_file_path(data: str) -> bool:
     """Return True when a string appears to be a local file path."""
     data = data.strip()
-    return (
-        data.startswith("/") or bool(re.match(r"^[A-Za-z]:\\", data)) or data.startswith("file://")
-    )
+    return data.startswith(("/", "file://")) or bool(re.match(r"^[A-Za-z]:\\", data))
 
 
 def validate_file_path(
@@ -69,7 +68,7 @@ def validate_file_path(
     *,
     path_exists: Callable[[str], bool] = os.path.exists,
     is_running_in_docker: Callable[[], bool] = lambda: False,
-) -> Optional[str]:
+) -> str | None:
     """Validate path-like input and return an MCP-friendly error when invalid."""
     if not looks_like_file_path(data):
         return None
@@ -98,7 +97,7 @@ def validate_cognify_file_paths(
     *,
     path_exists: Callable[[str], bool] = os.path.exists,
     is_running_in_docker: Callable[[], bool] = lambda: False,
-) -> Optional[str]:
+) -> str | None:
     """Validate every path-like item in a cognify input batch."""
     for index, item in enumerate(items):
         error = validate_file_path(
@@ -113,7 +112,7 @@ def validate_cognify_file_paths(
     return None
 
 
-def parse_csv_list(value: Optional[str]) -> Optional[list[str]]:
+def parse_csv_list(value: str | None) -> list[str] | None:
     """Parse an optional comma-separated string into a clean list."""
     if not value:
         return None
@@ -156,7 +155,7 @@ def _model_dump(value: Any) -> Any:
     return value
 
 
-def _json_dumps(value: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None) -> str:
+def _json_dumps(value: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
     if json_encoder:
         return json.dumps(_model_dump(value), indent=2, cls=json_encoder)
     return json.dumps(_model_dump(value), indent=2, default=str)
@@ -185,7 +184,7 @@ def _unwrap_results(value: Any) -> Any:
 
 
 def _render_scalar_or_json(
-    value: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
+    value: Any, *, json_encoder: type[json.JSONEncoder] | None = None
 ) -> str:
     value = _model_dump(value)
     if isinstance(value, str):
@@ -195,9 +194,7 @@ def _render_scalar_or_json(
     return str(value)
 
 
-def _extract_result_text(
-    value: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
-) -> str:
+def _extract_result_text(value: Any, *, json_encoder: type[json.JSONEncoder] | None = None) -> str:
     text = _get_field(
         value,
         "search_result",
@@ -214,7 +211,7 @@ def _extract_result_text(
 
 
 def _format_completion_results(
-    results: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
+    results: Any, *, json_encoder: type[json.JSONEncoder] | None = None
 ) -> str:
     results = _unwrap_results(results)
     if not isinstance(results, list):
@@ -252,7 +249,7 @@ def format_search_results(
     search_results: Any,
     search_type: str,
     *,
-    json_encoder: Optional[type[json.JSONEncoder]] = None,
+    json_encoder: type[json.JSONEncoder] | None = None,
 ) -> str:
     """Render Cognee search results into stable MCP text output."""
     normalized_type = normalize_search_type(search_type)
@@ -270,7 +267,7 @@ def format_search_results(
 
 
 def format_recall_results(
-    results: Any, *, json_encoder: Optional[type[json.JSONEncoder]] = None
+    results: Any, *, json_encoder: type[json.JSONEncoder] | None = None
 ) -> str:
     """Render recall results, including normalized response envelopes."""
     results = _unwrap_results(results)

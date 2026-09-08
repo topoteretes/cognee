@@ -17,7 +17,7 @@ class DecompositionMode(str, Enum):
 class QueryDecomposition(BaseModel):
     """Structured decomposition output."""
 
-    subqueries: List[str]
+    subqueries: list[str]
 
 
 @dataclass
@@ -25,7 +25,7 @@ class SubqueryRunState:
     """State collected for one decomposed subquery."""
 
     query: str
-    edges: List[Edge] = field(default_factory=list)
+    edges: list[Edge] = field(default_factory=list)
     context: str = ""
     answer: str = ""
 
@@ -35,15 +35,15 @@ class DecompositionRunState:
     """State collected for one decomposed retrieval run."""
 
     original_query: str
-    subqueries: List[SubqueryRunState] = field(default_factory=list)
-    merged_edges: List[Edge] = field(default_factory=list)
-    final_context: Optional[str] = None
+    subqueries: list[SubqueryRunState] = field(default_factory=list)
+    merged_edges: list[Edge] = field(default_factory=list)
+    final_context: str | None = None
 
 
-def normalize_subqueries(original_query: str, subqueries: Optional[List[str]]) -> List[str]:
+def normalize_subqueries(original_query: str, subqueries: list[str] | None) -> list[str]:
     """Clean and bound decomposed subqueries."""
 
-    normalized_queries: List[str] = []
+    normalized_queries: list[str] = []
     for subquery in subqueries or []:
         cleaned_query = subquery.strip()
         if not cleaned_query or cleaned_query in normalized_queries:
@@ -59,10 +59,10 @@ def normalize_subqueries(original_query: str, subqueries: Optional[List[str]]) -
     return [fallback_query or original_query]
 
 
-def merge_deduplicated_edges(edge_batches: List[List[Edge]]) -> List[Edge]:
+def merge_deduplicated_edges(edge_batches: list[list[Edge]]) -> list[Edge]:
     """Merge edge batches using identity-based deduplication."""
 
-    merged_edges: List[Edge] = []
+    merged_edges: list[Edge] = []
     seen_ids: set[int] = set()
     for edge_batch in edge_batches:
         for edge in edge_batch:
@@ -77,7 +77,7 @@ def merge_deduplicated_edges(edge_batches: List[List[Edge]]) -> List[Edge]:
 def build_subquery_answer_context(state: DecompositionRunState) -> str:
     """Build the final context from ordered subquery answers."""
 
-    sections: List[str] = []
+    sections: list[str] = []
     for index, subquery_state in enumerate(state.subqueries, start=1):
         sections.append(
             f"Subquery {index}: {subquery_state.query}\n"

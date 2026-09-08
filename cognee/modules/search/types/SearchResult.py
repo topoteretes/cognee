@@ -11,5 +11,5 @@ class SearchResultDataset(BaseModel):
 
 class SearchResult(BaseModel):
     search_result: Any
-    dataset_id: Optional[UUID]
-    dataset_name: Optional[str]
+    dataset_id: UUID | None
+    dataset_name: str | None

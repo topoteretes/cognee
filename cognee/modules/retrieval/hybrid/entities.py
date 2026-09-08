@@ -18,7 +18,7 @@ async def search_entities(
     vector_engine: Any,
     query: str,
     top_k: int,
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
     query_vector: list[float],
 ) -> list[Any]:
@@ -42,8 +42,8 @@ async def build_entities(
     graph_engine: Any,
     entity_hits: list[Any],
     max_edges_per_entity: int,
-    edge_ranks: Optional[dict[str, int]] = None,
-    node_name: Optional[list[str]] = None,
+    edge_ranks: dict[str, int] | None = None,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
 ) -> tuple[list[dict], set[str]]:
     if not entity_hits:
@@ -107,7 +107,7 @@ def _partition_neighborhood(
 
 def _keep_scoped_connections(
     connections_by_entity_id: dict[str, list[tuple[dict, dict, dict]]],
-    node_name: Optional[list[str]],
+    node_name: list[str] | None,
     node_name_filter_operator: str,
 ) -> dict[str, list[tuple[dict, dict, dict]]]:
     """Drop 1-hop neighbours that are not in the requested node set.
@@ -198,7 +198,7 @@ def _format_entity(entity: dict) -> str:
     return "\n".join(lines)
 
 
-def _entity_type(result_payload: dict) -> Optional[str]:
+def _entity_type(result_payload: dict) -> str | None:
     for value in (result_payload.get("is_a"), result_payload.get("type")):
         entity_type = display_value(value)
         if entity_type and entity_type not in {"IndexSchema"}:
@@ -250,7 +250,7 @@ def _edge_sort_key(edge: dict, edge_ranks: dict[str, int]) -> tuple[int, int]:
     return (1, rank)
 
 
-def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
+def _unpack_connection(connection: Any) -> tuple[dict, dict, dict] | None:
     if not isinstance(connection, (list, tuple)) or len(connection) != 3:
         return None
     source, edge, target = connection
@@ -259,7 +259,7 @@ def _unpack_connection(connection: Any) -> Optional[tuple[dict, dict, dict]]:
     return source, edge, target
 
 
-def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
+def _edge_bullet(source: dict, edge: dict, target: dict) -> dict | None:
     source_label = _node_label(source)
     target_label = _node_label(target)
     relationship = display_value(edge.get("relationship_name"))
@@ -281,7 +281,7 @@ def _edge_bullet(source: dict, edge: dict, target: dict) -> Optional[dict]:
     }
 
 
-def _edge_dedupe_key(edge: dict) -> Optional[tuple[str, str, str]]:
+def _edge_dedupe_key(edge: dict) -> tuple[str, str, str] | None:
     source_id = display_value(edge.get("source_id"))
     relationship = display_value(edge.get("relationship"))
     target_id = display_value(edge.get("target_id"))
@@ -290,7 +290,7 @@ def _edge_dedupe_key(edge: dict) -> Optional[tuple[str, str, str]]:
     return None
 
 
-def _is_type_relationship(relationship: Optional[str]) -> bool:
+def _is_type_relationship(relationship: str | None) -> bool:
     if not relationship:
         return False
     normalized = relationship.lower().replace("_", " ").replace("-", " ").strip()
@@ -304,12 +304,12 @@ def _is_type_edge(edge: dict) -> bool:
     return bool(text and " is a " in f" {text.lower()} ")
 
 
-def _nested_edge_text(edge: dict) -> Optional[str]:
+def _nested_edge_text(edge: dict) -> str | None:
     properties = edge.get("properties")
     if not isinstance(properties, dict):
         return None
     return display_value(properties.get("edge_text"))
 
 
-def _node_label(node: dict) -> Optional[str]:
+def _node_label(node: dict) -> str | None:
     return first_display_value(node.get("name"), node.get("id"))

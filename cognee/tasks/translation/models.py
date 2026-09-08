@@ -35,7 +35,7 @@ class TranslatedContent(DataPoint):
     translation_provider: str
     confidence_score: float
     translation_timestamp: datetime = None
-    translated_from: Optional[DocumentChunk] = None
+    translated_from: DocumentChunk | None = None
 
     metadata: dict = {"index_fields": ["source_language", "translated_text"]}
 
@@ -67,6 +67,6 @@ class LanguageMetadata(DataPoint):
     language_confidence: float
     requires_translation: bool
     character_count: int
-    language_name: Optional[str] = None
+    language_name: str | None = None
 
     metadata: dict = {"index_fields": ["detected_language"]}

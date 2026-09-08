@@ -18,10 +18,11 @@ time via ``get_effective_status_sql`` against
 """
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional, Sequence
+from typing import Optional
 from uuid import UUID as UUIDType
 
 from sqlalchemy import and_, case, func, or_, select, update
@@ -63,8 +64,8 @@ async def ensure_and_touch_session(
     *,
     session_id: str,
     user_id: UUIDType,
-    dataset_id: Optional[UUIDType] = None,
-    agent_id: Optional[str] = None,
+    dataset_id: UUIDType | None = None,
+    agent_id: str | None = None,
 ) -> None:
     """Upsert the session row in one round trip.
 
@@ -175,7 +176,7 @@ async def accumulate_usage(
     tokens_in: int = 0,
     tokens_out: int = 0,
     cost_usd: float = 0.0,
-    model: Optional[str] = None,
+    model: str | None = None,
     errored: bool = False,
 ) -> None:
     """Atomically add usage counters to the session row + per-model row.
@@ -334,10 +335,10 @@ async def get_session_row(
     *,
     session_id: str,
     user_id: UUIDType,
-    user_ids: Optional[list[UUIDType]] = None,
-    permitted_dataset_ids: Optional[list[UUIDType]] = None,
+    user_ids: list[UUIDType] | None = None,
+    permitted_dataset_ids: list[UUIDType] | None = None,
     prefer_other_owner: bool = False,
-) -> Optional[SessionRecord]:
+) -> SessionRecord | None:
     """Fetch a session row visible to the caller.
 
     Returns the row if the caller (or their child agents, via
@@ -407,11 +408,11 @@ class SessionListPage:
 
 async def list_session_rows(
     *,
-    user_id: Optional[UUIDType] = None,
-    user_ids: Optional[list[UUIDType]] = None,
-    permitted_dataset_ids: Optional[list[UUIDType]] = None,
-    since: Optional[datetime] = None,
-    status_filter: Optional[str] = None,
+    user_id: UUIDType | None = None,
+    user_ids: list[UUIDType] | None = None,
+    permitted_dataset_ids: list[UUIDType] | None = None,
+    since: datetime | None = None,
+    status_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
     order_by: str = "last_activity_at",
@@ -552,7 +553,7 @@ async def record_session_activity(
     user_id: str,
     session_id: str,
     *,
-    dataset_id: Optional[UUIDType] = None,
+    dataset_id: UUIDType | None = None,
     errored: bool = False,
 ) -> None:
     """Write a lifecycle heartbeat for a session: upsert + touch the SessionRecord row.

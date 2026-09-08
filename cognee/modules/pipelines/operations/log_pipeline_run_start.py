@@ -14,7 +14,7 @@ async def log_pipeline_run_start(
     dataset_id: UUID,
     data: Any,
     *,
-    user: Optional[User] = None,
+    user: User | None = None,
 ):
     data_info = summarize_run_info_data(data)
 

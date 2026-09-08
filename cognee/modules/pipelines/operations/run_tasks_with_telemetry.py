@@ -15,7 +15,7 @@ logger = get_logger("run_tasks_with_telemetry()")
 
 
 async def run_tasks_with_telemetry(
-    tasks: list[Task], data, user: User, pipeline_name: str, ctx: Optional[PipelineContext] = None
+    tasks: list[Task], data, user: User, pipeline_name: str, ctx: PipelineContext | None = None
 ):
     config = get_current_settings()
 
@@ -48,12 +48,10 @@ async def run_tasks_with_telemetry(
             }
             | config,
         )
-    except Exception as error:
-        logger.error(
-            "Pipeline run errored: `%s`\n%s\n",
+    except Exception:
+        logger.exception(
+            "Pipeline run errored: `%s`\n",
             pipeline_name,
-            str(error),
-            exc_info=True,
         )
         send_telemetry(
             "Pipeline Run Errored",
@@ -66,4 +64,4 @@ async def run_tasks_with_telemetry(
             | config,
         )
 
-        raise error
+        raise

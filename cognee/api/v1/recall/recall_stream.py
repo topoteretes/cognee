@@ -43,7 +43,8 @@ Three more properties are deliberate and easy to break:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, Optional
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import TypeAdapter
@@ -78,7 +79,7 @@ _STREAM_TASKS: set = set()
 _RESULTS_ADAPTER = TypeAdapter(list[RecallResponse])
 
 
-def _encode_stream_event(event: StreamEvent) -> Optional[str]:
+def _encode_stream_event(event: StreamEvent) -> str | None:
     if event.type == "delta":
         return encode_sse("delta", {"text": event.text or ""})
     if event.type == "stage":
@@ -125,7 +126,7 @@ class RecallStream:
         task: asyncio.Task,
         sink: TokenSink,
         iterator: AsyncIterator[StreamEvent],
-        first_event: Optional[StreamEvent],
+        first_event: StreamEvent | None,
     ) -> None:
         self._task = task
         self._sink = sink
@@ -195,7 +196,7 @@ class RecallStream:
             except (asyncio.CancelledError, GeneratorExit):
                 raise
             except Exception as error:  # noqa: BLE001 - the client already has a 200
-                logger.error("Streaming recall failed: %s", error, exc_info=True)
+                logger.exception("Streaming recall failed")
                 if not self._errored:
                     # Only if the engine has not already reported it: a second
                     # `error` frame would arrive after a client that treats the
@@ -209,7 +210,7 @@ class RecallStream:
                 # unvalidated, which is exactly the shape jsonable_encoder can
                 # fail on. Letting that propagate would truncate the response
                 # with no terminal event at all; the JSON path degrades to a 409.
-                logger.error("Could not encode the streamed recall payload", exc_info=True)
+                logger.exception("Could not encode the streamed recall payload")
                 if not self._errored:
                     yield encode_sse("error", _error_payload(error))
                 return
@@ -271,7 +272,7 @@ async def begin_recall_stream(run_recall: Callable[[], Awaitable[Any]]) -> Recal
         requested_token_sink.reset(token)
 
     iterator = sink.__aiter__()
-    first_event: Optional[StreamEvent] = None
+    first_event: StreamEvent | None = None
     try:
         first_event = await iterator.__anext__()
     except StopAsyncIteration:

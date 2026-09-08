@@ -4,8 +4,9 @@ This is the restore half of backup/restore and the receiving end of
 Cognee-to-Cognee instance migration.
 """
 
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator, Union
+from typing import Union
 
 from cognee.modules.migration.cogx import (
     COGXRecord,
@@ -31,7 +32,7 @@ class COGXArchiveSource(MemorySource):
 
     source_system = "cogx"
 
-    def __init__(self, directory: Union[str, Path], mode: str = "preserve"):
+    def __init__(self, directory: str | Path, mode: str = "preserve"):
         super().__init__(mode=mode)
         self.directory = Path(directory)
         # read_manifest validates the archive's cogx_version (raises ValueError

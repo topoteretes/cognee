@@ -33,7 +33,7 @@ image = (
 
 @app.function(image=image, concurrency_limit=10, timeout=86400, volumes={"/data": vol})
 async def modal_evaluate_answers(
-    answers_json_content: dict, answers_filename: str, eval_config: dict = None
+    answers_json_content: dict, answers_filename: str, eval_config: dict | None = None
 ):
     """Evaluates answers from JSON content and returns metrics results."""
     if eval_config is None:

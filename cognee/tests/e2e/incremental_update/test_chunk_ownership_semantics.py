@@ -20,6 +20,7 @@ scenarios are independent — with mocked LLM and embeddings.
 
 import asyncio
 import hashlib
+import itertools
 import re
 import shutil
 import tempfile
@@ -42,7 +43,7 @@ def _nouns(text: str) -> list:
 
 def _pairs(text: str) -> set:
     names = _nouns(text)
-    return {(a, b) for a, b in zip(names, names[1:]) if a != b}
+    return {(a, b) for a, b in itertools.pairwise(names) if a != b}
 
 
 @pytest.fixture(scope="module")

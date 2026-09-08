@@ -9,7 +9,7 @@ from cognee.modules.agent_memory.sanitization import (
 )
 
 
-def _validate_list_of_str(value: object, key: str) -> List[str]:
+def _validate_list_of_str(value: object, key: str) -> list[str]:
     if not isinstance(value, list):
         raise ValueError(f"{key} must be a list")
     for i, item in enumerate(value):
@@ -39,18 +39,18 @@ class SessionQAEntry(BaseModel):
     question: str
     context: str
     answer: str
-    qa_id: Optional[str] = None
-    feedback_text: Optional[str] = None
-    feedback_score: Optional[int] = None
-    used_graph_element_ids: Optional[Dict[str, List[str]]] = None
-    memify_metadata: Optional[Dict[str, bool]] = None
-    used_session_context_ids: Optional[List[str]] = None
+    qa_id: str | None = None
+    feedback_text: str | None = None
+    feedback_score: int | None = None
+    used_graph_element_ids: dict[str, list[str]] | None = None
+    memify_metadata: dict[str, bool] | None = None
+    used_session_context_ids: list[str] | None = None
 
     @field_validator("used_graph_element_ids")
     @classmethod
     def used_graph_element_ids_only_node_and_edge_ids(
-        cls, v: Optional[Dict[str, List[str]]]
-    ) -> Optional[Dict[str, List[str]]]:
+        cls, v: dict[str, list[str]] | None
+    ) -> dict[str, list[str]] | None:
         if v is None:
             return None
         if not isinstance(v, dict):
@@ -58,7 +58,7 @@ class SessionQAEntry(BaseModel):
         allowed = {"node_ids", "edge_ids"}
         if set(v.keys()) - allowed:
             raise ValueError("used_graph_element_ids may only have keys 'node_ids' and 'edge_ids'")
-        out: Dict[str, List[str]] = {}
+        out: dict[str, list[str]] = {}
         if "node_ids" in v:
             out["node_ids"] = _validate_list_of_str(v["node_ids"], "node_ids")
         if "edge_ids" in v:
@@ -67,7 +67,7 @@ class SessionQAEntry(BaseModel):
 
     @field_validator("used_session_context_ids")
     @classmethod
-    def validate_used_session_context_ids(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_used_session_context_ids(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
         validated = _validate_list_of_str(v, "used_session_context_ids")
@@ -75,7 +75,7 @@ class SessionQAEntry(BaseModel):
 
     @field_validator("feedback_score")
     @classmethod
-    def feedback_score_range(cls, v: Optional[int]) -> Optional[int]:
+    def feedback_score_range(cls, v: int | None) -> int | None:
         if v is not None and (v < 1 or v > 5):
             raise ValueError("feedback_score must be between 1 and 5")
         return v
@@ -83,13 +83,13 @@ class SessionQAEntry(BaseModel):
     @field_validator("memify_metadata")
     @classmethod
     def memify_metadata_only_pipeline_keys(
-        cls, v: Optional[Dict[str, bool]]
-    ) -> Optional[Dict[str, bool]]:
+        cls, v: dict[str, bool] | None
+    ) -> dict[str, bool] | None:
         if v is None:
             return None
         if not isinstance(v, dict):
             raise ValueError("memify_metadata must be a dict or None")
-        out: Dict[str, bool] = {}
+        out: dict[str, bool] = {}
         for key, val in v.items():
             if not isinstance(key, str) or not isinstance(val, bool):
                 raise ValueError("memify_metadata may only have string keys and bool values")
@@ -118,7 +118,7 @@ class SessionAgentTraceEntry(BaseModel):
     status: str
     memory_query: str = ""
     memory_context: str = ""
-    method_params: Dict[str, Any] = Field(default_factory=dict)
+    method_params: dict[str, Any] = Field(default_factory=dict)
     method_return_value: Any = None
     error_message: str = ""
     session_feedback: str = ""
@@ -142,7 +142,7 @@ class SessionAgentTraceEntry(BaseModel):
 
     @field_validator("method_params")
     @classmethod
-    def sanitize_method_params(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+    def sanitize_method_params(cls, v: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(v, dict):
             raise ValueError("method_params must be a dict")
         sanitized = sanitize_value(v)

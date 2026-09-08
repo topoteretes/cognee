@@ -21,7 +21,8 @@ carry no cardinality metadata, so which ones hold a single target cannot be
 inferred — only declared.
 """
 
-from typing import Collection, List, Optional, Set
+from collections.abc import Collection
+from typing import List, Optional, Set
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
@@ -32,14 +33,14 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("resolve_temporal_contradictions")
 
 
-def _collect_touched_node_ids(items) -> Set[str]:
+def _collect_touched_node_ids(items) -> set[str]:
     """Collect the ids of the entity/event nodes the current ingestion produced.
 
     The pipeline hands this task ``TextSummary`` objects, which wrap their source
     chunk in ``made_from``; other callers may pass ``DocumentChunk`` objects
     directly. Either way the extracted entities live on the chunk's ``contains``.
     """
-    touched: Set[str] = set()
+    touched: set[str] = set()
     for item in items:
         chunk = getattr(item, "made_from", None) or item
         for entry in getattr(chunk, "contains", None) or []:
@@ -53,10 +54,10 @@ def _collect_touched_node_ids(items) -> Set[str]:
 
 @task_summary("Resolved temporal contradictions for {n} item(s)")
 async def resolve_temporal_contradictions(
-    data_points: List[DataPoint],
-    functional_relationships: Optional[Collection[str]] = None,
+    data_points: list[DataPoint],
+    functional_relationships: Collection[str] | None = None,
     **kwargs,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """Supersede outdated assertions of single-valued relationships.
 
     Args:

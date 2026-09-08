@@ -11,7 +11,7 @@ from cognee.infrastructure.databases.relational import get_relational_config
 
 
 @lru_cache
-def get_dlt_destination(dlt_db_name: str) -> Optional[Any]:
+def get_dlt_destination(dlt_db_name: str) -> Any | None:
     """
     Handle the propagation of the cognee database configuration to the dlt library.
 

@@ -16,9 +16,9 @@ logger = get_logger("cognify_session")
 
 
 async def cognify_session(
-    data: Union[SessionPersistWindow, list[SessionPersistWindow]],
-    dataset_id: Optional[UUID | str] = None,
-    user: Optional[User] = None,
+    data: SessionPersistWindow | list[SessionPersistWindow],
+    dataset_id: UUID | str | None = None,
+    user: User | None = None,
 ) -> None:
     """
     Cognify session windows into the knowledge graph and advance their watermarks.

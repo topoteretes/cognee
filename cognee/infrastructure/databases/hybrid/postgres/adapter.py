@@ -81,35 +81,35 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     # GraphDBInterface: delegate to PostgresDemoAdapter
     # ------------------------------------------------------------------
 
-    async def query(self, query_str: str, params: Optional[dict] = None) -> List[Any]:
+    async def query(self, query_str: str, params: dict | None = None) -> list[Any]:
         return await self._graph.query(query_str, params)
 
     async def is_empty(self) -> bool:
         return await self._graph.is_empty()
 
     async def add_node(
-        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+        self, node: DataPoint | str, properties: dict[str, Any] | None = None
     ) -> None:
         return await self._graph.add_node(node, properties)
 
     async def add_nodes(
         self,
-        nodes: Union[List[Tuple[str, Dict]], List[DataPoint]],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        nodes: list[tuple[str, dict]] | list[DataPoint],
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         return await self._graph.add_nodes(nodes, source_ref_key, pipeline_run_id)
 
     async def delete_node(self, node_id: str) -> None:
         return await self._graph.delete_node(node_id)
 
-    async def delete_nodes(self, node_ids: List[str]) -> None:
+    async def delete_nodes(self, node_ids: list[str]) -> None:
         return await self._graph.delete_nodes(node_ids)
 
-    async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def get_node(self, node_id: str) -> dict[str, Any] | None:
         return await self._graph.get_node(node_id)
 
-    async def get_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_nodes(self, node_ids: list[str]) -> list[dict[str, Any]]:
         return await self._graph.get_nodes(node_ids)
 
     async def add_edge(
@@ -117,77 +117,77 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         source_id: str,
         target_id: str,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: dict[str, Any] | None = None,
     ) -> None:
         return await self._graph.add_edge(source_id, target_id, relationship_name, properties)
 
     async def add_edges(
         self,
-        edges: Union[List[Tuple[str, str, str, Optional[Dict[str, Any]]]], List],
-        source_ref_key: Optional[str] = None,
-        pipeline_run_id: Optional[str] = None,
+        edges: list[tuple[str, str, str, dict[str, Any] | None]] | list,
+        source_ref_key: str | None = None,
+        pipeline_run_id: str | None = None,
     ) -> None:
         return await self._graph.add_edges(edges, source_ref_key, pipeline_run_id)
 
     async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
         return await self._graph.has_edge(source_id, target_id, relationship_name)
 
-    async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    async def has_edges(self, edges: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
         return await self._graph.has_edges(edges)
 
-    async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+    async def get_edges(self, node_id: str) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
         return await self._graph.get_edges(node_id)
 
-    async def get_neighbors(self, node_id: str) -> List[Dict[str, Any]]:
+    async def get_neighbors(self, node_id: str) -> list[dict[str, Any]]:
         return await self._graph.get_neighbors(node_id)
 
     async def get_connections(
-        self, node_id: Union[str, UUID]
-    ) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
+        self, node_id: str | UUID
+    ) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
         return await self._graph.get_connections(node_id)
 
     async def get_graph_data(
         self,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         return await self._graph.get_graph_data()
 
     async def get_filtered_graph_data(
-        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
-    ) -> Tuple[List[Tuple[str, Dict]], List[Tuple[str, str, str, Dict]]]:
+        self, attribute_filters: list[dict[str, list[str | int]]]
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         return await self._graph.get_filtered_graph_data(attribute_filters)
 
     async def get_nodeset_subgraph(
         self,
-        node_type: Type[Any],
-        node_name: List[str],
+        node_type: type[Any],
+        node_name: list[str],
         node_name_filter_operator: str = "OR",
-    ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:
+    ) -> tuple[list[tuple[str, dict]], list[tuple[str, str, str, dict]]]:
         return await self._graph.get_nodeset_subgraph(
             node_type, node_name, node_name_filter_operator
         )
 
     async def get_neighborhood(
         self,
-        node_ids: List[str],
+        node_ids: list[str],
         depth: int = 1,
-        edge_types: Optional[List[str]] = None,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+        edge_types: list[str] | None = None,
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, str, dict[str, Any]]]]:
         return await self._graph.get_neighborhood(node_ids, depth, edge_types)
 
-    async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
+    async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         return await self._graph.get_graph_metrics(include_optional)
 
     async def delete_graph(self) -> None:
         return await self._graph.delete_graph()
 
-    async def get_triplets_batch(self, offset: int, limit: int) -> List[Dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         return await self._graph.get_triplets_batch(offset, limit)
 
     # ------------------------------------------------------------------
     # VectorDBInterface: delegate to PGVectorAdapter
     # ------------------------------------------------------------------
 
-    async def embed_data(self, data: List[str]) -> List[List[float]]:
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
         return await self._vector.embed_data(data)
 
     async def has_collection(self, collection_name: str) -> bool:
@@ -196,31 +196,31 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     async def create_collection(self, collection_name: str, payload_schema=None):
         return await self._vector.create_collection(collection_name, payload_schema)
 
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         return await self._vector.create_data_points(collection_name, data_points)
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         return await self._vector.create_vector_index(index_name, index_property_name)
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         return await self._vector.index_data_points(index_name, index_property_name, data_points)
 
-    async def retrieve(self, collection_name: str, data_point_ids: List[str]):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         return await self._vector.retrieve(collection_name, data_point_ids)
 
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: Optional[int] = 15,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-    ) -> List[ScoredResult]:
+    ) -> list[ScoredResult]:
         return await self._vector.search(
             collection_name,
             query_text,
@@ -235,11 +235,11 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: Optional[int] = None,
+        query_texts: list[str],
+        limit: int | None = None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         return await self._vector.batch_search(
             collection_name,
@@ -250,7 +250,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             node_name,
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         return await self._vector.delete_data_points(collection_name, data_point_ids)
 
     async def prune(self):
@@ -260,7 +260,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
     # Hybrid: combined graph+vector writes
     # ------------------------------------------------------------------
 
-    def _resolve_batch_size(self, items: List) -> int:
+    def _resolve_batch_size(self, items: list) -> int:
         """Positive batch size for chunking ``items`` through ``embed_data``.
 
         Falls back to ``len(items)`` (single-batch call) when
@@ -273,7 +273,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             return raw
         return len(items)
 
-    async def add_nodes_with_vectors(self, data_points: List[DataPoint]) -> None:
+    async def add_nodes_with_vectors(self, data_points: list[DataPoint]) -> None:
         """Insert nodes into graph and their embeddings into vector tables
         in a single database transaction.
 
@@ -290,7 +290,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         now = datetime.now(timezone.utc)
 
         # Group data points by (type_name, field_name) for vector indexing
-        vector_groups: Dict[str, List[Tuple[DataPoint, str]]] = {}
+        vector_groups: dict[str, list[tuple[DataPoint, str]]] = {}
         for dp in data_points:
             for field_name in dp.metadata.get("index_fields", []):
                 if getattr(dp, field_name, None) is None:
@@ -300,7 +300,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 vector_groups[collection].append((dp, field_name))
 
         # Embed all texts grouped by collection
-        embeddings_by_collection: Dict[str, List[Tuple[DataPoint, List[float], str]]] = {}
+        embeddings_by_collection: dict[str, list[tuple[DataPoint, list[float], str]]] = {}
         for collection, items in vector_groups.items():
             valid_items = [(dp, getattr(dp, field_name, None)) for dp, field_name in items]
             valid_items = [(dp, t.strip() if isinstance(t, str) else t) for dp, t in valid_items]
@@ -338,7 +338,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
                 }
             )
 
-        vector_rows_by_table: Dict[str, List[Dict]] = {}
+        vector_rows_by_table: dict[str, list[dict]] = {}
         for collection, items in embeddings_by_collection.items():
             table = _validate_table_name(collection)
             rows = []
@@ -396,7 +396,7 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
             await session.commit()
 
     async def add_edges_with_vectors(
-        self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
+        self, edges: list[tuple[str, str, str, dict[str, Any]]]
     ) -> None:
         """Insert edges into graph and their type embeddings into vector
         tables in a single database transaction.
@@ -511,8 +511,8 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
 
     async def delete_nodes_with_vectors(
         self,
-        node_ids: List[str],
-        collections: Optional[Dict[str, List[str]]] = None,
+        node_ids: list[str],
+        collections: dict[str, list[str]] | None = None,
     ) -> None:
         """Delete nodes from graph and optionally their embeddings from
         vector tables in a single database transaction.
@@ -550,8 +550,8 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
 
     async def delete_edges_with_vectors(
         self,
-        edge_type_ids: Optional[List[str]] = None,
-        triplet_ids: Optional[List[str]] = None,
+        edge_type_ids: list[str] | None = None,
+        triplet_ids: list[str] | None = None,
     ) -> None:
         """Delete edge type and triplet embeddings from vector tables.
 
@@ -599,9 +599,9 @@ class PostgresHybridAdapter(GraphDBInterface, VectorDBInterface):
         self,
         query_text: str,
         collection_name: str = "Entity_name",
-        node_id: Optional[str] = None,
+        node_id: str | None = None,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Combined graph traversal + vector similarity in a single SQL query.
 
         Finds neighbors of a node (or all nodes if node_id is None) and

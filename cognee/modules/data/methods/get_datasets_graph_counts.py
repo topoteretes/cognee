@@ -39,13 +39,13 @@ class DatasetGraphCounts:
             race with a concurrent caller (counts are still exact).
     """
 
-    pipeline_run_id: Optional[UUID] = None
+    pipeline_run_id: UUID | None = None
     num_nodes: int = 0
     num_edges: int = 0
-    computed_at: Optional[datetime] = None
+    computed_at: datetime | None = None
 
 
-async def _get_latest_cognify_runs(dataset_ids: List[UUID]) -> Dict[UUID, "PipelineRun"]:
+async def _get_latest_cognify_runs(dataset_ids: list[UUID]) -> dict[UUID, "PipelineRun"]:
     """The newest cognify run row per dataset, in one query.
 
     Delegates to the same query get_pipeline_run_by_dataset uses for the
@@ -61,7 +61,7 @@ async def _get_latest_cognify_runs(dataset_ids: List[UUID]) -> Dict[UUID, "Pipel
     return await get_latest_pipeline_runs_by_datasets(dataset_ids, COGNIFY_PIPELINE_NAME)
 
 
-async def _get_cached_metrics(run_ids: List[UUID]) -> Dict[UUID, GraphMetrics]:
+async def _get_cached_metrics(run_ids: list[UUID]) -> dict[UUID, GraphMetrics]:
     """Already-computed counts for these runs, in one query."""
     if not run_ids:
         return {}
@@ -134,8 +134,8 @@ async def _count_and_cache(dataset: Dataset, pipeline_run_id: UUID) -> DatasetGr
 
 
 async def get_datasets_graph_counts(
-    datasets: List[Dataset],
-) -> Dict[UUID, DatasetGraphCounts]:
+    datasets: list[Dataset],
+) -> dict[UUID, DatasetGraphCounts]:
     """Node/edge counts per dataset, cached per cognify run.
 
     Counts are computed once per dataset's latest cognify run and cached in
@@ -168,8 +168,8 @@ async def get_datasets_graph_counts(
         [run.pipeline_run_id for run in latest_runs.values() if run.pipeline_run_id]
     )
 
-    counts: Dict[UUID, DatasetGraphCounts] = {}
-    misses: List[UUID] = []
+    counts: dict[UUID, DatasetGraphCounts] = {}
+    misses: list[UUID] = []
     miss_calls = []
     for dataset in datasets:
         latest_run = latest_runs.get(dataset.id)

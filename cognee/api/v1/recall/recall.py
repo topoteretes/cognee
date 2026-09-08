@@ -199,7 +199,7 @@ async def _search_session(
 
     scored: list[tuple[int, SessionQAEntry]] = []
     for entry in entries:
-        entry_text = " ".join((entry.question, entry.context, entry.answer))
+        entry_text = f"{entry.question} {entry.context} {entry.answer}"
         entry_words = _tokenize(entry_text)
 
         hits = len(query_words & entry_words)

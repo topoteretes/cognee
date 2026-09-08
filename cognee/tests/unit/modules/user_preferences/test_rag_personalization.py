@@ -43,10 +43,10 @@ def _chunk(chunk_id: str, score: float) -> SimpleNamespace:
 class FakeVectorEngine:
     """Records search kwargs and serves the first ``limit`` seeded chunks."""
 
-    def __init__(self, chunks: List[Any]):
+    def __init__(self, chunks: list[Any]):
         self.chunks = chunks
-        self.search_calls: List[Dict[str, Any]] = []
-        self.retrieve_calls: List[Dict[str, Any]] = []
+        self.search_calls: list[dict[str, Any]] = []
+        self.retrieve_calls: list[dict[str, Any]] = []
 
     async def search(self, collection_name, query, **kwargs):
         self.search_calls.append({"collection_name": collection_name, **kwargs})
@@ -60,7 +60,7 @@ class FakeVectorEngine:
         return [chunk for chunk in self.chunks if str(chunk.payload.get("id", chunk.id)) in ids]
 
 
-def _patch_lookup(monkeypatch, result: Tuple[str, Dict[str, float]]):
+def _patch_lookup(monkeypatch, result: tuple[str, dict[str, float]]):
     text, weights = result
 
     async def fake_load_preference_text():
@@ -73,7 +73,7 @@ def _patch_lookup(monkeypatch, result: Tuple[str, Dict[str, float]]):
     monkeypatch.setattr(retriever_module, "load_preference_weights", fake_load_preference_weights)
 
 
-def _patch_engine(monkeypatch, chunks: List[Any]) -> FakeVectorEngine:
+def _patch_engine(monkeypatch, chunks: list[Any]) -> FakeVectorEngine:
     engine = FakeVectorEngine(chunks)
 
     async def fake_get_vector_engine_async():

@@ -65,11 +65,11 @@ graphiti_image = (
 )
 
 # --- Neo4j Image Definition ---
-neo4j_env_dict = dict(
-    NEO4J_AUTH="neo4j/pleaseletmein",
-    NEO4J_ACCEPT_LICENSE_AGREEMENT="yes",
-    NEO4J_PLUGINS='["apoc", "graph-data-science"]',
-)
+neo4j_env_dict = {
+    "NEO4J_AUTH": "neo4j/pleaseletmein",
+    "NEO4J_ACCEPT_LICENSE_AGREEMENT": "yes",
+    "NEO4J_PLUGINS": '["apoc", "graph-data-science"]',
+}
 
 neo4j_image = (
     modal.Image.from_dockerfile("modal_apps/Dockerfile.neo4j-custom")

@@ -20,4 +20,4 @@ class InDTO(BaseModel):
 
 class ErrorResponse(OutDTO):
     error: str
-    detail: Optional[str] = None
+    detail: str | None = None

@@ -6,7 +6,7 @@ from typing import Any, Optional
 from cognee.tasks.ingestion.data_item import DataItem
 
 
-def _normalize_filename(filename: Optional[str], index: int) -> str:
+def _normalize_filename(filename: str | None, index: int) -> str:
     if not filename:
         return f"upload_{index}.bin"
     normalized = str(filename).replace("\\", "/").split("/")[-1]

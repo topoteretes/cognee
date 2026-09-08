@@ -61,8 +61,8 @@ STATE_BUILD_FAILED = "build_failed"
 class WarmupProbe:
     state: str
     datapoint_count: int
-    error_class: Optional[str] = None
-    error_message: Optional[str] = None
+    error_class: str | None = None
+    error_message: str | None = None
 
     @property
     def is_warm(self) -> bool:

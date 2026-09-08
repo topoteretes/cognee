@@ -19,7 +19,8 @@ so no property is lost.
 """
 
 import json
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, Union
+from collections.abc import Iterable
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, create_model, field_validator
 
@@ -32,15 +33,15 @@ _SKIP_EDGE_KEYS = ("source_node_id", "target_node_id", "relationship_name")
 _BASE_FIELDS = frozenset(DataPoint.model_fields.keys())
 
 
-def datapoint_registry() -> Dict[str, Type[DataPoint]]:
+def datapoint_registry() -> dict[str, type[DataPoint]]:
     """All currently loaded DataPoint subclasses, keyed by class name.
 
     Also keyed by ``module.ClassName`` so identically named classes from
     different modules stay individually addressable.
     """
-    registry: Dict[str, Type[DataPoint]] = {}
+    registry: dict[str, type[DataPoint]] = {}
 
-    def _walk(cls: Type[DataPoint]) -> None:
+    def _walk(cls: type[DataPoint]) -> None:
         for subclass in cls.__subclasses__():
             # Dynamic fallback models are never authoritative for a type name.
             if issubclass(subclass, _DynamicDataPoint) or subclass is _DynamicDataPoint:
@@ -59,14 +60,14 @@ class _DynamicDataPoint(DataPoint):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 
-_dynamic_models: Dict[Tuple[str, Tuple[str, ...], Tuple[str, ...]], Type[DataPoint]] = {}
+_dynamic_models: dict[tuple[str, tuple[str, ...], tuple[str, ...]], type[DataPoint]] = {}
 
 
 def _dynamic_model(
     type_name: str,
-    property_names: Optional[Iterable[str]] = None,
-    index_fields: Optional[List[str]] = None,
-) -> Type[DataPoint]:
+    property_names: Iterable[str] | None = None,
+    index_fields: list[str] | None = None,
+) -> type[DataPoint]:
     """A DataPoint subclass named ``type_name`` that DECLARES the record's
     properties as fields and bakes ``index_fields`` into the CLASS-level
     metadata default.
@@ -88,7 +89,7 @@ def _dynamic_model(
     )
     key = (type_name, extra_fields, tuple(index_fields or ()))
     if key not in _dynamic_models:
-        field_definitions: Dict[str, Any] = {name: (Any, None) for name in extra_fields}
+        field_definitions: dict[str, Any] = {name: (Any, None) for name in extra_fields}
         field_definitions["metadata"] = (dict, {"index_fields": list(index_fields or [])})
         _dynamic_models[key] = create_model(
             type_name, __base__=_DynamicDataPoint, **field_definitions
@@ -96,7 +97,7 @@ def _dynamic_model(
     return _dynamic_models[key]
 
 
-def _clean_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
+def _clean_properties(properties: dict[str, Any]) -> dict[str, Any]:
     props = dict(properties)
     # Graph stores may serialize dict-valued fields as JSON strings.
     for key in ("metadata", "belongs_to_set"):
@@ -110,7 +111,7 @@ def _clean_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def rehydrate_node(
-    properties: Dict[str, Any], registry: Optional[Dict[str, Type[DataPoint]]] = None
+    properties: dict[str, Any], registry: dict[str, type[DataPoint]] | None = None
 ) -> DataPoint:
     """Turn stored node properties back into a typed DataPoint instance.
 
@@ -151,7 +152,7 @@ class GraphEdge(BaseModel):
     source_id: str
     target_id: str
     relationship: str
-    properties: Dict[str, Any] = Field(default_factory=dict)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphSnapshot(BaseModel):
@@ -167,8 +168,8 @@ class GraphSnapshot(BaseModel):
 
     dataset_name: str = ""
     dataset_id: str = ""
-    nodes: List[SerializeAsAny[DataPoint]] = Field(default_factory=list)
-    edges: List[GraphEdge] = Field(default_factory=list)
+    nodes: list[SerializeAsAny[DataPoint]] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
 
     @field_validator("nodes", mode="before")
     @classmethod
@@ -180,14 +181,14 @@ class GraphSnapshot(BaseModel):
             rehydrate_node(item, registry) if isinstance(item, dict) else item for item in value
         ]
 
-    def nodes_of_type(self, node_type: Union[str, Type[DataPoint]]) -> List[DataPoint]:
+    def nodes_of_type(self, node_type: str | type[DataPoint]) -> list[DataPoint]:
         if isinstance(node_type, type):
             return [node for node in self.nodes if isinstance(node, node_type)]
         return [node for node in self.nodes if node.type == node_type]
 
     def find(
-        self, node_type: Union[str, Type[DataPoint], None] = None, **field_filters: Any
-    ) -> List[DataPoint]:
+        self, node_type: str | type[DataPoint] | None = None, **field_filters: Any
+    ) -> list[DataPoint]:
         """Find nodes by type and/or exact field values: ``find(Entity, name="Alice")``."""
         nodes = self.nodes_of_type(node_type) if node_type is not None else list(self.nodes)
         for field_name, expected in field_filters.items():
@@ -202,7 +203,7 @@ class GraphSnapshot(BaseModel):
         source node's class declares (e.g. ``Entity.is_a``), sets the target
         instance on it — turning the two lists into a traversable object graph.
         """
-        by_id: Dict[str, DataPoint] = {str(node.id): node for node in self.nodes}
+        by_id: dict[str, DataPoint] = {str(node.id): node for node in self.nodes}
         for edge in self.edges:
             source = by_id.get(edge.source_id)
             target = by_id.get(edge.target_id)

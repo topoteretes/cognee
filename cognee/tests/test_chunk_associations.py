@@ -71,7 +71,7 @@ async def test_chunk_associations_creates_edges_between_similar_chunks(clean_tes
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -112,7 +112,7 @@ async def test_chunk_associations_respects_similarity_threshold(clean_test_envir
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -147,7 +147,7 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -221,7 +221,7 @@ async def test_chunk_associations_handles_single_chunk(clean_test_environment):
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -254,7 +254,7 @@ async def test_chunk_associations_configurable_parameters(clean_test_environment
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 

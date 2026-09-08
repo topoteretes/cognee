@@ -64,8 +64,8 @@ class ContextPreview:
     """
 
     session_context: str = ""
-    user_prompt: Optional[str] = None
-    system_prompt: Optional[str] = None
+    user_prompt: str | None = None
+    system_prompt: str | None = None
 
 
 def render_context_for_prompt(context: Any) -> Any:
@@ -89,11 +89,11 @@ class SharedSessionHistory:
     are dataset-scoped, so it renders per dataset.
     """
 
-    def __init__(self, *, query: str, session_id: Optional[str]):
+    def __init__(self, *, query: str, session_id: str | None):
         self.query = query
         self.session_id = session_id
         self._lock = asyncio.Lock()
-        self._history: Optional[str] = None
+        self._history: str | None = None
 
     async def get(self, session_manager, *, user_id: str, resolved_session_id: str) -> str:
         async with self._lock:
@@ -110,8 +110,8 @@ class SharedSessionHistory:
 async def load_read_only_session_prompt(
     raw_query: str,
     *,
-    session_id: Optional[str] = None,
-    shared_history: Optional[SharedSessionHistory] = None,
+    session_id: str | None = None,
+    shared_history: SharedSessionHistory | None = None,
 ) -> str:
     """The session layer a completion would carry, read without writing or calling an LLM.
 
@@ -161,8 +161,8 @@ async def build_context_preview(
     *,
     query: str,
     context: Any,
-    session_id: Optional[str] = None,
-    shared_history: Optional[SharedSessionHistory] = None,
+    session_id: str | None = None,
+    shared_history: SharedSessionHistory | None = None,
 ) -> ContextPreview:
     """Assemble the session layer and the rendered prompts for one ``only_context`` call.
 

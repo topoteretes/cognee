@@ -35,7 +35,7 @@ class VectorDBInterface(Protocol):
     async def create_collection(
         self,
         collection_name: str,
-        payload_schema: Optional[Any] = None,
+        payload_schema: Any | None = None,
     ):
         """
         Create a new collection with an optional payload schema.
@@ -52,7 +52,7 @@ class VectorDBInterface(Protocol):
     """ Data points """
 
     @abstractmethod
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """
         Insert new data points into the specified collection.
 
@@ -69,7 +69,7 @@ class VectorDBInterface(Protocol):
         self,
         collection_name: str,
         points: list[dict],
-        payload_schema: Optional[Any] = None,
+        payload_schema: Any | None = None,
     ) -> None:
         """
         Upsert already-computed vectors into the specified collection.
@@ -100,12 +100,12 @@ class VectorDBInterface(Protocol):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str],
-        query_vector: Optional[List[float]],
-        limit: Optional[int],
+        query_text: str | None,
+        query_vector: list[float] | None,
+        limit: int | None,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
     ):
         """
@@ -135,11 +135,11 @@ class VectorDBInterface(Protocol):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: Optional[int],
+        query_texts: list[str],
+        limit: int | None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -164,7 +164,7 @@ class VectorDBInterface(Protocol):
     supports_payload_update: bool = False
 
     async def update_payload(
-        self, collection_name: str, payload_updates: Dict[str, Dict[str, Any]]
+        self, collection_name: str, payload_updates: dict[str, dict[str, Any]]
     ) -> None:
         """
         Update payload fields on existing rows WITHOUT re-embedding.
@@ -192,7 +192,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError("This vector adapter does not support payload-only updates.")
 
     @abstractmethod
-    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         """
         Delete specified data points from a collection.
 
@@ -210,8 +210,8 @@ class VectorDBInterface(Protocol):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """
         Remove the given tag names from every `belongs_to_set` array in the
@@ -238,7 +238,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def embed_data(self, data: List[str]) -> List[List[float]]:
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
         Embed textual data into vector representations.
 
@@ -283,7 +283,7 @@ class VectorDBInterface(Protocol):
         """
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         """
         Index data points for improved search performance.
@@ -312,7 +312,7 @@ class VectorDBInterface(Protocol):
         return model_type
 
     @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: UUID | None, user: User | None) -> dict:
         """
         Return a dictionary with connection info for a vector database for the given dataset.
         Function can auto handle deploying of the actual database if needed, but is not necessary.

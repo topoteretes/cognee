@@ -59,7 +59,7 @@ async def execute_evaluation(params: dict) -> None:
     return metrics
 
 
-async def run_evaluation(params: dict) -> List[dict]:
+async def run_evaluation(params: dict) -> list[dict]:
     """Run each step of the evaluation pipeline based on configuration flags."""
     # Step 1: Evaluate answers if requested
     if params.get("evaluating_answers"):

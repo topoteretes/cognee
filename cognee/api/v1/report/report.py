@@ -12,10 +12,10 @@ logger = get_logger("report")
 
 
 async def report(
-    datasets: Optional[Union[str, List[str]]] = DEFAULT_DATASET_NAME,
-    output_path: Optional[str] = "graph_report.md",
+    datasets: str | list[str] | None = DEFAULT_DATASET_NAME,
+    output_path: str | None = "graph_report.md",
     top_n: int = 10,
-    user: Optional[User] = None,
+    user: User | None = None,
 ) -> str:
     """Generate a Graph Insight Report from the knowledge graph.
 

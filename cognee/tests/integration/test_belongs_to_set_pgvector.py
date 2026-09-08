@@ -49,7 +49,7 @@ class _FakeEmbeddingEngine:
         """Return the stub embedding batch size."""
         return 100
 
-    async def embed_text(self, texts: List[str]) -> List[List[float]]:
+    async def embed_text(self, texts: list[str]) -> list[list[float]]:
         """Return a fixed 3-D vector per input text without making any API call."""
         return [[0.1, 0.2, 0.3] for _ in texts]
 

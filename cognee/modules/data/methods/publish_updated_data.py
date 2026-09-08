@@ -60,7 +60,7 @@ class StagedContent(BaseModel):
     data_size: int
 
 
-def merged_external_metadata(data: Data, node_set: Optional[List[str]]) -> dict:
+def merged_external_metadata(data: Data, node_set: list[str] | None) -> dict:
     """The row's external metadata with an explicitly supplied node_set applied.
 
     Mirrors ``ingest_data``'s ``ext_metadata["node_set"] = node_set`` so an
@@ -78,7 +78,7 @@ async def publish_updated_data(
     dataset_id: UUID,
     staged: StagedContent,
     token_count: int,
-    node_set: Optional[List[str]],
+    node_set: list[str] | None,
 ) -> None:
     """The one-transaction publish: content, metadata, and status flip together.
 

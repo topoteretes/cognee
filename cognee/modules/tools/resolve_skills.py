@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.modules.engine.models import Skill
@@ -16,10 +17,10 @@ def _skill_in_dataset_scope(skill: Skill, dataset_id: UUID) -> bool:
 
 
 async def resolve_skills(
-    skills: Optional[Sequence[Union[str, Skill]]] = None,
+    skills: Sequence[str | Skill] | None = None,
     *,
-    dataset_id: Optional[UUID] = None,
-) -> List[Skill]:
+    dataset_id: UUID | None = None,
+) -> list[Skill]:
     """Resolve explicit skills inside one dataset.
 
     v1 intentionally rejects unscoped skill lookup and multi-dataset lookup.
@@ -27,7 +28,7 @@ async def resolve_skills(
     if dataset_id is None:
         raise ValueError("Skill lookup requires one explicit dataset.")
 
-    resolved: List[Skill] = []
+    resolved: list[Skill] = []
     seen_ids = set()
 
     for item in skills or []:
@@ -50,7 +51,7 @@ async def resolve_skills(
     return resolved
 
 
-async def find_skill_by_id(skill_id: str, *, dataset_id: UUID) -> Optional[Skill]:
+async def find_skill_by_id(skill_id: str, *, dataset_id: UUID) -> Skill | None:
     raw_nodes = await _load_skill_nodes()
     for raw in raw_nodes:
         skill = _coerce_skill(raw)
@@ -61,7 +62,7 @@ async def find_skill_by_id(skill_id: str, *, dataset_id: UUID) -> Optional[Skill
     return None
 
 
-async def find_skill_by_name(name: str, *, dataset_id: UUID) -> Optional[Skill]:
+async def find_skill_by_name(name: str, *, dataset_id: UUID) -> Skill | None:
     raw_nodes = await _load_skill_nodes(name=name)
     for raw in raw_nodes:
         skill = _coerce_skill(raw)
@@ -72,7 +73,7 @@ async def find_skill_by_name(name: str, *, dataset_id: UUID) -> Optional[Skill]:
     return None
 
 
-async def _load_skill_nodes(name: Optional[str] = None):
+async def _load_skill_nodes(name: str | None = None):
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception:
@@ -111,7 +112,7 @@ async def _load_skill_nodes(name: Optional[str] = None):
         return []
 
 
-def _coerce_skill(raw) -> Optional[Skill]:
+def _coerce_skill(raw) -> Skill | None:
     if isinstance(raw, Skill):
         return raw
     node_id = None

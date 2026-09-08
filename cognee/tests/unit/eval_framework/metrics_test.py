@@ -17,7 +17,7 @@ with patch.dict(
 
 
 class MockTestCase:
-    def __init__(self, actual_output: Optional[str], expected_output: Optional[str]):
+    def __init__(self, actual_output: str | None, expected_output: str | None):
         self.actual_output = actual_output
         self.expected_output = expected_output
 

@@ -96,7 +96,7 @@ def is_tracing_enabled() -> bool:
     return False
 
 
-def get_last_trace() -> Optional[CogneeTrace]:
+def get_last_trace() -> CogneeTrace | None:
     """Return the most recent completed trace from the in-memory buffer."""
     exporter = get_exporter()
     if exporter is None:

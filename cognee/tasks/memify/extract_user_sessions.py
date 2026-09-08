@@ -15,7 +15,7 @@ logger = get_logger("extract_user_sessions")
 
 async def extract_user_sessions(
     data,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
 ):
     """
     Extract not-yet-persisted Q&A entries for the current user via SessionManager.

@@ -26,7 +26,8 @@ warning. Resolution is advisory only and never raises: a wrong count is a
 degraded estimate, not a fatal error.
 """
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
@@ -44,7 +45,7 @@ _MISMATCH_HINT = (
 )
 
 
-def _bare_model(model: Optional[str]) -> Optional[str]:
+def _bare_model(model: str | None) -> str | None:
     """Drop a single leading ``provider/`` tag from a model id.
 
     Splits once, so a multi-segment repo after the tag survives
@@ -56,7 +57,7 @@ def _bare_model(model: Optional[str]) -> Optional[str]:
     return model.split("/", 1)[-1] if model and "/" in model else model
 
 
-def _fastembed_hf_repo(model: Optional[str]) -> Optional[str]:
+def _fastembed_hf_repo(model: str | None) -> str | None:
     """Return the HuggingFace repo whose tokenizer matches a fastembed model.
 
     fastembed model ids are the canonical HF repos (``BAAI/bge-small-en-v1.5``,
@@ -128,10 +129,10 @@ def _huggingface_or_fallback(
 
 def resolve_embedding_tokenizer(
     *,
-    provider: Optional[str],
-    model: Optional[str],
+    provider: str | None,
+    model: str | None,
     max_completion_tokens: int = 512,
-    huggingface_tokenizer: Optional[str] = None,
+    huggingface_tokenizer: str | None = None,
 ) -> TokenizerInterface:
     """Resolve the tokenizer that best matches an embedding provider and model.
 

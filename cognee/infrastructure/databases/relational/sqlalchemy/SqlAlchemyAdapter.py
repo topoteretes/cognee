@@ -2,9 +2,10 @@ import asyncio
 import gc
 import os
 import tempfile
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from os import path
-from typing import AsyncGenerator, List, Optional
+from typing import List, Optional
 from urllib.parse import unquote
 from uuid import UUID
 
@@ -30,7 +31,12 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
+    def __init__(
+        self,
+        connection_string: str,
+        connect_args: dict | None = None,
+        pool_args: dict | None = None,
+    ):
         """
         Initialize the SQLAlchemy adapter with connection settings.
 
@@ -256,7 +262,7 @@ class SQLAlchemyAdapter:
             )
             await connection.close()
 
-    async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
+    async def delete_table(self, table_name: str, schema_name: str | None = "public"):
         """
         Delete a table from the specified schema, if it exists.
 
@@ -281,7 +287,7 @@ class SQLAlchemyAdapter:
         self,
         table_name: str,
         data: list[dict],
-        schema_name: Optional[str] = "public",
+        schema_name: str | None = "public",
     ) -> int:
         """
         Insert data into a specified table, returning the number of rows inserted.
@@ -327,9 +333,9 @@ class SQLAlchemyAdapter:
 
         except Exception as e:
             logger.error(f"Insert failed: {e!s}")
-            raise e  # Re-raise for error handling upstream
+            raise  # Re-raise for error handling upstream
 
-    async def get_schema_list(self) -> List[str]:
+    async def get_schema_list(self) -> list[str]:
         """
         Return a list of all schema names in the database, excluding system schemas.
 
@@ -352,7 +358,7 @@ class SQLAlchemyAdapter:
         return []
 
     async def delete_entity_by_id(
-        self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"
+        self, table_name: str, data_id: UUID, schema_name: str | None = "public"
     ):
         """
         Delete an entity from the specified table based on its unique ID.
@@ -432,7 +438,7 @@ class SQLAlchemyAdapter:
         await self.remove_data_file_if_unreferenced(raw_data_location)
         await self.remove_data_file_if_unreferenced(original_data_location)
 
-    async def remove_data_file_if_unreferenced(self, file_location: Optional[str]) -> None:
+    async def remove_data_file_if_unreferenced(self, file_location: str | None) -> None:
         """Remove a cognee-managed stored file once no ``Data`` row references it.
 
         A location outside the data root is a user's own file (a local path, an
@@ -477,7 +483,7 @@ class SQLAlchemyAdapter:
         else:
             logger.warning("Stored file to clean up was already gone: %s", file_location)
 
-    async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
+    async def get_table(self, table_name: str, schema_name: str | None = "public") -> Table:
         """
         Load a table dynamically using the specified name and schema information.
 
@@ -526,7 +532,7 @@ class SQLAlchemyAdapter:
                     return metadata.tables[full_table_name]
                 raise EntityNotFoundError(message=f"Table '{full_table_name}' not found.")
 
-    async def get_table_names(self) -> List[str]:
+    async def get_table_names(self) -> list[str]:
         """
         Return a list of all table names in the database, regardless of their model definitions.
 
@@ -556,7 +562,7 @@ class SQLAlchemyAdapter:
 
         return table_names
 
-    async def get_data(self, table_name: str, filters: dict = None):
+    async def get_data(self, table_name: str, filters: dict | None = None):
         """
         Retrieve data from a specified table using optional filtering conditions.
 
@@ -661,9 +667,9 @@ class SQLAlchemyAdapter:
                 logger.debug("Database tables dropped successfully.")
             except Exception as e:
                 logger.error(f"Error dropping database tables: {e}")
-                raise e
+                raise
 
-    async def create_database(self, script_location: Optional[str] = None):
+    async def create_database(self, script_location: str | None = None):
         """
         Create the database by applying the Alembic migration chain: prepare the
         storage (SQLite directory, pgvector extension), then ``alembic upgrade
@@ -771,7 +777,7 @@ class SQLAlchemyAdapter:
 
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
-            raise e
+            raise
 
         logger.info("Database deleted successfully.")
 

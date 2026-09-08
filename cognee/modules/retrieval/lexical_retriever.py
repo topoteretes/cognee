@@ -1,7 +1,8 @@
 import asyncio
 import re
+from collections.abc import Callable
 from heapq import nlargest
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -11,7 +12,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("LexicalRetriever")
 
 
-def tokenize_words(text: str, stop_words: Optional[set[str]] = None) -> list[str]:
+def tokenize_words(text: str, stop_words: set[str] | None = None) -> list[str]:
     """Lowercase, split on word characters, and drop any stop words.
 
     Shared by the lexical retrievers so tokenization stays consistent across scorers.
@@ -155,7 +156,7 @@ class LexicalRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Returns a completion for the given query.
 

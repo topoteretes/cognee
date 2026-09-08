@@ -54,7 +54,7 @@ _pending_searches: set = set()
 # text itself — Slack button values cap at 2000 chars, easily blown by a
 # real question+answer). Popped on Share or Discard; an id missing here
 # (server restart, double-click) means "no longer available", not a crash.
-_pending_answers: dict[str, Tuple[str, str, List[dict[str, Any]]]] = {}
+_pending_answers: dict[str, tuple[str, str, list[dict[str, Any]]]] = {}
 
 # Keep the placeholder/confirm text readable even if someone pastes an essay.
 _QUERY_PREVIEW_MAX_CHARS = 200
@@ -64,7 +64,7 @@ def _ephemeral(
     text: str,
     *,
     replace_original: bool = False,
-    blocks: Optional[List[dict[str, Any]]] = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a reply visible only to the person who ran the command.
 
@@ -78,7 +78,7 @@ def _in_channel(
     text: str,
     *,
     replace_original: bool = False,
-    blocks: Optional[List[dict[str, Any]]] = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a reply visible to everyone in the channel/DM the command ran in.
 
@@ -93,7 +93,7 @@ def _reply(
     text: str,
     *,
     replace_original: bool,
-    blocks: Optional[List[dict[str, Any]]],
+    blocks: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     # `text` is always set, even when `blocks` is present — Slack renders it
     # in notifications, screen readers, and any client that doesn't support
@@ -251,7 +251,7 @@ async def handle_cognee_ask_discard(answer_id: str) -> dict[str, Any]:
     return _ephemeral("Discarded.", replace_original=True)
 
 
-def _extract_fact(result: Any) -> Optional[str]:
+def _extract_fact(result: Any) -> str | None:
     """Pull the answer text out of one ``cognee.search()`` result.
 
     Despite the ``List[SearchResult]`` type hint, the public ``search()``
@@ -295,7 +295,7 @@ def _is_refusal(fact: str) -> bool:
     return any(marker in lowered for marker in _REFUSAL_MARKERS)
 
 
-def _format_answer(results: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
+def _format_answer(results: list[Any]) -> tuple[str, list[dict[str, Any]]]:
     """Build a ``/cognee-ask`` answer as ``(fallback_text, blocks)``.
 
     ``fallback_text`` is a plain-text summary for notifications/screen
@@ -313,7 +313,7 @@ def _format_answer(results: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
     if not facts:
         return "No relevant information found.", []
 
-    blocks: List[dict[str, Any]] = [
+    blocks: list[dict[str, Any]] = [
         {"type": "header", "text": {"type": "plain_text", "text": "Answer", "emoji": True}},
     ]
     for fact in facts:

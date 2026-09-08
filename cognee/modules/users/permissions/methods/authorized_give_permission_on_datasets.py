@@ -9,7 +9,7 @@ from cognee.modules.users.permissions.methods import (
 
 
 async def authorized_give_permission_on_datasets(
-    principal_id: UUID, dataset_ids: Union[List[UUID], UUID], permission_name: str, owner_id: UUID
+    principal_id: UUID, dataset_ids: list[UUID] | UUID, permission_name: str, owner_id: UUID
 ):
     """
         Give permission to certain datasets to a user.

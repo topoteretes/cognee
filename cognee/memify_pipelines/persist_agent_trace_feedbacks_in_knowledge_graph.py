@@ -18,11 +18,11 @@ logger = get_logger("persist_agent_trace_feedbacks_in_knowledge_graph")
 
 async def persist_agent_trace_feedbacks_in_knowledge_graph_pipeline(
     user: User,
-    session_ids: Optional[list[str]] = None,
+    session_ids: list[str] | None = None,
     dataset: str = DEFAULT_DATASET_NAME,
     node_set_name: str = "agent_trace_feedbacks",
     raw_trace_content: bool = False,
-    last_n_steps: Optional[int] = None,
+    last_n_steps: int | None = None,
     run_in_background: bool = False,
 ):
     """

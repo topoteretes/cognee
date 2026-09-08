@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from collections.abc import Awaitable, Callable
+from typing import Any, List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -36,17 +37,17 @@ logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
 async def run_tasks(
-    tasks: Union[List[Task], Callable[[Any], List[Task]]],
+    tasks: list[Task] | Callable[[Any], list[Task]],
     dataset_id: UUID,
-    data: Optional[List[Any]] = None,
-    user: Optional[User] = None,
+    data: list[Any] | None = None,
+    user: User | None = None,
     pipeline_name: str = "unknown_pipeline",
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    extras: Optional[dict] = None,
-    rollback_handler: Optional[Callable[..., Awaitable[None]]] = None,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
+    extras: dict | None = None,
+    rollback_handler: Callable[..., Awaitable[None]] | None = None,
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
     data_cache: bool = False,
 ):
     """Run a pipeline over a dataset as ONE logical run.
@@ -172,11 +173,10 @@ async def run_tasks(
                             total_items=total_items,
                             current_stage=progress_state["current_stage"],
                         )
-                    except Exception as progress_error:
+                    except Exception:
                         # Progress reporting must never fail the pipeline run.
-                        logger.error(
-                            f"Failed to log pipeline run progress: {progress_error}",
-                            exc_info=True,
+                        logger.exception(
+                            "Failed to log pipeline run progress",
                         )
 
                 async def _run_item(data_item, item_tasks):
@@ -216,7 +216,7 @@ async def run_tasks(
 
                 # Separate successes from unhandled exceptions
                 results = []
-                first_item_error: Optional[BaseException] = None
+                first_item_error: BaseException | None = None
                 for i, result in enumerate(gathered):
                     if isinstance(result, BaseException):
                         logger.error(f"Item {i} failed: {result}", exc_info=result)
@@ -310,8 +310,8 @@ async def run_tasks(
                             data_ingestion_info=locals().get("results"),
                             error=error,
                         )
-                    except Exception as rollback_error:
-                        logger.error("Rollback errored: %s", rollback_error, exc_info=True)
+                    except Exception:
+                        logger.exception("Rollback errored")
 
                 # Per-item failures arrive wrapped in a generic
                 # PipelineRunFailedError; record and surface the ROOT cause so
@@ -347,4 +347,4 @@ async def run_tasks(
 
                 # In case of error during incremental loading of data just let the user know the pipeline Errored, don't raise error
                 if not isinstance(error, PipelineRunFailedError):
-                    raise error
+                    raise
