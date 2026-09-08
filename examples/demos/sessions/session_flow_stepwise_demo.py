@@ -108,7 +108,9 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")
 # --------------------------------------------------------------------------- #
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_PATH = LOG_DIR / f"session_flow_stepwise_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_PATH = (
+    LOG_DIR / f"session_flow_stepwise_{datetime.now().astimezone().strftime('%Y%m%d_%H%M%S')}.log"
+)
 VIZ_PATH = LOG_PATH.with_suffix(".html")
 
 

@@ -92,7 +92,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        time_now = datetime.now().strftime("%d-%m-%Y")
+        time_now = datetime.now().astimezone().strftime("%d-%m-%Y")
 
         system_prompt = render_prompt(
             prompt_path, {"time_now": time_now}, base_directory=base_directory

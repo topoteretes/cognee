@@ -7,7 +7,7 @@ scheduled scraping tasks and ensures that node updates preserve existing graph e
 
 import hashlib
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from uuid import NAMESPACE_OID, NAMESPACE_URL, uuid5
 
@@ -77,7 +77,7 @@ async def cron_web_scraper_task(
         ValueError: If the schedule is an invalid cron expression.
         ImportError: If APScheduler is not installed.
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     if schedule:
         try:
@@ -109,7 +109,7 @@ async def cron_web_scraper_task(
         return
 
     # If no schedule, run immediately
-    logger.info(f"[{datetime.now()}] Running web scraper task immediately...")
+    logger.info(f"[{datetime.now(timezone.utc)}] Running web scraper task immediately...")
     return await web_scraper_task(
         url=url,
         schedule=schedule,
@@ -170,7 +170,7 @@ async def web_scraper_task(
     soup_crawler_config, tavily_config, keenable_config, preferred_tool = check_arguments(
         tavily_api_key, extraction_rules, tavily_config, soup_crawler_config, keenable_config
     )
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     provenance_kwargs = await graph_provenance_write_kwargs(
         graph_db,

@@ -68,7 +68,7 @@ ALL_SENTINELS: dict[int, set[str]] = {index: set() for index in range(NUM_USERS)
 
 
 def log(message: str) -> None:
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    timestamp = datetime.now().astimezone().strftime("%H:%M:%S.%f")[:-3]
     print(f"[{timestamp}] {message}", flush=True)
 
 

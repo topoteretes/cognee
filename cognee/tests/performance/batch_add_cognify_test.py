@@ -116,7 +116,7 @@ def wait_for_server(url: str, timeout: float = 240.0) -> None:
 
 
 def log(msg: str) -> None:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     print(f"[{ts}] {msg}", flush=True)
 
 
