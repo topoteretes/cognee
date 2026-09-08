@@ -348,7 +348,7 @@ class DatasetQueue:
                 if reaped:
                     logger.debug("Idle reaper closed %d subprocess engine(s)", reaped)
             except Exception:
-                logger.error("Idle reaper sweep failed", exc_info=True)
+                logger.exception("Idle reaper sweep failed")
 
     def _evict_subprocess_engines(self) -> None:
         """Evict this context's subprocess-mode engines from their caches.

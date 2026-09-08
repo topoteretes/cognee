@@ -194,16 +194,12 @@ async def update_sync_operation(
                 logger.debug(f"Successfully updated sync operation {run_id}")
                 return sync_operation
 
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Database error updating sync operation {run_id}: {e!s}", exc_info=True
-                )
+            except SQLAlchemyError:
+                logger.exception(f"Database error updating sync operation {run_id}")
                 await session.rollback()
                 raise
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error updating sync operation {run_id}: {e!s}", exc_info=True
-                )
+            except Exception:
+                logger.exception(f"Unexpected error updating sync operation {run_id}")
                 await session.rollback()
                 raise
 

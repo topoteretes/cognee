@@ -371,7 +371,7 @@ async def answer_scope(
         # The consumer has already been handed a 200 and part of an answer, so
         # the failure has to reach it as an event. The detail stays server-side:
         # provider errors embed the rendered prompt and connection details.
-        logger.error("Answer streaming failed: %s", error, exc_info=True)
+        logger.exception("Answer streaming failed")
         if sink.owns(producer):
             sink.fail(
                 f"{type(error).__name__} during answer generation",

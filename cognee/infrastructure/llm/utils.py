@@ -112,17 +112,17 @@ async def test_llm_connection() -> None:
         )
         logger.error(msg)
         raise TimeoutError(msg)
-    except litellm.exceptions.AuthenticationError as e:
+    except litellm.exceptions.AuthenticationError:
         msg = (
             "LLM authentication failed. Check your LLM_API_KEY configuration. "
             "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
         )
         logger.error(msg)
-        raise e
+        raise
     except Exception as e:
         logger.error(e)
         logger.error("Connection to LLM could not be established.")
-        raise e
+        raise
 
 
 async def test_embedding_connection() -> int:
@@ -160,7 +160,7 @@ async def test_embedding_connection() -> int:
     except Exception as e:
         logger.error(e)
         logger.error("Connection to Embedding handler could not be established.")
-        raise e
+        raise
 
 
 async def determine_embedding_dimensions(detected_dimensions: int) -> None:

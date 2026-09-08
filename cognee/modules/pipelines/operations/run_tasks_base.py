@@ -246,9 +246,8 @@ async def handle_task(
             span.set_status(StatusCode.ERROR, str(error))
             span.record_exception(error)
 
-            logger.error(
-                f"{task_type} task errored: `{task_name}`\n{error!s}\n",
-                exc_info=True,
+            logger.exception(
+                f"{task_type} task errored: `{task_name}`\n",
             )
             send_telemetry(
                 f"{task_type} Task Errored",
@@ -259,7 +258,7 @@ async def handle_task(
                     "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
                 },
             )
-            raise error
+            raise
 
 
 async def run_tasks_base(

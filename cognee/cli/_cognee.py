@@ -389,7 +389,7 @@ def main() -> int:
             fmt.error(f"Error starting UI: {ex!s}")
             signal_handler(signal.SIGTERM, None)
             if debug.is_debug_enabled():
-                raise ex
+                raise
             return 1
 
     # When --api-url is set, delegate to the API server instead of running
@@ -404,7 +404,7 @@ def main() -> int:
         except Exception as ex:
             fmt.error(str(ex))
             if debug.is_debug_enabled():
-                raise ex
+                raise
             return 1
         return 0
 

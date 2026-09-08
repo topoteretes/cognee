@@ -131,8 +131,8 @@ def get_sessions_router() -> APIRouter:
                     "has_more": page.has_more,
                 }
             )
-        except Exception as exc:
-            logger.error("list_sessions failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list_sessions failed")
             return JSONResponse(status_code=500, content={"error": "list failed"})
 
     @router.get("/stats")
@@ -369,8 +369,8 @@ def get_sessions_router() -> APIRouter:
             # message; the global handler in cognee/api/client.py returns
             # them to the caller.
             raise
-        except Exception as exc:
-            logger.error("list_sessions_with_agent_info failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list_sessions_with_agent_info failed")
             return JSONResponse(status_code=500, content={"error": "list failed"})
 
     @router.get("/cost-by-user-agent")
@@ -406,8 +406,8 @@ def get_sessions_router() -> APIRouter:
             # message; the global handler in cognee/api/client.py returns
             # them to the caller.
             raise
-        except Exception as exc:
-            logger.error("cost_by_user_agent failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("cost_by_user_agent failed")
             return JSONResponse(status_code=500, content={"error": "aggregation failed"})
 
     @router.get("/{session_id}")

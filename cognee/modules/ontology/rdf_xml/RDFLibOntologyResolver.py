@@ -128,7 +128,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
 
             self.build_lookup()
         except Exception as e:
-            logger.error("Failed to load ontology", exc_info=True)
+            logger.exception("Failed to load ontology")
             raise OntologyInitializationError(f"Failed to load ontology: {e}") from e
 
     def _uri_to_key(self, uri: URIRef) -> str:

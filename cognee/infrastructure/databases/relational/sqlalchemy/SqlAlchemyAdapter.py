@@ -327,7 +327,7 @@ class SQLAlchemyAdapter:
 
         except Exception as e:
             logger.error(f"Insert failed: {e!s}")
-            raise e  # Re-raise for error handling upstream
+            raise  # Re-raise for error handling upstream
 
     async def get_schema_list(self) -> List[str]:
         """
@@ -661,7 +661,7 @@ class SQLAlchemyAdapter:
                 logger.debug("Database tables dropped successfully.")
             except Exception as e:
                 logger.error(f"Error dropping database tables: {e}")
-                raise e
+                raise
 
     async def create_database(self, script_location: Optional[str] = None):
         """
@@ -771,7 +771,7 @@ class SQLAlchemyAdapter:
 
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
-            raise e
+            raise
 
         logger.info("Database deleted successfully.")
 

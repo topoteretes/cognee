@@ -381,10 +381,10 @@ def start_api_server(host: str = "0.0.0.0", port: int = 8000):
 
         config = uvicorn.Config(app, host=host, port=port)
         uvicorn.Server(config).run(sockets=[sock])
-    except Exception as e:
-        logger.exception(f"Failed to start server: {e}")
+    except Exception:
+        logger.exception("Failed to start server")
         # Here you could add any cleanup code or error recovery code.
-        raise e
+        raise
 
 
 if __name__ == "__main__":

@@ -372,4 +372,4 @@ async def brute_force_triplet_search(
                 query_batch if query_list_length else [query],
                 error,
             )
-            raise error
+            raise

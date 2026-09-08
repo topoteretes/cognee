@@ -52,7 +52,7 @@ async def code_description_to_code_part(
         vector_engine = await get_vector_engine_async()
         graph_engine = await get_graph_engine()
     except Exception as init_error:
-        logger.error("Failed to initialize engines: %s", init_error, exc_info=True)
+        logger.exception("Failed to initialize engines")
         raise RuntimeError("System initialization error. Please try again later.") from init_error
 
     send_telemetry("code_description_to_code_part_search EXECUTION STARTED", user)
@@ -131,12 +131,10 @@ async def code_description_to_code_part(
         return code_pieces_to_return, context_from_documents
 
     except Exception as exec_error:
-        logger.error(
-            "Error during code description to code part search for user: %s, query: '%s'. Error: %s",
+        logger.exception(
+            "Error during code description to code part search for user: %s, query: '%s'. Error",
             user.id,
             query,
-            exec_error,
-            exc_info=True,
         )
         send_telemetry("code_description_to_code_part_search EXECUTION FAILED", user)
         raise RuntimeError("An error occurred while processing your request.") from exec_error
@@ -153,6 +151,6 @@ if __name__ == "__main__":
             logger.debug("Retrieved Code Parts:", results)
         except Exception as e:
             logger.error(f"An error occurred: {e}")
-            raise e
+            raise
 
     asyncio.run(main())

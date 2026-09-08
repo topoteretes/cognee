@@ -66,14 +66,13 @@ class S3BinaryData(IngestionData):
             async with file_storage.open(file_path, "rb") as file:
                 self.metadata = await get_file_metadata(file)
         except (OSError, ValueError, ClientError, NoCredentialsError) as error:
-            logger.error(
+            logger.exception(
                 "S3 metadata fetch failed",
                 extra={
                     "s3_path": self.s3_path,
                     "file_path": file_path,
                     "error": str(error),
                 },
-                exc_info=True,
             )
             raise
 

@@ -143,7 +143,7 @@ class BedrockAdapter(LLMInterface):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                raise
 
             raise ContentPolicyFilterError(
                 f"The provided input contains content that is not aligned with our content policy: {text_input}"

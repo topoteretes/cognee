@@ -212,8 +212,8 @@ class ProvenanceManager:
             )
         except (ValueError, TypeError):
             raise
-        except Exception as error:
-            logger.error("Failed to track entity %r: %s", entity_id, error, exc_info=True)
+        except Exception:
+            logger.exception("Failed to track entity %r", entity_id)
             return None
 
     def _relationship_write(
@@ -275,10 +275,8 @@ class ProvenanceManager:
             )
         except (ValueError, TypeError):
             raise
-        except Exception as error:
-            logger.error(
-                "Failed to track relationship %r: %s", relationship_id, error, exc_info=True
-            )
+        except Exception:
+            logger.exception("Failed to track relationship %r", relationship_id)
             return None
 
     def _chunk_write(
@@ -362,8 +360,8 @@ class ProvenanceManager:
             )
         except (ValueError, TypeError):
             raise
-        except Exception as error:
-            logger.error("Failed to track chunk %r: %s", chunk_id, error, exc_info=True)
+        except Exception:
+            logger.exception("Failed to track chunk %r", chunk_id)
             return None
 
     def batch(self) -> "ProvenanceBatch":
@@ -692,12 +690,10 @@ class ProvenanceBatch:
             return []
         try:
             return await storage.append_chained_many(write_fns)
-        except Exception as error:
-            logger.error(
-                "Failed to commit provenance batch of %d entries: %s",
+        except Exception:
+            logger.exception(
+                "Failed to commit provenance batch of %d entries",
                 len(write_fns),
-                error,
-                exc_info=True,
             )
             return None
 

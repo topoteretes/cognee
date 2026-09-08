@@ -146,7 +146,7 @@ def get_responses_router() -> APIRouter:
                     function_result = await dispatch_function(tool_call)
                     output_status = "success"
                 except Exception as e:
-                    logger.exception(f"Error executing function {function_name}: {e}")
+                    logger.exception(f"Error executing function {function_name}")
                     function_result = f"Error executing {function_name}: {e!s}"
                     output_status = "error"
 

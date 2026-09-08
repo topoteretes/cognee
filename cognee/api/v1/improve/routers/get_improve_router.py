@@ -102,8 +102,8 @@ def get_improve_router() -> APIRouter:
             # Cognee errors carry their own status code and actionable message;
             # the global handler in cognee/api/client.py returns them.
             raise
-        except Exception as error:
-            logger.error("Improve endpoint error: %s", error, exc_info=True)
+        except Exception:
+            logger.exception("Improve endpoint error")
             return JSONResponse(
                 status_code=409,
                 content={"error": "An error occurred during graph improvement."},
