@@ -270,6 +270,9 @@ jobs:
   # Docling test - NO container (runs on macOS, container only works on Linux)
   # Uses docling-full: the test converts PDF/PNG through docling's ML pipeline,
   # which the slim `docling` extra intentionally leaves out.
+  # NOT mocked, deliberately: unlike the example jobs above this is a real
+  # test that asserts on the LLM answer's content (len != 0, expected
+  # tokens), so a generic mock's empty completion fails it by design.
   test_docling_add:
     name: Run Add with Docling Test
     runs-on: macos-15
@@ -289,13 +292,18 @@ jobs:
       - name: Run Docling Test
         env:
           ENV: 'dev'
-          OPENAI_API_KEY: "mock-not-used"
-          LLM_API_KEY: "mock-not-used"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_ARGS: ${{ secrets.LLM_ARGS }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_API_KEY: "mock-not-used"
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
         run: |
           uv sync --extra docling-full
-          uv run python cognee/tests/utils/run_mocked.py ./cognee/tests/test_add_docling_document.py
+          uv run python ./cognee/tests/test_add_docling_document.py
 
   # Guards the slim docling profile (COG-5924): the loader must convert
   # office/web formats on `--extra docling` without torch installed.
