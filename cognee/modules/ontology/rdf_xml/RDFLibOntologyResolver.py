@@ -1,7 +1,7 @@
 import difflib
 import os
 from collections import deque
-from typing import IO, Any, Dict, List, Optional, Tuple, Union
+from typing import IO
 
 from rdflib import OWL, RDF, RDFS, Graph, URIRef
 from rdflib.util import guess_format

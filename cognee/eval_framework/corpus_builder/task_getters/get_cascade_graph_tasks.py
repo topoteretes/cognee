@@ -1,5 +1,3 @@
-from typing import List
-
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import get_max_chunk_tokens

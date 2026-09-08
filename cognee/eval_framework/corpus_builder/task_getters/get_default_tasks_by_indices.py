@@ -1,5 +1,3 @@
-from typing import List
-
 from cognee.api.v1.cognify.cognify import get_default_tasks
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver

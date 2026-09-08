@@ -14,7 +14,7 @@ All tests are deterministic and require no real LLM calls or network access.
 """
 
 import os
-from typing import List, Optional
+from typing import Optional
 from uuid import uuid4
 
 import pytest

@@ -22,8 +22,6 @@ under, so a new fact and the stored fact it contradicts share a subject and land
 in the same 1-hop neighbourhood.
 """
 
-from typing import Dict, List, Optional, Set, Tuple
-
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.infrastructure.llm import LLMGateway

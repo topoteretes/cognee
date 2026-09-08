@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Keep Cognee's normal logging quiet; this script prints its own progress.
 os.environ["LOG_LEVEL"] = "ERROR"

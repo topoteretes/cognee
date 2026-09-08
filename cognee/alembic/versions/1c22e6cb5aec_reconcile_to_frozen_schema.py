@@ -39,7 +39,6 @@ table only when such a default is involved.
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 from alembic import op
 

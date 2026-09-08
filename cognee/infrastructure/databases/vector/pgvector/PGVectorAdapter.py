@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional, get_type_hints
+from typing import Any, get_type_hints
 from uuid import UUID
 
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError

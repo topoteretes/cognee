@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError

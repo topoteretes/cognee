@@ -1,7 +1,6 @@
 import platform
 import subprocess
 from pathlib import Path
-from typing import List
 
 from cognee.shared.logging_utils import get_logger
 

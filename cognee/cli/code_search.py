@@ -23,7 +23,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandInnerException

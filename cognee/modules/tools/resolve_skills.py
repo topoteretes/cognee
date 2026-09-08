@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.modules.engine.models import Skill

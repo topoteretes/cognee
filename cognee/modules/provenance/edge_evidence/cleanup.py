@@ -14,7 +14,6 @@ so the sweep is hygiene against unbounded growth, not correctness. It never
 raises: deletion must not fail because of a sidecar.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import delete

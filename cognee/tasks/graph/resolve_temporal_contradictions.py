@@ -22,7 +22,6 @@ inferred — only declared.
 """
 
 from collections.abc import Collection
-from typing import List, Optional, Set
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint

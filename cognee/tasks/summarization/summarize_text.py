@@ -1,5 +1,4 @@
 import asyncio
-from typing import Type
 from uuid import uuid5
 
 from pydantic import BaseModel

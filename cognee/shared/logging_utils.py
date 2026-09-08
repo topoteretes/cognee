@@ -9,7 +9,7 @@ import traceback
 from collections.abc import MutableMapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import structlog
 

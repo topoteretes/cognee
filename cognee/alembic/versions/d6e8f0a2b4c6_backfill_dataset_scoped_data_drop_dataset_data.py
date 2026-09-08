@@ -47,7 +47,6 @@ import logging
 import uuid
 from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

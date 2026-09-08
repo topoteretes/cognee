@@ -14,8 +14,6 @@ multiplicative compose with the feedback blend) is covered in
 ``tests/unit/modules/graph/cognee_graph_test.py``.
 """
 
-from typing import Dict, Tuple
-
 import pytest
 
 import cognee.modules.retrieval.graph_completion_retriever as retriever_module

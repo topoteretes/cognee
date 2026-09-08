@@ -29,7 +29,6 @@ import concurrent.futures
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import text

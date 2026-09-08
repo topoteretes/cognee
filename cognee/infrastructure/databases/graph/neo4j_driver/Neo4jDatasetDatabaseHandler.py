@@ -1,7 +1,6 @@
 import asyncio
 import re
 from time import monotonic
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.dataset_database_handler import (

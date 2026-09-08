@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import event, text

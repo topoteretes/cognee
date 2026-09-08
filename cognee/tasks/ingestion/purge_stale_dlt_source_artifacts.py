@@ -14,7 +14,7 @@ A crash after the purge leaves the source absent until the retry, which
 re-runs the purge harmlessly and rebuilds.
 """
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.modules.data.processing.document_types import DltSourceDocument, Document
 from cognee.shared.logging_utils import get_logger

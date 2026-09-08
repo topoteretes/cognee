@@ -1,7 +1,7 @@
 import asyncio
 import os
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata

@@ -5,7 +5,6 @@ record per non-pipeline operation — plus in-memory OTEL spans, so the
 frontend can render an activity timeline and trace viewer.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query

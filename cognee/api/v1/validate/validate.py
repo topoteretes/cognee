@@ -31,7 +31,7 @@ every graph/vector adapter is covered without adapter-specific code):
 
 from collections import defaultdict
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel
 

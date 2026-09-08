@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.tasks.ingestion.exceptions import (

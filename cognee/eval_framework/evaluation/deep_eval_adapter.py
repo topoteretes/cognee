@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from deepeval.metrics import ContextualRelevancyMetric, GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams

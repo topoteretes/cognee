@@ -27,7 +27,6 @@ Two boundaries are deliberate:
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.incremental_chunking import (

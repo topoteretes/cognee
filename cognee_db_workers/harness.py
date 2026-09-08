@@ -25,7 +25,7 @@ import traceback
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

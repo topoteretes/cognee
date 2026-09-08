@@ -4,7 +4,6 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
 
 import aiohttp
 from pydantic import BaseModel

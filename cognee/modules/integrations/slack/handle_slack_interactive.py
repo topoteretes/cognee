@@ -16,7 +16,7 @@ Slack retry, never a better outcome for a payload this app doesn't act on.
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError

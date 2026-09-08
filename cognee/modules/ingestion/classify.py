@@ -1,7 +1,7 @@
 from io import BufferedReader, BytesIO
 from os import path
 from tempfile import SpooledTemporaryFile
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from cognee.modules.ingestion.exceptions import IngestionError
 

@@ -8,7 +8,6 @@ Create Date: 2025-07-24 17:11:52.174737
 
 import os
 from collections.abc import Sequence
-from typing import Union
 
 import kuzu
 from cognee.infrastructure.databases.graph.kuzu.kuzu_migrate import (

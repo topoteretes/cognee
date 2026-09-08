@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager

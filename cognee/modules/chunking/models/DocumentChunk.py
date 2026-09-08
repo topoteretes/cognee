@@ -1,5 +1,3 @@
-from typing import List, Optional, Union
-
 from pydantic import PrivateAttr
 
 from cognee.infrastructure.engine import DataPoint

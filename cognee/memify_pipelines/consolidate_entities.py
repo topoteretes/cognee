@@ -6,8 +6,6 @@ detect (extraction) task followed by a single merge (enrichment) task. The share
 both tasks so detection and merge agree on thresholds and on ``dry_run``.
 """
 
-from typing import List, Optional
-
 from cognee import memify
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME

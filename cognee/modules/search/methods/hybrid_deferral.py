@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.engine.models.node_set import NodeSet

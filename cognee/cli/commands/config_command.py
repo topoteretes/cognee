@@ -1,6 +1,5 @@
 import argparse
 import json
-from typing import Any, Optional
 
 import cognee.cli.echo as fmt
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError

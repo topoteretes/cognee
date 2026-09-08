@@ -14,7 +14,6 @@ import socket
 import subprocess
 import time
 from collections.abc import AsyncIterator, Iterator
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

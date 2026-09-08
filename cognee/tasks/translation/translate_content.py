@@ -1,5 +1,4 @@
 import asyncio
-from typing import List, Optional
 from uuid import uuid5
 
 from cognee.modules.chunking.models import DocumentChunk

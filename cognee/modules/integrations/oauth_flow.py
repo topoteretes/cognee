@@ -24,7 +24,6 @@ matching ``field_count``.
 import hashlib
 import hmac
 import time
-from typing import Optional, Union
 from uuid import UUID
 
 # Long enough to pick a workspace/account and click through the provider's

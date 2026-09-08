@@ -15,7 +15,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 from fastapi import status
 

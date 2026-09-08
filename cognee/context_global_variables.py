@@ -1,7 +1,6 @@
 import os
 import warnings
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID
 
 from cognee.base_config import get_base_config

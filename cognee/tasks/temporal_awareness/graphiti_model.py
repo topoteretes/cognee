@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee.infrastructure.engine import DataPoint
 
 

@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Optional
+from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 from pydantic import TypeAdapter

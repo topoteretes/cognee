@@ -15,7 +15,7 @@ blocking path raises — is a bug here, not a quirk of streaming.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import litellm
 

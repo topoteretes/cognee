@@ -11,7 +11,7 @@ that stamps the same artifact from two concurrent operations can still lose an
 update in the read→write window. See ``phase1_storage_capabilities.md``.
 """
 
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from .source_refs import (

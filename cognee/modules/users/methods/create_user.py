@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from fastapi_users.exceptions import UserAlreadyExists

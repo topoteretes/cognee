@@ -17,7 +17,7 @@ routing keys on. Per-call dlt options (``primary_key``, ``write_disposition``,
 """
 
 import hashlib
-from typing import Any, Optional
+from typing import Any
 
 import dlt  # ty:ignore[unresolved-import] — hard gate: without the extra this loader must not register
 

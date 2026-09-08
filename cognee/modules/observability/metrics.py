@@ -8,7 +8,6 @@ have not been set up, every call is a no-op via _NullInstrument.
 """
 
 import os
-from typing import Optional
 
 try:
     from opentelemetry import metrics

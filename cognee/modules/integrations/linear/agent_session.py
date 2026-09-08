@@ -24,7 +24,7 @@ ripple into another's.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from cognee.api.v1.search.search import search as cognee_search
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError

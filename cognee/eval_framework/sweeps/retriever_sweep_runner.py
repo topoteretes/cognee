@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from cognee.eval_framework.answer_generation.question_type_prompts import (
     get_question_type_prompt,

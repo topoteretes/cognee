@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO

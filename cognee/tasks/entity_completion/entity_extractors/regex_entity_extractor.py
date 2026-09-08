@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.modules.engine.models import Entity
 from cognee.root_dir import get_absolute_path

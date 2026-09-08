@@ -1,5 +1,4 @@
 from collections import Counter
-from typing import Optional
 
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
 

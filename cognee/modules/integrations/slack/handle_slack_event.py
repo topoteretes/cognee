@@ -20,7 +20,7 @@ throttled to 1 req/min).
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.integrations.credentials import decrypt_token_payload
 from cognee.modules.integrations.slack.home import publish_home_view

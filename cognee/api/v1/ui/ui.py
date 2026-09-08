@@ -11,7 +11,6 @@ import webbrowser
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import requests
 

@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from textwrap import dedent
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any
 from uuid import UUID
 
 from neo4j import AsyncGraphDatabase, AsyncSession

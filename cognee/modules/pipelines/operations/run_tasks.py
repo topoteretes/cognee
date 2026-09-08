@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.context_global_variables import set_database_global_context_variables

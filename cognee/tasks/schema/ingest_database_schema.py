@@ -1,6 +1,5 @@
 import json
 from datetime import datetime, timezone
-from typing import Dict, List
 from uuid import NAMESPACE_OID, uuid5
 
 from sqlalchemy import text

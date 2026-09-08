@@ -14,7 +14,6 @@ just at start/complete/error, making that gap matter sooner than it used to.
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 from alembic import op
 from sqlalchemy.engine.reflection import Inspector

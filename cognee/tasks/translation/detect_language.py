@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 

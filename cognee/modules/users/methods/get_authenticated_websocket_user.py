@@ -1,5 +1,3 @@
-from typing import Optional
-
 import jwt
 from fastapi import HTTPException, WebSocket
 from fastapi_users import exceptions as fastapi_users_exceptions

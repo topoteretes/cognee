@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from io import BytesIO
-from typing import Dict
 
 from pydantic import BaseModel
 from sqlalchemy import text

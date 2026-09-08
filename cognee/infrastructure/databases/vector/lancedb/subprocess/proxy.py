@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pyarrow as pa
 

@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel

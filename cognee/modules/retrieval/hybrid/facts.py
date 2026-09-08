@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text

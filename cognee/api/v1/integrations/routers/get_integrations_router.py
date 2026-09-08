@@ -36,7 +36,6 @@ provider name.
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 from urllib.parse import quote
 from uuid import UUID
 

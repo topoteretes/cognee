@@ -1,7 +1,7 @@
 """Prepare edges for graph storage by ensuring each has default edge properties."""
 
 from collections.abc import Iterable
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from cognee.modules.engine.utils import generate_edge_object_id
 from cognee.shared.logging_utils import get_logger

@@ -5,7 +5,6 @@ also takes **kwargs, so anything unusable has to raise here rather than vanish.
 """
 
 import importlib
-from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

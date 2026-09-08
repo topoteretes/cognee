@@ -1,7 +1,6 @@
 import logging
 import os
 import pathlib
-from typing import List
 
 import pytest
 import pytest_asyncio

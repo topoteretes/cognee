@@ -1,6 +1,5 @@
 import logging
 import pathlib
-from typing import Optional, Union
 
 import pytest
 import pytest_asyncio

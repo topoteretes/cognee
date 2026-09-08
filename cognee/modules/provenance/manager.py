@@ -24,7 +24,7 @@ dataset id for exactly this reason; readers join with the same prefixed key.
 
 from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from cognee import SearchType, config, prune, search, visualize_graph
 from cognee.low_level import DataPoint, setup

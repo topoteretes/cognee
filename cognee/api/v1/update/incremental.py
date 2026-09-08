@@ -40,7 +40,7 @@ ingestion in the logs. Permission errors are NOT refusals: they propagate.
 import json
 from enum import Enum
 from pathlib import PureWindowsPath
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel

@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError, TimeoutError

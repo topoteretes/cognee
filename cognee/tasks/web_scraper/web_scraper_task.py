@@ -8,7 +8,6 @@ scheduled scraping tasks and ensures that node updates preserve existing graph e
 import hashlib
 import os
 from datetime import datetime
-from typing import List, Union
 from urllib.parse import urlparse
 from uuid import NAMESPACE_OID, NAMESPACE_URL, uuid5
 

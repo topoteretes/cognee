@@ -5,7 +5,6 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
