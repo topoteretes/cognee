@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from os.path import basename
 from uuid import NAMESPACE_OID, uuid5
 
@@ -16,10 +17,10 @@ class TextChunkerWithOverlap(Chunker):
     def __init__(
         self,
         document,
-        get_text: callable,
+        get_text: Callable,
         max_chunk_size: int,
         chunk_overlap_ratio: float = 0.0,
-        get_chunk_data: callable | None = None,
+        get_chunk_data: Callable | None = None,
     ):
         super().__init__(document, get_text, max_chunk_size)
         self.document_name = document.name or basename(document.raw_data_location)
