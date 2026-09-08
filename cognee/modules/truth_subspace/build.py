@@ -6,7 +6,6 @@ onto those slots and persisted with the centroid epoch used to compute them.
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables

@@ -898,9 +898,13 @@ def build_preprocessed_fragments_from_turns(
                 text = _format_chunk_text(split_prefix, fragment.body)
             else:
                 text = fragment.body
-            if include_time_metadata_header and time_anchor:
-                if not include_location_prefix and part_count == 1:
-                    text = _format_chunk_text(_format_time_metadata_prefix(time_anchor), text)
+            if (
+                include_time_metadata_header
+                and time_anchor
+                and not include_location_prefix
+                and part_count == 1
+            ):
+                text = _format_chunk_text(_format_time_metadata_prefix(time_anchor), text)
             fragments.append(
                 PreprocessedFragment(
                     text=text,

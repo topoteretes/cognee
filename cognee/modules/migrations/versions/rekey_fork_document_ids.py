@@ -52,7 +52,6 @@ the upgrade), so this is cheap: one indexed relational query in the common
 case, per-document work only where forks exist.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select

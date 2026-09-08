@@ -8,7 +8,7 @@ documents in the knowledge graph. The flow:
 Curator calls run in parallel by batch; judge/write calls run in parallel by lesson.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 

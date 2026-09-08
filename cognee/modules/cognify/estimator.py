@@ -23,7 +23,7 @@ import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import NAMESPACE_OID, UUID, uuid5

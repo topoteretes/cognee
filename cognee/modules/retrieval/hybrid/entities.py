@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.retrieval.hybrid.chunks import search_collection
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id

@@ -1,4 +1,3 @@
-from typing import Union
 from uuid import UUID
 
 from cognee import memify

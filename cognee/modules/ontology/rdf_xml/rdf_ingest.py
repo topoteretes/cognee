@@ -35,7 +35,7 @@ thin convenience that persists via the standard storage task.
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import IO, Any, Dict, List, Optional, Union
+from typing import IO, Any
 
 from rdflib import OWL, RDF, RDFS, Graph, URIRef
 from rdflib.term import Node as RDFNode

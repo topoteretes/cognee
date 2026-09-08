@@ -10,7 +10,6 @@ migration keep NULL, and so do searches that spanned more than one dataset.
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

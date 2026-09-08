@@ -46,7 +46,9 @@ def test_importing_evaluator_registry_does_not_import_deepeval():
         "assert 'deepeval' not in sys.modules, 'deepeval was imported eagerly';"
         "print('ok')"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
 
@@ -63,7 +65,9 @@ def test_importing_runner_surface_does_not_import_optional_extras():
         "assert 'deepeval' not in sys.modules, 'deepeval was imported eagerly';"
         "print('ok')"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
 
@@ -83,7 +87,9 @@ def test_importing_pipeline_steps_does_not_import_optional_extras():
         "assert 'deepeval' not in sys.modules, 'deepeval was imported eagerly';"
         "print('ok')"
     )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
 

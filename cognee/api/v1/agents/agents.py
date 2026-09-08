@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional, Union
 from uuid import UUID
 
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent

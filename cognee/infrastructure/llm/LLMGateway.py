@@ -1,5 +1,5 @@
 from collections.abc import Coroutine
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 

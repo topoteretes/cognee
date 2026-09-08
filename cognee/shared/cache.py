@@ -118,13 +118,15 @@ class StorageAwareCache:
             # Make a HEAD request to check headers without downloading
             ssl_context = create_secure_ssl_context()
             connector = aiohttp.TCPConnector(ssl=ssl_context)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.head(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    response.raise_for_status()
+            async with (
+                aiohttp.ClientSession(connector=connector) as session,
+                session.head(url, timeout=aiohttp.ClientTimeout(total=30)) as response,
+            ):
+                response.raise_for_status()
 
-                    # Try ETag first (most reliable)
-                    etag = response.headers.get("ETag", "").strip('"')
-                    last_modified = response.headers.get("Last-Modified", "")
+                # Try ETag first (most reliable)
+                etag = response.headers.get("ETag", "").strip('"')
+                last_modified = response.headers.get("Last-Modified", "")
 
             # Use ETag if available, otherwise Last-Modified
             remote_identifier = etag if etag else last_modified
@@ -192,17 +194,19 @@ class StorageAwareCache:
         last_modified = ""
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                response.raise_for_status()
+        async with (
+            aiohttp.ClientSession(connector=connector) as session,
+            session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response,
+        ):
+            response.raise_for_status()
 
-                # Extract headers before consuming response
-                etag = response.headers.get("ETag", "").strip('"')
-                last_modified = response.headers.get("Last-Modified", "")
+            # Extract headers before consuming response
+            etag = response.headers.get("ETag", "").strip('"')
+            last_modified = response.headers.get("Last-Modified", "")
 
-                # Read the response content
-                async for chunk in response.content.iter_chunked(8192):
-                    zip_content.write(chunk)
+            # Read the response content
+            async for chunk in response.content.iter_chunked(8192):
+                zip_content.write(chunk)
         zip_content.seek(0)
 
         # Extract the archive

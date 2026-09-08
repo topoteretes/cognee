@@ -14,7 +14,7 @@ load_skill tool to fetch a body on demand (progressive disclosure).
 import time
 from collections.abc import Sequence
 from types import SimpleNamespace
-from typing import Any, List, Optional, Union
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field

@@ -1,7 +1,7 @@
 """Neptune Analytics Adapter for Graph Database"""
 
 import json
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any
 from uuid import UUID
 
 from botocore.config import Config

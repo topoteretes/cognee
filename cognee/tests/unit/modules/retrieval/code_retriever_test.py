@@ -1026,11 +1026,13 @@ async def test_operations_accept_enola_fact_ids_as_seeds():
     assert path["found"] is True
     assert [node["id"] for node in path["path"]] == ["api", "db"]
 
-    with pytest.raises(CodeSearchValidationError, match="could not resolve"):
-        with _insight_graph_patch():
-            await CodeRetriever(
-                config={"operation": "explore", "id": "f" * 32}
-            ).get_retrieved_objects("")
+    with (
+        pytest.raises(CodeSearchValidationError, match="could not resolve"),
+        _insight_graph_patch(),
+    ):
+        await CodeRetriever(config={"operation": "explore", "id": "f" * 32}).get_retrieved_objects(
+            ""
+        )
 
 
 @pytest.mark.asyncio

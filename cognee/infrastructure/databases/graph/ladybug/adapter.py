@@ -8,7 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from ladybug import Connection
@@ -17,7 +17,7 @@ from ladybug.database import Database
 # Importing this package registers the Windows DLL search path ladybug's native
 # extension needs, so it has to precede the ``ladybug`` imports below. See
 # cognee_db_workers/_windows_openssl.py.
-import cognee_db_workers  # noqa: F401
+import cognee_db_workers
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph.graph_db_interface import (
@@ -2785,16 +2785,13 @@ class LadybugAdapter(GraphDBInterface):
                 if row and len(row) == 3:
                     processed_rows = []
                     for i, item in enumerate(row):
-                        if isinstance(item, dict):
-                            if item.get("properties"):
-                                try:
-                                    props = json.loads(item["properties"])
-                                    item.update(props)
-                                    del item["properties"]
-                                except json.JSONDecodeError:
-                                    logger.warning(
-                                        f"Failed to parse JSON properties for node/edge {i}"
-                                    )
+                        if isinstance(item, dict) and item.get("properties"):
+                            try:
+                                props = json.loads(item["properties"])
+                                item.update(props)
+                                del item["properties"]
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse JSON properties for node/edge {i}")
                         processed_rows.append(item)
                     edges.append(tuple(processed_rows))
             return edges if edges else []  # Always return a list, even if empty

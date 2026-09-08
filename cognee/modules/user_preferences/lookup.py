@@ -13,7 +13,6 @@ fail a search.
 """
 
 from contextvars import ContextVar
-from typing import Dict, List, Optional, Tuple
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import current_dataset_id, session_user

@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Configure cache/session behavior before importing cognee internals.
 # Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values

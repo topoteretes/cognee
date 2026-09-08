@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, BinaryIO, Union
+from typing import Any, BinaryIO
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import warnings
 from collections.abc import Sequence
-from typing import Any, Dict, List, Type, cast
+from typing import Any
 
 import click
 

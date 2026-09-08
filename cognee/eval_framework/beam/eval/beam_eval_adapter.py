@@ -1,7 +1,7 @@
 import asyncio
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.eval_framework.beam.eval.metrics.beam_rubric import BEAMRubricMetric
 from cognee.eval_framework.beam.eval.metrics.kendall_tau import KendallTauMetric

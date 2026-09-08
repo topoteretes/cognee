@@ -24,7 +24,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from threading import RLock
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.context_global_variables import current_dataset_id
@@ -1201,9 +1201,12 @@ class CodeRetriever(BaseRetriever):
                 ):
                     continue
             node_name = str(node.get("name") or "")
-            if names or substring:
-                if node_name not in names and not (substring and substring in node_name.casefold()):
-                    continue
+            if (
+                (names or substring)
+                and node_name not in names
+                and not (substring and substring in node_name.casefold())
+            ):
+                continue
             if repo is not None and node.get("repo") != repo:
                 continue
             if relation_types and not any(

@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +62,9 @@ def validate_file_results(
             return False
 
         # Validate metrics if present
-        if "metrics" in item:
-            if not validate_metrics(item["metrics"]):
-                print(f"Metrics validation failed in {filename}[{i}]")
-                return False
+        if "metrics" in item and not validate_metrics(item["metrics"]):
+            print(f"Metrics validation failed in {filename}[{i}]")
+            return False
 
     return True
 

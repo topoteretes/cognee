@@ -1,7 +1,6 @@
 """Adapter for remote Ladybug graph database via REST API."""
 
 import json
-from typing import List, Optional, Tuple
 from uuid import UUID
 
 import aiohttp

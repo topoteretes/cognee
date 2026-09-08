@@ -14,7 +14,7 @@ from cognee.infrastructure.session.session_manager import SessionManager
 
 def _session_module():
     """Real session.py module (package __init__ replaces session with a SimpleNamespace)."""
-    import cognee.api.v1.session  # noqa: F401
+    import cognee.api.v1.session
 
     return sys.modules["cognee.api.v1.session.session"]
 

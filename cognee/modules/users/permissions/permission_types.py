@@ -1,5 +1,3 @@
-from typing import FrozenSet
-
 PERMISSION_TYPES = ["read", "write", "delete", "share"]
 
 # Role names that grant permission to manage users in a tenant (list users, assign/remove

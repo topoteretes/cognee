@@ -5,7 +5,6 @@ import tempfile
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from os import path
-from typing import List, Optional
 from urllib.parse import unquote
 from uuid import UUID
 

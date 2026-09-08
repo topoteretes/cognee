@@ -134,7 +134,7 @@ def api_key():
             f"{log_path.read_text()[-3000:]}"
         )
 
-    import cognee  # noqa: F401  (its import runs load_dotenv(override=True))
+    import cognee  # (its import runs load_dotenv(override=True))
 
     os.environ.update(_client_env(root / "client"))
     _reset_config_caches()

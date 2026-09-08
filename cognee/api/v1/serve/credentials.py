@@ -5,7 +5,6 @@ import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 

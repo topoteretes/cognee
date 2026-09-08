@@ -1,6 +1,5 @@
 import re
 from collections import Counter
-from typing import Any, Optional
 
 from deepeval.test_case import LLMTestCase
 

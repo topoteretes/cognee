@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from cognee.modules.data.models import Dataset

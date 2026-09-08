@@ -123,9 +123,8 @@ def enclosing_source(path: Path, line_index: int, max_chars: int = 6000) -> str:
     for node in ast.walk(tree):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.ClassDef)):
             start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
-            if start <= lineno <= (node.end_lineno or start):
-                if best is None or start > best[0]:
-                    best = (start, node.end_lineno)
+            if start <= lineno <= (node.end_lineno or start) and (best is None or start > best[0]):
+                best = (start, node.end_lineno)
     if best is None:
         return ""
     lines = source.splitlines()[best[0] - 1 : best[1]]

@@ -1,6 +1,5 @@
 import math
 from collections import Counter
-from typing import Optional
 
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever, tokenize_words
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS

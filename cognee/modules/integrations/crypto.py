@@ -29,7 +29,7 @@ Configuration (env):
 import base64
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 

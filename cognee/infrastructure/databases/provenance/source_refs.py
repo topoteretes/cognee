@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 from uuid import UUID
 
 from .constants import CHUNK_SOURCE_REF_PREFIX, SOURCE_REF_PREFIX, SOURCE_RUN_REF_PREFIX

@@ -1,4 +1,4 @@
-from typing import BinaryIO, Protocol, Union
+from typing import BinaryIO, Protocol
 
 
 class IngestionData(Protocol):

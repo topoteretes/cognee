@@ -6,7 +6,6 @@ avoid the cognee.__init__ import chain (starlette version issue).
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field

@@ -9,7 +9,7 @@ efficiency and storage optimization through whole-document removal.
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa

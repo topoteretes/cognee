@@ -7,7 +7,6 @@ linked with weighted "associated_with" edges in the knowledge graph.
 """
 
 from collections.abc import AsyncGenerator
-from typing import List, Optional, Union
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, Field

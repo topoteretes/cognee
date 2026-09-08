@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid5
 
 from cognee.modules.retrieval.hybrid.results import (

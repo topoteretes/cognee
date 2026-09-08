@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Union
 from uuid import uuid5
 
 from cognee.infrastructure.engine import DataPoint

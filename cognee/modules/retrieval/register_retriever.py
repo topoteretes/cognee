@@ -1,5 +1,3 @@
-from typing import Type
-
 from ..search.types import SearchType
 from .base_retriever import BaseRetriever
 from .registered_community_retrievers import registered_community_retrievers

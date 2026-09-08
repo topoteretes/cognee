@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from typing import List
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine

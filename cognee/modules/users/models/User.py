@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID as uuid_UUID
 
 from fastapi_users import schemas

@@ -1,6 +1,6 @@
 import json
 from functools import lru_cache
-from typing import Any, ClassVar
+from typing import Any
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -222,9 +222,13 @@ class LLMConfig(BaseSettings):
         """
         for field_name in self.__class__.model_fields:
             value = getattr(self, field_name, None)
-            if isinstance(value, str) and len(value) >= 2:
-                if value[0] == value[-1] and value[0] in ("'", '"'):
-                    setattr(self, field_name, value[1:-1])
+            if (
+                isinstance(value, str)
+                and len(value) >= 2
+                and value[0] == value[-1]
+                and value[0] in ("'", '"')
+            ):
+                setattr(self, field_name, value[1:-1])
 
         return self
 

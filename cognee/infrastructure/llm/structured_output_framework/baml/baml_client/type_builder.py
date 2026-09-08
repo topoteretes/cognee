@@ -15,7 +15,7 @@ import typing
 from baml_py import baml_py, type_builder
 
 # These are exports, not used here, hence the linter is disabled
-from baml_py.baml_py import (  # noqa: F401 # pylint: disable=unused-import
+from baml_py.baml_py import (  # pylint: disable=unused-import
     ClassBuilder,
     EnumBuilder,
     EnumValueBuilder,
@@ -95,7 +95,7 @@ class ResponseModelBuilder(ResponseModelAst):
 class ResponseModelProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: set[str]):
         self.__bldr = bldr
-        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute)
 
     def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
         if name not in self.__properties:

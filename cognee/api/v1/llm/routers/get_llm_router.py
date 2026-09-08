@@ -3,7 +3,7 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import litellm
 from fastapi import APIRouter, Depends, File, Form

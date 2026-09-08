@@ -1,7 +1,7 @@
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

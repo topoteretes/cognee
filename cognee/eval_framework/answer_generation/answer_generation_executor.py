@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever

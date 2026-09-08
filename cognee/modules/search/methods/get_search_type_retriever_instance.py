@@ -1,6 +1,5 @@
 import os
 from collections.abc import Callable
-from typing import List, Optional, Tuple, Type
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user

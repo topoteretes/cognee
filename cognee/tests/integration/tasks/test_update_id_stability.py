@@ -41,7 +41,7 @@ MARKER = re.compile(r"ENT[A-Z0-9]+")
 def update_env():
     root = Path(tempfile.mkdtemp(prefix="cognee_update_id_test_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     def clear_config_caches():
         import importlib

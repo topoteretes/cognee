@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.observability import (

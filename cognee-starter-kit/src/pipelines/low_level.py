@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -21,6 +21,8 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.pipelines import Task
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 class Person(DataPoint):
@@ -215,7 +217,7 @@ async def execute_pipeline() -> None:
     """Execute Cognee pipeline."""
 
     # Configure system paths
-    logging.info("Configuring Cognee directories at %s", COGNEE_DIR)
+    logger.info("Configuring Cognee directories at %s", COGNEE_DIR)
     config.system_root_directory(str(COGNEE_DIR))
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -233,7 +235,7 @@ async def execute_pipeline() -> None:
     pipeline = run_pipeline(tasks, [data], [dataset.id], user, "demo_pipeline")
 
     async for status in pipeline:
-        logging.info("Pipeline status: %s", status)
+        logger.info("Pipeline status: %s", status)
 
     await visualize_graph(str(GRAPH_HTML))
 
@@ -243,7 +245,7 @@ async def execute_pipeline() -> None:
         query_type=SearchType.GRAPH_COMPLETION,
     )
     result = completion
-    logging.info("Graph completion result: %s", result)
+    logger.info("Graph completion result: %s", result)
 
 
 def configure_logging() -> None:
@@ -260,7 +262,7 @@ async def main() -> None:
     try:
         await execute_pipeline()
     except Exception:
-        logging.exception("Run failed")
+        logger.exception("Run failed")
         raise
 
 

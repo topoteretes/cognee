@@ -16,7 +16,7 @@ import base64
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization

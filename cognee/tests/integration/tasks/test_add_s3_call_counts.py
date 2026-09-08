@@ -82,7 +82,7 @@ def s3_env():
 
     root = Path(tempfile.mkdtemp(prefix="cognee_s3_counts_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     def clear_config_caches():
         import importlib

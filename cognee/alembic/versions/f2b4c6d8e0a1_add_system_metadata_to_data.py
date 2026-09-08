@@ -16,7 +16,6 @@ whole dict moves to system_metadata and external_metadata is cleared.
 
 import json
 from collections.abc import Sequence
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

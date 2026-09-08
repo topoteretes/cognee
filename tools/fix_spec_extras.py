@@ -175,7 +175,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    from sync_release_docs import EXTRAS_PATH, load_extras  # noqa: E402
+    from sync_release_docs import EXTRAS_PATH, load_extras
 
     try:
         spec = load_app_schema()

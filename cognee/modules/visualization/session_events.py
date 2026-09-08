@@ -15,7 +15,7 @@ Two event kinds are emitted per the renderer's contract:
   ``apply_feedback_weights`` (reinforcement overlay).
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger

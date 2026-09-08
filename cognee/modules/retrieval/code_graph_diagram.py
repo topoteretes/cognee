@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from typing import Any, Optional
+from typing import Any
 
 DIAGRAM_FORMATS = ("mermaid", "dot")
 

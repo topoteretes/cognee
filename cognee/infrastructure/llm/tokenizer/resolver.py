@@ -27,7 +27,6 @@ degraded estimate, not a fatal error.
 """
 
 from collections.abc import Callable
-from typing import Optional
 
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer

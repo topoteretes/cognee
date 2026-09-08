@@ -1,6 +1,6 @@
 """Callable memory search: lets the agent run a fresh triplet lookup mid-loop."""
 
-from typing import Any, Dict
+from typing import Any
 
 from cognee.modules.engine.models import Tool
 from cognee.modules.graph.utils import resolve_edges_to_text

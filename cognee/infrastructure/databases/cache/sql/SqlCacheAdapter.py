@@ -6,7 +6,6 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from typing import List, Optional
 
 from pydantic import ValidationError
 from sqlalchemy import (

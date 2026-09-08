@@ -5,7 +5,7 @@ connection management, URL parsing, and Neptune-specific configurations.
 """
 
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from cognee.shared.logging_utils import get_logger

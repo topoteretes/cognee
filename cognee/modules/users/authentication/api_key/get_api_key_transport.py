@@ -1,5 +1,3 @@
-from typing import Dict, Optional
-
 from fastapi import Request, Response
 from fastapi.security import APIKeyHeader
 from fastapi_users.authentication import Transport

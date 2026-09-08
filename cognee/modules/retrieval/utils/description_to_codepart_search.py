@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async

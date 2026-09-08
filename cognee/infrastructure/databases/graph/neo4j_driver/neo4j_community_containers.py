@@ -35,7 +35,6 @@ import socket
 import subprocess
 import threading
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
 
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.lru_cache import DATABASE_MAX_LRU_CACHE_SIZE
@@ -100,7 +99,7 @@ def check_docker_available() -> tuple[bool, str]:
         )
 
     try:
-        result = subprocess.run(["docker", "info"], capture_output=True, timeout=15)
+        result = subprocess.run(["docker", "info"], capture_output=True, timeout=15, check=False)
     except subprocess.TimeoutExpired:
         return False, (
             "Docker daemon did not respond within 15 seconds. "
@@ -148,7 +147,7 @@ def bolt_url_for_port(host_port: int) -> str:
 
 
 def _run_docker_sync(args: list[str], timeout: float) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker", *args], capture_output=True, timeout=timeout)
+    return subprocess.run(["docker", *args], capture_output=True, timeout=timeout, check=False)
 
 
 async def _docker(args: list[str], timeout: float = DOCKER_COMMAND_TIMEOUT_SECONDS) -> str:

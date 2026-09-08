@@ -1,7 +1,6 @@
 """Shared utilities for DLT ingestion."""
 
 import json
-from typing import Optional
 
 # A dlt source sets this attribute to opt into the "document" ingestion path:
 # each row becomes a text document that flows through normal cognify (LLM entity

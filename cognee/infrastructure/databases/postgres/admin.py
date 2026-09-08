@@ -10,7 +10,6 @@ credentials came from.
 import json
 import os
 import re
-from typing import Union
 from uuid import UUID
 
 from sqlalchemy import URL, text

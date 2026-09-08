@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import Any, Dict
+from typing import Any
 from uuid import NAMESPACE_OID, uuid5
 
 from .chunk_by_sentence import chunk_by_sentence

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from typing import Dict
 
 from baml_py import BamlCtxManager, BamlRuntime
 

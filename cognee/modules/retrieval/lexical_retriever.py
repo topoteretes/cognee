@@ -2,7 +2,7 @@ import asyncio
 import re
 from collections.abc import Callable
 from heapq import nlargest
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
