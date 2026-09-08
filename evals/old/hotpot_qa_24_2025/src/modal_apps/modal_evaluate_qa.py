@@ -1,6 +1,9 @@
 import modal
 
 from modal_apps.modal_image import image
+import logging
+
+logger = logging.getLogger(__name__)
 
 APP_NAME = "volume-reader"
 VOLUME_NAME = "qa-benchmarks"
@@ -51,6 +54,7 @@ def get_answers_files(benchmark_folder: str):
         print("📭 Answers folder is empty or doesn't exist")
         return []
     except Exception as e:
+        logger.debug("Ignoring exception in get_answers_files", exc_info=True)
         print(f"❌ Error reading answers folder: {e}")
         return []
 
@@ -193,6 +197,7 @@ def calculate_qa_metrics(benchmark_folder: str, filename: str):
     except json.JSONDecodeError as e:
         print(f"❌ Invalid JSON in {filename}: {e}")
     except Exception as e:
+        logger.debug("Ignoring exception in calculate_qa_metrics", exc_info=True)
         print(f"❌ Error processing {filename}: {e}")
 
 

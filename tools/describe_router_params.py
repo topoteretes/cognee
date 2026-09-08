@@ -26,6 +26,9 @@ import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "No description provided in code yet."
 BULLET_RE = re.compile(
@@ -238,6 +241,7 @@ def main() -> int:
     try:
         descriptions = generate_descriptions(placeholders)
     except Exception as exc:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"Description generation failed: {exc}", file=sys.stderr)
         return 1
 

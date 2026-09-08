@@ -42,6 +42,9 @@ import json
 import os
 import sys
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -177,6 +180,7 @@ def main() -> int:
     try:
         spec = load_app_schema()
     except Exception as exc:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 

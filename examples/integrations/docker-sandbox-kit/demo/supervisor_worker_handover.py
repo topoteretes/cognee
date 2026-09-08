@@ -46,6 +46,9 @@ from cognee.modules.data.methods import get_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user, get_user_by_email
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+import logging
+
+logger = logging.getLogger(__name__)
 
 SUPERVISOR_EMAIL = "supervisor@handover.demo"
 WORKER_EMAIL = "worker@handover.demo"
@@ -71,6 +74,7 @@ async def get_or_create_user(email: str, password: str):
     try:
         return await create_user(email, password)
     except Exception:  # UserAlreadyExists on re-runs
+        logger.debug("Ignoring exception in get_or_create_user", exc_info=True)
         return await get_user_by_email(email)
 
 
@@ -146,6 +150,7 @@ async def phase_work(token_file: Path) -> None:
     except PermissionDeniedError as err:
         print(f"[worker] correctly denied: {type(err).__name__}: {err}")
     except Exception as err:
+        logger.debug("Ignoring exception in phase_work", exc_info=True)
         print(f"[worker] correctly not found: {type(err).__name__}: {err}")
 
     print("[worker] writing the completion report back into the shared dataset...")

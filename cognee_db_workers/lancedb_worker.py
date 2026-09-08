@@ -28,6 +28,9 @@ from .lancedb_protocol import (
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # The connection is stored at a fixed handle id (0) since there is exactly one
 # per worker.
@@ -219,6 +222,7 @@ async def _op_merge_insert_execute(registry: HandleRegistry, req: Request):
             "num_deleted_rows": getattr(result, "num_deleted_rows", None),
         }
     except Exception:
+        logger.debug("Ignoring exception in _op_merge_insert_execute", exc_info=True)
         return None
 
 

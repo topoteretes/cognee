@@ -18,6 +18,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def run_git_command(command: list[str]) -> str:
@@ -54,6 +57,7 @@ def get_latest_release_tag(exclude: str | None = None) -> str | None:
                 return tag
         return None
     except Exception:
+        logger.debug("Ignoring exception in get_latest_release_tag", exc_info=True)
         return None
 
 
@@ -133,7 +137,7 @@ def _parse_dependencies(pyproject_text: str) -> dict[str, str]:
                 deps[name] = spec
         return deps
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _parse_dependencies", exc_info=True)
 
     # Fallback: extract the [project].dependencies = [ ... ] array textually.
     match = re.search(r"^dependencies\s*=\s*\[(.*?)\]", pyproject_text, re.DOTALL | re.MULTILINE)
@@ -155,6 +159,7 @@ def get_dependency_changes(base_ref: str, target_ref: str) -> dict[str, list[str
     except SystemExit:
         return changes
     except Exception:
+        logger.debug("Ignoring exception in get_dependency_changes", exc_info=True)
         return changes
 
     base_deps = _parse_dependencies(base_text)
@@ -177,9 +182,11 @@ def get_compatibility_info(target_ref: str) -> dict[str, str]:
     try:
         text = run_git_command(["git", "show", f"{target_ref}:pyproject.toml"])
     except Exception:
+        logger.debug("Ignoring exception in get_compatibility_info", exc_info=True)
         try:
             text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
         except Exception:
+            logger.debug("Ignoring exception in get_compatibility_info", exc_info=True)
             return info
 
     py_match = re.search(r'^requires-python\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
@@ -327,6 +334,7 @@ Create engaging release notes that help users understand what's new and improved
         )
         return response
     except Exception as e:
+        logger.debug("Ignoring exception in generate_release_notes_with_llm", exc_info=True)
         print(f"Warning: LLM generation failed: {e}", file=sys.stderr)
         return None
 
@@ -522,6 +530,7 @@ async def main():
             else:
                 version = "unknown"
         except Exception as e:
+            logger.debug("Ignoring exception in main", exc_info=True)
             print(f"Warning: Could not extract version: {e}", file=sys.stderr)
             version = "unknown"
 

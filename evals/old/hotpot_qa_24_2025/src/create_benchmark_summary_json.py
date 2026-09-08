@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def validate_csv_exists(csv_path: str) -> bool:
@@ -200,6 +203,7 @@ def process_single_benchmark(
             )
             metric_values[metric] = {"mean": mean, "confidence_interval": confidence_interval}
         except Exception as e:
+            logger.debug("Ignoring exception in process_single_benchmark", exc_info=True)
             print(f"❌ Error processing {metric} for {benchmark_name}: {e}")
             return None
 
@@ -377,6 +381,7 @@ def process_all_benchmarks(temp_dir: str, max_benchmarks: int = 3) -> list[dict[
                 error_count += 1
 
         except Exception as e:
+            logger.debug("Ignoring exception in process_all_benchmarks", exc_info=True)
             handle_processing_errors(benchmark_name, e)
             error_count += 1
 
@@ -514,6 +519,7 @@ def main():
             print("⚠️  No benchmarks found in CSV")
 
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Error loading cross-benchmark data: {e}")
         return
 
@@ -530,6 +536,7 @@ def main():
         print(f"\n🎉 Success! JSON saved to: {OUTPUT_PATH}")
         print("📄 You can now use the benchmark summary JSON file")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Error saving results: {e}")
         return
 

@@ -25,6 +25,9 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 SHUTDOWN = "__SUBPROCESS_HARNESS_SHUTDOWN__"
 _DEFAULT_SHUTDOWN_TIMEOUT = 10.0
@@ -262,6 +265,7 @@ def set_pdeathsig() -> bool:
         rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
         return rc == 0
     except Exception:
+        logger.debug("Ignoring exception in set_pdeathsig", exc_info=True)
         return False
 
 
@@ -291,6 +295,7 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
     try:
         original_ppid = os.getppid()
     except Exception:
+        logger.debug("Ignoring exception in start_parent_liveness_watchdog", exc_info=True)
         return
 
     def _watch() -> None:
@@ -298,6 +303,9 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
             try:
                 current_ppid = os.getppid()
             except Exception:
+                logger.debug(
+                    "Ignoring exception in start_parent_liveness_watchdog._watch", exc_info=True
+                )
                 return
             if current_ppid != original_ppid:
                 # Parent is gone; exit fast without running atexit handlers
@@ -306,6 +314,9 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
             try:
                 time.sleep(poll_interval)
             except Exception:
+                logger.debug(
+                    "Ignoring exception in start_parent_liveness_watchdog._watch", exc_info=True
+                )
                 return
 
     t = threading.Thread(target=_watch, name="parent-liveness-watchdog", daemon=True)
@@ -342,11 +353,15 @@ class spawn_without_main:
                 try:
                     main_mod.__spec__ = None
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Ignoring exception in spawn_without_main.__enter__", exc_info=True
+                    )
                 try:
                     main_mod.__file__ = None
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Ignoring exception in spawn_without_main.__enter__", exc_info=True
+                    )
         except BaseException:
             _MAIN_MODULE_MUTATION_LOCK.release()
             raise
@@ -359,11 +374,11 @@ class spawn_without_main:
             try:
                 self._main.__spec__ = self._saved_spec
             except Exception:
-                pass
+                logger.debug("Ignoring exception in spawn_without_main.__exit__", exc_info=True)
             try:
                 self._main.__file__ = self._saved_file
             except Exception:
-                pass
+                logger.debug("Ignoring exception in spawn_without_main.__exit__", exc_info=True)
             return False
         finally:
             _MAIN_MODULE_MUTATION_LOCK.release()
@@ -396,7 +411,7 @@ def _enable_faulthandler() -> None:
         # Best-effort: if faulthandler can't be enabled (no usable stderr,
         # etc.) we just lose this diagnostic. Don't crash the worker over a
         # debugging aid.
-        pass
+        logger.debug("Ignoring exception in _enable_faulthandler", exc_info=True)
 
 
 def run_worker_loop(
@@ -450,6 +465,7 @@ def run_worker_loop(
             init(registry)
         resp_q.put(Response(result=_READY_SENTINEL))
     except Exception as e:
+        logger.debug("Ignoring exception in run_worker_loop", exc_info=True)
         resp_q.put(Response(error=traceback.format_exc(), exception=_safe_pickle_exception(e)))
         return
 
@@ -481,6 +497,7 @@ def run_worker_loop(
             try:
                 _emit(rid, await coro)
             except Exception as e:
+                logger.debug("Ignoring exception in run_worker_loop._run_async", exc_info=True)
                 _emit_error(rid, e)
 
     async def serve() -> None:
@@ -506,6 +523,7 @@ def run_worker_loop(
             try:
                 result = handler(registry, msg)
             except Exception as e:
+                logger.debug("Ignoring exception in run_worker_loop.serve", exc_info=True)
                 _emit_error(rid, e)
                 continue
 
@@ -522,7 +540,7 @@ def run_worker_loop(
         try:
             loop.close()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in run_worker_loop", exc_info=True)
 
 
 def _safe_pickle_exception(e: BaseException) -> BaseException | None:
@@ -530,6 +548,7 @@ def _safe_pickle_exception(e: BaseException) -> BaseException | None:
         pickle.dumps(e)
         return e
     except Exception:
+        logger.debug("Ignoring exception in _safe_pickle_exception", exc_info=True)
         return None
 
 
@@ -580,6 +599,7 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
             session.call(Request(op=OP_GC_COLLECT), timeout=timeout)
             collected += 1
         except Exception:
+            logger.debug("Ignoring exception in collect_garbage_in_all_workers", exc_info=True)
             continue
     return collected
 
@@ -603,7 +623,7 @@ def _reap_all_sessions_atexit() -> None:
         try:
             session._terminate(timeout=2.0)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _reap_all_sessions_atexit", exc_info=True)
 
 
 atexit.register(_reap_all_sessions_atexit)
@@ -720,14 +740,17 @@ class SubprocessSession:
         try:
             pid = self._proc.pid
         except Exception:
+            logger.debug("Ignoring exception in SubprocessSession._init_diagnostics", exc_info=True)
             pid = None
         try:
             exitcode = self._proc.exitcode
         except Exception:
+            logger.debug("Ignoring exception in SubprocessSession._init_diagnostics", exc_info=True)
             exitcode = None
         try:
             alive = self._proc.is_alive()
         except Exception:
+            logger.debug("Ignoring exception in SubprocessSession._init_diagnostics", exc_info=True)
             alive = None
         return f"pid={pid} exitcode={_describe_exitcode(exitcode)} alive={alive}"
 
@@ -899,6 +922,9 @@ class SubprocessSession:
                     # type that slipped past the targeted clauses above
                     # would bubble out and leave callers waiting on
                     # futures forever.
+                    logger.debug(
+                        "Ignoring exception in SubprocessSession._reader_loop", exc_info=True
+                    )
                     transport_err = SubprocessTransportError(
                         f"Subprocess reader internal error: {e!r}"
                     )
@@ -1407,7 +1433,7 @@ class SubprocessSession:
                     except std_queue.Empty:
                         pass
             except Exception:
-                pass
+                logger.debug("Ignoring exception in SubprocessSession.shutdown", exc_info=True)
 
         # ``_terminate`` reaps the worker process, which closes the
         # multiprocessing queue's underlying pipe; that unblocks any
@@ -1473,13 +1499,13 @@ class SubprocessSession:
                 while self._proc.is_alive() and time.monotonic() < deadline:
                     self._proc.join(timeout=0.05)
             except Exception:
-                pass
+                logger.debug("Ignoring exception in SubprocessSession._terminate", exc_info=True)
 
     def __del__(self) -> None:
         try:
             self.shutdown(timeout=2.0)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in SubprocessSession.__del__", exc_info=True)
 
 
 def get_process_rss_bytes(pid: int) -> int:
@@ -1499,4 +1525,5 @@ def get_process_rss_bytes(pid: int) -> int:
         )
         return int(out.strip()) * 1024
     except Exception:
+        logger.debug("Ignoring exception in get_process_rss_bytes", exc_info=True)
         return 0

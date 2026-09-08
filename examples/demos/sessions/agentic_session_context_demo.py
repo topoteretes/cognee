@@ -52,6 +52,9 @@ import cognee
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.memory import TraceEntry
 from cognee.modules.users.methods import get_default_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 DATASET_NAME = "agentic_session_context_demo"
 SESSION_ID = "agentic_demo_session"
@@ -188,6 +191,7 @@ async def run_distillation_act(user) -> dict:
             "cognified_documents": result.documents,
         }
     except Exception as exc:
+        logger.debug("Ignoring exception in run_distillation_act", exc_info=True)
         progress(f"Act 2 failed: {exc}")
         return {
             "flush_touched_entry_ids": [],

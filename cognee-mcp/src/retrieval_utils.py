@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 from typing import Any, Literal
+import logging
+
+logger = logging.getLogger(__name__)
 
 DOCUMENT_TYPES = {
     "Document",
@@ -246,6 +249,7 @@ async def _document_from_subgraph(
     try:
         subgraph = await get_document_subgraph(document_id)
     except Exception:
+        logger.debug("Ignoring exception in _document_from_subgraph", exc_info=True)
         return None, []
 
     if not subgraph:

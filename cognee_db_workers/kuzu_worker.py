@@ -27,6 +27,9 @@ from .kuzu_protocol import (
     OP_OPEN_CONNECTION,
     OP_OPEN_DATABASE,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 _LOCK_HELD_MARKER = "could not set lock on file"
 
@@ -119,7 +122,7 @@ def _db_close(registry: HandleRegistry, req: Request) -> None:
         try:
             db.close()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _db_close", exc_info=True)
 
 
 def _open_connection(registry: HandleRegistry, req: Request) -> HandleResult:
@@ -137,7 +140,7 @@ def _conn_close(registry: HandleRegistry, req: Request) -> None:
         try:
             conn.close()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _conn_close", exc_info=True)
 
 
 def _conn_execute_fetch_all(registry: HandleRegistry, req: Request):
@@ -167,7 +170,7 @@ def _conn_execute_fetch_all(registry: HandleRegistry, req: Request):
             try:
                 result.close()
             except Exception:
-                pass
+                logger.debug("Ignoring exception in _conn_execute_fetch_all", exc_info=True)
     return rows
 
 

@@ -8,6 +8,9 @@ from graphrag_sdk import KnowledgeGraph, Ontology
 from graphrag_sdk.model_config import KnowledgeGraphModelConfig
 from graphrag_sdk.models.litellm import LiteModel
 from graphrag_sdk.source import STRING, URL
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -141,6 +144,7 @@ def answer_questions(
         try:
             response = chat.send_message(question)
         except Exception as e:
+            logger.debug("Ignoring exception in answer_questions", exc_info=True)
             print(f"Error processing question: {e!s}")
             response = "Error: Unable to generate answer due to an internal error."
 

@@ -43,6 +43,9 @@ import os
 import sys
 
 import duckdb
+import logging
+
+logger = logging.getLogger(__name__)
 
 MD_TARGET = os.environ.get("MD_TARGET", "ci_analytics.nightly")
 CATALOG, SCHEMA = MD_TARGET.split(".", 1)
@@ -195,7 +198,7 @@ def main() -> int:
         params.insert(3, f"SESSION_TOKEN '{os.environ['AWS_SESSION_TOKEN']}'")
     try:
         con.execute(f"CREATE OR REPLACE SECRET cognee_ci_s3 IN MOTHERDUCK ({', '.join(params)});")
-    except Exception as exc:  # never echo the statement -- it holds the key
+    except duckdb.Error as exc:  # never echo the statement or chain -- both hold the key
         raise RuntimeError(f"failed to register S3 secret: {type(exc).__name__}") from None
     print(f"registered S3 secret for s3://{BUCKET} ({REGION})")
 
@@ -235,6 +238,7 @@ def main() -> int:
             con.execute(f"CREATE OR REPLACE VIEW {TGT}.{name} AS {sql.format(t=TGT)};")
             print(f"view {name}: created")
         except Exception as exc:
+            logger.debug("Ignoring exception in main", exc_info=True)
             failures += 1
             print(f"WARN view {name} failed ({type(exc).__name__}): {str(exc).splitlines()[0]}")
 

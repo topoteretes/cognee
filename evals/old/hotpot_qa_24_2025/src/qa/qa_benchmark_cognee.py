@@ -15,6 +15,9 @@ from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusB
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 
 from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -152,6 +155,7 @@ class QABenchmarkCognee(QABenchmarkRAG):
                 return "No relevant information found."
 
         except Exception as e:
+            logger.debug("Ignoring exception in QABenchmarkCognee.query_rag", exc_info=True)
             print(f"Error during retrieval: {e}")
             return f"Error: {e!s}"
 

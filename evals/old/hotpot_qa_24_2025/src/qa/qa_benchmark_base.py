@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from tqdm import tqdm
+import logging
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -99,6 +102,7 @@ class QABenchmarkRAG(ABC):
             try:
                 answer = await self.query_rag(question)
             except Exception as e:
+                logger.debug("Ignoring exception in QABenchmarkRAG.answer_questions", exc_info=True)
                 print(f"Error processing question {i + 1}: {e}")
                 answer = f"Error: {e!s}"
 

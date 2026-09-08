@@ -39,6 +39,9 @@ from check_router_docstrings import (  # noqa: E402
     iter_api_routes,
     normalize,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 PATH_SECTION = "Path Parameters"
 QUERY_SECTION = "Query Parameters"
@@ -503,6 +506,7 @@ def main() -> int:
     try:
         fixes = collect_fixes()
     except Exception as exc:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 
