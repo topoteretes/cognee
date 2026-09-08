@@ -25,7 +25,7 @@ def _sanitize_value(value: Any) -> Any:
             return f"<cannot be serialized: {type(value).__name__}>"
         return str_repr
     except Exception:
-        logger.debug("Ignoring exception in _sanitize_value", exc_info=True)
+        logger.debug("Falling back after error in _sanitize_value", exc_info=True)
         return f"<cannot be serialized: {type(value).__name__}>"
 
 
@@ -88,7 +88,7 @@ def _get_param_names(func: Callable) -> list[str]:
     try:
         return list(inspect.signature(func).parameters.keys())
     except Exception:
-        logger.debug("Ignoring exception in _get_param_names", exc_info=True)
+        logger.debug("Falling back to [] after error in _get_param_names", exc_info=True)
         return []
 
 
@@ -102,7 +102,7 @@ def _get_param_defaults(func: Callable) -> dict[str, Any]:
                 defaults[param_name] = param.default
         return defaults
     except Exception:
-        logger.debug("Ignoring exception in _get_param_defaults", exc_info=True)
+        logger.debug("Falling back to {} after error in _get_param_defaults", exc_info=True)
         return {}
 
 
@@ -129,7 +129,7 @@ def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> str |
                     return str(user.id)
         return None
     except Exception:
-        logger.debug("Ignoring exception in _extract_user_id", exc_info=True)
+        logger.debug("Falling back to None after error in _extract_user_id", exc_info=True)
         return None
 
 

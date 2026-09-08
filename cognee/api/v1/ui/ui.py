@@ -132,7 +132,7 @@ def _is_port_available(port: int) -> bool:
             result = sock.connect_ex(("localhost", port))
             return result != 0  # Port is available if connection fails
     except Exception:
-        logger.debug("Ignoring exception in _is_port_available", exc_info=True)
+        logger.debug("Falling back to False after error in _is_port_available", exc_info=True)
         return False
 
 
@@ -398,7 +398,7 @@ def is_development_frontend(frontend_path: Path) -> bool:
 
         return "next" in dependencies or "next" in dev_dependencies
     except Exception:
-        logger.debug("Ignoring exception in is_development_frontend", exc_info=True)
+        logger.debug("Falling back to False after error in is_development_frontend", exc_info=True)
         return False
 
 

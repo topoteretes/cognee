@@ -180,9 +180,7 @@ def get_search_router() -> APIRouter:
 
             return history
         except Exception as error:
-            logger.debug(
-                "Ignoring exception in get_search_router.get_search_history", exc_info=True
-            )
+            logger.exception("get_search_router.get_search_history failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(
@@ -301,7 +299,7 @@ def get_search_router() -> APIRouter:
             # returns them to the caller.
             raise
         except Exception as error:
-            logger.debug("Ignoring exception in get_search_router.search", exc_info=True)
+            logger.exception("get_search_router.search failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(

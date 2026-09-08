@@ -192,7 +192,7 @@ async def run_distillation_act(user) -> dict:
             "cognified_documents": result.documents,
         }
     except Exception as exc:
-        logger.debug("Ignoring exception in run_distillation_act", exc_info=True)
+        logger.debug("Falling back after error in run_distillation_act", exc_info=True)
         progress(f"Act 2 failed: {exc}")
         return {
             "flush_touched_entry_ids": [],

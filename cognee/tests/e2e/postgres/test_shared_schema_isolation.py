@@ -72,7 +72,7 @@ async def _postgres_reachable() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:
-        logger.debug("Ignoring exception in _postgres_reachable", exc_info=True)
+        logger.debug("Falling back to False after error in _postgres_reachable", exc_info=True)
         return False
     finally:
         await engine.dispose()

@@ -531,7 +531,9 @@ async def compress_until_within_limit(
                     llm_semaphore=llm_semaphore,
                 )
             except Exception as exc:
-                logger.debug("Ignoring exception in compress_until_within_limit", exc_info=True)
+                logger.debug(
+                    "Skipping item after error in compress_until_within_limit", exc_info=True
+                )
                 attempts.append(
                     {
                         "role_compression_percents": role_percents,

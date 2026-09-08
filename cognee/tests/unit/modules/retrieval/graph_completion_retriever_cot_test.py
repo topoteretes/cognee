@@ -37,7 +37,9 @@ def _no_real_llm_calls():
         try:
             return response_model.model_construct()
         except Exception:
-            logger.debug("Ignoring exception in _no_real_llm_calls._structured", exc_info=True)
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
             return "reasoning"
 
     with patch.object(

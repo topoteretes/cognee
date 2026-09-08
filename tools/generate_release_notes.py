@@ -57,7 +57,7 @@ def get_latest_release_tag(exclude: str | None = None) -> str | None:
                 return tag
         return None
     except Exception:
-        logger.debug("Ignoring exception in get_latest_release_tag", exc_info=True)
+        logger.debug("Falling back to None after error in get_latest_release_tag", exc_info=True)
         return None
 
 
@@ -159,7 +159,7 @@ def get_dependency_changes(base_ref: str, target_ref: str) -> dict[str, list[str
     except SystemExit:
         return changes
     except Exception:
-        logger.debug("Ignoring exception in get_dependency_changes", exc_info=True)
+        logger.debug("Falling back after error in get_dependency_changes", exc_info=True)
         return changes
 
     base_deps = _parse_dependencies(base_text)
@@ -186,7 +186,7 @@ def get_compatibility_info(target_ref: str) -> dict[str, str]:
         try:
             text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
         except Exception:
-            logger.debug("Ignoring exception in get_compatibility_info", exc_info=True)
+            logger.debug("Falling back after error in get_compatibility_info", exc_info=True)
             return info
 
     py_match = re.search(r'^requires-python\s*=\s*["\']([^"\']+)["\']', text, re.MULTILINE)
@@ -334,7 +334,9 @@ Create engaging release notes that help users understand what's new and improved
         )
         return response
     except Exception as e:
-        logger.debug("Ignoring exception in generate_release_notes_with_llm", exc_info=True)
+        logger.debug(
+            "Falling back to None after error in generate_release_notes_with_llm", exc_info=True
+        )
         print(f"Warning: LLM generation failed: {e}", file=sys.stderr)
         return None
 

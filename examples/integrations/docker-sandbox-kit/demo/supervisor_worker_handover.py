@@ -75,7 +75,7 @@ async def get_or_create_user(email: str, password: str):
     try:
         return await create_user(email, password)
     except Exception:  # UserAlreadyExists on re-runs
-        logger.debug("Ignoring exception in get_or_create_user", exc_info=True)
+        logger.debug("Falling back after error in get_or_create_user", exc_info=True)
         return await get_user_by_email(email)
 
 

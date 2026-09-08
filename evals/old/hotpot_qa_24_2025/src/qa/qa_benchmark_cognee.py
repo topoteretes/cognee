@@ -155,7 +155,7 @@ class QABenchmarkCognee(QABenchmarkRAG):
                 return "No relevant information found."
 
         except Exception as e:
-            logger.debug("Ignoring exception in QABenchmarkCognee.query_rag", exc_info=True)
+            logger.debug("Falling back after error in QABenchmarkCognee.query_rag", exc_info=True)
             print(f"Error during retrieval: {e}")
             return f"Error: {e!s}"
 

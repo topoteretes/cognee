@@ -184,7 +184,7 @@ def _llm_tokenizer() -> TikTokenTokenizer:
         return TikTokenTokenizer(model=model)
     except Exception:
         # Model unknown to tiktoken — fall back to its default encoding.
-        logger.debug("Ignoring exception in _llm_tokenizer", exc_info=True)
+        logger.debug("Falling back after error in _llm_tokenizer", exc_info=True)
         return TikTokenTokenizer(model=None)
 
 

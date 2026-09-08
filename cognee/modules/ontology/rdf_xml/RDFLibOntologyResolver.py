@@ -192,7 +192,8 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 parsed_graph.parse(data=content, format=rdf_format)
             except Exception as error:
                 logger.debug(
-                    "Ignoring exception in RDFLibOntologyResolver._parse_file_object", exc_info=True
+                    "Skipping item after error in RDFLibOntologyResolver._parse_file_object",
+                    exc_info=True,
                 )
                 parse_errors.append(f"{rdf_format}: {error}")
                 continue

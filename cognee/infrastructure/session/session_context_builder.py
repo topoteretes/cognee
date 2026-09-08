@@ -304,7 +304,7 @@ async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_i
                 merge={"last_served_at": served_at},
             )
         except Exception:
-            logger.debug("Ignoring exception in _stamp_served_entries", exc_info=True)
+            logger.debug("Skipping item after error in _stamp_served_entries", exc_info=True)
             continue
 
 
@@ -400,7 +400,7 @@ async def build_active_context_block(
         return block, served_ids
     except Exception:
         # Fail-open: never block answer generation.
-        logger.debug("Ignoring exception in build_active_context_block", exc_info=True)
+        logger.debug("Falling back after error in build_active_context_block", exc_info=True)
         return "", []
 
 
@@ -544,9 +544,9 @@ async def apply_candidate_updates(
                     touched.append(entry_id)
             except Exception:
                 # Per-candidate fail-open: skip this candidate, keep going.
-                logger.debug("Ignoring exception in apply_candidate_updates", exc_info=True)
+                logger.debug("Skipping item after error in apply_candidate_updates", exc_info=True)
                 continue
         return touched
     except Exception:
-        logger.debug("Ignoring exception in apply_candidate_updates", exc_info=True)
+        logger.debug("Falling back after error in apply_candidate_updates", exc_info=True)
         return touched

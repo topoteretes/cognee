@@ -223,7 +223,7 @@ async def _op_merge_insert_execute(registry: HandleRegistry, req: Request):
             "num_deleted_rows": getattr(result, "num_deleted_rows", None),
         }
     except Exception:
-        logger.debug("Ignoring exception in _op_merge_insert_execute", exc_info=True)
+        logger.debug("Falling back to None after error in _op_merge_insert_execute", exc_info=True)
         return None
 
 

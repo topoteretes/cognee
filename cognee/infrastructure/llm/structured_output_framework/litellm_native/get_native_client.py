@@ -64,7 +64,7 @@ def _qualify_model(model: str, provider: str) -> str:
         litellm.get_llm_provider(model=model)
         return model
     except Exception:
-        logger.debug("Ignoring exception in _qualify_model", exc_info=True)
+        logger.debug("Falling back after error in _qualify_model", exc_info=True)
         prefix = _LITELLM_PROVIDER_PREFIX.get((provider or "").lower())
         return f"{prefix}/{model}" if prefix else model
 

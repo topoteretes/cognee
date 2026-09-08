@@ -123,7 +123,7 @@ class CogneeApiClient:
         try:
             return r.json()
         except Exception:
-            logger.debug("Ignoring exception in CogneeApiClient.health", exc_info=True)
+            logger.debug("Falling back after error in CogneeApiClient.health", exc_info=True)
             return {"status_code": r.status_code, "text": r.text}
 
     # -- add -------------------------------------------------------------

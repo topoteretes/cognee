@@ -202,7 +202,7 @@ def _import_family_modules():
             # Modules behind optional extras (codegraph, scraping, neptune, ...)
             # may not import in a minimal environment. The static test above
             # already covers them; here we simply skip what we cannot load.
-            logger.debug("Ignoring exception in _import_family_modules", exc_info=True)
+            logger.debug("Skipping item after error in _import_family_modules", exc_info=True)
             continue
 
 

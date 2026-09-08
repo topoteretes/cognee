@@ -158,5 +158,5 @@ def _coerce_tool(raw) -> Tool | None:
     try:
         return Tool.model_validate(data)
     except Exception:
-        logger.debug("Ignoring exception in _coerce_tool", exc_info=True)
+        logger.debug("Falling back to None after error in _coerce_tool", exc_info=True)
         return None

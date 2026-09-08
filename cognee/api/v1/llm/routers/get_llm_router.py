@@ -78,7 +78,7 @@ def _count_tokens(text: str, model: str) -> int | None:
     try:
         return litellm.token_counter(model=model, text=text)
     except Exception:
-        logger.debug("Ignoring exception in _count_tokens", exc_info=True)
+        logger.debug("Falling back to None after error in _count_tokens", exc_info=True)
         return None
 
 
@@ -143,7 +143,7 @@ def _model_aware_sample_text(
 
         return sample
     except Exception:
-        logger.debug("Ignoring exception in _model_aware_sample_text", exc_info=True)
+        logger.debug("Falling back after error in _model_aware_sample_text", exc_info=True)
         return _sample_text(text)
 
 

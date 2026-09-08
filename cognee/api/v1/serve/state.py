@@ -35,7 +35,7 @@ def _note_local_execution() -> None:
 
         creds = load_credentials()
     except Exception:
-        logger.debug("Ignoring exception in _note_local_execution", exc_info=True)
+        logger.debug("Giving up after error in _note_local_execution", exc_info=True)
         return
     if creds and creds.service_url and creds.api_key:
         logger.warning(

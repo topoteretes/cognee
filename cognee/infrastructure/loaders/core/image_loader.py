@@ -256,7 +256,10 @@ class ImageLoader(LoaderInterface):
             with Image.open(file_path) as img:
                 exif_data = img._getexif()  # ty:ignore[unresolved-attribute]
         except Exception:
-            logger.debug("Ignoring exception in ImageLoader._extract_exif_metadata", exc_info=True)
+            logger.debug(
+                "Falling back to None after error in ImageLoader._extract_exif_metadata",
+                exc_info=True,
+            )
             return None
 
         if exif_data is None:
@@ -320,7 +323,8 @@ class ImageLoader(LoaderInterface):
                 return _dhash(img)
         except Exception:
             logger.debug(
-                "Ignoring exception in ImageLoader._compute_perceptual_hash", exc_info=True
+                "Falling back to None after error in ImageLoader._compute_perceptual_hash",
+                exc_info=True,
             )
             return None
 
@@ -394,7 +398,7 @@ def _format_gps_info(gps_dict: dict) -> str | None:
         lat = _to_decimal(gps_dict.get(2), gps_dict.get(1, "N"))  # GPSLatitude, GPSLatitudeRef
         lon = _to_decimal(gps_dict.get(4), gps_dict.get(3, "E"))  # GPSLongitude, GPSLongitudeRef
     except Exception:
-        logger.debug("Ignoring exception in _format_gps_info", exc_info=True)
+        logger.debug("Falling back to None after error in _format_gps_info", exc_info=True)
         return None
 
     parts = []

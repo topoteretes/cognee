@@ -66,7 +66,7 @@ def _generation_input_payload(func, args, kwargs):
         }
         return json.dumps(payload, default=str) if payload else None
     except Exception:
-        logger.debug("Ignoring exception in _generation_input_payload", exc_info=True)
+        logger.debug("Falling back to None after error in _generation_input_payload", exc_info=True)
         return None
 
 

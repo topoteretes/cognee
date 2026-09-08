@@ -113,7 +113,7 @@ def process_single_benchmark(benchmark_folder: str, volume_path: str) -> bool:
         print(f"✅ Successfully processed: {benchmark_folder}")
         return True
     except Exception as e:
-        logger.debug("Ignoring exception in process_single_benchmark", exc_info=True)
+        logger.debug("Falling back to False after error in process_single_benchmark", exc_info=True)
         print(f"❌ Error processing {benchmark_folder}: {e}")
         return False
 

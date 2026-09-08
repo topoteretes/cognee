@@ -265,7 +265,7 @@ def set_pdeathsig() -> bool:
         rc = libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
         return rc == 0
     except Exception:
-        logger.debug("Ignoring exception in set_pdeathsig", exc_info=True)
+        logger.debug("Falling back to False after error in set_pdeathsig", exc_info=True)
         return False
 
 
@@ -295,7 +295,7 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
     try:
         original_ppid = os.getppid()
     except Exception:
-        logger.debug("Ignoring exception in start_parent_liveness_watchdog", exc_info=True)
+        logger.debug("Giving up after error in start_parent_liveness_watchdog", exc_info=True)
         return
 
     def _watch() -> None:
@@ -304,7 +304,8 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
                 current_ppid = os.getppid()
             except Exception:
                 logger.debug(
-                    "Ignoring exception in start_parent_liveness_watchdog._watch", exc_info=True
+                    "Giving up after error in start_parent_liveness_watchdog._watch",
+                    exc_info=True,
                 )
                 return
             if current_ppid != original_ppid:
@@ -315,7 +316,8 @@ def start_parent_liveness_watchdog(poll_interval: float = 1.0) -> None:
                 time.sleep(poll_interval)
             except Exception:
                 logger.debug(
-                    "Ignoring exception in start_parent_liveness_watchdog._watch", exc_info=True
+                    "Giving up after error in start_parent_liveness_watchdog._watch",
+                    exc_info=True,
                 )
                 return
 
@@ -465,7 +467,7 @@ def run_worker_loop(
             init(registry)
         resp_q.put(Response(result=_READY_SENTINEL))
     except Exception as e:
-        logger.debug("Ignoring exception in run_worker_loop", exc_info=True)
+        logger.debug("Giving up after error in run_worker_loop", exc_info=True)
         resp_q.put(Response(error=traceback.format_exc(), exception=_safe_pickle_exception(e)))
         return
 
@@ -523,7 +525,7 @@ def run_worker_loop(
             try:
                 result = handler(registry, msg)
             except Exception as e:
-                logger.debug("Ignoring exception in run_worker_loop.serve", exc_info=True)
+                logger.debug("Skipping item after error in run_worker_loop.serve", exc_info=True)
                 _emit_error(rid, e)
                 continue
 
@@ -548,7 +550,7 @@ def _safe_pickle_exception(e: BaseException) -> BaseException | None:
         pickle.dumps(e)
         return e
     except Exception:
-        logger.debug("Ignoring exception in _safe_pickle_exception", exc_info=True)
+        logger.debug("Falling back to None after error in _safe_pickle_exception", exc_info=True)
         return None
 
 
@@ -599,7 +601,9 @@ def collect_garbage_in_all_workers(timeout: float = 5.0) -> int:
             session.call(Request(op=OP_GC_COLLECT), timeout=timeout)
             collected += 1
         except Exception:
-            logger.debug("Ignoring exception in collect_garbage_in_all_workers", exc_info=True)
+            logger.debug(
+                "Skipping item after error in collect_garbage_in_all_workers", exc_info=True
+            )
             continue
     return collected
 
@@ -1525,5 +1529,5 @@ def get_process_rss_bytes(pid: int) -> int:
         )
         return int(out.strip()) * 1024
     except Exception:
-        logger.debug("Ignoring exception in get_process_rss_bytes", exc_info=True)
+        logger.debug("Falling back to 0 after error in get_process_rss_bytes", exc_info=True)
         return 0

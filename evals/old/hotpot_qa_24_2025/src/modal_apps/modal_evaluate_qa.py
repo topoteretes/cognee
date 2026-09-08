@@ -55,7 +55,7 @@ def get_answers_files(benchmark_folder: str):
         print("📭 Answers folder is empty or doesn't exist")
         return []
     except Exception as e:
-        logger.debug("Ignoring exception in get_answers_files", exc_info=True)
+        logger.debug("Falling back to [] after error in get_answers_files", exc_info=True)
         print(f"❌ Error reading answers folder: {e}")
         return []
 

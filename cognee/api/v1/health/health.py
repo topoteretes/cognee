@@ -187,7 +187,9 @@ class HealthChecker:
                 details="Storage accessible",
             )
         except Exception as e:
-            logger.debug("Ignoring exception in HealthChecker.check_file_storage", exc_info=True)
+            logger.debug(
+                "Falling back after error in HealthChecker.check_file_storage", exc_info=True
+            )
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
@@ -242,7 +244,7 @@ class HealthChecker:
             )
         except Exception as e:
             logger.debug(
-                "Ignoring exception in HealthChecker.check_embedding_service", exc_info=True
+                "Falling back after error in HealthChecker.check_embedding_service", exc_info=True
             )
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(

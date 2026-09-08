@@ -184,5 +184,7 @@ def extract_email_from_id_token(id_token: str) -> str | None:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         return payload.get("email")
     except Exception:
-        logger.debug("Ignoring exception in extract_email_from_id_token", exc_info=True)
+        logger.debug(
+            "Falling back to None after error in extract_email_from_id_token", exc_info=True
+        )
         return None

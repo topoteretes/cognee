@@ -342,7 +342,8 @@ class S3FileStorage(Storage):
             except Exception:
                 # If directory doesn't exist or other error, return empty list
                 logger.debug(
-                    "Ignoring exception in S3FileStorage.list_files.list_files_sync", exc_info=True
+                    "Falling back to [] after error in S3FileStorage.list_files.list_files_sync",
+                    exc_info=True,
                 )
                 return []
 

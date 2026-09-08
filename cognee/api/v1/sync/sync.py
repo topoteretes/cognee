@@ -561,7 +561,7 @@ async def _get_file_size(file_path: str) -> int:
 
         return await file_storage.get_size(file_name)
     except Exception:
-        logger.debug("Ignoring exception in _get_file_size", exc_info=True)
+        logger.debug("Falling back to 0 after error in _get_file_size", exc_info=True)
         return 0
 
 

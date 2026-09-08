@@ -139,7 +139,7 @@ class BaseRetriever(ABC):
             )
         except Exception:
             logger.debug(
-                "Ignoring exception in BaseRetriever.prepare_session_turn_for_retrieval",
+                "Falling back after error in BaseRetriever.prepare_session_turn_for_retrieval",
                 exc_info=True,
             )
             from cognee.infrastructure.session.session_manager import SessionTurnPreparation

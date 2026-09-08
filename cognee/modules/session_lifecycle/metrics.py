@@ -57,7 +57,7 @@ def _dialect_name(bind) -> str:
     try:
         return bind.dialect.name
     except Exception:
-        logger.debug("Ignoring exception in _dialect_name", exc_info=True)
+        logger.debug("Falling back to  after error in _dialect_name", exc_info=True)
         return ""
 
 

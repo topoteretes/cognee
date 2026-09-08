@@ -74,7 +74,7 @@ def _fastembed_hf_repo(model: str | None) -> str | None:
     except Exception:
         # fastembed not installed here (e.g. CI unit tests): best-effort treat a
         # namespaced id as an HF repo, otherwise give up so the caller warns.
-        logger.debug("Ignoring exception in _fastembed_hf_repo", exc_info=True)
+        logger.debug("Falling back after error in _fastembed_hf_repo", exc_info=True)
         return model if "/" in model else None
 
     bare = _bare_model(model)

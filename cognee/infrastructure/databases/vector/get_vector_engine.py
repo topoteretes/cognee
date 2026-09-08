@@ -59,7 +59,8 @@ class _VectorEngineHandle:
                     return False
             except Exception:
                 logger.debug(
-                    "Ignoring exception in _VectorEngineHandle._pin_is_live", exc_info=True
+                    "Falling back to False after error in _VectorEngineHandle._pin_is_live",
+                    exc_info=True,
                 )
                 return False
         return not getattr(engine, "_permanently_closed", False)

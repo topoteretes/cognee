@@ -172,7 +172,7 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             records = await cls._run_system_query(driver, NEO4J_EDITION_QUERY)
         except Exception:
             logger.debug(
-                "Ignoring exception in Neo4jDatasetDatabaseHandler._ensure_multi_database_support",
+                "Giving up after error in Neo4jDatasetDatabaseHandler._ensure_multi_database_support",
                 exc_info=True,
             )
             return

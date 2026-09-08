@@ -120,7 +120,7 @@ def _supports_native_schema(model_name: str) -> bool:
     try:
         return bool(litellm.supports_response_schema(model=model_name))
     except Exception:
-        logger.debug("Ignoring exception in _supports_native_schema", exc_info=True)
+        logger.debug("Falling back to False after error in _supports_native_schema", exc_info=True)
         return False
 
 

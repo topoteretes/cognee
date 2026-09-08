@@ -101,7 +101,9 @@ def _is_budget_exhausted_link(e: BaseException) -> bool:
     try:
         text = str(e)
     except Exception:
-        logger.debug("Ignoring exception in _is_budget_exhausted_link", exc_info=True)
+        logger.debug(
+            "Falling back to False after error in _is_budget_exhausted_link", exc_info=True
+        )
         return False
     return _has_budget_message(text)
 

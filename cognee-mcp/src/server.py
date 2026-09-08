@@ -1013,7 +1013,7 @@ async def delete_dataset(dataset_name: str) -> list:
                 )
             ]
         except Exception as e:
-            logger.debug("Ignoring exception in delete_dataset", exc_info=True)
+            logger.debug("Falling back after error in delete_dataset", exc_info=True)
             return [types.TextContent(type="text", text=f"Error deleting dataset: {e!s}")]
 
 
@@ -1213,7 +1213,7 @@ async def remember(
         try:
             decoded = base64.b64decode(content_base64, validate=True)
         except Exception as e:
-            logger.debug("Ignoring exception in remember", exc_info=True)
+            logger.debug("Falling back after error in remember", exc_info=True)
             return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
         if len(decoded) > _MAX_UPLOAD_BYTES:
             return [

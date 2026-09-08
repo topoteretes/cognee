@@ -354,7 +354,7 @@ async def process_turn(
         )
         counts.update(compression_counts)
     except Exception as exc:
-        logger.debug("Ignoring exception in process_turn", exc_info=True)
+        logger.debug("Falling back after error in process_turn", exc_info=True)
         counts["compression_failed_count"] += 1
         counts["failed_compression_turns"] += 1
         outlier["status"] = "compression_failed"

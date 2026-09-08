@@ -33,7 +33,7 @@ def _render_served_context(served_context) -> str:
                 continue
             lines.append(f"{str(entry_id).strip()}: {str(content).strip()}")
     except Exception:
-        logger.debug("Ignoring exception in _render_served_context", exc_info=True)
+        logger.debug("Falling back to  after error in _render_served_context", exc_info=True)
         return ""
     return "\n".join(lines)
 

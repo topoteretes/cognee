@@ -332,7 +332,9 @@ async def apply_served_context_ratings(
                 )
                 counts[entry_id] = next_counts
             except Exception:
-                logger.debug("Ignoring exception in apply_served_context_ratings", exc_info=True)
+                logger.debug(
+                    "Skipping item after error in apply_served_context_ratings", exc_info=True
+                )
                 continue
     except Exception as e:
         logger.warning("Session turn: served-context rating update failed: %s", e, exc_info=True)

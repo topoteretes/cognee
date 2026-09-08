@@ -203,7 +203,9 @@ def process_single_benchmark(
             )
             metric_values[metric] = {"mean": mean, "confidence_interval": confidence_interval}
         except Exception as e:
-            logger.debug("Ignoring exception in process_single_benchmark", exc_info=True)
+            logger.debug(
+                "Falling back to None after error in process_single_benchmark", exc_info=True
+            )
             print(f"❌ Error processing {metric} for {benchmark_name}: {e}")
             return None
 
@@ -519,7 +521,7 @@ def main():
             print("⚠️  No benchmarks found in CSV")
 
     except Exception as e:
-        logger.debug("Ignoring exception in main", exc_info=True)
+        logger.debug("Giving up after error in main", exc_info=True)
         print(f"❌ Error loading cross-benchmark data: {e}")
         return
 
@@ -536,7 +538,7 @@ def main():
         print(f"\n🎉 Success! JSON saved to: {OUTPUT_PATH}")
         print("📄 You can now use the benchmark summary JSON file")
     except Exception as e:
-        logger.debug("Ignoring exception in main", exc_info=True)
+        logger.debug("Giving up after error in main", exc_info=True)
         print(f"❌ Error saving results: {e}")
         return
 

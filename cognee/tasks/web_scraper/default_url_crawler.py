@@ -124,7 +124,9 @@ class DefaultUrlCrawler:
         try:
             return urlparse(url).netloc
         except Exception:
-            logger.debug("Ignoring exception in DefaultUrlCrawler._domain_from_url", exc_info=True)
+            logger.debug(
+                "Falling back after error in DefaultUrlCrawler._domain_from_url", exc_info=True
+            )
             return url
 
     @lru_cache(maxsize=1024)
@@ -276,7 +278,9 @@ class DefaultUrlCrawler:
                 cache = await self._fetch_and_cache_robots(domain_root)
             return cache.crawl_delay
         except Exception:
-            logger.debug("Ignoring exception in DefaultUrlCrawler._get_crawl_delay", exc_info=True)
+            logger.debug(
+                "Falling back after error in DefaultUrlCrawler._get_crawl_delay", exc_info=True
+            )
             return self.crawl_delay
 
     async def _fetch_httpx(self, url: str) -> str:

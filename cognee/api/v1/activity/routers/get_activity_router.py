@@ -278,7 +278,8 @@ def get_activity_router() -> APIRouter:
             ]
         except Exception:
             logger.debug(
-                "Ignoring exception in get_activity_router.get_tenant_users", exc_info=True
+                "Falling back to [] after error in get_activity_router.get_tenant_users",
+                exc_info=True,
             )
             return []
 

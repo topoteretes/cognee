@@ -140,5 +140,8 @@ class LLMTranslationProvider(TranslationProvider):
             # Check if API key is configured (required for most providers)
             return bool(llm_config.llm_api_key)
         except Exception:
-            logger.debug("Ignoring exception in LLMTranslationProvider.is_available", exc_info=True)
+            logger.debug(
+                "Falling back to False after error in LLMTranslationProvider.is_available",
+                exc_info=True,
+            )
             return False

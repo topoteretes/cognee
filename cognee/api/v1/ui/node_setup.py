@@ -357,5 +357,5 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
 
         return False, "Node.js/npm not found. Please install Node.js from https://nodejs.org/"
     except Exception as e:
-        logger.debug("Ignoring exception in check_node_npm", exc_info=True)
+        logger.debug("Falling back after error in check_node_npm", exc_info=True)
         return False, f"Error checking Node.js/npm: {e!s}"

@@ -507,7 +507,7 @@ def main() -> int:
     try:
         fixes = collect_fixes()
     except Exception as exc:
-        logger.debug("Ignoring exception in main", exc_info=True)
+        logger.debug("Exiting with status 2 after error in main", exc_info=True)
         print(f"Failed to import cognee API app: {exc}", file=sys.stderr)
         return 2
 

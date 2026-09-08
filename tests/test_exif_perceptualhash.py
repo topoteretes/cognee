@@ -69,7 +69,7 @@ def _format_gps_info(gps_dict: dict) -> str | None:
         lat = _to_decimal(gps_dict.get(2), gps_dict.get(1, "N"))
         lon = _to_decimal(gps_dict.get(4), gps_dict.get(3, "E"))
     except Exception:
-        logger.debug("Ignoring exception in _format_gps_info", exc_info=True)
+        logger.debug("Falling back to None after error in _format_gps_info", exc_info=True)
         return None
 
     parts = []
@@ -90,7 +90,7 @@ def _extract_exif_metadata(file_path: str) -> str | None:
         with Image.open(file_path) as img:
             exif_data = img._getexif()
     except Exception:
-        logger.debug("Ignoring exception in _extract_exif_metadata", exc_info=True)
+        logger.debug("Falling back to None after error in _extract_exif_metadata", exc_info=True)
         return None
 
     if exif_data is None:

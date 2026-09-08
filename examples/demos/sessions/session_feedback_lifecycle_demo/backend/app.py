@@ -238,7 +238,7 @@ async def _safe_search(question: str, session_id: str, top_k: int = 5) -> str:
             if results:
                 break
         except Exception:
-            logger.debug("Ignoring exception in _safe_search", exc_info=True)
+            logger.debug("Skipping item after error in _safe_search", exc_info=True)
             continue
 
     if not results:

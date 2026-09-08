@@ -83,7 +83,7 @@ async def _load_skill_nodes(name: str | None = None):
     try:
         graph_engine = await get_graph_engine()
     except Exception:
-        logger.debug("Ignoring exception in _load_skill_nodes", exc_info=True)
+        logger.debug("Falling back to [] after error in _load_skill_nodes", exc_info=True)
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -130,5 +130,5 @@ def _coerce_skill(raw) -> Skill | None:
     try:
         return Skill.model_validate(data)
     except Exception:
-        logger.debug("Ignoring exception in _coerce_skill", exc_info=True)
+        logger.debug("Falling back to None after error in _coerce_skill", exc_info=True)
         return None

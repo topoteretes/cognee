@@ -37,7 +37,7 @@ def get_version() -> str:
 
         return importlib.metadata.version("cognee")
     except Exception:
-        logger.debug("Ignoring exception in get_version", exc_info=True)
+        logger.debug("Falling back after error in get_version", exc_info=True)
         return "unknown"
 
 

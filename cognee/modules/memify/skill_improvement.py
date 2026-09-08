@@ -300,7 +300,7 @@ async def _load_nodes_by_type(model):
     try:
         graph_engine = await get_graph_engine()
     except Exception:
-        logger.debug("Ignoring exception in _load_nodes_by_type", exc_info=True)
+        logger.debug("Falling back to [] after error in _load_nodes_by_type", exc_info=True)
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -347,5 +347,5 @@ def _coerce_model(raw, model):
     try:
         return model.model_validate(data)
     except Exception:
-        logger.debug("Ignoring exception in _coerce_model", exc_info=True)
+        logger.debug("Falling back to None after error in _coerce_model", exc_info=True)
         return None
