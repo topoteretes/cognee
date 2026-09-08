@@ -144,10 +144,14 @@ DATASET_NAME = "stepwise_remember_recall_demo"
 SESSION_ID = "stepwise_session"
 
 DOCUMENTS = [
-    "Aurora Robotics builds two products: the VoltaArm industrial gripper and the "
-    "TerraScout warehouse rover.",
-    "The VoltaArm gripper uses firmware version 4 and a calibration routine that maps "
-    "joint torque to grip strength.",
+    (
+        "Aurora Robotics builds two products: the VoltaArm industrial gripper and the "
+        "TerraScout warehouse rover."
+    ),
+    (
+        "The VoltaArm gripper uses firmware version 4 and a calibration routine that maps "
+        "joint torque to grip strength."
+    ),
     "The TerraScout rover navigates warehouses using lidar maps and charging dock beacons.",
     "Dana Voss leads the VoltaArm firmware team at Aurora Robotics.",
     "Calibration data for the VoltaArm gripper is stored in a battery-backed memory bank.",

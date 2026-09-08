@@ -14,6 +14,6 @@ from contextvars import ContextVar
 
 from cognee.modules.engine.models import Skill
 
-active_skills_var: ContextVar[dict[str, Skill]] = ContextVar("cognee_active_skills", default={})
+active_skills_var: ContextVar[dict[str, Skill]] = ContextVar("cognee_active_skills")
 
 opened_skills_var: ContextVar[set[str] | None] = ContextVar("cognee_opened_skills", default=None)

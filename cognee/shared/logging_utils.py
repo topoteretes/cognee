@@ -136,8 +136,8 @@ def resolve_logs_dir() -> Path | None:
 MAX_LOG_FILES = 10
 
 # Log rotation defaults — override via COGNEE_LOG_MAX_BYTES / COGNEE_LOG_BACKUP_COUNT
-LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", 50 * 1024 * 1024))  # 50 MB
-LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", 5))  # 5 backups → 300 MB cap
+LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", "52428800"))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", "5"))  # 5 backups → 300 MB cap
 
 # Version information
 PYTHON_VERSION = platform.python_version()
@@ -450,7 +450,7 @@ def setup_logging(log_level=None, name=None) -> bool:
         if event_dict.get("exc_info"):
             # If it's already a tuple, use it directly
             if isinstance(event_dict["exc_info"], tuple):
-                exc_type, exc_value, tb = event_dict["exc_info"]
+                exc_type, exc_value, _tb = event_dict["exc_info"]
             else:
                 exc_type, exc_value, _tb = sys.exc_info()
 

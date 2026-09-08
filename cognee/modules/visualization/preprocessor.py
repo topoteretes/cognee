@@ -768,8 +768,8 @@ def extract_type_schema_graph_data(
             "out": [],
             "in": [],
         }
-    for type_name in instances_by_type:
-        instances_by_type[type_name].sort(key=lambda rec: rec["name"])
+    for records in instances_by_type.values():
+        records.sort(key=lambda rec: rec["name"])
     for link in links_list:
         source = str(link["source"])
         target = str(link["target"])

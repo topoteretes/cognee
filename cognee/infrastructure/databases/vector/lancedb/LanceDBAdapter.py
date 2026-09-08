@@ -6,7 +6,14 @@ import types
 from collections import OrderedDict
 from enum import Enum
 from os import path
-from typing import List, Optional, Union, get_args, get_origin, get_type_hints
+from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not an annotation
+    List,
+    Optional,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 from uuid import UUID
 
 import lancedb

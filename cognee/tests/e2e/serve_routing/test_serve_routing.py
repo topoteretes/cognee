@@ -112,7 +112,7 @@ def api_key():
         env=server_env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+        start_new_session=True,
     )
 
     deadline = time.time() + SERVER_BOOT_TIMEOUT

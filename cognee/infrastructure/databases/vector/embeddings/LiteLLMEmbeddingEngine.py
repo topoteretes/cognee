@@ -347,10 +347,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # already bypasses the handlers below and propagates unwrapped.)
             raise
 
-        except (
-            litellm.exceptions.BadRequestError,
-            litellm.exceptions.NotFoundError,
-        ) as e:
+        except litellm.exceptions.NotFoundError as e:
             logger.error(f"Embedding error with model {self.model}: {e!s}")
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
