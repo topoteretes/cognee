@@ -13,7 +13,7 @@ Two things are checked, and both are needed:
 """
 
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -411,3 +411,241 @@ def test_no_pipeline_name_leaves_the_filter_out(monkeypatch):
     _client(user_id).get("/activity/pipeline-runs")
 
     assert "pipeline_name" not in _where_terms(statements[0])
+
+
+# --------------------------------------------------------------------------- #
+# SDK-591: read-time ABANDONED staleness
+# --------------------------------------------------------------------------- #
+
+
+def test_stale_started_row_reports_abandoned(monkeypatch):
+    """A STARTED row older than the threshold is a worker that crashed
+    mid-run — nothing ever writes a terminal status for it, so the endpoint
+    must report ABANDONED itself rather than leaving the client staring at a
+    "RUNNING" row with unbounded elapsed time."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    stale_created_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    run = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=stale_created_at,
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "ABANDONED"
+
+
+def test_fresh_started_row_stays_started(monkeypatch):
+    """A STARTED row inside the threshold is still a plausibly-running
+    pipeline — must not be reported as abandoned just because it is old
+    enough to fail a sloppier check."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "1800")
+    fresh_created_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+    run = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=fresh_created_at,
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [PipelineRunStatus.DATASET_PROCESSING_COMPLETED, PipelineRunStatus.DATASET_PROCESSING_ERRORED],
+)
+def test_terminal_status_is_never_overridden_regardless_of_age(monkeypatch, terminal_status):
+    """Staleness only applies to STARTED — a COMPLETED/ERRORED row that is
+    ancient is a normal finished run, not an abandoned one."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    ancient_created_at = datetime.now(timezone.utc) - timedelta(days=365)
+    run = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=terminal_status,
+        created_at=ancient_created_at,
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == terminal_status.value
+
+
+def test_operation_row_has_no_status_and_is_unaffected(monkeypatch):
+    """Operation rows (pipeline_name NULL) carry no status column at all —
+    the staleness override must not synthesize one from an unrelated
+    created_at."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    ancient_created_at = datetime.now(timezone.utc) - timedelta(days=365)
+    run = _run(user_id=user_id, operation_name="recall", created_at=ancient_created_at)
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] is None
+    assert body[0]["kind"] == "operation"
+
+
+def test_threshold_boundary_just_under_and_just_over(monkeypatch):
+    """Exercise both sides of the threshold explicitly rather than trusting
+    a single interior point."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+
+    just_under = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(seconds=50),
+    )
+    just_over = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(seconds=70),
+    )
+    _stub_engine(monkeypatch, [_joined(just_under), _joined(just_over)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
+    assert body[1]["status"] == "ABANDONED"
+
+
+def test_threshold_boundary_is_strictly_less_than(monkeypatch):
+    """Pins the exact comparison the code uses (`created_at < threshold`),
+    not just two points somewhere near it. A row created exactly at the
+    threshold instant is still within budget and must not read as
+    ABANDONED; one second older must. Mutating the source's `<` to `<=`
+    must turn this test red (verified manually, see SDK-591 review notes).
+
+    The router computes `threshold = datetime.now(...) - abandon_after`
+    itself, so the "now" used for the comparison isn't observable from the
+    test — freeze it via monkeypatch so the boundary is exact instead of a
+    race against wall-clock time between test setup and the request."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(router_module, "datetime", _FrozenDatetime)
+
+    at_threshold = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=now - timedelta(seconds=60),
+    )
+    one_second_past_threshold = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=now - timedelta(seconds=61),
+    )
+    _stub_engine(monkeypatch, [_joined(at_threshold), _joined(one_second_past_threshold)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
+    assert body[1]["status"] == "ABANDONED"
+
+
+def test_pipeline_name_none_with_status_set_returns_raw_status(monkeypatch):
+    """`pipeline_name is None` normally means an operation row, which also
+    has `status=None` and returns early before this guard. This pins the
+    guard itself for the "shouldn't happen" shape where `status` is set but
+    `pipeline_name` isn't — it must return the raw status rather than
+    running the STARTED/age check (which would need `pipeline_name` to mean
+    anything)."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    run = _run(
+        user_id=user_id,
+        pipeline_name=None,
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
+
+
+# --------------------------------------------------------------------------- #
+# _pipeline_run_abandon_after_seconds validation
+# --------------------------------------------------------------------------- #
+
+
+def test_negative_threshold_env_falls_back_to_default(monkeypatch):
+    """A negative value parses as a plain int without error, but would push
+    the threshold into the future and flag nearly every in-flight STARTED
+    row as ABANDONED. Must fall back to the 1800s default instead."""
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "-100")
+
+    assert router_module._pipeline_run_abandon_after_seconds() == 1800
+
+
+def test_zero_threshold_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "0")
+
+    assert router_module._pipeline_run_abandon_after_seconds() == 1800
+
+
+def test_huge_threshold_env_falls_back_to_default_instead_of_overflowing(monkeypatch):
+    """A huge value parses fine as a Python int but overflows the
+    `timedelta(seconds=...)` call the result later feeds, raising an
+    uncaught OverflowError that would 500 the whole endpoint. Must be
+    rejected before it ever reaches timedelta()."""
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "999999999999999999999999")
+
+    assert router_module._pipeline_run_abandon_after_seconds() == 1800
+    # And the value that would feed timedelta() must actually stay safe.
+    from datetime import timedelta
+
+    timedelta(seconds=router_module._pipeline_run_abandon_after_seconds())
+
+
+def test_huge_threshold_env_does_not_500_the_endpoint(monkeypatch):
+    """End-to-end confirmation of the OverflowError fix: a STARTED row read
+    through the real endpoint with a huge threshold configured must not
+    raise, and must not be reported ABANDONED (a fresh row is nowhere near
+    even the 1800s default)."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "999999999999999999999999")
+    run = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(seconds=5),
+    )
+    _stub_engine(monkeypatch, [_joined(run)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    response = _client(user_id).get("/activity/pipeline-runs")
+
+    assert response.status_code == 200
+    assert response.json()[0]["status"] == "DATASET_PROCESSING_STARTED"
