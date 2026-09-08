@@ -1,9 +1,11 @@
+from unittest.mock import AsyncMock
+
 import pytest
+
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,
 )
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
-from unittest.mock import AsyncMock
 
 
 @pytest.mark.asyncio

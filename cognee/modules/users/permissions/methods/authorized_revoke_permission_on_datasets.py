@@ -1,4 +1,4 @@
-from typing import Union, List
+from typing import List, Union
 from uuid import UUID
 
 from cognee.modules.users.permissions.methods import (

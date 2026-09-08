@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from typing import Type
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestGenerateCompletion:

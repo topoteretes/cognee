@@ -1,11 +1,11 @@
 from collections import Counter
-from typing import Optional, Dict, Any, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData
+from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.index_data_points import index_data_points
 
 logger = get_logger()
@@ -88,5 +88,3 @@ async def index_graph_edges(
     except Exception as e:
         logger.error("Failed to index graph edges: %s", e)
         raise RuntimeError("Graph edge indexing error") from e
-
-    return None

@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import Dict, Optional, Literal
 import os
+from typing import Dict, Literal, Optional
+
+from pydantic import BaseModel, Field
 
 
 class TavilyConfig(BaseModel):

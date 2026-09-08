@@ -15,9 +15,6 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -29,6 +26,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger

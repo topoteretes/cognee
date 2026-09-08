@@ -101,7 +101,7 @@ async def launch_neo4j_and_run_benchmark(config_params: dict, dir_suffix: str):
             with socket.create_connection(("localhost", 7474), timeout=1):
                 print("✅ Neo4j server is ready.")
                 break
-        except (socket.timeout, ConnectionRefusedError):
+        except (TimeoutError, ConnectionRefusedError):
             if neo4j_process.poll() is not None:
                 raise RuntimeError("Neo4j process terminated unexpectedly.")
             time.sleep(1)

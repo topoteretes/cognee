@@ -1,9 +1,10 @@
 import json
 import os
-import pydantic
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 from typing import Union
+
+import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.base_config import get_base_config

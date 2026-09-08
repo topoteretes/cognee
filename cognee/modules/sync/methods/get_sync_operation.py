@@ -1,8 +1,10 @@
-from uuid import UUID
 from typing import List, Optional
-from sqlalchemy import select, desc, and_
-from cognee.modules.sync.models import SyncOperation, SyncStatus
+from uuid import UUID
+
+from sqlalchemy import and_, desc, select
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.sync.models import SyncOperation, SyncStatus
 
 
 async def get_sync_operation(run_id: str) -> Optional[SyncOperation]:

@@ -1,9 +1,9 @@
 from typing import Optional
 
-from cognee.modules.users.models import User
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
+from cognee.modules.users.models import User
 
 from ..models import Dataset
 

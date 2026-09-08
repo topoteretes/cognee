@@ -27,7 +27,6 @@ import pytest
 import cognee
 from cognee.exceptions import CogneeApiError
 
-
 # The single root of the Cognee error hierarchy, read off the class itself so it
 # can never drift from the source. Every other error class is *discovered* from
 # here by name (see ``_family_classes_in_repo``): seeding the fixpoint with just

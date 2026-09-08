@@ -1,5 +1,6 @@
-from typing import Any, Callable, Generator, List
 import asyncio
+from typing import Any, Callable, Generator, List
+
 from ..tasks.task import Task
 
 

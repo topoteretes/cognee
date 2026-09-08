@@ -1,18 +1,21 @@
 import os
 import pathlib
+
+import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
-from cognee.modules.users.methods import get_default_user
+from cognee.infrastructure.databases.relational import (
+    create_db_and_tables as create_relational_db_and_tables,
+)
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
-    create_db_and_tables as create_relational_db_and_tables,
 )
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
-from cognee.tasks.ingestion import migrate_relational_database
+from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.search.types import SearchType
-import cognee
+from cognee.modules.users.methods import get_default_user
+from cognee.tasks.ingestion import migrate_relational_database
 
 TEST_DATASET_NAME = "migration_test_dataset"
 
@@ -229,7 +232,7 @@ async def test_schema_only_migration():
     }
 
     if graph_db_provider == "neo4j":
-        for rel_type in edge_counts.keys():
+        for rel_type in edge_counts:
             query_str = f"""
             MATCH ()-[r:{rel_type}]->()
             RETURN count(r) as c
@@ -238,7 +241,7 @@ async def test_schema_only_migration():
             edge_counts[rel_type] = rows[0]["c"]
 
     elif graph_db_provider in ("ladybug", "kuzu"):
-        for rel_type in edge_counts.keys():
+        for rel_type in edge_counts:
             query_str = f"""
             MATCH ()-[r:EDGE]->()
             WHERE r.relationship_name = '{rel_type}'

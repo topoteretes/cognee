@@ -15,7 +15,6 @@ from cognee.modules.tools.path_safety import trusted_is_dir, trusted_is_file, tr
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.storage.add_data_points import add_data_points
 
-
 logger = get_logger("cognee.tools.ingest_skills")
 
 SKILL_SOURCE_ROOTS_ENV = "COGNEE_SKILL_SOURCE_ROOTS"

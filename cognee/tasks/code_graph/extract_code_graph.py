@@ -2,10 +2,10 @@
 
 import hashlib
 import json
+import posixpath
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-import posixpath
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from uuid import NAMESPACE_OID, UUID, uuid5
 
@@ -26,6 +26,7 @@ from cognee.tasks.code_graph.models import (
     ApiEndpoint,
     CodeAssociation,
     CodeExtractionAccount,
+    CodeFileReference,
     CodeInsight,
     CodeIntent,
     CodeLintFinding,
@@ -34,7 +35,6 @@ from cognee.tasks.code_graph.models import (
     CodeService,
     CodeSymbol,
     CodeTestReference,
-    CodeFileReference,
     ExternalDependency,
     StorageResource,
 )

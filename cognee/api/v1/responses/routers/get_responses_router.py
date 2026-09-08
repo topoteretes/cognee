@@ -4,24 +4,26 @@ Get router for the OpenAI-compatible responses API.
 
 import logging
 import uuid
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 import openai
 from fastapi import APIRouter, Depends
+
+from cognee.api.v1.responses.default_tools import DEFAULT_TOOLS
+from cognee.api.v1.responses.dispatch_function import dispatch_function
 from cognee.api.v1.responses.models import (
-    ResponseRequest,
-    ResponseBody,
-    ResponseToolCall,
     ChatUsage,
     FunctionCall,
+    ResponseBody,
+    ResponseRequest,
+    ResponseToolCall,
     ToolCallOutput,
 )
-from cognee.api.v1.responses.dispatch_function import dispatch_function
-from cognee.api.v1.responses.default_tools import DEFAULT_TOOLS
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
-from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 
 
 def get_responses_router() -> APIRouter:
@@ -145,7 +147,7 @@ def get_responses_router() -> APIRouter:
                     output_status = "success"
                 except Exception as e:
                     logger.exception(f"Error executing function {function_name}: {e}")
-                    function_result = f"Error executing {function_name}: {str(e)}"
+                    function_result = f"Error executing {function_name}: {e!s}"
                     output_status = "error"
 
                 processed_call = ResponseToolCall(

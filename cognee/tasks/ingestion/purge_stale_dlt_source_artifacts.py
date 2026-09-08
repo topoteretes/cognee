@@ -16,7 +16,7 @@ re-runs the purge harmlessly and rebuilds.
 
 from typing import TYPE_CHECKING, List, Optional
 
-from cognee.modules.data.processing.document_types import Document, DltSourceDocument
+from cognee.modules.data.processing.document_types import DltSourceDocument, Document
 from cognee.shared.logging_utils import get_logger
 
 if TYPE_CHECKING:

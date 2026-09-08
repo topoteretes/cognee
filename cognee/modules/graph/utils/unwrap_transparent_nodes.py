@@ -11,8 +11,8 @@ from typing import Any, List, Optional
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.extract_field_relationships import (
     EdgeTargets,
-    iter_targets,
     iter_fields,
+    iter_targets,
 )
 from cognee.shared.logging_utils import get_logger
 

@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-
 from graphiti_core import Graphiti
-from graphiti_core.nodes import EpisodeType
-from .qa_benchmark_base import QABenchmarkRAG, QABenchmarkConfig
 from graphiti_core.llm_client import OpenAIClient
 from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.nodes import EpisodeType
+from langchain_openai import ChatOpenAI
+
+from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
 
 load_dotenv()
 

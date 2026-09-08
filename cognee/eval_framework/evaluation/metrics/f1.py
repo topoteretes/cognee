@@ -1,7 +1,8 @@
-from collections import Counter
-from deepeval.test_case import LLMTestCase
 import re
-from typing import Optional, Any
+from collections import Counter
+from typing import Any, Optional
+
+from deepeval.test_case import LLMTestCase
 
 
 class F1ScoreMetric:

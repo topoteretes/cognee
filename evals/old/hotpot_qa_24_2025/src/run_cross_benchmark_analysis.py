@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
 import pandas as pd
 from analysis.analyze_single_benchmark import analyze_single_benchmark_folder
 

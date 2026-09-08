@@ -30,14 +30,13 @@ from contextlib import asynccontextmanager
 from typing import List, Tuple
 
 import cognee
-
 import cognee.shared.lru_cache as _lru_cache_module
-from cognee.infrastructure.databases.dataset_queue import queue as _queue_module
 from cognee.infrastructure.databases.dataset_queue import dataset_queue
-from cognee.modules.search.types import SearchType
-from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.databases.dataset_queue import queue as _queue_module
 from cognee.modules.engine.operations.setup import setup
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods.get_default_user import get_default_user
+from cognee.shared.logging_utils import get_logger
 
 _lru_cache_module.DATABASE_MAX_LRU_CACHE_SIZE = 1
 _queue_module.DATABASE_MAX_LRU_CACHE_SIZE = 1

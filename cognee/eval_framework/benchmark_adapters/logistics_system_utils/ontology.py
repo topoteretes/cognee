@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import random
 import json
+import random
 from pathlib import Path
+
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.package import Package
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.retailer import (
     retailer_possible_values,
@@ -11,24 +12,24 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.rule_engine
     DeliveryRuleEngine,
 )
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.utils import (
-    store_world,
     load_world,
     match_user_and_retailer_for_package,
+    store_world,
 )
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.world_creation_utils import (
+    PACKAGE_DESCRIPTIONS,
+    RETAILER_NAMES,
+    USER_NAMES,
+    _compatible_user_retailer_pairs,
     _normalize_entity_count,
     _normalize_package_count,
-    _seed_user,
-    _pick_unique_name,
-    _seed_retailer,
-    _seed_post_offices,
     _origin_post_office_id_for_retailer,
-    _seed_world_carriers,
-    _compatible_user_retailer_pairs,
+    _pick_unique_name,
     _seed_package,
-    USER_NAMES,
-    RETAILER_NAMES,
-    PACKAGE_DESCRIPTIONS,
+    _seed_post_offices,
+    _seed_retailer,
+    _seed_user,
+    _seed_world_carriers,
     pretty_print_world,
 )
 
@@ -180,7 +181,7 @@ def write_golden_answers(
     validate_world_packages(world)
 
     golden_answers = {"golden_answers": []}
-    for i in range(0, len(world["packages"])):
+    for i in range(len(world["packages"])):
         user, retailer = match_user_and_retailer_for_package(world, world["packages"][i])
         delivery_plan = DeliveryRuleEngine().evaluate(
             retailer=retailer,

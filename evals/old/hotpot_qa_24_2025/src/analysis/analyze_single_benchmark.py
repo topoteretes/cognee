@@ -2,14 +2,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+from analysis.analyze_results import create_aggregate_metrics_df, cumulative_all_metrics_analysis
 from analysis.process_results import (
+    create_all_metrics_df,
+    create_answers_df,
     process_results,
     transform_results,
     validate_question_consistency,
-    create_answers_df,
-    create_all_metrics_df,
 )
-from analysis.analyze_results import create_aggregate_metrics_df, cumulative_all_metrics_analysis
 
 
 def create_project_structure(project_dir: str) -> str:

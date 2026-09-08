@@ -23,11 +23,10 @@ from contextvars import ContextVar
 from typing import Optional
 from uuid import UUID as UUIDType
 
-from cognee.shared.logging_utils import get_logger
-
 # Submodule import on purpose: avoids the cognee.modules.operations
 # package-init chain from this low-level module.
 from cognee.modules.operations.usage_accumulator import get_active_operation_usage
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("session_usage")
 

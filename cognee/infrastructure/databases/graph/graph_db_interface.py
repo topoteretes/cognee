@@ -1,14 +1,15 @@
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 from uuid import UUID
-from abc import abstractmethod, ABC
-from typing import Optional, Dict, Any, List, Tuple, Type, Union
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.engine import DataPoint
+
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.provenance import (
     EdgeDeleteData,
     EdgeIdentity,
     NodeDeleteData,
 )
+from cognee.infrastructure.engine import DataPoint
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -164,7 +165,7 @@ class GraphDBInterface(ABC):
         Default no-op; only Neo4j overrides this today. Other
         list-property-storing adapters are free to implement it later.
         """
-        return None
+        return
 
     async def update_chunk_index(self, chunk_indexes: "dict[str, int]") -> None:
         """

@@ -1,15 +1,13 @@
 import time
+
 from sqlalchemy import select
 from sqlalchemy.sql import func
 
-from cognee.modules.data.models import Data
-from cognee.modules.data.models import GraphMetrics
-from cognee.modules.pipelines.models import PipelineRunInfo
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-
+from cognee.modules.data.models import Data, GraphMetrics
+from cognee.modules.pipelines.models import PipelineRunInfo
 from cognee.shared.logging_utils import get_logger
-
 
 logger = get_logger(__name__)
 

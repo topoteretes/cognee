@@ -1,13 +1,13 @@
-import sys
-import os
 import argparse
 import logging
+import os
 import signal
 import subprocess
+import sys
 import warnings
-from typing import Any, Sequence, Dict, Type, cast, List
-import click
+from typing import Any, Dict, List, Sequence, Type, cast
 
+import click
 
 try:
     import rich_argparse
@@ -17,13 +17,11 @@ try:
 except ImportError:
     HAS_RICH = False
 
-from cognee.cli import SupportsCliCommand, DEFAULT_DOCS_URL
-from cognee.cli.config import CLI_DESCRIPTION
-from cognee.cli import debug
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL, SupportsCliCommand, debug
+from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.remediation import find_remediation
-
 
 ACTION_EXECUTED = False
 
@@ -41,7 +39,7 @@ class DebugAction(argparse.Action):
         default: Any = argparse.SUPPRESS,
         help: str = None,
     ) -> None:
-        super(DebugAction, self).__init__(
+        super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
         )
 
@@ -65,7 +63,7 @@ class UiAction(argparse.Action):
         default: Any = argparse.SUPPRESS,
         help: str = None,
     ) -> None:
-        super(UiAction, self).__init__(
+        super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
         )
 
@@ -388,7 +386,7 @@ def main() -> int:
                 return 1
 
         except Exception as ex:
-            fmt.error(f"Error starting UI: {str(ex)}")
+            fmt.error(f"Error starting UI: {ex!s}")
             signal_handler(signal.SIGTERM, None)
             if debug.is_debug_enabled():
                 raise ex
@@ -397,7 +395,8 @@ def main() -> int:
     # When --api-url is set, delegate to the API server instead of running
     # in-process.  This is the correct mode for concurrent / multi-agent use
     # with file-based databases (SQLite, Ladybug, LanceDB).
-    from cognee.cli.api_dispatch import can_dispatch, dispatch as api_dispatch
+    from cognee.cli.api_dispatch import can_dispatch
+    from cognee.cli.api_dispatch import dispatch as api_dispatch
 
     if can_dispatch(args) and args.command:
         try:

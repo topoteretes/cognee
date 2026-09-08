@@ -1,14 +1,15 @@
 import pathlib
+
 import pytest
 import pytest_asyncio
 
 import cognee
-from cognee.low_level import setup
 from cognee import memify
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.low_level import setup
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
+from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
 
 
 @pytest_asyncio.fixture

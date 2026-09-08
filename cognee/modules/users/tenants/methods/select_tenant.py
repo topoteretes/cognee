@@ -1,15 +1,15 @@
-from uuid import UUID
 from typing import Union
+from uuid import UUID
 
 import sqlalchemy.exc
 from sqlalchemy import select
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.exceptions import TenantNotFoundError, UserNotFoundError
 from cognee.modules.users.methods.get_user import get_user
-from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.modules.users.models.User import User
+from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.modules.users.permissions.methods import get_tenant
-from cognee.modules.users.exceptions import UserNotFoundError, TenantNotFoundError
 
 
 async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]) -> User:

@@ -1,20 +1,19 @@
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import text
 
-from cognee.modules.users.models import User
-from cognee.modules.users.models import DatasetDatabase
-from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
-from cognee.infrastructure.databases.vector.create_vector_engine import (
-    create_vector_engine,
-    vector_engine_cache,
-)
 from cognee.infrastructure.databases.postgres import (
     create_pg_database_if_not_exists,
     drop_pg_database_if_exists,
 )
+from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.infrastructure.databases.vector.create_vector_engine import (
+    create_vector_engine,
+    vector_engine_cache,
+)
+from cognee.modules.users.models import DatasetDatabase, User
 
 
 class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):

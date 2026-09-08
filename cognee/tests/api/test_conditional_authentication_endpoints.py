@@ -1,9 +1,10 @@
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from uuid import uuid4
-from fastapi.testclient import TestClient
-from types import SimpleNamespace
 import importlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
 
 with patch("dotenv.load_dotenv"):
     # This prevents the .env file from ever loading during tests

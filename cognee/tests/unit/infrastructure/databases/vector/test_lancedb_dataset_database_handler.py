@@ -6,7 +6,6 @@ import pytest
 
 import cognee.infrastructure.databases.dataset_database_handler  # noqa: F401
 
-
 handler_module = import_module(
     "cognee.infrastructure.databases.vector.lancedb.LanceDBDatasetDatabaseHandler"
 )

@@ -1,7 +1,6 @@
+import hashlib
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import hashlib
 
 import pytest
 
@@ -354,8 +353,7 @@ async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader)
 )
 async def test_extract_audio_invocation_error_cleans_up(mock_run, loader):
     """If the ffmpeg invocation itself raises, the temp WAV is still removed."""
-    with _RemoveSpy() as removed:
-        with pytest.raises(OSError):
-            await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
+    with _RemoveSpy() as removed, pytest.raises(OSError):
+        await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
 
     assert removed.paths and not os.path.exists(removed.paths[0])

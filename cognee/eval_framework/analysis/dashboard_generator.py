@@ -1,8 +1,9 @@
 import html
 import json
-import plotly.graph_objects as go
-from typing import Dict, List, Tuple
 from collections import defaultdict
+from typing import Dict, List, Tuple
+
+import plotly.graph_objects as go
 
 
 def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]:

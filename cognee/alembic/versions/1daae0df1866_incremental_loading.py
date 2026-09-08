@@ -8,8 +8,8 @@ Create Date: 2025-08-12 13:14:12.515935
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.ext.mutable import MutableDict
 
 # revision identifiers, used by Alembic.

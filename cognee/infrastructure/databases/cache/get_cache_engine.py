@@ -4,11 +4,11 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 from cognee.infrastructure.databases.exceptions import CacheConnectionError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CacheEngine")
 

@@ -7,7 +7,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.en
     ShippingRange,
 )
 
-
 retailer_possible_values = {
     "region": [region.label for region in Region],
     "shipping_range": [shipping_range.label for shipping_range in ShippingRange],

@@ -57,15 +57,17 @@ async def graphql(
     if variables:
         payload["variables"] = variables
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-        async with session.post(
+    async with (
+        aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+        session.post(
             GRAPHQL_URL,
             json=payload,
             headers={"Authorization": f"Bearer {access_token}"},
-        ) as response:
-            if response.status != 200:
-                raise RuntimeError(f"Linear {operation} failed: HTTP {response.status}")
-            body: dict[str, Any] = await response.json()
+        ) as response,
+    ):
+        if response.status != 200:
+            raise RuntimeError(f"Linear {operation} failed: HTTP {response.status}")
+        body: dict[str, Any] = await response.json()
 
     errors = body.get("errors")
     if errors:

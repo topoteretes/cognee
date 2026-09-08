@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Union, Optional
+from typing import Optional, Union
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart

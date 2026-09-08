@@ -1,8 +1,9 @@
 """CLI output formatting utilities"""
 
 import sys
-import click
 from typing import Any
+
+import click
 
 
 def echo(message: str = "", color: str = None, err: bool = False) -> None:

@@ -1,14 +1,14 @@
-import pytest
 import pathlib
-import pytest_asyncio
-import cognee
 
+import pytest
+import pytest_asyncio
+
+import cognee
 from cognee.low_level import setup as setup_databases
-from cognee.tasks.storage import add_data_points
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
-
+from cognee.tasks.storage import add_data_points
 
 ALPHA_TEXT = "orion orion logistics common"
 BETA_TEXT = "orion logistics logistics logistics common"
@@ -17,10 +17,10 @@ GAMMA_TEXT = "nebula archive common"
 
 def _clear_engine_caches():
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
-    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()

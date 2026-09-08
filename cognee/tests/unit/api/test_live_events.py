@@ -107,9 +107,8 @@ async def test_timezone_aware_since_is_normalized_before_comparing():
 @pytest.mark.asyncio
 async def test_unauthorized_dataset_raises_permission_denied():
     ctx_a, ctx_b = _patches([], authorized=False)
-    with ctx_a, ctx_b:
-        with pytest.raises(PermissionDeniedError):
-            await visualize_module.get_live_events(DATASET_ID)
+    with ctx_a, ctx_b, pytest.raises(PermissionDeniedError):
+        await visualize_module.get_live_events(DATASET_ID)
 
 
 @pytest.mark.asyncio

@@ -6,11 +6,11 @@ import argparse
 import asyncio
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 from typing import Any, Optional
 
 # Keep Cognee's normal logging quiet; this script prints its own progress.

@@ -19,7 +19,9 @@ import pytest
 # Same shadowing gotcha as test_visualize_subgraph.py: cognee.api.v1.__init__
 # rebinds `visualize` on the v1 package to the visualize_graph *function*, so a
 # dotted-string patch target has to go through sys.modules instead.
-from cognee.api.v1.visualize.visualize import build_brains_payload as _build_brains_payload  # noqa: F401,E501
+from cognee.api.v1.visualize.visualize import (
+    build_brains_payload as _build_brains_payload,  # noqa: F401,E501
+)
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
 

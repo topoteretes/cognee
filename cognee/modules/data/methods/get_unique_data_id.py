@@ -1,10 +1,10 @@
 from typing import Optional
-from uuid import uuid5, NAMESPACE_OID, UUID
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from sqlalchemy import select
 
-from cognee.modules.data.models.Data import Data
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.models.Data import Data
 from cognee.modules.users.models import User
 
 
@@ -40,8 +40,8 @@ async def get_unique_data_id(
     if dataset_id is not None:
         data_identifier = f"{dataset_id}:{data_identifier}"
 
-    modern_data_id = uuid5(NAMESPACE_OID, f"{data_identifier}{str(user.id)}{str(user.tenant_id)}")
-    pre_tenant_data_id = uuid5(NAMESPACE_OID, f"{data_identifier}{str(user.id)}")
+    modern_data_id = uuid5(NAMESPACE_OID, f"{data_identifier}{user.id!s}{user.tenant_id!s}")
+    pre_tenant_data_id = uuid5(NAMESPACE_OID, f"{data_identifier}{user.id!s}")
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:

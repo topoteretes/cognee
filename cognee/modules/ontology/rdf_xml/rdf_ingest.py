@@ -37,12 +37,12 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import IO, Any, Dict, List, Optional, Union
 
-from rdflib import Graph, OWL, RDF, RDFS, URIRef
+from rdflib import OWL, RDF, RDFS, Graph, URIRef
 from rdflib.term import Node as RDFNode
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.engine.models import Entity, EntityType
+from cognee.modules.engine.utils import generate_edge_name
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("RDFIngest")

@@ -1,10 +1,10 @@
-import time
-import random
-import pytest
 import asyncio
+import random
+import time
 from typing import List
 from uuid import NAMESPACE_OID, uuid5
 
+import pytest
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils import get_graph_from_model

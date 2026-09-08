@@ -6,19 +6,21 @@ This module provides a unified interface for interacting with Cognee, supporting
 - API mode: Makes HTTP requests to a running Cognee FastAPI server
 """
 
-import os
-import sys
 import base64
 import hashlib
-import mimetypes
-import tempfile
-from pathlib import Path
-from typing import Optional, Any, List, Dict
-from uuid import UUID
-from contextlib import redirect_stdout
-import httpx
-from cognee.shared.logging_utils import get_logger
 import json
+import mimetypes
+import os
+import sys
+import tempfile
+from contextlib import redirect_stdout
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+import httpx
+
+from cognee.shared.logging_utils import get_logger
 
 try:
     from .server_utils import normalize_delete_mode
@@ -396,7 +398,7 @@ class CogneeClient:
                 headers=self._get_headers(),
             )
             if response.status_code in {404, 405}:
-                endpoint = f"{self.api_url}/api/v1/datasets/{str(dataset_id)}/data/{str(data_id)}"
+                endpoint = f"{self.api_url}/api/v1/datasets/{dataset_id!s}/data/{data_id!s}"
                 response = await self.client.delete(endpoint, headers=self._get_headers())
             response.raise_for_status()
             return self._json_or_success(response)
@@ -514,8 +516,8 @@ class CogneeClient:
             return response.json()
         else:
             # Direct mode: Call cognee directly
-            from cognee.modules.users.methods import get_default_user
             from cognee.modules.data.methods import get_datasets
+            from cognee.modules.users.methods import get_default_user
 
             with redirect_stdout(sys.stderr):
                 user = await get_default_user()

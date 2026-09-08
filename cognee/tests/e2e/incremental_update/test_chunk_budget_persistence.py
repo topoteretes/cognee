@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from cognee.tests.e2e.incremental_update.backend_env import (
     incremental_test_backend_env,
     reset_backend_state,

@@ -69,7 +69,7 @@ def check_nvm_installed() -> bool:
 
         return result.returncode == 0
     except Exception as e:
-        logger.debug(f"Exception checking nvm: {str(e)}")
+        logger.debug(f"Exception checking nvm: {e!s}")
         return False
 
 
@@ -131,10 +131,10 @@ def install_nvm() -> bool:
                 pass
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to download nvm installer: {str(e)}")
+        logger.error(f"Failed to download nvm installer: {e!s}")
         return False
     except Exception as e:
-        logger.error(f"Failed to install nvm: {str(e)}")
+        logger.error(f"Failed to install nvm: {e!s}")
         return False
 
 
@@ -203,7 +203,7 @@ def install_node_with_nvm() -> bool:
         logger.error("Timeout installing Node.js (this can take several minutes)")
         return False
     except Exception as e:
-        logger.error(f"Error installing Node.js: {str(e)}")
+        logger.error(f"Error installing Node.js: {e!s}")
         return False
 
 
@@ -353,8 +353,8 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                     elif result.stderr:
                         logger.debug(f"Failed to source nvm or run npm: {result.stderr.strip()}")
         except Exception as e:
-            logger.debug(f"Exception retrying node/npm check: {str(e)}")
+            logger.debug(f"Exception retrying node/npm check: {e!s}")
 
         return False, "Node.js/npm not found. Please install Node.js from https://nodejs.org/"
     except Exception as e:
-        return False, f"Error checking Node.js/npm: {str(e)}"
+        return False, f"Error checking Node.js/npm: {e!s}"

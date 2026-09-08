@@ -6,12 +6,11 @@ Create Date: 2025-10-30 13:36:23.226706
 
 """
 
-from typing import Sequence, Union
 from datetime import datetime, timezone
+from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "84e5d08260d6"

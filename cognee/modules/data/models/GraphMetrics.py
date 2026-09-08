@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import JSON, UUID, Boolean, Column, DateTime, Float, Integer, false
 from sqlalchemy.sql import func
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, JSON, UUID, false
-
 from cognee.infrastructure.databases.relational import Base
-from uuid import uuid4
 
 
 class GraphMetrics(Base):

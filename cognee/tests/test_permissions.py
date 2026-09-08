@@ -21,8 +21,8 @@ from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
-    select_tenant,
     remove_user_from_tenant,
+    select_tenant,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -44,11 +44,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -246,14 +246,13 @@ async def test_permissions_example_flow(permissions_example_env):
     await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
 
     # user_3 can no longer read the tenant dataset after being removed.
-    with pytest.raises(PermissionDeniedError):
-        with llm_patch:
-            await cognee.recall(
-                query_type=SearchType.GRAPH_COMPLETION,
-                query_text="What is in the document?",
-                user=user_3,
-                dataset_ids=[quantum_cognee_lab_dataset_id],
-            )
+    with pytest.raises(PermissionDeniedError), llm_patch:
+        await cognee.recall(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_3,
+            dataset_ids=[quantum_cognee_lab_dataset_id],
+        )
 
 
 async def test_remove_user_from_tenant_non_owner_gets_403(permissions_example_env):
@@ -352,7 +351,6 @@ async def test_improve_permission_matrix(permissions_example_env):
     paths patch the memify engine.
     """
     from importlib import import_module
-
     from uuid import uuid4
 
     from cognee.modules.data.methods import get_datasets_by_name

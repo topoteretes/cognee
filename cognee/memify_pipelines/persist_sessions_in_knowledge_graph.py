@@ -1,15 +1,14 @@
-from typing import Optional, List
+from typing import List, Optional
 
 from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.tasks.memify import extract_user_sessions, cognify_session
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
-
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify import cognify_session, extract_user_sessions
 
 logger = get_logger("persist_sessions_in_knowledge_graph")
 
@@ -40,7 +39,7 @@ async def persist_sessions_in_knowledge_graph_pipeline(
 
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User (id: {user.id!s}) does not have write access to dataset: {dataset}",
             log=False,
         )
 

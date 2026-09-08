@@ -1,13 +1,14 @@
-import pytest
 import pathlib
-import pytest_asyncio
 from typing import Optional, Union
+
+import pytest
+import pytest_asyncio
+
 import cognee
 from cognee.exceptions import CogneeValidationError
-
-from cognee.low_level import setup, DataPoint
-from cognee.tasks.storage import add_data_points
+from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.tasks.storage import add_data_points
 
 
 @pytest_asyncio.fixture

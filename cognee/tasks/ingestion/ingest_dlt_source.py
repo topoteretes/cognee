@@ -9,17 +9,17 @@ from typing import List, Optional
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.postgres.admin import create_pg_database_if_not_exists
 from cognee.infrastructure.databases.relational.config import get_relational_config
+from cognee.modules.data.models import Data
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.exceptions.exceptions import (
-    UnsupportedDBProviderError,
     DLTIngestionError,
     InvalidDLTArgumentError,
+    UnsupportedDBProviderError,
 )
 from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
-from cognee.shared.logging_utils import get_logger
 
 try:
     import dlt
@@ -499,9 +499,9 @@ def _to_safe_ident(s: str) -> str:
 
 async def migrate_dlt_database(data: List[Data]):
     """Legacy function for migrating dlt database schema to graph database."""
-    from cognee.tasks.ingestion.migrate_relational_database import migrate_relational_database
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.tasks.ingestion.migrate_relational_database import migrate_relational_database
 
     graph_engine = await get_graph_engine()
 

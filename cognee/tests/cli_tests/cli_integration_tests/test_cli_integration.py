@@ -2,12 +2,12 @@
 Integration tests for CLI commands that test end-to-end functionality.
 """
 
-import tempfile
 import os
-import sys
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class TestCliIntegration:

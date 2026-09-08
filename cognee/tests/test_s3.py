@@ -1,10 +1,9 @@
 import logging
-
-import cognee
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from collections import Counter
 
+import cognee
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 

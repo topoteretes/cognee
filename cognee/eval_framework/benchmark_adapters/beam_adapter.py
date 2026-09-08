@@ -32,7 +32,7 @@ _ANSWER_FIELD_NAMES = [
 def _extract_answer(question_dict: dict) -> str:
     """Extract the ground-truth answer from a BEAM probing question."""
     for field in _ANSWER_FIELD_NAMES:
-        if field in question_dict and question_dict[field]:
+        if question_dict.get(field):
             val = question_dict[field]
             return val if isinstance(val, str) else str(val)
     return ""

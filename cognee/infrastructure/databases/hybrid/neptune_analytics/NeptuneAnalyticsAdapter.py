@@ -3,21 +3,23 @@
 import asyncio
 import json
 from collections import Counter
-from typing import List, Optional, Any, Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from cognee.modules.graph.models.EdgeType import EdgeType
-from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
+from cognee.infrastructure.databases.exceptions import (
+    MissingQueryParameterError,
+    MutuallyExclusiveQueryParametersError,
+)
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
-from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
-from cognee.infrastructure.engine import DataPoint
-from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
-from cognee.modules.storage.utils import JSONEncoder
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.models.PayloadSchema import PayloadSchema
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.modules.graph.utils.prepare_edges_for_storage import get_edge_retrieval_text
+from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NeptuneAnalyticsAdapter")
 
@@ -107,7 +109,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         No operation is performed and None will be returned here,
         because the concept of connection is not applicable in this context.
         """
-        return None
+        return
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
@@ -155,14 +157,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - payload_schema (Optional[PayloadSchema]): An optional schema for the payloads
               within this collection. (default None)
         """
-        pass
 
     async def get_collection(self, collection_name: str):
         """
         This method is part of the default implementation but not defined in the interface.
         No operation is performed here because the concept of collection is not applicable in NeptuneAnalytics vector store.
         """
-        return None
+        return
 
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """
@@ -213,7 +214,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 self._client.query(query_string, params)
             except Exception as e:
                 self._na_exception_handler(e, query_string)
-        pass
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """
@@ -437,7 +437,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             self._client.query(query_string, params)
         except Exception as e:
             self._na_exception_handler(e, query_string)
-        pass
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """
@@ -490,7 +489,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         # Run actual truncate
         self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) DETACH DELETE n")
-        pass
 
     async def is_empty(self) -> bool:
         query = """
@@ -609,4 +607,4 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
     async def run_migrations(self):
         """Run Neptune Analytics adapter migrations (currently no-op)."""
-        return None
+        return

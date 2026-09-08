@@ -1,17 +1,17 @@
+from typing import Any, Dict, List, Optional
 from uuid import NAMESPACE_OID, uuid5
+
+from pydantic import Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-
+from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.low_level import DataPoint
-from cognee.infrastructure.llm import LLMGateway
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.methods import upsert_edges
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.engine.models import NodeSet
 from cognee.tasks.storage import add_data_points, index_graph_edges
-from typing import Dict, Optional, List, Any
-from pydantic import Field
 
 logger = get_logger("coding_rule_association")
 

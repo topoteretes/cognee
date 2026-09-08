@@ -25,4 +25,4 @@ async def check_api_key(auth_token: str):
                     )
 
     except Exception as e:
-        raise CloudConnectionError(f"Failed to connect to cloud instance: {str(e)}")
+        raise CloudConnectionError(f"Failed to connect to cloud instance: {e!s}")

@@ -2,10 +2,11 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
-from cognee.infrastructure.databases.relational.ModelBase import Base
 from sqlalchemy import JSON, DateTime, Index, LargeBinary, SmallInteger, String
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column
+
+from cognee.infrastructure.databases.relational.ModelBase import Base
 
 
 class IntegrationCredential(Base):

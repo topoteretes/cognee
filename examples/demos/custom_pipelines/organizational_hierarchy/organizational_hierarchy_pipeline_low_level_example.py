@@ -9,13 +9,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping
 
-from cognee import config, prune, search, SearchType, visualize_graph
-from cognee.low_level import setup, DataPoint
-from cognee.pipelines import run_tasks, Task
+from cognee import SearchType, config, prune, search, visualize_graph
+from cognee.low_level import DataPoint, setup
+from cognee.modules.data.methods import load_or_create_datasets
+from cognee.modules.users.methods import get_default_user
+from cognee.pipelines import Task, run_tasks
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.data.methods import load_or_create_datasets
 
 
 class Person(DataPoint):

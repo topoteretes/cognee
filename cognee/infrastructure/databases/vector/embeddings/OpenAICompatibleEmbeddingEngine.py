@@ -29,25 +29,25 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.databases.exceptions import (
+    EmbeddingContextWindowTooSmallError,
+    EmbeddingCredentialsError,
+    EmbeddingException,
+)
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
     EmbeddingEngine,
 )
 from cognee.infrastructure.databases.vector.embeddings.retry_config import (
     embedding_retry_condition,
 )
-from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
-from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.infrastructure.databases.vector.embeddings.utils import (
     handle_embedding_response,
     sanitize_embedding_text_inputs,
 )
-from cognee.infrastructure.databases.exceptions import (
-    EmbeddingContextWindowTooSmallError,
-    EmbeddingCredentialsError,
-    EmbeddingException,
-)
-from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
+from cognee.infrastructure.llm.exceptions import raise_if_budget_exhausted
+from cognee.infrastructure.llm.tokenizer.resolver import resolve_embedding_tokenizer
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 logger = get_logger("OpenAICompatibleEmbeddingEngine")
 

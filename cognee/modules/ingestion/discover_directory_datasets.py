@@ -1,4 +1,4 @@
-from os import path, listdir
+from os import listdir, path
 
 
 def discover_directory_datasets(root_dir_path: str, parent_dir: str = None):

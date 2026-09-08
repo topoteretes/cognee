@@ -1,13 +1,13 @@
-from cognee.shared.logging_utils import get_logger
 from typing import List
 
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.modules.engine.models import Entity
 from cognee.modules.engine.models.EntityType import EntityType
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("llm_entity_extractor")
 
@@ -68,5 +68,5 @@ class LLMEntityExtractor(BaseEntityExtractor):
             return response.entities
 
         except Exception as e:
-            logger.error(f"Entity extraction failed: {str(e)}")
+            logger.error(f"Entity extraction failed: {e!s}")
             return []

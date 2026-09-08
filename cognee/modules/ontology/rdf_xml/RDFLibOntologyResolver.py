@@ -1,19 +1,20 @@
-import os
 import difflib
-from cognee.shared.logging_utils import get_logger
+import os
 from collections import deque
-from typing import List, Tuple, Dict, Optional, Any, Union, IO
-from rdflib import Graph, URIRef, RDF, RDFS, OWL
+from typing import IO, Any, Dict, List, Optional, Tuple, Union
+
+from rdflib import OWL, RDF, RDFS, Graph, URIRef
 from rdflib.util import guess_format
 
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.exceptions import (
-    OntologyInitializationError,
     FindClosestMatchError,
     GetSubgraphError,
+    OntologyInitializationError,
 )
-from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy, MatchingStrategy
 from cognee.modules.ontology.models import AttachedOntologyNode
-from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("OntologyAdapter")
 
@@ -217,7 +218,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                     "individuals": individuals,
                 }
 
-                return None
+                return
 
             for cls in self.graph.subjects(RDF.type, OWL.Class):
                 key = self._uri_to_key(cls)
@@ -238,7 +239,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 len(individuals),
             )
 
-            return None
+            return
         except Exception as e:
             logger.error("Failed to build lookup dictionary: %s", str(e))
             raise RuntimeError("Lookup build failed") from e

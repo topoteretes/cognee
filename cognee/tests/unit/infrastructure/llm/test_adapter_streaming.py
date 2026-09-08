@@ -26,8 +26,8 @@ from cognee.infrastructure.llm.streaming.stream_completion import stream_text_co
 from cognee.infrastructure.llm.streaming.token_sink import (
     TokenSink,
     active_token_sink,
-    requested_token_sink,
     answer_scope,
+    requested_token_sink,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,

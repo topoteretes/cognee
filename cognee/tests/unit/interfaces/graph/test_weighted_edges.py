@@ -1,6 +1,8 @@
+from typing import Any, List
+
 import pytest
-from typing import List, Any
 from pydantic import SkipValidation
+
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.graph.utils import get_graph_from_model

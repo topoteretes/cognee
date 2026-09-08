@@ -12,16 +12,19 @@
 
 from __future__ import annotations
 
-import os
-import warnings
-import typing_extensions
-import typing
 import functools
+import os
+import typing
+import warnings
 
+import typing_extensions
 from baml_py.logging import (
     get_log_level as baml_get_log_level,
+)
+from baml_py.logging import (
     set_log_level as baml_set_log_level,
 )
+
 from .globals import reset_baml_env_vars
 
 rT = typing_extensions.TypeVar("rT")  # return type
@@ -38,7 +41,7 @@ def _deprecated(message: str):
         def new_func(*args: pT.args, **kwargs: pT.kwargs):
             warnings.simplefilter("always", DeprecationWarning)  # turn off filter
             warnings.warn(
-                "Call to a deprecated function {}.".format(func.__name__) + message,
+                f"Call to a deprecated function {func.__name__}." + message,
                 category=DeprecationWarning,
                 stacklevel=2,
             )
@@ -86,9 +89,9 @@ def set_log_max_chunk_length():
 
 
 __all__ = [
-    "set_log_level",
     "get_log_level",
-    "set_log_json_mode",
     "reset_baml_env_vars",
+    "set_log_json_mode",
+    "set_log_level",
     "set_log_max_chunk_length",
 ]

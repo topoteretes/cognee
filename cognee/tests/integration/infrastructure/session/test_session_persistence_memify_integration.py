@@ -41,11 +41,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -99,9 +99,11 @@ def _count_document_chunks(nodes) -> int:
     document_chunk_count = 0
     for _node_id, props in nodes:
         node_type = props.get("type")
-        if isinstance(node_type, dict) and node_type.get("DocumentChunk"):
-            document_chunk_count += 1
-        elif node_type == "DocumentChunk":
+        if (
+            isinstance(node_type, dict)
+            and node_type.get("DocumentChunk")
+            or node_type == "DocumentChunk"
+        ):
             document_chunk_count += 1
     return document_chunk_count
 
@@ -177,19 +179,21 @@ def session_manager_with_qa(request):
     """
     backend = request.param
     if backend == "fs":
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch(
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch(
                 "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
                 return_value={"data_root_directory": tmpdir},
-            ):
-                from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                    FSCacheAdapter,
-                )
+            ),
+        ):
+            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+                FSCacheAdapter,
+            )
 
-                adapter = FSCacheAdapter()
-                sm = SessionManager(cache_engine=adapter)
-                yield sm, adapter
-                adapter.cache.close()
+            adapter = FSCacheAdapter()
+            sm = SessionManager(cache_engine=adapter)
+            yield sm, adapter
+            adapter.cache.close()
     elif backend == "redis":
         store = _InMemoryRedisList()
         patch_mod = "cognee.infrastructure.databases.cache.redis.RedisAdapter"
@@ -566,97 +570,99 @@ async def test_persist_sessions_watermark_ingests_everything_exactly_once(
     user = await get_default_user()
     user_id = str(user.id)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch(
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        patch(
             "cognee.infrastructure.databases.cache.fscache.FsCacheAdapter.get_storage_config",
             return_value={"data_root_directory": tmpdir},
+        ),
+    ):
+        from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
+            FSCacheAdapter,
+        )
+
+        adapter = FSCacheAdapter()
+        session_manager = SessionManager(cache_engine=adapter)
+
+        await session_manager.add_qa(
+            user_id=user_id,
+            question="What is the watermark first question?",
+            context="",
+            answer="WATERMARK-FIRST-ANSWER about knowledge graphs.",
+            session_id=session_id,
+        )
+        await session_manager.add_qa(
+            user_id=user_id,
+            question="What is the watermark second question?",
+            context="",
+            answer="WATERMARK-SECOND-ANSWER about vector search.",
+            session_id=session_id,
+        )
+
+        extract_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]
+        cognify_module = sys.modules["cognee.tasks.memify.cognify_session"]
+        with (
+            patch.object(extract_module, "get_session_manager", return_value=session_manager),
+            patch.object(cognify_module, "get_session_manager", return_value=session_manager),
         ):
-            from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import (
-                FSCacheAdapter,
+            # Run 1: persists both existing entries.
+            await persist_sessions_in_knowledge_graph_pipeline(
+                user=user,
+                session_ids=[session_id],
+                dataset=dataset_name,
+                run_in_background=False,
             )
 
-            adapter = FSCacheAdapter()
-            session_manager = SessionManager(cache_engine=adapter)
+            graph_engine = await get_graph_engine()
+            nodes, _ = await graph_engine.get_graph_data()
+            chunks_after_first = _count_document_chunks(nodes)
 
+            # Run 2: unchanged session — nothing new may be ingested.
+            await persist_sessions_in_knowledge_graph_pipeline(
+                user=user,
+                session_ids=[session_id],
+                dataset=dataset_name,
+                run_in_background=False,
+            )
+
+            nodes, _ = await graph_engine.get_graph_data()
+            assert _count_document_chunks(nodes) == chunks_after_first, (
+                "Re-running persistence on an unchanged session must not ingest anything"
+            )
+
+            # Run 3: session grew by one entry — only that entry is persisted.
             await session_manager.add_qa(
                 user_id=user_id,
-                question="What is the watermark first question?",
+                question="What is the watermark third question?",
                 context="",
-                answer="WATERMARK-FIRST-ANSWER about knowledge graphs.",
+                answer="WATERMARK-THIRD-ANSWER about session memory.",
                 session_id=session_id,
             )
-            await session_manager.add_qa(
-                user_id=user_id,
-                question="What is the watermark second question?",
-                context="",
-                answer="WATERMARK-SECOND-ANSWER about vector search.",
-                session_id=session_id,
+            await persist_sessions_in_knowledge_graph_pipeline(
+                user=user,
+                session_ids=[session_id],
+                dataset=dataset_name,
+                run_in_background=False,
             )
 
-            extract_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]
-            cognify_module = sys.modules["cognee.tasks.memify.cognify_session"]
-            with (
-                patch.object(extract_module, "get_session_manager", return_value=session_manager),
-                patch.object(cognify_module, "get_session_manager", return_value=session_manager),
+            nodes, _ = await graph_engine.get_graph_data()
+            chunk_texts = _document_chunk_texts(nodes)
+
+            # Completeness: every entry is in the graph.
+            for marker in (
+                "WATERMARK-FIRST-ANSWER",
+                "WATERMARK-SECOND-ANSWER",
+                "WATERMARK-THIRD-ANSWER",
             ):
-                # Run 1: persists both existing entries.
-                await persist_sessions_in_knowledge_graph_pipeline(
-                    user=user,
-                    session_ids=[session_id],
-                    dataset=dataset_name,
-                    run_in_background=False,
+                occurrences = sum(text.count(marker) for text in chunk_texts)
+                assert occurrences == 1, (
+                    f"{marker} appears {occurrences} times in DocumentChunks — "
+                    "each entry must be ingested exactly once"
                 )
 
-                graph_engine = await get_graph_engine()
-                nodes, _ = await graph_engine.get_graph_data()
-                chunks_after_first = _count_document_chunks(nodes)
-
-                # Run 2: unchanged session — nothing new may be ingested.
-                await persist_sessions_in_knowledge_graph_pipeline(
-                    user=user,
-                    session_ids=[session_id],
-                    dataset=dataset_name,
-                    run_in_background=False,
-                )
-
-                nodes, _ = await graph_engine.get_graph_data()
-                assert _count_document_chunks(nodes) == chunks_after_first, (
-                    "Re-running persistence on an unchanged session must not ingest anything"
-                )
-
-                # Run 3: session grew by one entry — only that entry is persisted.
-                await session_manager.add_qa(
-                    user_id=user_id,
-                    question="What is the watermark third question?",
-                    context="",
-                    answer="WATERMARK-THIRD-ANSWER about session memory.",
-                    session_id=session_id,
-                )
-                await persist_sessions_in_knowledge_graph_pipeline(
-                    user=user,
-                    session_ids=[session_id],
-                    dataset=dataset_name,
-                    run_in_background=False,
-                )
-
-                nodes, _ = await graph_engine.get_graph_data()
-                chunk_texts = _document_chunk_texts(nodes)
-
-                # Completeness: every entry is in the graph.
-                for marker in (
-                    "WATERMARK-FIRST-ANSWER",
-                    "WATERMARK-SECOND-ANSWER",
-                    "WATERMARK-THIRD-ANSWER",
-                ):
-                    occurrences = sum(text.count(marker) for text in chunk_texts)
-                    assert occurrences == 1, (
-                        f"{marker} appears {occurrences} times in DocumentChunks — "
-                        "each entry must be ingested exactly once"
-                    )
-
-                # No re-ingestion: the third run's window must not contain the
-                # first run's entries (no whole-session snapshot documents).
-                third_chunks = [t for t in chunk_texts if "WATERMARK-THIRD-ANSWER" in t]
-                assert third_chunks and all(
-                    "WATERMARK-FIRST-ANSWER" not in text for text in third_chunks
-                ), "Third run re-ingested already-persisted entries"
+            # No re-ingestion: the third run's window must not contain the
+            # first run's entries (no whole-session snapshot documents).
+            third_chunks = [t for t in chunk_texts if "WATERMARK-THIRD-ANSWER" in t]
+            assert third_chunks and all(
+                "WATERMARK-FIRST-ANSWER" not in text for text in third_chunks
+            ), "Third run re-ingested already-persisted entries"

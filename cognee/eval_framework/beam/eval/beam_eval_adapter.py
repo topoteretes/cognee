@@ -3,10 +3,9 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.eval_framework.beam.eval.metrics.beam_rubric import BEAMRubricMetric
 from cognee.eval_framework.beam.eval.metrics.kendall_tau import KendallTauMetric
-
+from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 
 DEFAULT_BEAM_EVAL_MAX_CONCURRENT = 10
 

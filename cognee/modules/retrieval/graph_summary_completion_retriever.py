@@ -1,4 +1,4 @@
-from typing import Optional, Type, List
+from typing import List, Optional, Type
 
 from cognee.base_config import get_base_config
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever

@@ -54,7 +54,7 @@ async def start_neo4j_server():
             with socket.create_connection(("localhost", 7474), timeout=1):
                 print("✅ Neo4j server is ready on port 7474.")
                 break
-        except (socket.timeout, ConnectionRefusedError):
+        except (TimeoutError, ConnectionRefusedError):
             if neo4j_process.poll() is not None:
                 raise RuntimeError("Neo4j process terminated unexpectedly.")
             time.sleep(1)

@@ -11,8 +11,8 @@ from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import (
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.corpus_generator.narrativize_corpus import (
     PACKAGE_FOLDER,
     load_narrative_corpus,
-    narrativize_corpus,
     narrative_corpus_exists,
+    narrativize_corpus,
     run_narrativize_corpus,
 )
 from cognee.eval_framework.benchmark_adapters.logistics_system_utils.ontology import (
@@ -26,7 +26,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.utils
     load_world,
     store_world,
 )
-
 
 DEFAULT_WORLD_ROOT = Path("data/logistics_system_worlds")
 DEFAULT_WORLD_NAME = "default"

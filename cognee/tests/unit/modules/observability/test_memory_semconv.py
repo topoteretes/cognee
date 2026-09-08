@@ -5,8 +5,8 @@ attributes), metrics, and that the log bridge attaches without error.
 """
 
 import time
-import pytest
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,15 +33,15 @@ def _clean_otel_state():
 def test_memory_semconv_constants_exported():
     """memory-semconv attribute constants are exported from the observability package."""
     from cognee.modules.observability import (
-        MEMORY_SYSTEM,
+        MEMORY_COLLECTION,
+        MEMORY_DATA_SIZE,
+        MEMORY_ITEM_COUNT,
         MEMORY_OPERATION,
         MEMORY_QUERY_TEXT,
         MEMORY_QUERY_TYPE,
         MEMORY_RESULT_COUNT,
-        MEMORY_DATA_SIZE,
-        MEMORY_ITEM_COUNT,
-        MEMORY_COLLECTION,
         MEMORY_STORE_BACKEND,
+        MEMORY_SYSTEM,
     )
 
     assert MEMORY_SYSTEM == "memory.system"
@@ -60,8 +60,8 @@ def test_enable_tracing_sets_up_all_signals():
     pytest.importorskip("opentelemetry")
 
     from cognee.modules.observability.trace_context import (
-        enable_tracing,
         disable_tracing,
+        enable_tracing,
         is_tracing_enabled,
     )
 
@@ -79,15 +79,14 @@ def test_new_span_emits_memory_operation_retrieve():
     """A search-style span tagged with memory.operation=retrieve is collected."""
     pytest.importorskip("opentelemetry")
 
-    from cognee.modules.observability.trace_context import enable_tracing
     from cognee.modules.observability import (
-        new_span,
-        MEMORY_SYSTEM,
         MEMORY_OPERATION,
         MEMORY_QUERY_TEXT,
         MEMORY_RESULT_COUNT,
+        MEMORY_SYSTEM,
+        new_span,
     )
-    from cognee.modules.observability.trace_context import get_last_trace
+    from cognee.modules.observability.trace_context import enable_tracing, get_last_trace
 
     enable_tracing()
 
@@ -114,14 +113,13 @@ def test_new_span_emits_memory_operation_store():
     """A store span tagged with memory.operation=store is collected."""
     pytest.importorskip("opentelemetry")
 
-    from cognee.modules.observability.trace_context import enable_tracing
     from cognee.modules.observability import (
-        new_span,
-        MEMORY_SYSTEM,
-        MEMORY_OPERATION,
         MEMORY_COLLECTION,
+        MEMORY_OPERATION,
+        MEMORY_SYSTEM,
+        new_span,
     )
-    from cognee.modules.observability.trace_context import get_last_trace
+    from cognee.modules.observability.trace_context import enable_tracing, get_last_trace
 
     enable_tracing()
 
@@ -140,9 +138,8 @@ def test_new_span_emits_memory_operation_delete():
     """A delete span tagged with memory.operation=delete is collected."""
     pytest.importorskip("opentelemetry")
 
-    from cognee.modules.observability.trace_context import enable_tracing
-    from cognee.modules.observability import new_span, MEMORY_SYSTEM, MEMORY_OPERATION
-    from cognee.modules.observability.trace_context import get_last_trace
+    from cognee.modules.observability import MEMORY_OPERATION, MEMORY_SYSTEM, new_span
+    from cognee.modules.observability.trace_context import enable_tracing, get_last_trace
 
     enable_tracing()
 
@@ -161,9 +158,8 @@ def test_new_span_emits_memory_operation_process():
     """A process span tagged with memory.operation=process is collected."""
     pytest.importorskip("opentelemetry")
 
-    from cognee.modules.observability.trace_context import enable_tracing
-    from cognee.modules.observability import new_span, MEMORY_SYSTEM, MEMORY_OPERATION
-    from cognee.modules.observability.trace_context import get_last_trace
+    from cognee.modules.observability import MEMORY_OPERATION, MEMORY_SYSTEM, new_span
+    from cognee.modules.observability.trace_context import enable_tracing, get_last_trace
 
     enable_tracing()
 
@@ -185,16 +181,16 @@ def test_new_span_emits_memory_operation_process():
 def test_metric_helpers_are_no_ops_before_setup():
     """Metric helpers do not raise even when metrics are not configured."""
     from cognee.modules.observability import (
-        record_operation_duration,
-        increment_items_stored,
-        increment_items_retrieved,
-        increment_items_deleted,
-        record_query_results,
         increment_bytes_stored,
-        increment_vector_searches,
         increment_graph_edges,
         increment_graph_nodes,
+        increment_items_deleted,
+        increment_items_retrieved,
+        increment_items_stored,
         increment_operation_errors,
+        increment_vector_searches,
+        record_operation_duration,
+        record_query_results,
     )
 
     attrs = {"memory.system": "cognee", "memory.operation": "store"}
@@ -213,16 +209,16 @@ def test_metric_helpers_are_no_ops_before_setup():
 def test_metric_names_follow_semconv():
     """Exported metric name constants match memory-semconv v0.1.0."""
     from cognee.modules.observability import (
-        MEMORY_OPERATION_DURATION,
-        MEMORY_ITEMS_STORED,
-        MEMORY_ITEMS_RETRIEVED,
-        MEMORY_ITEMS_DELETED,
-        MEMORY_QUERY_RESULT_COUNT,
         MEMORY_DATA_BYTES_STORED,
-        MEMORY_VECTOR_SEARCHES,
         MEMORY_GRAPH_EDGES_ADDED,
         MEMORY_GRAPH_NODES_ADDED,
+        MEMORY_ITEMS_DELETED,
+        MEMORY_ITEMS_RETRIEVED,
+        MEMORY_ITEMS_STORED,
+        MEMORY_OPERATION_DURATION,
         MEMORY_OPERATION_ERRORS,
+        MEMORY_QUERY_RESULT_COUNT,
+        MEMORY_VECTOR_SEARCHES,
     )
 
     assert MEMORY_OPERATION_DURATION == "memory.operation.duration"
@@ -241,7 +237,7 @@ def test_setup_metrics_returns_meter():
     """setup_metrics() returns a meter when the OTel SDK is available."""
     pytest.importorskip("opentelemetry")
 
-    from cognee.modules.observability.metrics import setup_metrics, get_meter, shutdown_metrics
+    from cognee.modules.observability.metrics import get_meter, setup_metrics, shutdown_metrics
 
     meter = setup_metrics()
     assert meter is not None
@@ -255,13 +251,13 @@ def test_metric_helpers_accept_calls_after_setup():
     """Metric helpers do not raise after metrics are configured."""
     pytest.importorskip("opentelemetry")
 
-    from cognee.modules.observability.metrics import setup_metrics, shutdown_metrics
     from cognee.modules.observability import (
+        increment_items_retrieved,
+        increment_items_stored,
         record_operation_duration,
         record_query_results,
-        increment_items_stored,
-        increment_items_retrieved,
     )
+    from cognee.modules.observability.metrics import setup_metrics, shutdown_metrics
 
     setup_metrics()
     attrs = {"memory.system": "cognee", "memory.operation": "retrieve"}
@@ -282,6 +278,7 @@ def test_log_bridge_attaches_without_error():
     pytest.importorskip("opentelemetry")
 
     import logging
+
     from cognee.modules.observability.logs import setup_log_bridge, shutdown_log_bridge
 
     setup_log_bridge()
@@ -306,7 +303,8 @@ def test_enable_tracing_wires_log_bridge():
     pytest.importorskip("opentelemetry")
 
     import logging
-    from cognee.modules.observability.trace_context import enable_tracing, disable_tracing
+
+    from cognee.modules.observability.trace_context import disable_tracing, enable_tracing
 
     enable_tracing()
     cognee_logger = logging.getLogger("cognee")

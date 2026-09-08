@@ -2,12 +2,12 @@ import pathlib
 
 import pytest
 import pytest_asyncio
-import cognee
 
+import cognee
 from cognee.infrastructure.engine import DataPoint
+from cognee.low_level import setup
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.low_level import setup
 from cognee.tasks.storage import add_data_points
 
 

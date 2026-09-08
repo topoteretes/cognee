@@ -2,10 +2,10 @@ import asyncio
 import time
 from typing import Any, List, Optional
 
-from cognee.shared.logging_utils import get_logger, ERROR
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.modules.observability import new_span, COGNEE_VECTOR_COLLECTION
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.modules.observability import COGNEE_VECTOR_COLLECTION, new_span
+from cognee.shared.logging_utils import ERROR, get_logger
 
 logger = get_logger(level=ERROR)
 

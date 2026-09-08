@@ -12,7 +12,6 @@ import os
 from typing import Iterator
 
 import pytest
-
 from mcp_harness import (
     MCPContainer,
     docker_available,

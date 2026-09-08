@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+from cognee.shared.data_models import KnowledgeGraph
 
 DEMO_KG_PATH = os.path.join(os.path.dirname(__file__), "test_kg.json")
 

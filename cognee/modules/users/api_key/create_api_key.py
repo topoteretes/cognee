@@ -1,14 +1,15 @@
 import secrets
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.models import User
 from cognee.modules.users.models.UserApiKey import UserApiKey
+from cognee.shared.logging_utils import get_logger
+
 from .exceptions import ApiKeyCreationError
 from .get_api_keys import get_api_keys
 from .hash_api_key import prepare_api_key
-
 
 logger = get_logger(__name__)
 
@@ -48,7 +49,7 @@ async def create_api_key(user: User, name: str = None):
             user_api_key.api_key = api_key  # return raw key so caller can show it once
             return user_api_key
         except Exception as error:
-            logger.error(f"Failed to create API key for user {user.id}: {str(error)}")
+            logger.error(f"Failed to create API key for user {user.id}: {error!s}")
             await session.rollback()
             raise ApiKeyCreationError("Failed to create API key, please try again.")
 

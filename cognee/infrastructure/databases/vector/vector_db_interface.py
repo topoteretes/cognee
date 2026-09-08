@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Optional, Protocol
 from abc import abstractmethod
-from cognee.infrastructure.engine import DataPoint
-from .models.PayloadSchema import PayloadSchema
+from typing import Any, Dict, List, Optional, Protocol
 from uuid import UUID
+
+from cognee.infrastructure.engine import DataPoint
 from cognee.modules.users.models import User
+
+from .models.PayloadSchema import PayloadSchema
 
 
 class VectorDBInterface(Protocol):
@@ -226,7 +228,7 @@ class VectorDBInterface(Protocol):
         Default no-op; adapters that need to clean up stale NodeSet tags
         on dataset deletion override this.
         """
-        return None
+        return
 
     @abstractmethod
     async def prune(self):
@@ -258,28 +260,27 @@ class VectorDBInterface(Protocol):
         Run adapter-specific vector storage migrations.
         Default implementation is a no-op.
         """
-        return None
+        return
 
     async def get_connection(self):
         """
         Get a connection to the vector database.
         This method is optional and may return None for adapters that don't use connections.
         """
-        return None
+        return
 
     async def get_collection(self, collection_name: str):
         """
         Get a collection object from the vector database.
         This method is optional and may return None for adapters that don't expose collection objects.
         """
-        return None
+        return
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """
         Create a vector index for improved search performance.
         This method is optional and may be a no-op for adapters that don't support indexing.
         """
-        pass
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: List[DataPoint]
@@ -294,7 +295,6 @@ class VectorDBInterface(Protocol):
             - index_property_name (str): Property name to index on
             - data_points (List[DataPoint]): Data points to index
         """
-        pass
 
     def get_data_point_schema(self, model_type: Any) -> Any:
         """
@@ -330,7 +330,6 @@ class VectorDBInterface(Protocol):
         Returns:
             dict: Connection info for the created vector database instance.
         """
-        pass
 
     async def delete_dataset(self, dataset_id: UUID, user: User) -> None:
         """
@@ -342,4 +341,3 @@ class VectorDBInterface(Protocol):
             dataset_id: UUID of the dataset
             user: User object
         """
-        pass

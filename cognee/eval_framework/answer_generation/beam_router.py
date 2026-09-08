@@ -8,8 +8,8 @@ and delegates to the matching retrieval strategy.
 from typing import Any, Dict, List, Optional
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )

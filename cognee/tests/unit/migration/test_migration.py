@@ -8,6 +8,7 @@ import json
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
+from cognee.modules.migration import loader
 from cognee.modules.migration.cogx import (
     COGX_VERSION,
     COGXArchiveWriter,
@@ -24,7 +25,6 @@ from cognee.modules.migration.cogx import (
     read_manifest,
 )
 from cognee.modules.migration.formats import write_cypher, write_graphml, write_json
-from cognee.modules.migration import loader
 from cognee.modules.migration.loader import record_data_id, translate_records
 from cognee.modules.migration.sources import (
     COGXArchiveSource,

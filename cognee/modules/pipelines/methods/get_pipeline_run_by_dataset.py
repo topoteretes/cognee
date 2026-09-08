@@ -1,9 +1,12 @@
 from typing import Dict, List, Optional
 from uuid import UUID
-from sqlalchemy import select, func
-from cognee.infrastructure.databases.relational import get_relational_engine
-from ..models import PipelineRun
+
+from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
+
+from cognee.infrastructure.databases.relational import get_relational_engine
+
+from ..models import PipelineRun
 
 
 def _latest_run_per_dataset_query(dataset_ids: Optional[List[UUID]], pipeline_name: str):

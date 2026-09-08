@@ -30,7 +30,6 @@ from cognee.eval_framework.runner import (
     summarize_result,
 )
 
-
 # --------------------------------------------------------------------------- #
 # Optional addon: lazy engine imports
 # --------------------------------------------------------------------------- #
@@ -98,12 +97,14 @@ def test_direct_llm_engine_loads_without_extra():
 def test_missing_deepeval_raises_actionable_error():
     """Selecting DeepEval without the extra installed raises an actionable error
     pointing at ``cognee[eval]`` rather than a bare ImportError."""
-    with patch(
-        "cognee.eval_framework.evaluation.evaluator_adapters.import_module",
-        side_effect=ImportError("No module named 'deepeval'"),
+    with (
+        patch(
+            "cognee.eval_framework.evaluation.evaluator_adapters.import_module",
+            side_effect=ImportError("No module named 'deepeval'"),
+        ),
+        pytest.raises(ImportError) as excinfo,
     ):
-        with pytest.raises(ImportError) as excinfo:
-            EvaluatorAdapter.DEEPEVAL.load_adapter_class()
+        EvaluatorAdapter.DEEPEVAL.load_adapter_class()
 
     # The message names the engine and the extra, and chains the original error.
     assert "cognee[eval]" in str(excinfo.value)

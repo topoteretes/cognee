@@ -70,8 +70,9 @@ class GithubIntegration(OAuthIntegration):
         GitHub returns errors as HTTP 200 with an ``error`` field, so the
         body, not the status, is what's checked.
         """
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession(timeout=_TIMEOUT) as session,
+            session.post(
                 _ACCESS_TOKEN_URL,
                 data={
                     "client_id": require("client_id"),
@@ -79,8 +80,9 @@ class GithubIntegration(OAuthIntegration):
                     "code": code,
                 },
                 headers={"Accept": "application/json"},
-            ) as response:
-                payload = await response.json()
+            ) as response,
+        ):
+            payload = await response.json()
 
         if payload.get("error") or not payload.get("access_token"):
             raise RuntimeError(

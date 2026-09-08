@@ -1,15 +1,20 @@
-from uuid import uuid4
-from enum import Enum
-from typing import Optional, List
 from datetime import datetime, timezone
+from enum import Enum
+from typing import List, Optional
+from uuid import uuid4
+
 from sqlalchemy import (
-    Column,
-    Text,
-    DateTime,
-    UUID as SQLAlchemy_UUID,
-    Integer,
-    Enum as SQLEnum,
     JSON,
+    Column,
+    DateTime,
+    Integer,
+    Text,
+)
+from sqlalchemy import (
+    UUID as SQLAlchemy_UUID,
+)
+from sqlalchemy import (
+    Enum as SQLEnum,
 )
 
 from cognee.infrastructure.databases.relational import Base

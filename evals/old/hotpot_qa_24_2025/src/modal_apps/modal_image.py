@@ -1,8 +1,7 @@
 import os
 
-import modal
-
 import dotenv
+import modal
 
 dotenv.load_dotenv()
 

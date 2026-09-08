@@ -12,15 +12,15 @@ from typing import Optional, Sequence
 
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
     from opentelemetry.sdk.trace.export import (
-        SpanExporter,
-        SpanExportResult,
-        SimpleSpanProcessor,
         BatchSpanProcessor,
         ConsoleSpanExporter,
+        SimpleSpanProcessor,
+        SpanExporter,
+        SpanExportResult,
     )
-    from opentelemetry.sdk.resources import Resource
     from opentelemetry.trace import StatusCode
 
     _OTEL_AVAILABLE = True

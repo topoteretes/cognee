@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 
 def read_results(dir_path: str) -> Dict[str, Any]:

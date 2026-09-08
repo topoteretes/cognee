@@ -1,9 +1,9 @@
 from typing import List
 
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.root_dir import get_absolute_path
+from cognee.shared.data_models import KnowledgeGraph
 
 
 async def extract_edge_triplets(

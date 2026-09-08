@@ -12,14 +12,14 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
-from cognee import config, prune, search, SearchType, visualize_graph
-from cognee.low_level import setup, DataPoint
+from cognee import SearchType, config, prune, search, visualize_graph
+from cognee.low_level import DataPoint, setup
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.pipelines.operations import run_pipeline
+from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.pipelines import Task
 from cognee.tasks.storage import add_data_points
-from cognee.modules.users.methods import get_default_user
 
 
 class Person(DataPoint):

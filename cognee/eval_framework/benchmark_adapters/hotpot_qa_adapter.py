@@ -1,7 +1,8 @@
-import os
 import json
+import os
 import random
-from typing import Optional, Any, List, Union, Tuple
+from typing import Any, List, Optional, Tuple, Union
+
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
 

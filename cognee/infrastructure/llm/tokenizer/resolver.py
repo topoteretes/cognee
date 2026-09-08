@@ -28,11 +28,11 @@ degraded estimate, not a fatal error.
 
 from typing import Callable, Optional
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
 from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
 from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.infrastructure.llm.tokenizer.tokenizer_interface import TokenizerInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("tokenizer_resolver")
 

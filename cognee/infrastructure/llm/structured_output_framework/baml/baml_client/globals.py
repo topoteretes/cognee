@@ -11,12 +11,14 @@
 # baml-cli is available with the baml package.
 
 from __future__ import annotations
+
 import os
 import warnings
+from typing import Dict
 
 from baml_py import BamlCtxManager, BamlRuntime
+
 from .inlinedbaml import get_baml_files
-from typing import Dict
 
 DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME = BamlRuntime.from_files(
     "baml_src", get_baml_files(), os.environ.copy()

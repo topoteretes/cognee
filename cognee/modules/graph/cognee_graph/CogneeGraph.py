@@ -1,19 +1,19 @@
+import heapq
 import time
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.graph.models.EdgeType import EdgeType
-from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
+from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.infrastructure.engine import is_internal_node
+from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions import (
     EntityNotFoundError,
     InvalidDimensionsError,
 )
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
-from cognee.infrastructure.engine import is_internal_node
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
-from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
+from cognee.modules.graph.models.EdgeType import EdgeType
 from cognee.modules.user_preferences.weights import personal_factor
-from cognee.base_config import get_base_config
-import heapq
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CogneeGraph")
 
@@ -381,7 +381,7 @@ class CogneeGraph(CogneeAbstractGraph):
         self.reset_distances(self.edges, query_count)
 
         if not edge_distances:
-            return None
+            return
 
         per_query_scored_results = self._normalize_query_distance_lists(
             edge_distances, query_list_length, "edge_distances"

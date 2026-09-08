@@ -1,9 +1,10 @@
-from cognee.shared.logging_utils import get_logger
 from os.path import basename
 
-from cognee.tasks.chunks import chunk_by_paragraph
-from cognee.modules.chunking.Chunker import Chunker
 from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
+from cognee.modules.chunking.Chunker import Chunker
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.chunks import chunk_by_paragraph
+
 from .models.DocumentChunk import DocumentChunk
 
 logger = get_logger()

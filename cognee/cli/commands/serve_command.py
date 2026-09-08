@@ -1,9 +1,9 @@
 import argparse
 import asyncio
 
-from cognee.cli.reference import SupportsCliCommand
-from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
+from cognee.cli import DEFAULT_DOCS_URL
+from cognee.cli.reference import SupportsCliCommand
 
 
 class ServeCommand(SupportsCliCommand):

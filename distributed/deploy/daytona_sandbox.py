@@ -17,18 +17,18 @@ Usage:
     python distributed/deploy/daytona_sandbox.py
 """
 
+import asyncio
 import os
 import sys
 import time
-import asyncio
 
 from daytona import (  # type: ignore[import-untyped]
+    CreateSandboxFromImageParams,
     Daytona,
     DaytonaConfig,
-    CreateSandboxFromImageParams,
-    SessionExecuteRequest,
     Image,
     Resources,
+    SessionExecuteRequest,
 )
 
 DAYTONA_API_URL = "https://app.daytona.io/api"

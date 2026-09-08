@@ -25,7 +25,6 @@ import weakref
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, Optional
 
-
 SHUTDOWN = "__SUBPROCESS_HARNESS_SHUTDOWN__"
 _DEFAULT_SHUTDOWN_TIMEOUT = 10.0
 _DEFAULT_INIT_TIMEOUT = 60.0

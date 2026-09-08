@@ -1,5 +1,6 @@
-from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 import json
+
+from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 
 INSTANCE_FILTER = [
     "5a8e341c5542995085b373d6",

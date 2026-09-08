@@ -1,5 +1,6 @@
-from cognee.infrastructure.engine import DataPoint
 from typing import Optional
+
+from cognee.infrastructure.engine import DataPoint
 
 
 class GraphitiNode(DataPoint):

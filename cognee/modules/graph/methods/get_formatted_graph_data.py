@@ -1,6 +1,7 @@
 from uuid import UUID
-from cognee.infrastructure.databases.graph import get_graph_engine
+
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.users.models import User
@@ -22,7 +23,7 @@ async def get_formatted_graph_data(dataset_id: UUID, user: User):
                     "id": str(node[0]),
                     "label": node[1]["name"]
                     if ("name" in node[1] and node[1]["name"] != "")
-                    else f"{node[1]['type']}_{str(node[0])}",
+                    else f"{node[1]['type']}_{node[0]!s}",
                     "type": node[1]["type"],
                     "properties": {
                         key: value

@@ -22,10 +22,10 @@ import pytest
 from cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter import (
     SQLAlchemyAdapter,
 )
-from cognee.modules.data.models import Data, Dataset
 from cognee.infrastructure.loaders.LoaderInterface import LoaderResult
+from cognee.modules.data.models import Data, Dataset
 from cognee.modules.ingestion import StoredFile
-from cognee.tasks.ingestion.carried_source import CarriedSource, CARRIED_SOURCE_KEY
+from cognee.tasks.ingestion.carried_source import CARRIED_SOURCE_KEY, CarriedSource
 
 ingest_module = importlib.import_module("cognee.tasks.ingestion.ingest_data")
 

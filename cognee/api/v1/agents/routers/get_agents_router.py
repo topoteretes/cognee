@@ -1,22 +1,23 @@
 from typing import Literal, Optional
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi_users.exceptions import UserAlreadyExists
+
 from cognee.api.DTO import OutDTO
 from cognee.modules.agents.agent_mode import register_agent, unregister_agent
-from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.create_agent import create_agent
+from cognee.modules.agents.delete_agent import delete_agent
 from cognee.modules.agents.get_agent import get_agent
 from cognee.modules.agents.list_agents import list_agents
-from cognee.modules.agents.delete_agent import delete_agent
+from cognee.modules.agents.models import RegisterAgentRequest, UnregisterAgentRequest
 from cognee.modules.agents.operations import (
     get_agent_connection_detail,
     list_agent_connections,
 )
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.models.User import User
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.encoders import jsonable_encoder
-from fastapi_users.exceptions import UserAlreadyExists
 
 RangeLiteral = Literal["24h", "7d", "30d", "all"]
 

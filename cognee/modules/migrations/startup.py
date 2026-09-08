@@ -26,10 +26,10 @@ and a FAILED run does not set the flag, so the next call retries.
 """
 
 import asyncio
+import importlib.resources as pkg_resources
 import logging
 import os
 import threading
-import importlib.resources as pkg_resources
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -305,8 +305,8 @@ async def apply_all_migrations(
     gate or the once-per-process guard — those belong to ``run_migrations``;
     the CLI must migrate even when automatic migrations are disabled.
     """
-    from cognee.modules.migrations.runner import migration_lock, run_database_migrations
     from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.migrations.runner import migration_lock, run_database_migrations
 
     async with migration_lock():
         if await _relational_schema_exists():

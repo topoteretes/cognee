@@ -9,11 +9,11 @@ Create Date: 2025-07-24 17:11:52.174737
 import os
 from typing import Sequence, Union
 
+import kuzu
 from cognee.infrastructure.databases.graph.kuzu.kuzu_migrate import (
     kuzu_migration,
     read_kuzu_storage_version,
 )
-import kuzu
 
 # revision identifiers, used by Alembic.
 revision: str = "b9274c27a25a"

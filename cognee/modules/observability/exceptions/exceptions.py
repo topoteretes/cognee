@@ -1,5 +1,6 @@
-from cognee.exceptions import CogneeConfigurationError
 from fastapi import status
+
+from cognee.exceptions import CogneeConfigurationError
 
 
 class UnsupportedObserverError(CogneeConfigurationError):

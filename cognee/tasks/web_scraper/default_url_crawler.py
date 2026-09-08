@@ -1,15 +1,16 @@
 import asyncio
+import os
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
-import time
-from typing import Any, Union, List, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
+
 import httpx
-import os
 
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.web_scraper.types import UrlsToHtmls
 from cognee.tasks.web_scraper.ssrf_protection import validate_outbound_url
+from cognee.tasks.web_scraper.types import UrlsToHtmls
 
 logger = get_logger()
 

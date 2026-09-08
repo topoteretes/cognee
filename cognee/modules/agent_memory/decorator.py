@@ -6,8 +6,6 @@ import uuid
 from typing import Any, Callable, Optional
 
 from cognee.exceptions import CogneeValidationError
-from cognee.modules.users.models import User
-
 from cognee.modules.agent_memory.runtime import (
     AgentMemoryContext,
     build_method_params,
@@ -24,6 +22,7 @@ from cognee.modules.agents.registry import (
     derive_memory_mode,
     register_agent_connection,
 )
+from cognee.modules.users.models import User
 
 
 def agent_memory(
