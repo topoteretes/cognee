@@ -325,6 +325,10 @@ extend-immutable-calls = [
 # Package init order is load-bearing (side-effect registration, circular-import
 # avoidance); sorting these breaks `import cognee`.
 "__init__.py" = ["I001"]
+# Logging handlers and filters must never log or raise from inside emit()/filter():
+# doing so re-enters the logging machinery. They swallow broadly and report via
+# Handler.handleError, the same shape the stdlib handlers use.
+"cognee/shared/logging_utils.py" = ["BLE001", "S110"]
 
 [tool.ty.src]
 # TODO: Gradually add more directories to include until we have type hints for all modules
