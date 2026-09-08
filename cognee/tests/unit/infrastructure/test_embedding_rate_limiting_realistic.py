@@ -60,7 +60,7 @@ async def test_embedding_rate_limiting_realistic():
             logger.info(f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}")
             return True
         except Exception as e:
-            logger.info(f"Request #{i + 1} rate limited: {e}")
+            logger.info(f"Request #{i + 1} rate limited: {e}", exc_info=True)
             return False
 
     # Batch 1: Send 10 concurrent requests (expect 3 to succeed, 7 to be rate limited)
@@ -127,7 +127,7 @@ async def test_embedding_rate_limiting_realistic():
             logger.info(f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}")
             batch_successes += 1
         except Exception as e:
-            logger.info(f"Request #{i + 1} rate limited: {e}")
+            logger.info(f"Request #{i + 1} rate limited: {e}", exc_info=True)
             batch_rate_limited += 1
 
     batch_end = time.time()
@@ -185,7 +185,7 @@ async def test_with_mock_failures():
 
             logger.info(f"Request #{i + 1} succeeded for {embedding!s}")
         except Exception as e:
-            logger.info(f"Request #{i + 1} failed as expected: {e}")
+            logger.info(f"Request #{i + 1} failed as expected: {e}", exc_info=True)
 
     # Reset environment variables
     os.environ.pop("EMBEDDING_RATE_LIMIT_ENABLED", None)

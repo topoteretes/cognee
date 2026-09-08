@@ -110,6 +110,10 @@ import cognee  # noqa: E402
 from cognee.modules.search.types import SearchType  # noqa: E402
 from cognee_db_workers.harness import collect_garbage_in_all_workers  # noqa: E402
 
+import logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
 # Twenty distinct public-domain Gutenberg books (each roughly 400 KB – 1.5 MB).
 # One is used per large-round cycle; with ``--cycles 20`` we use all of them.
 LARGE_TEXTS: list[tuple[str, str]] = [
@@ -181,7 +185,7 @@ def print_rss(label: str) -> None:
 
         _pa.default_memory_pool().release_unused()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in print_rss", exc_info=True)
 
     proc = psutil.Process(os.getpid())
     parent_mb = proc.memory_info().rss / (1024 * 1024)

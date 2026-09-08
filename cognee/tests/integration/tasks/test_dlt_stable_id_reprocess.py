@@ -27,6 +27,10 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 DATASET = "gadgets_ds"
 # Separate identity for the second test: dlt keeps process-global pipeline
 # state keyed by name, so tests in one process must not share dataset names.
@@ -75,7 +79,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _dlt_source(rows, name="gadgets"):

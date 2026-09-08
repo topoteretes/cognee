@@ -8,6 +8,10 @@ import time
 
 import pytest
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -22,7 +26,7 @@ def _clean_otel_state():
 
         disable_tracing()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _clean_otel_state", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

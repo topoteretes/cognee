@@ -20,6 +20,10 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.storage import add_data_points
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class TestAnswer(BaseModel):
     answer: str
@@ -221,7 +225,7 @@ async def setup_test_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment", exc_info=True)
 
 
 @pytest.mark.asyncio

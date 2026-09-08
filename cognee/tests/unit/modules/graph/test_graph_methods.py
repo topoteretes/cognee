@@ -36,9 +36,9 @@ from cognee.modules.graph.methods import (
 )
 from cognee.modules.graph.models import Edge, Node
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import get_logger
+import logging
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -51,7 +51,7 @@ async def _dispose_relational_engine_after_test():
         if engine is not None:
             await engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _dispose_relational_engine_after_test", exc_info=True)
 
     create_relational_engine.cache_clear()
 

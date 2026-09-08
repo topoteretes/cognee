@@ -27,6 +27,10 @@ import pytest
 import cognee
 from cognee.exceptions import CogneeApiError
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # The single root of the Cognee error hierarchy, read off the class itself so it
 # can never drift from the source. Every other error class is *discovered* from
 # here by name (see ``_family_classes_in_repo``): seeding the fixpoint with just
@@ -199,6 +203,7 @@ def _import_family_modules():
             # Modules behind optional extras (codegraph, scraping, neptune, ...)
             # may not import in a minimal environment. The static test above
             # already covers them; here we simply skip what we cannot load.
+            logger.debug("Ignoring exception in _import_family_modules", exc_info=True)
             continue
 
 

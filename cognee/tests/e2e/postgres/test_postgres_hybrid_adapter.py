@@ -15,6 +15,10 @@ from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybr
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # -- Session-scoped event loop so async engines stay on a single loop.
 
 
@@ -70,7 +74,7 @@ async def adapter():
     try:
         await a.delete_graph()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in adapter", exc_info=True)
 
     # Drop any vector collection tables created during the test
     try:
@@ -85,7 +89,7 @@ async def adapter():
                 await session.execute(sa_text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
             await session.commit()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in adapter", exc_info=True)
 
 
 # -- Helpers --

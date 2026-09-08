@@ -28,6 +28,10 @@ from cognee_db_workers.harness import (
     spawn_without_main,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
 # spawning. On Windows the spawned child intermittently deadlocks at
@@ -519,7 +523,9 @@ async def test_kuzu_adapter_rejects_use_after_close(tmp_path):
         try:
             await adapter.close()
         except Exception:
-            pass
+            logger.debug(
+                "Ignoring exception in test_kuzu_adapter_rejects_use_after_close", exc_info=True
+            )
 
 
 # --- retry / replay -------------------------------------------------------
@@ -873,6 +879,10 @@ def test_concurrent_shutdown_with_inflight_call_does_not_hang():
                         TimeoutError("call() timed out — response likely stolen by shutter")
                     )
             except Exception as exc:
+                logger.debug(
+                    "Ignoring exception in test_concurrent_shutdown_with_inflight_call_does_not_hang.caller",
+                    exc_info=True,
+                )
                 with errors_lock:
                     errors.append(exc)
 
@@ -880,6 +890,10 @@ def test_concurrent_shutdown_with_inflight_call_does_not_hang():
             try:
                 s.shutdown(timeout=1.0)
             except Exception as exc:
+                logger.debug(
+                    "Ignoring exception in test_concurrent_shutdown_with_inflight_call_does_not_hang.shutter",
+                    exc_info=True,
+                )
                 with errors_lock:
                     errors.append(exc)
 

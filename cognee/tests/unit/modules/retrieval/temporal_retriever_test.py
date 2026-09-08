@@ -9,6 +9,10 @@ from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 @pytest.fixture(autouse=True)
 def _no_real_llm_calls():
@@ -33,6 +37,7 @@ def _no_real_llm_calls():
         try:
             return response_model.model_construct()
         except Exception:
+            logger.debug("Ignoring exception in _no_real_llm_calls._structured", exc_info=True)
             return QueryInterval()
 
     with patch.object(

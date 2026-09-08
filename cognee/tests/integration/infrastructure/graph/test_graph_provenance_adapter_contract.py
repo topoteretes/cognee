@@ -25,6 +25,10 @@ from cognee.infrastructure.databases.provenance import (
 )
 from cognee.infrastructure.engine import DataPoint
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 try:
     from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 
@@ -67,6 +71,7 @@ async def _make_postgres_adapter():
             await conn.run_sync(_meta.drop_all)
         await adapter.initialize()
     except Exception as exc:  # pragma: no cover - environment dependent
+        logger.debug("Ignoring exception in _make_postgres_adapter", exc_info=True)
         await adapter.close()
         pytest.skip(f"postgres graph backend not reachable: {exc}")
     return adapter
@@ -100,6 +105,7 @@ async def _make_neo4j_adapter():
         await adapter.initialize()
         await adapter.query("MATCH (n) DETACH DELETE n")
     except Exception as exc:  # pragma: no cover - environment dependent
+        logger.debug("Ignoring exception in _make_neo4j_adapter", exc_info=True)
         await adapter.close()
         pytest.skip(f"neo4j graph backend not reachable: {exc}")
     return adapter

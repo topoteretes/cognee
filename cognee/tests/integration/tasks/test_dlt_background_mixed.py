@@ -26,6 +26,10 @@ from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunStarted
 from cognee.modules.users.methods import get_default_user
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 DATASET = "background_mixed_ds"
 COMPLETION_TIMEOUT_SECONDS = 120
 
@@ -97,7 +101,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _dlt_source():

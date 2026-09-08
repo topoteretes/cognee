@@ -28,6 +28,10 @@ from pathlib import Path
 
 import pytest
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 moto = pytest.importorskip("moto", reason="requires moto[server] (pip install 'moto[server]')")
 s3fs = pytest.importorskip("s3fs", reason="requires s3fs (pip install 'cognee[aws]')")
 
@@ -70,6 +74,7 @@ def s3_env():
             client.list_buckets()
             break
         except Exception:
+            logger.debug("Ignoring exception in s3_env", exc_info=True)
             time.sleep(0.25)
     else:
         moto_proc.terminate()

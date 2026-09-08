@@ -16,6 +16,10 @@ from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 async def _reset_engines_and_prune() -> None:
     """Reset cached engines and clear persisted test state."""
@@ -26,7 +30,7 @@ async def _reset_engines_and_prune() -> None:
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (

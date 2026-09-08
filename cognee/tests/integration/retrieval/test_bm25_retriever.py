@@ -10,6 +10,10 @@ from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
 from cognee.tasks.storage import add_data_points
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 ALPHA_TEXT = "orion orion logistics common"
 BETA_TEXT = "orion logistics logistics logistics common"
 GAMMA_TEXT = "nebula archive common"
@@ -65,7 +69,7 @@ async def setup_bm25_corpus():
         await cognee.prune.prune_system(metadata=True)
         _clear_engine_caches()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_bm25_corpus", exc_info=True)
 
 
 @pytest.mark.asyncio

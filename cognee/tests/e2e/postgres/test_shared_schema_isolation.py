@@ -26,6 +26,10 @@ from cognee.infrastructure.databases.postgres import (
     drop_pg_schema_if_exists,
 )
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _db() -> dict:
     return {
@@ -69,6 +73,7 @@ async def _postgres_reachable() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception:
+        logger.debug("Ignoring exception in _postgres_reachable", exc_info=True)
         return False
     finally:
         await engine.dispose()

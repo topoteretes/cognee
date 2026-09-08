@@ -15,6 +15,10 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Port the MCP server listens on inside the container (entrypoint default).
 CONTAINER_HTTP_PORT = 8000
 
@@ -64,7 +68,8 @@ def wait_for_health(url: str, timeout: float = 120.0) -> None:
             response = httpx.get(url, timeout=5)
             if response.status_code == 200:
                 return
-        except Exception as exc:  # noqa: BLE001 - poller intentionally tolerant
+        except Exception as exc:  # poller intentionally tolerant
+            logger.debug("Ignoring exception in wait_for_health", exc_info=True)
             last_error = exc
         time.sleep(1.0)
     raise TimeoutError(

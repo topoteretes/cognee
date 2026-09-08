@@ -33,6 +33,10 @@ import re
 import sys
 from pathlib import Path
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 TEXT_SUFFIXES = {".txt", ".md", ".markdown"}
 PDF_SUFFIXES = {".pdf"}
 SUPPORTED = TEXT_SUFFIXES | PDF_SUFFIXES
@@ -57,6 +61,7 @@ def extract_pdf_text(path: Path) -> str:
         try:
             pages.append(page.extract_text() or "")
         except Exception as exc:  # a single broken page must not kill the corpus
+            logger.debug("Ignoring exception in extract_pdf_text", exc_info=True)
             print(f"  warn: {path.name}: page extraction failed ({type(exc).__name__})")
             pages.append("")
     return "\n\n".join(pages)

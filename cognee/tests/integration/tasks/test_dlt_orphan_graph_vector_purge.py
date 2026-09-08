@@ -35,6 +35,10 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.users.methods import get_default_user
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 DATASET = "dlt_purge_ac_ds"
 
 
@@ -90,7 +94,7 @@ async def clean_env(tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_env", exc_info=True)
 
 
 def _mock_llm():
@@ -181,6 +185,7 @@ async def _store_counts(dataset):
         try:
             vec = await (await ve.get_collection("DltRow_text")).count_rows()
         except Exception:
+            logger.debug("Ignoring exception in _store_counts", exc_info=True)
             vec = 0
     return len(nodes), vec
 

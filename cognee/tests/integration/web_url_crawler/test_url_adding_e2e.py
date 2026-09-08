@@ -9,6 +9,10 @@ from cognee.infrastructure.loaders.external.beautiful_soup_loader import Beautif
 from cognee.infrastructure.loaders.LoaderEngine import LoaderEngine
 from cognee.tasks.ingestion import save_data_item_to_storage
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 @pytest.mark.asyncio
 async def test_url_saves_as_html_file():
@@ -23,6 +27,7 @@ async def test_url_saves_as_html_file():
         assert file.exists()
         assert file.stat().st_size > 0
     except Exception as e:
+        logger.debug("Ignoring exception in test_url_saves_as_html_file", exc_info=True)
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
@@ -62,6 +67,7 @@ async def test_saved_html_is_valid():
         )
         assert has_html_elements, "File should contain common HTML elements"
     except Exception as e:
+        logger.debug("Ignoring exception in test_saved_html_is_valid", exc_info=True)
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
@@ -100,6 +106,9 @@ async def test_add_url_without_incremental_loading():
             incremental_loading=False,
         )
     except Exception as e:
+        logger.debug(
+            "Ignoring exception in test_add_url_without_incremental_loading", exc_info=True
+        )
         pytest.fail(f"Failed to add url: {e}")
 
 
@@ -114,6 +123,7 @@ async def test_add_url_with_incremental_loading():
             incremental_loading=True,
         )
     except Exception as e:
+        logger.debug("Ignoring exception in test_add_url_with_incremental_loading", exc_info=True)
         pytest.fail(f"Failed to add url: {e}")
 
 
@@ -146,6 +156,7 @@ async def test_add_url_with_extraction_rules():
             preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
         )
     except Exception as e:
+        logger.debug("Ignoring exception in test_add_url_with_extraction_rules", exc_info=True)
         pytest.fail(f"Failed to add url: {e}")
 
 
@@ -177,6 +188,7 @@ async def test_loader_is_none_by_default():
 
         assert loader is None
     except Exception as e:
+        logger.debug("Ignoring exception in test_loader_is_none_by_default", exc_info=True)
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
@@ -210,6 +222,10 @@ async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_prov
 
         assert loader == bs_loader
     except Exception as e:
+        logger.debug(
+            "Ignoring exception in test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_provided",
+            exc_info=True,
+        )
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
@@ -246,6 +262,10 @@ async def test_beautiful_soup_loader_works_with_and_without_arguments():
             preferred_loaders=preferred_loaders,
         )
     except Exception as e:
+        logger.debug(
+            "Ignoring exception in test_beautiful_soup_loader_works_with_and_without_arguments",
+            exc_info=True,
+        )
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
@@ -277,6 +297,10 @@ async def test_beautiful_soup_loader_successfully_loads_file_if_required_args_pr
             preferred_loaders=preferred_loaders,
         )
     except Exception as e:
+        logger.debug(
+            "Ignoring exception in test_beautiful_soup_loader_successfully_loads_file_if_required_args_present",
+            exc_info=True,
+        )
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
@@ -330,4 +354,7 @@ async def test_beautiful_soup_loads_file_successfully():
             f"Expected same base name: {original_basename} vs {extracted_basename}"
         )
     except Exception as e:
+        logger.debug(
+            "Ignoring exception in test_beautiful_soup_loads_file_successfully", exc_info=True
+        )
         pytest.fail(f"Failed to save data item to storage: {e}")

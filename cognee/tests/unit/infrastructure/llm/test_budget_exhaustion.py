@@ -283,7 +283,8 @@ class TestCauseChainWalk:
         try:
             try:
                 raise _rate_limit_error(LITELLM_BUDGET_MESSAGES[0])
-            except Exception:
+            except litellm.RateLimitError:
+                # Deliberately unchained: the test needs __context__ without __cause__.
                 raise ValueError("secondary failure during cleanup")
         except ValueError as e:
             unrelated = e

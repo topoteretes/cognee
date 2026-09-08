@@ -35,6 +35,10 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 )
 from cognee.tasks.storage.index_data_points import index_data_points
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 DATASET = "consolidate_entities_integration"
 DUPLICATE_NAMES = {"New York City", "NYC"}
 
@@ -60,7 +64,7 @@ async def clean_test_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
 
 
 async def _seed(graph):

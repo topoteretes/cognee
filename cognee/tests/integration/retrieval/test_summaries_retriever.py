@@ -14,6 +14,10 @@ from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization.models import TextSummary
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 @pytest_asyncio.fixture
 async def setup_test_environment_with_summaries():
@@ -145,7 +149,7 @@ async def setup_test_environment_with_summaries():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_with_summaries", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -167,7 +171,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

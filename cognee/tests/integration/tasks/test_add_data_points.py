@@ -13,6 +13,10 @@ from cognee.low_level import setup
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.tasks.storage.exceptions import InvalidDataPointsInAddDataPointsError
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class Person(DataPoint):
     name: str
@@ -64,7 +68,7 @@ async def clean_test_environment(request):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
 
 
 @pytest.mark.asyncio
