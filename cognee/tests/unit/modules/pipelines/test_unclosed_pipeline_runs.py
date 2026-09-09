@@ -194,6 +194,34 @@ async def test_operation_records_are_not_runs(runs_engine):
 
 
 @pytest.mark.asyncio
+async def test_a_terminal_row_without_a_run_id_does_not_blank_the_result(runs_engine):
+    """One NULL in a NOT IN subquery makes the whole predicate unknown, which
+    would leave recovery quietly finding nothing at all. No writer produces a
+    terminal row without a run id, and this keeps that from being the only
+    thing standing between us and a silent no-op."""
+    dataset_id = uuid4()
+    open_run = uuid4()
+    await _insert(
+        runs_engine,
+        _row(
+            dataset_id, "add_pipeline", PipelineRunStatus.DATASET_PROCESSING_STARTED, open_run, 10
+        ),
+        PipelineRun(
+            pipeline_run_id=None,
+            pipeline_name="cognify_pipeline",
+            pipeline_id=uuid4(),
+            status=PipelineRunStatus.DATASET_PROCESSING_COMPLETED,
+            dataset_id=dataset_id,
+            run_info={},
+        ),
+    )
+
+    runs = await get_unclosed_pipeline_runs()
+
+    assert [run.pipeline_run_id for run in runs] == [open_run]
+
+
+@pytest.mark.asyncio
 async def test_dataset_scoping(runs_engine):
     wanted_dataset, other_dataset = uuid4(), uuid4()
     wanted, other = uuid4(), uuid4()

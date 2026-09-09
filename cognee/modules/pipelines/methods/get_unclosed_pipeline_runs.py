@@ -43,8 +43,18 @@ async def get_unclosed_pipeline_runs(
     # Aliased so the NOT IN subquery keeps its own FROM: sharing the outer
     # table would let SQLAlchemy correlate it and silently change the test to
     # "this row is not itself terminal".
+    #
+    # The IS NOT NULL is insurance, not a live fix: one NULL in a NOT IN
+    # subquery makes the whole predicate unknown, so recovery would quietly
+    # find nothing at all. No writer produces a terminal row without a run id
+    # today, and this keeps that from being load-bearing. It also lets the
+    # planner treat the subquery as a plain anti-join.
     closed = aliased(PipelineRun)
-    closed_run_ids = select(closed.pipeline_run_id).filter(closed.status.in_(_TERMINAL_STATUSES))
+    closed_run_ids = (
+        select(closed.pipeline_run_id)
+        .filter(closed.status.in_(_TERMINAL_STATUSES))
+        .filter(closed.pipeline_run_id.isnot(None))
+    )
 
     query = select(PipelineRun).filter(
         PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_STARTED,
