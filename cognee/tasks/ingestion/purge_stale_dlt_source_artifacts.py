@@ -14,7 +14,7 @@ A crash after the purge leaves the source absent until the retry, which
 re-runs the purge harmlessly and rebuilds.
 """
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.modules.data.processing.document_types import DltSourceDocument, Document
 from cognee.shared.logging_utils import get_logger
@@ -26,9 +26,9 @@ logger = get_logger("purge_stale_dlt_source_artifacts")
 
 
 async def purge_stale_dlt_source_artifacts(
-    documents: List[Document],
+    documents: list[Document],
     ctx: Optional["PipelineContext"] = None,
-) -> List[Document]:
+) -> list[Document]:
     manifest_docs = [doc for doc in documents if isinstance(doc, DltSourceDocument)]
     if not manifest_docs:
         return documents
@@ -66,7 +66,9 @@ async def purge_stale_dlt_source_artifacts(
                 user_id=ctx.user.id,
             )
         except Exception as error:
-            logger.warning("Session invalidation after DLT purge failed (non-fatal): %s", error)
+            logger.warning(
+                "Session invalidation after DLT purge failed (non-fatal): %s", error, exc_info=True
+            )
         logger.info(
             "Purged prior derived artifacts of DLT source data item %s before re-emission.",
             doc.id,

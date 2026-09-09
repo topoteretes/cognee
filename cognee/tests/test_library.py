@@ -111,7 +111,7 @@ async def main():
 
     # Test updating of documents
     # Get Pipeline Run object
-    pipeline_run_obj = list(cognify_run_info.values())[0]
+    pipeline_run_obj = next(iter(cognify_run_info.values()))
     for data_item in pipeline_run_obj.data_ingestion_info:
         # Update all documents in dataset to only contain Mark and Cindy information
         await update(

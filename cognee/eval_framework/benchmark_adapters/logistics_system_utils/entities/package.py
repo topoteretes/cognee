@@ -109,7 +109,7 @@ class Package:
         route_post_office_ids: tuple[str, ...] = (),
         route_post_office_names: tuple[str, ...] = (),
         status_history: tuple[str, ...] = (),
-    ) -> "Package":
+    ) -> Package:
         return cls(
             package_id=package_id,
             description=description,

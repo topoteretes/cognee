@@ -5,7 +5,8 @@ import signal
 import subprocess
 import sys
 import warnings
-from typing import Any, Dict, List, Sequence, Type, cast
+from collections.abc import Sequence
+from typing import Any
 
 import click
 
@@ -22,6 +23,9 @@ from cognee.cli import DEFAULT_DOCS_URL, SupportsCliCommand, debug
 from cognee.cli.config import CLI_DESCRIPTION
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.remediation import find_remediation
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 ACTION_EXECUTED = False
 
@@ -37,7 +41,7 @@ class DebugAction(argparse.Action):
         option_strings: Sequence[str],
         dest: Any = argparse.SUPPRESS,
         default: Any = argparse.SUPPRESS,
-        help: str = None,
+        help: str | None = None,
     ) -> None:
         super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
@@ -48,7 +52,7 @@ class DebugAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: str = None,
+        option_string: str | None = None,
     ) -> None:
         # Enable debug mode for stack traces
         debug.enable_debug()
@@ -61,7 +65,7 @@ class UiAction(argparse.Action):
         option_strings: Sequence[str],
         dest: Any = argparse.SUPPRESS,
         default: Any = argparse.SUPPRESS,
-        help: str = None,
+        help: str | None = None,
     ) -> None:
         super().__init__(
             option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
@@ -72,7 +76,7 @@ class UiAction(argparse.Action):
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
         values: Any,
-        option_string: str = None,
+        option_string: str | None = None,
     ) -> None:
         # Set a flag to indicate UI should be started
         global ACTION_EXECUTED
@@ -83,7 +87,7 @@ class UiAction(argparse.Action):
 # Debug functionality is now in cognee.cli.debug module
 
 
-def _discover_commands() -> List[Type[SupportsCliCommand]]:
+def _discover_commands() -> list[type[SupportsCliCommand]]:
     """Discover all available CLI commands"""
     # Import commands dynamically to avoid early cognee initialization
     commands = []
@@ -127,7 +131,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
     return commands
 
 
-def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliCommand]]:
+def _create_parser() -> tuple[argparse.ArgumentParser, dict[str, SupportsCliCommand]]:
     parser = argparse.ArgumentParser(
         description=f"{CLI_DESCRIPTION} Further help is available at {DEFAULT_DOCS_URL}."
     )
@@ -178,7 +182,7 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
 
     # Discover and install commands
     command_classes = _discover_commands()
-    installed_commands: Dict[str, SupportsCliCommand] = {}
+    installed_commands: dict[str, SupportsCliCommand] = {}
 
     for command_class in command_classes:
         command = command_class()
@@ -203,7 +207,7 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
                 parser.description = Markdown(parser.description, style="argparse.text")
             for action in parser._actions:
                 if isinstance(action, argparse._SubParsersAction):
-                    for _subcmd, subparser in action.choices.items():
+                    for subparser in action.choices.values():
                         add_formatter_class(subparser)
 
         add_formatter_class(parser)
@@ -296,7 +300,7 @@ def main() -> int:
                         ["docker", "rm", "-f", docker_container], capture_output=True, check=False
                     )
                 except Exception:
-                    pass
+                    logger.debug("Ignoring exception in main.signal_handler", exc_info=True)
 
             # Then, stop regular processes
             for pid in spawned_pids:
@@ -435,7 +439,7 @@ def main() -> int:
             fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
 
             if debug.is_debug_enabled() and raiseable_exception:
-                raise raiseable_exception
+                raise raiseable_exception from ex
 
             return error_code
     else:

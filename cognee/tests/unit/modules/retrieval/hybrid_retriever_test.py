@@ -132,9 +132,11 @@ async def test_empty_neighborhood_does_not_prevent_chunk_search():
 async def test_query_batch_with_session_cache_is_rejected():
     retriever = HybridRetriever()
 
-    with patch.object(retriever, "_use_session_cache", return_value=True):
-        with pytest.raises(QueryValidationError, match="batch queries with session cache"):
-            await retriever.get_retrieved_objects(query_batch=["q"])
+    with (
+        patch.object(retriever, "_use_session_cache", return_value=True),
+        pytest.raises(QueryValidationError, match="batch queries with session cache"),
+    ):
+        await retriever.get_retrieved_objects(query_batch=["q"])
 
 
 @pytest.mark.asyncio

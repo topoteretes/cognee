@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO
@@ -34,7 +33,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
-async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: Optional[list[str]], fetch):
+async def _fan_out_by_pipeline(dataset_ids: list[UUID], pipeline_names: list[str] | None, fetch):
     """Shared flat/nested shaping for get_status and get_progress.
 
     ``fetch`` is get_pipeline_status or get_pipeline_progress — only the
@@ -72,13 +71,15 @@ async def _invalidate_sessions_for_dataset_nonfatal(dataset_id: UUID) -> None:
 
         await invalidate_sessions_for_dataset(dataset_id)
     except Exception as error:
-        logger.warning("Session invalidation after dataset delete failed (non-fatal): %s", error)
+        logger.warning(
+            "Session invalidation after dataset delete failed (non-fatal): %s", error, exc_info=True
+        )
 
 
 async def _invalidate_sessions_for_deleted_data_nonfatal(
     dataset_id: UUID,
-    deleted_elements: Optional[DeletedGraphElements],
-    user_id: Optional[UUID] = None,
+    deleted_elements: DeletedGraphElements | None,
+    user_id: UUID | None = None,
 ) -> None:
     """Remove session entries that used the deleted elements. Never fails the delete."""
     if deleted_elements is None:
@@ -95,7 +96,9 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
             user_id=user_id,
         )
     except Exception as error:
-        logger.warning("Session invalidation after data delete failed (non-fatal): %s", error)
+        logger.warning(
+            "Session invalidation after data delete failed (non-fatal): %s", error, exc_info=True
+        )
 
 
 class datasets:
@@ -121,7 +124,7 @@ class datasets:
     """
 
     @staticmethod
-    async def list_datasets(user: Optional[User] = None):
+    async def list_datasets(user: User | None = None):
         if user is None:
             user = await get_default_user()
 
@@ -132,7 +135,7 @@ class datasets:
         return list(discover_directory_datasets(directory_path).keys())
 
     @staticmethod
-    async def list_data(dataset_id: UUID, user: Optional[User] = None):
+    async def list_data(dataset_id: UUID, user: User | None = None):
         # Route to the remote instance when connected via serve(): the dataset
         # lives on the server, so the local store would report it missing.
         # Rows are parsed through the same DTO the server serializes them
@@ -153,7 +156,7 @@ class datasets:
         return await get_dataset_data(dataset.id)
 
     @staticmethod
-    async def has_data(dataset_id: str, user: Optional[User] = None) -> bool:
+    async def has_data(dataset_id: str, user: User | None = None) -> bool:
         if not user:
             user = await get_default_user()
 
@@ -162,14 +165,12 @@ class datasets:
         return await has_dataset_data(dataset.id)
 
     @staticmethod
-    async def get_status(
-        dataset_ids: list[UUID], pipeline_names: Optional[list[str]] = None
-    ) -> dict:
+    async def get_status(dataset_ids: list[UUID], pipeline_names: list[str] | None = None) -> dict:
         return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_status)
 
     @staticmethod
     async def get_progress(
-        dataset_ids: list[UUID], pipeline_names: Optional[list[str]] = None
+        dataset_ids: list[UUID], pipeline_names: list[str] | None = None
     ) -> dict:
         """Same flat-or-nested shape as get_status, but each value is
         {status, progress} instead of a bare status. A separate method
@@ -179,7 +180,7 @@ class datasets:
         return await _fan_out_by_pipeline(dataset_ids, pipeline_names, get_pipeline_progress)
 
     @staticmethod
-    async def empty_dataset(dataset_id: UUID, user: Optional[User] = None):
+    async def empty_dataset(dataset_id: UUID, user: User | None = None):
         from cognee.modules.data.methods import delete_data, delete_dataset
 
         if not user:
@@ -192,21 +193,23 @@ class datasets:
 
         # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
         # on this dataset and exclude concurrent deletes.
-        async with dataset_lock(dataset.id):
-            async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        async with (
+            dataset_lock(dataset.id),
+            set_database_global_context_variables(dataset.id, dataset.owner_id),
+        ):
+            deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-                # Session memory derived from this dataset would keep asserting
-                # the deleted content (stale QA replay / session-context leak),
-                # so drop the attributed sessions with the dataset.
-                await _invalidate_sessions_for_dataset_nonfatal(dataset.id)
-                await _invalidate_sessions_for_deleted_data_nonfatal(
-                    dataset.id, deleted_elements, user.id
-                )
+            # Session memory derived from this dataset would keep asserting
+            # the deleted content (stale QA replay / session-context leak),
+            # so drop the attributed sessions with the dataset.
+            await _invalidate_sessions_for_dataset_nonfatal(dataset.id)
+            await _invalidate_sessions_for_deleted_data_nonfatal(
+                dataset.id, deleted_elements, user.id
+            )
 
-                # delete_dataset removes the dataset's scoped Data rows
-                # (files refcounted by raw_data_location) with the record.
-                result = await delete_dataset(dataset)
+            # delete_dataset removes the dataset's scoped Data rows
+            # (files refcounted by raw_data_location) with the record.
+            result = await delete_dataset(dataset)
 
         return result
 
@@ -214,7 +217,7 @@ class datasets:
     async def delete_data(
         dataset_id: UUID,
         data_id: UUID,
-        user: Optional[User] = None,
+        user: User | None = None,
         mode: str = "soft",  # mode is there for backwards compatibility. Don't use "hard", it is dangerous.
         delete_dataset_if_empty: bool = False,  # if this flag is True, delete the whole dataset if it is left empty after data deletion
     ):
@@ -303,7 +306,7 @@ class datasets:
             return {"status": "success"}
 
     @staticmethod
-    async def delete_all(user: Optional[User] = None):
+    async def delete_all(user: User | None = None):
         if not user:
             user = await get_default_user()
 

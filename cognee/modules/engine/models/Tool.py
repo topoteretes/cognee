@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, Literal, Optional
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -28,8 +28,8 @@ class Tool(DataPoint):
 
     name: Annotated[str, Embeddable(), Dedup()]
     description: Annotated[str, Embeddable(), LLMContext()]
-    input_schema: Dict[str, Any] = Field(default_factory=dict)
+    input_schema: dict[str, Any] = Field(default_factory=dict)
     handler_ref: Annotated[str, Dedup()]
-    dataset_id: Optional[UUID] = None
+    dataset_id: UUID | None = None
     permission_required: PermissionVerb = "read"
     readonly_hint: bool = True

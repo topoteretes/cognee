@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from .harness import (
     DEFAULT_DISPATCH,
     HandleRegistry,
@@ -28,6 +30,8 @@ from .lancedb_protocol import (
     OP_TABLE_TO_ARROW,
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
+
+logger = logging.getLogger(__name__)
 
 # The connection is stored at a fixed handle id (0) since there is exactly one
 # per worker.
@@ -90,7 +94,7 @@ def _relax_nullability(schema):
 
 
 async def _op_create_table(registry: HandleRegistry, req: Request):
-    import pyarrow as pa  # noqa: F401  # ensure pyarrow is resolved in-worker
+    import pyarrow as pa  # ensure pyarrow is resolved in-worker
 
     conn = _get_connection(registry)
     name = req.args[0]
@@ -219,6 +223,7 @@ async def _op_merge_insert_execute(registry: HandleRegistry, req: Request):
             "num_deleted_rows": getattr(result, "num_deleted_rows", None),
         }
     except Exception:
+        logger.debug("Falling back to None after error in _op_merge_insert_execute", exc_info=True)
         return None
 
 

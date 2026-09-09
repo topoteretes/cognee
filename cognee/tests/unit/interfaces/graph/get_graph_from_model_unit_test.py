@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 
 import pytest
 
@@ -13,13 +13,6 @@ class Document(DataPoint):
     metadata: dict = {"index_fields": []}
 
 
-class DocumentChunk(DataPoint):
-    part_of: Document
-    text: str
-    contains: List["Entity"] = None
-    metadata: dict = {"index_fields": ["text"]}
-
-
 class EntityType(DataPoint):
     name: str
     metadata: dict = {"index_fields": ["name"]}
@@ -31,9 +24,19 @@ class Entity(DataPoint):
     metadata: dict = {"index_fields": ["name"]}
 
 
+# Defined after Entity so the annotation needs no forward reference: a quoted
+# name inside a builtin generic is not resolvable when the model is copied
+# into another module on Python 3.10.
+class DocumentChunk(DataPoint):
+    part_of: Document
+    text: str
+    contains: list[Entity] = None
+    metadata: dict = {"index_fields": ["text"]}
+
+
 class Company(DataPoint):
     name: str
-    employees: List[Any] = None  # Allow flexible edge system with tuples
+    employees: list[Any] = None  # Allow flexible edge system with tuples
     metadata: dict = {"index_fields": ["name"]}
 
 

@@ -7,7 +7,7 @@ Create Date: 2025-07-24 17:11:52.174737
 """
 
 import os
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import kuzu
 from cognee.infrastructure.databases.graph.kuzu.kuzu_migrate import (
@@ -17,9 +17,9 @@ from cognee.infrastructure.databases.graph.kuzu.kuzu_migrate import (
 
 # revision identifiers, used by Alembic.
 revision: str = "b9274c27a25a"
-down_revision: Union[str, None] = "e4ebee1091e7"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "e4ebee1091e7"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -52,20 +52,21 @@ def upgrade() -> None:
         from cognee.infrastructure.databases.graph import get_graph_config
 
         graph_config = get_graph_config()
-        if graph_config.graph_database_provider.lower() == "kuzu":
-            if os.path.exists(graph_config.graph_file_path):
-                kuzu_db_version = read_kuzu_storage_version(graph_config.graph_file_path)
-                if (
-                    kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
-                ) and kuzu_db_version != kuzu.__version__:
-                    # Try to migrate kuzu database to latest version
-                    kuzu_migration(
-                        new_db=graph_config.graph_file_path + "_new",
-                        old_db=graph_config.graph_file_path,
-                        new_version=kuzu.__version__,
-                        old_version=kuzu_db_version,
-                        overwrite=True,
-                    )
+        if graph_config.graph_database_provider.lower() == "kuzu" and os.path.exists(
+            graph_config.graph_file_path
+        ):
+            kuzu_db_version = read_kuzu_storage_version(graph_config.graph_file_path)
+            if (
+                kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
+            ) and kuzu_db_version != kuzu.__version__:
+                # Try to migrate kuzu database to latest version
+                kuzu_migration(
+                    new_db=graph_config.graph_file_path + "_new",
+                    old_db=graph_config.graph_file_path,
+                    new_version=kuzu.__version__,
+                    old_version=kuzu_db_version,
+                    overwrite=True,
+                )
 
 
 def downgrade() -> None:

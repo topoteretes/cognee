@@ -772,7 +772,7 @@ async def test_invalidation_during_load_discards_stale_snapshot():
 
 @pytest.mark.asyncio
 async def test_delta_operation_reports_repository_last_delta():
-    engine, graph_patch = _graph_patch()
+    _engine, graph_patch = _graph_patch()
     retriever = CodeRetriever(config={"operation": "delta"})
 
     with graph_patch:
@@ -820,7 +820,7 @@ async def test_delta_operation_repo_filter_and_stamped_payload():
 
 @pytest.mark.asyncio
 async def test_repository_nodes_stay_out_of_fact_operations():
-    engine, graph_patch = _graph_patch()
+    _engine, graph_patch = _graph_patch()
     retriever = CodeRetriever(config={"operation": "query_facts", "limit": 100})
 
     with graph_patch:
@@ -1026,11 +1026,13 @@ async def test_operations_accept_enola_fact_ids_as_seeds():
     assert path["found"] is True
     assert [node["id"] for node in path["path"]] == ["api", "db"]
 
-    with pytest.raises(CodeSearchValidationError, match="could not resolve"):
-        with _insight_graph_patch():
-            await CodeRetriever(
-                config={"operation": "explore", "id": "f" * 32}
-            ).get_retrieved_objects("")
+    with (
+        pytest.raises(CodeSearchValidationError, match="could not resolve"),
+        _insight_graph_patch(),
+    ):
+        await CodeRetriever(config={"operation": "explore", "id": "f" * 32}).get_retrieved_objects(
+            ""
+        )
 
 
 @pytest.mark.asyncio

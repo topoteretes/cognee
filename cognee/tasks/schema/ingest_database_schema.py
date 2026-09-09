@@ -1,6 +1,5 @@
 import json
 from datetime import datetime, timezone
-from typing import Dict, List
 from uuid import NAMESPACE_OID, uuid5
 
 from sqlalchemy import text
@@ -16,7 +15,7 @@ from cognee.tasks.schema.models import DatabaseSchema, SchemaRelationship, Schem
 async def ingest_database_schema(
     schema,
     max_sample_rows: int = 0,
-) -> Dict[str, List[DataPoint] | DataPoint]:
+) -> dict[str, list[DataPoint] | DataPoint]:
     """
     Extract database schema metadata (optionally with sample data) and return DataPoint models for graph construction.
 
@@ -53,7 +52,7 @@ async def ingest_database_schema(
             tn = qname(table_name)
             if max_sample_rows > 0:
                 rows_result = await cursor.execute(
-                    text(f"SELECT * FROM {tn} LIMIT :limit;"),  # noqa: S608 - tn is fully quoted
+                    text(f"SELECT * FROM {tn} LIMIT :limit;"),  # tn is fully quoted
                     {"limit": max_sample_rows},
                 )
                 rows = [dict(r) for r in rows_result.mappings().all()]
@@ -76,7 +75,9 @@ async def ingest_database_schema(
                 )
                 row_count_estimate = estimate.scalar() or 0
             else:
-                count_result = await cursor.execute(text(f"SELECT COUNT(*) FROM {tn};"))  # noqa: S608 - tn is fully quoted
+                count_result = await cursor.execute(
+                    text(f"SELECT COUNT(*) FROM {tn};")
+                )  # tn is fully quoted
                 row_count_estimate = count_result.scalar()
 
             schema_table = SchemaTable(

@@ -31,7 +31,7 @@ async def emit_dlt_schema_graph(
     tables: dict,
     row_records: list[dict],
     ctx: Optional["PipelineContext"] = None,
-    emitted_value_node_ids: Optional[set] = None,
+    emitted_value_node_ids: set | None = None,
 ) -> None:
     """Build and persist the DLT schema graph for the given tables and rows.
 

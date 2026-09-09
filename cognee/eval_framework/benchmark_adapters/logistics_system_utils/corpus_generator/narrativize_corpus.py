@@ -16,6 +16,9 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.utils.utils
     load_world,
 )
 from cognee.infrastructure.llm import LLMGateway
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 BASE_PATH = Path(__file__).resolve().parent.parent
 WORLD_ENTITY_FOLDERS = ("carrier", "post_office", "retailer", "user")
@@ -194,6 +197,7 @@ async def narrativize_corpus(
                 NarrativeOutput,
             )
         except Exception:
+            logger.debug("Ignoring exception in narrativize_corpus", exc_info=True)
             response = _fallback_world_narratives(world)
     else:
         response = _fallback_world_narratives(world)
@@ -207,6 +211,7 @@ async def narrativize_corpus(
                 PackageNarrativeOutput,
             )
         except Exception:
+            logger.debug("Ignoring exception in narrativize_corpus", exc_info=True)
             package_response = _fallback_package_narratives(world)
     else:
         package_response = _fallback_package_narratives(world)

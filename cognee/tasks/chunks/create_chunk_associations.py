@@ -6,7 +6,7 @@ then applies LLM-based comparison to determine whether chunks should be
 linked with weighted "associated_with" edges in the knowledge graph.
 """
 
-from typing import AsyncGenerator, List, Optional, Union
+from collections.abc import AsyncGenerator
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ class ChunkSimilarity(BaseModel):
     are_similar: bool = Field(description="Whether chunks are semantically related")
     similarity_score: float = Field(ge=0.0, le=1.0, description="Similarity score 0.0-1.0")
     reasoning: str = Field(description="Brief explanation of similarity assessment")
-    association_type: Optional[str] = Field(
+    association_type: str | None = Field(
         default=None, description="Type: topical, causal, temporal, elaboration, contextual"
     )
 
@@ -38,7 +38,7 @@ async def _compare_chunks(
     chunk_2: str,
     user_prompt_location: str,
     system_prompt_location: str,
-) -> Optional[ChunkSimilarity]:
+) -> ChunkSimilarity | None:
     """Compare two text chunks for semantic similarity using an LLM.
 
     Renders the user and system prompts with the chunk texts and calls the LLM
@@ -65,7 +65,7 @@ async def _compare_chunks(
             response_model=ChunkSimilarity,
         )
     except Exception as e:
-        logger.warning(f"LLM comparison failed: {e}")
+        logger.warning(f"LLM comparison failed: {e}", exc_info=True)
         return ChunkSimilarity(
             are_similar=False, similarity_score=0.0, reasoning="LLM error", association_type=None
         )
@@ -99,10 +99,10 @@ def _create_edge(chunk_1_id: str, chunk_2_id: str, similarity: ChunkSimilarity):
 
 
 async def create_chunk_associations(
-    chunks: Union[List[str], str],
+    chunks: list[str] | str,
     similarity_threshold: float = 0.7,
     min_chunk_length: int = 10,
-    top_k_candidates: Optional[int] = None,
+    top_k_candidates: int | None = None,
     user_prompt_location: str = "chunk_association_user.txt",
     system_prompt_location: str = "chunk_association_system.txt",
     ctx=None,
@@ -164,7 +164,9 @@ async def create_chunk_associations(
                 chunk_id = str(results[0].id)
                 id_to_text[chunk_id] = chunk_text
         except Exception as e:
-            logger.warning(f"Failed to find chunk ID for text: {chunk_text[:50]}... Error: {e}")
+            logger.warning(
+                f"Failed to find chunk ID for text: {chunk_text[:50]}... Error: {e}", exc_info=True
+            )
 
     logger.info(f"Found {len(id_to_text)} chunk IDs from vector search")
 
@@ -179,7 +181,9 @@ async def create_chunk_associations(
                 "DocumentChunk_text", chunk_text, limit=search_limit
             )
         except Exception as e:
-            logger.warning(f"Vector search failed for chunk: {chunk_text[:50]}... Error: {e}")
+            logger.warning(
+                f"Vector search failed for chunk: {chunk_text[:50]}... Error: {e}", exc_info=True
+            )
             continue
 
         for candidate in candidates:

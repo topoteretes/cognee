@@ -97,7 +97,7 @@ def _type_from(
             _type_from(member, defs, depth + 1, in_flight_refs, budget)
             for member in schema["anyOf"]
         ]
-        return Union[tuple(members)]
+        return Union[tuple(members)]  # noqa: UP007 - built from a runtime list; no | spelling
 
     schema_type = schema.get("type")
     if isinstance(schema_type, list):
@@ -105,7 +105,7 @@ def _type_from(
             _type_from({**schema, "type": single}, defs, depth + 1, in_flight_refs, budget)
             for single in schema_type
         ]
-        return Union[tuple(members)]
+        return Union[tuple(members)]  # noqa: UP007 - built from a runtime list; no | spelling
 
     if schema_type == "null":
         return type(None)
@@ -144,7 +144,7 @@ def _build_object(
         if field_name in required:
             fields[field_name] = (annotation, ...)
         else:
-            fields[field_name] = (Optional[annotation], None)
+            fields[field_name] = (Optional[annotation], None)  # noqa: UP045 - annotation may be a forward-reference string
 
     raw_name = schema.get("title") or fallback_name
     model_name = raw_name if raw_name.isidentifier() else fallback_name

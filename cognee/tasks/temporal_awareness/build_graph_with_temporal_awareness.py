@@ -1,7 +1,6 @@
 import logging
 import os
 from datetime import datetime, timezone
-from typing import List
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType
@@ -12,8 +11,8 @@ from cognee.modules.data.models import Data
 logger = logging.getLogger(__name__)
 
 
-async def build_graph_with_temporal_awareness(data: List[Data]):
-    text_list: List[str] = []
+async def build_graph_with_temporal_awareness(data: list[Data]):
+    text_list: list[str] = []
 
     for text_data in data:
         file_dir = os.path.dirname(text_data.raw_data_location)

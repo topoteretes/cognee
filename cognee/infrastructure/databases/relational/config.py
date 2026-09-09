@@ -1,7 +1,6 @@
 import json
 import os
 from functools import lru_cache
-from typing import Union
 
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,19 +15,19 @@ class RelationalConfig(BaseSettings):
 
     db_path: str = ""
     db_name: str = "cognee_db"
-    db_host: Union[str, None] = None  # "localhost"
-    db_port: Union[str, None] = None  # "5432"
-    db_username: Union[str, None] = None  # "cognee"
-    db_password: Union[str, None] = None  # "cognee"
+    db_host: str | None = None  # "localhost"
+    db_port: str | None = None  # "5432"
+    db_username: str | None = None  # "cognee"
+    db_password: str | None = None  # "cognee"
     db_provider: str = "sqlite"
-    database_connect_args: Union[str, None] = None
-    pool_args: Union[str, None] = None
+    database_connect_args: str | None = None
+    pool_args: str | None = None
     # Turso (libSQL) specific settings. Only used when db_provider == "turso".
     # db_turso_url: remote Turso database URL (e.g. "libsql://<db>.turso.io").
     #   Leave unset for a purely local/embedded libSQL file (uses db_path/db_name).
     # db_turso_auth_token: auth token for the remote Turso database.
-    db_turso_url: Union[str, None] = None
-    db_turso_auth_token: Union[str, None] = None
+    db_turso_url: str | None = None
+    db_turso_auth_token: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -125,13 +124,13 @@ class MigrationConfig(BaseSettings):
     - migration_db_provider: Provider type for the migration database.
     """
 
-    migration_db_path: Union[str, None] = None
-    migration_db_name: Union[str, None] = None
-    migration_db_host: Union[str, None] = None
-    migration_db_port: Union[str, None] = None
-    migration_db_username: Union[str, None] = None
-    migration_db_password: Union[str, None] = None
-    migration_db_provider: Union[str, None] = None
+    migration_db_path: str | None = None
+    migration_db_name: str | None = None
+    migration_db_host: str | None = None
+    migration_db_port: str | None = None
+    migration_db_username: str | None = None
+    migration_db_password: str | None = None
+    migration_db_provider: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

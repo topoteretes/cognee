@@ -1,5 +1,5 @@
 from collections.abc import Coroutine
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -23,7 +23,7 @@ def _inject_agent_memory(text_input: str) -> str:
     return f"Additional Memory Context:\n{context.memory_context}\n\nOriginal Input:\n{text_input}"
 
 
-def _exact_usage_from_result(result: Any) -> tuple[Optional[int], Optional[int]]:
+def _exact_usage_from_result(result: Any) -> tuple[int | None, int | None]:
     """Real prompt/completion token counts from the raw provider response —
     (None, None) otherwise, so the caller falls back to its char-based
     estimate.
@@ -75,7 +75,7 @@ async def _record_session_usage_after(
             tokens_out_override=tokens_out,
         )
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _record_session_usage_after", exc_info=True)
     return result
 
 
@@ -184,7 +184,7 @@ class LLMGateway:
             )
 
             return bool(getattr(get_llm_client(), "supports_answer_streaming", False))
-        except Exception:  # noqa: BLE001 - a capability probe must not break a request
+        except Exception:  # a capability probe must not break a request
             logger.debug("Could not resolve answer-streaming support", exc_info=True)
             return False
 

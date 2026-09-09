@@ -16,7 +16,7 @@ class BinaryData(IngestionData):
     data: BinaryIO = None
     metadata: FileMetadata = None
 
-    def __init__(self, data: BinaryIO, name: str = None):
+    def __init__(self, data: BinaryIO, name: str | None = None):
         self.name = name
         self.data = data
 

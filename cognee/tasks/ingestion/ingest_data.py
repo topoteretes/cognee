@@ -2,7 +2,7 @@ import inspect
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, List, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -38,7 +38,7 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle: pipelines imports this pac
 logger = get_logger(__name__)
 
 
-def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> str:
+def _display_file_name(file_metadata: dict | None, actual_file_path: str) -> str:
     """The filename to show loaders for a payload, as the user would name it.
 
     ``FileMetadata`` splits a name into an extension-less ``name`` plus a
@@ -53,7 +53,7 @@ def _display_file_name(file_metadata: Optional[dict], actual_file_path: str) -> 
     return f"{name}.{extension}" if extension else name
 
 
-def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional[UUID], user: User):
+def _pipeline_dataset_for(ctx, dataset_name: str | None, dataset_id: UUID | None, user: User):
     """The run's dataset from ``ctx`` when it is the one this call targets, else None.
 
     The pipeline sets ``ctx.dataset`` to the dataset it resolved (with write
@@ -77,7 +77,7 @@ def _pipeline_dataset_for(ctx, dataset_name: Optional[str], dataset_id: Optional
     return None
 
 
-def _source_uri_from_input(data_item: Any) -> Optional[str]:
+def _source_uri_from_input(data_item: Any) -> str | None:
     """Return an origin locator without ever treating raw text as a URI.
 
     HTTP content is materialized into Cognee storage before metadata is read, so
@@ -117,9 +117,9 @@ async def ingest_data(
     data: Any,
     dataset_name: str,
     user: User,
-    node_set: Optional[List[str]] = None,
-    dataset_id: UUID = None,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    node_set: list[str] | None = None,
+    dataset_id: UUID | None = None,
+    preferred_loaders: dict[str, dict[str, Any]] | None = None,
     importance_weight: float = 0.5,
     ctx: "PipelineContext" = None,
 ):
@@ -134,7 +134,7 @@ async def ingest_data(
     if not user:
         user = await get_default_user()
 
-    def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
+    def get_external_metadata_dict(data_item: BinaryIO | str | Any) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(data_item.dict):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
@@ -144,9 +144,9 @@ async def ingest_data(
         data: Any,
         dataset_name: str,
         user: User,
-        node_set: Optional[List[str]] = None,
-        dataset_id: UUID = None,
-        preferred_loaders: dict[str, dict[str, Any]] = None,
+        node_set: list[str] | None = None,
+        dataset_id: UUID | None = None,
+        preferred_loaders: dict[str, dict[str, Any]] | None = None,
     ):
         import time as _time
 

@@ -3,7 +3,7 @@
 import asyncio
 import json
 import threading
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
@@ -30,14 +30,14 @@ class IndexSchema(DataPoint):
     # Optional reference scalars carried for the search "Evidence" feature.
     # They stay None for non-chunk data points, so this schema remains
     # compatible with every indexed DataPoint type.
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
-    chunk_index: Optional[int] = None
-    source_chunk_id: Optional[str] = None
-    importance_weight: Optional[float] = 0.5
+    document_id: str | None = None
+    document_name: str | None = None
+    chunk_index: int | None = None
+    source_chunk_id: str | None = None
+    importance_weight: float | None = 0.5
 
     metadata: dict = {"index_fields": ["text"]}
-    belongs_to_set: List[str] = []
+    belongs_to_set: list[str] = []
 
 
 def _is_remote_url(url: str) -> bool:
@@ -45,7 +45,7 @@ def _is_remote_url(url: str) -> bool:
     return url.startswith(("libsql://", "http://", "https://", "ws://", "wss://"))
 
 
-def _vector_literal(vector: List[float]) -> str:
+def _vector_literal(vector: list[float]) -> str:
     """Render an embedding as the JSON-array text ``vector32()`` expects."""
     return json.dumps([float(value) for value in vector])
 
@@ -58,9 +58,9 @@ class TursoVectorAdapter(VectorDBInterface):
     def __init__(
         self,
         url: str,
-        api_key: Optional[str],
+        api_key: str | None,
         embedding_engine: EmbeddingEngine,
-        database_name: Optional[str] = None,
+        database_name: str | None = None,
     ):
         self.url = url
         self.api_key = api_key
@@ -109,7 +109,7 @@ class TursoVectorAdapter(VectorDBInterface):
     def _run(
         self,
         sql: str,
-        params: Optional[List[Any]] = None,
+        params: list[Any] | None = None,
         *,
         fetch: bool = False,
         commit: bool = False,
@@ -126,7 +126,7 @@ class TursoVectorAdapter(VectorDBInterface):
     async def _execute(
         self,
         sql: str,
-        params: Optional[List[Any]] = None,
+        params: list[Any] | None = None,
         *,
         fetch: bool = False,
         commit: bool = False,
@@ -136,7 +136,7 @@ class TursoVectorAdapter(VectorDBInterface):
     # ------------------------------------------------------------------ #
     # Embedding
     # ------------------------------------------------------------------ #
-    async def embed_data(self, data: List[str]) -> List[List[float]]:
+    async def embed_data(self, data: list[str]) -> list[list[float]]:
         """Embed a list of texts into vectors using the configured engine."""
         return await self.embedding_engine.embed_text(data)
 
@@ -170,7 +170,7 @@ class TursoVectorAdapter(VectorDBInterface):
             )
             self._known_collections.add(collection_name)
 
-    async def get_table_names(self) -> List[str]:
+    async def get_table_names(self) -> list[str]:
         """Return every table name in the database (used by prune / detag / tests)."""
         rows = await self._execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'",
@@ -181,7 +181,7 @@ class TursoVectorAdapter(VectorDBInterface):
     # ------------------------------------------------------------------ #
     # Writes
     # ------------------------------------------------------------------ #
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
         """Upsert DataPoints, merging ``belongs_to_set`` on id conflict."""
         if not data_points:
             return
@@ -226,7 +226,7 @@ class TursoVectorAdapter(VectorDBInterface):
 
         await asyncio.to_thread(self._run_many, insert_sql, params)
 
-    def _run_many(self, sql: str, params: List[List[Any]]):
+    def _run_many(self, sql: str, params: list[list[Any]]):
         """Execute one write per row inside a single committed transaction."""
         with self._connection_lock:
             connection = self._get_connection()
@@ -239,7 +239,7 @@ class TursoVectorAdapter(VectorDBInterface):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
-        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         """Write index rows derived from ``data_points`` into the {index}_{property} table."""
         await self.create_data_points(
@@ -298,7 +298,7 @@ class TursoVectorAdapter(VectorDBInterface):
                 commit=True,
             )
 
-    async def retrieve(self, collection_name: str, data_point_ids: List[str]):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """Return rows from ``collection_name`` matching any of ``data_point_ids``."""
         if not await self.has_collection(collection_name):
             return []
@@ -330,14 +330,14 @@ class TursoVectorAdapter(VectorDBInterface):
     async def search(
         self,
         collection_name: str,
-        query_text: Optional[str] = None,
-        query_vector: Optional[List[float]] = None,
-        limit: Optional[int] = 15,
+        query_text: str | None = None,
+        query_vector: list[float] | None = None,
+        limit: int | None = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
-    ) -> List[ScoredResult]:
+    ) -> list[ScoredResult]:
         """Run a cosine-distance similarity search, optionally filtered by NodeSet tag."""
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -355,7 +355,7 @@ class TursoVectorAdapter(VectorDBInterface):
         if limit <= 0:
             return []
 
-        params: List[Any] = [_vector_literal(query_vector)]
+        params: list[Any] = [_vector_literal(query_vector)]
         where_clause = ""
         if node_name:
             placeholders = ",".join("?" for _ in node_name)
@@ -401,11 +401,11 @@ class TursoVectorAdapter(VectorDBInterface):
     async def batch_search(
         self,
         collection_name: str,
-        query_texts: List[str],
-        limit: int = None,
+        query_texts: list[str],
+        limit: int | None = None,
         with_vectors: bool = False,
         include_payload: bool = False,
-        node_name: Optional[List[str]] = None,
+        node_name: list[str] | None = None,
     ):
         """Run ``search`` for each query text and return a list of result lists."""
         query_vectors = await self.embedding_engine.embed_text(query_texts)
@@ -427,7 +427,7 @@ class TursoVectorAdapter(VectorDBInterface):
     # ------------------------------------------------------------------ #
     # Deletes
     # ------------------------------------------------------------------ #
-    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         """Delete rows whose id is in ``data_point_ids``."""
         if not await self.has_collection(collection_name):
             return
@@ -448,8 +448,8 @@ class TursoVectorAdapter(VectorDBInterface):
 
     async def remove_belongs_to_set_tags(
         self,
-        tags: List[str],
-        node_ids: Optional[List[str]] = None,
+        tags: list[str],
+        node_ids: list[str] | None = None,
     ) -> None:
         """Strip ``tags`` from belongs_to_set arrays and delete rows left empty.
 
@@ -471,7 +471,7 @@ class TursoVectorAdapter(VectorDBInterface):
 
         for table_name in candidate_tables:
             id_scope = ""
-            scope_params: List[Any] = []
+            scope_params: list[Any] = []
             if node_ids_list is not None:
                 placeholders = ",".join("?" for _ in node_ids_list)
                 id_scope = f" AND id IN ({placeholders})"
@@ -493,8 +493,10 @@ class TursoVectorAdapter(VectorDBInterface):
             # errors here and is skipped quietly.
             try:
                 rows = await self._execute(select_sql, [tags_json] + scope_params, fetch=True)
-            except Exception as error:  # noqa: BLE001 - not a vector collection; skip
-                logger.debug("remove_belongs_to_set_tags skipped '%s': %s", table_name, error)
+            except Exception as error:  # not a vector collection; skip
+                logger.debug(
+                    "remove_belongs_to_set_tags skipped '%s': %s", table_name, error, exc_info=True
+                )
                 continue
 
             target_ids = [row[0] for row in rows or []]
@@ -520,9 +522,12 @@ class TursoVectorAdapter(VectorDBInterface):
             try:
                 await self._execute(update_sql, [tags_json] + target_ids, commit=True)
                 await self._execute(delete_sql, target_ids, commit=True)
-            except Exception as error:  # noqa: BLE001 - surface, but continue other tables
+            except Exception as error:  # surface, but continue other tables
                 logger.warning(
-                    "remove_belongs_to_set_tags failed to update '%s': %s", table_name, error
+                    "remove_belongs_to_set_tags failed to update '%s': %s",
+                    table_name,
+                    error,
+                    exc_info=True,
                 )
 
         return

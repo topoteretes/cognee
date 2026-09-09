@@ -267,9 +267,11 @@ async def test_the_stream_is_closed_even_when_iteration_fails():
     async def _acompletion(*_args, **_kwargs):
         return _Exploding()
 
-    with patch(f"{STREAM_MODULE}.litellm.acompletion", new=_acompletion):
-        with pytest.raises(RuntimeError, match="connection reset"):
-            await _stream(sink, [])
+    with (
+        patch(f"{STREAM_MODULE}.litellm.acompletion", new=_acompletion),
+        pytest.raises(RuntimeError, match="connection reset"),
+    ):
+        await _stream(sink, [])
 
     assert closed.get("yes") is True
 

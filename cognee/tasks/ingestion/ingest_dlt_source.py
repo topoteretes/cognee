@@ -4,7 +4,6 @@ import json
 import os
 import re
 from collections import Counter
-from typing import List, Optional
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -39,10 +38,10 @@ _SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
-    primary_key: Optional[str] = None,
+    primary_key: str | None = None,
     write_disposition: str = "replace",
-    max_rows_per_table: Optional[int] = None,
-) -> List[DltRowData]:
+    max_rows_per_table: int | None = None,
+) -> list[DltRowData]:
     """
     Ingests a dlt (re)source by running the dlt pipeline on it.
     Returns a list of DltRowData, one per row in the ingested tables.
@@ -285,10 +284,10 @@ async def _read_rows_from_tables(
     dlt_db_name: str,
     dataset_name: str,
     schema: dict,
-    primary_key: Optional[str],
+    primary_key: str | None,
     relational_config,
     max_rows_per_table: int = 0,
-) -> List[DltRowData]:
+) -> list[DltRowData]:
     """Read rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
         # DLT creates a separate SQLite file: {db_name}__{dataset_name}
@@ -341,12 +340,12 @@ async def _read_single_table(
     conn,
     table_name: str,
     table_info: dict,
-    primary_key: Optional[str],
+    primary_key: str | None,
     dataset_name: str,
     dlt_db_name: str,
     relational_config,
     max_rows: int = 0,
-) -> List[DltRowData]:
+) -> list[DltRowData]:
     """Read rows from a single table and return DltRowData objects.
 
     At most ``max_rows`` rows are read.  Pass 0 or a negative value to
@@ -435,7 +434,7 @@ async def _read_single_table(
 
 
 def _resolve_primary_key(
-    provided_pk: Optional[str],
+    provided_pk: str | None,
     table_info: dict,
     column_names: list,
     table_name: str = "",
@@ -497,7 +496,7 @@ def _to_safe_ident(s: str) -> str:
     return s[:63]
 
 
-async def migrate_dlt_database(data: List[Data]):
+async def migrate_dlt_database(data: list[Data]):
     """Legacy function for migrating dlt database schema to graph database."""
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
     from cognee.infrastructure.files.utils.open_data_file import open_data_file

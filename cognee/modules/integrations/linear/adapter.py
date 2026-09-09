@@ -28,7 +28,7 @@ reconnect.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp
@@ -184,7 +184,7 @@ class LinearIntegration(OAuthIntegration):
     def frontend_base_url(self) -> str:
         return require("frontend_base_url")
 
-    def webhook_verifier(self) -> Optional[WebhookVerifier]:
+    def webhook_verifier(self) -> WebhookVerifier | None:
         return LinearWebhookVerifier()
 
     async def handle_webhook(self, raw_body: bytes, headers: dict[str, str]) -> None:
@@ -221,7 +221,7 @@ class LinearIntegration(OAuthIntegration):
                         credential.provider_account_id,
                         response.status,
                     )
-        except Exception:  # noqa: BLE001 - disconnect must proceed no matter what happens here
+        except Exception:  # disconnect must proceed no matter what happens here
             logger.exception(
                 "Linear token revoke for organization %s failed", credential.provider_account_id
             )

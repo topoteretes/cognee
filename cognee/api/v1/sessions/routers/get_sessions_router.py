@@ -6,7 +6,7 @@ abandonment-by-idle rule so no sweeper is needed.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder
@@ -37,7 +37,7 @@ logger = get_logger("sessions_api")
 _RangeLiteral = Literal["24h", "7d", "30d", "all"]
 
 
-def _range_since(range_key: _RangeLiteral) -> Optional[datetime]:
+def _range_since(range_key: _RangeLiteral) -> datetime | None:
     now = datetime.now(timezone.utc)
     if range_key == "24h":
         return now - timedelta(hours=24)
@@ -61,7 +61,7 @@ def get_sessions_router() -> APIRouter:
             ),
             examples=["30d"],
         ),
-        status: Optional[str] = Query(
+        status: str | None = Query(
             None,
             description=(
                 "Filter by effective status: 'running', 'completed', 'failed', or 'abandoned'. "
@@ -316,7 +316,7 @@ def get_sessions_router() -> APIRouter:
             description="Time window filtered on last_activity_at: 24h, 7d, 30d, or all.",
             examples=["30d"],
         ),
-        status: Optional[str] = Query(
+        status: str | None = Query(
             None,
             description="Effective-status filter: running, completed, failed, or abandoned.",
         ),
@@ -460,7 +460,9 @@ def get_sessions_router() -> APIRouter:
                     user_id=owner_user_id, session_id=session_id
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "Ignoring exception in get_sessions_router.get_session_detail", exc_info=True
+                )
 
         record = row.to_dict()
         # Label = first QA's question, else first trace's origin_function

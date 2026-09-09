@@ -1,5 +1,3 @@
-from typing import Optional
-
 import aiohttp
 
 from cognee.shared.logging_utils import get_logger
@@ -35,7 +33,7 @@ class AzureTranslationProvider(TranslationProvider):
         self,
         text: str,
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> TranslationResult:
         """
         Translate text using Azure Translator API.
@@ -99,7 +97,7 @@ class AzureTranslationProvider(TranslationProvider):
             )
 
         except Exception as e:
-            logger.error(f"Azure translation failed: {e}")
+            logger.exception("Azure translation failed")
             raise TranslationProviderError(
                 provider=self.provider_name,
                 message=f"Translation failed: {e}",
@@ -110,7 +108,7 @@ class AzureTranslationProvider(TranslationProvider):
         self,
         texts: list[str],
         target_language: str = "en",
-        source_language: Optional[str] = None,
+        source_language: str | None = None,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using Azure Translator API.
@@ -184,7 +182,7 @@ class AzureTranslationProvider(TranslationProvider):
                         )
 
         except Exception as e:
-            logger.error(f"Azure batch translation failed: {e}")
+            logger.exception("Azure batch translation failed")
             raise TranslationProviderError(
                 provider=self.provider_name,
                 message=f"Batch translation failed: {e}",

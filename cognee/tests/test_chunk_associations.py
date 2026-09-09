@@ -1,3 +1,4 @@
+import logging
 import pathlib
 
 import pytest
@@ -10,6 +11,8 @@ from cognee.low_level import setup
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -31,7 +34,7 @@ async def clean_test_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
 
 
 def _get_association_edges(edges):
@@ -71,7 +74,7 @@ async def test_chunk_associations_creates_edges_between_similar_chunks(clean_tes
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -112,7 +115,7 @@ async def test_chunk_associations_respects_similarity_threshold(clean_test_envir
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -147,7 +150,7 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -221,7 +224,7 @@ async def test_chunk_associations_handles_single_chunk(clean_test_environment):
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 
@@ -254,7 +257,7 @@ async def test_chunk_associations_configurable_parameters(clean_test_environment
     )
 
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     association_edges = _get_association_edges(edges)
 

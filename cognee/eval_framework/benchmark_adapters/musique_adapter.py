@@ -2,7 +2,7 @@ import json
 import os
 import random
 import zipfile
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 
@@ -36,7 +36,7 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
         return "\n".join(golden_context)
 
-    def _get_raw_corpus(self, auto_download: bool = True) -> List[dict[str, Any]]:
+    def _get_raw_corpus(self, auto_download: bool = True) -> list[dict[str, Any]]:
         """Loads the raw corpus data from file or downloads it if needed."""
         target_filename = self.dataset_info["filename"]
 
@@ -54,7 +54,7 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
         return data
 
-    def _get_corpus_entries(self, item: dict[str, Any]) -> List[str]:
+    def _get_corpus_entries(self, item: dict[str, Any]) -> list[str]:
         """Extracts corpus entries from the paragraphs of an item."""
         return [paragraph["paragraph_text"] for paragraph in item.get("paragraphs", [])]
 
@@ -79,12 +79,12 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
     def load_corpus(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         seed: int = 42,
         load_golden_context: bool = False,
         auto_download: bool = True,
-        instance_filter: Optional[Union[str, List[str], List[int]]] = None,
-    ) -> Tuple[List[str], List[dict[str, Any]]]:
+        instance_filter: str | list[str] | list[int] | None = None,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         """Loads and processes the Musique QA dataset with optional filtering."""
         raw_corpus = self._get_raw_corpus(auto_download)
 

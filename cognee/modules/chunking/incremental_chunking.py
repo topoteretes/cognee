@@ -18,9 +18,9 @@ into exactly the new text.
 """
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Callable, List, Optional
 
 
 class IncrementalPlanError(Exception):
@@ -31,7 +31,7 @@ class IncrementalPlanError(Exception):
 class ReplacementRegion:
     """One contiguous run of old chunks replaced by one stretch of new text."""
 
-    affected_indices: List[int]  # contiguous positions in the old chunk list
+    affected_indices: list[int]  # contiguous positions in the old chunk list
     replacement_text: str = field(repr=False, default="")
 
 
@@ -39,18 +39,18 @@ class ReplacementRegion:
 class IncrementalPlan:
     """Result of the chunk-level diff between old and new document text."""
 
-    regions: List[ReplacementRegion]
+    regions: list[ReplacementRegion]
     total_old_chunks: int
 
     @property
-    def affected_indices(self) -> List[int]:
-        indices: List[int] = []
+    def affected_indices(self) -> list[int]:
+        indices: list[int] = []
         for region in self.regions:
             indices.extend(region.affected_indices)
         return indices
 
 
-def chunk_offsets(old_text: str, old_chunks: List[str]) -> List[tuple]:
+def chunk_offsets(old_text: str, old_chunks: list[str]) -> list[tuple]:
     """[(start, end)] of each chunk inside old_text; the chunks must tile it."""
     offsets = []
     cursor = 0
@@ -66,7 +66,7 @@ def chunk_offsets(old_text: str, old_chunks: List[str]) -> List[tuple]:
     return offsets
 
 
-def _line_trim(old_lines: List[str], new_lines: List[str]) -> tuple:
+def _line_trim(old_lines: list[str], new_lines: list[str]) -> tuple:
     """(prefix, suffix) counts of identical lines shared at both ends.
 
     A fast path only: it shrinks the matcher's input for the common case of a
@@ -83,7 +83,7 @@ def _line_trim(old_lines: List[str], new_lines: List[str]) -> tuple:
     return prefix, suffix
 
 
-def _paragraph_units(lines: List[str]) -> List[str]:
+def _paragraph_units(lines: list[str]) -> list[str]:
     """Group lines into units: a run of non-blank lines plus the blank lines
     that follow it. Units tile their input byte-exactly."""
     units = []
@@ -99,7 +99,7 @@ def _paragraph_units(lines: List[str]) -> List[str]:
     return units
 
 
-def _popular_junk(elements: List[str]) -> Optional[Callable[[str], bool]]:
+def _popular_junk(elements: list[str]) -> Callable[[str], bool] | None:
     """difflib-autojunk-style popularity filter, applied at our layer.
 
     SequenceMatcher walks EVERY occurrence of an element for every query, so
@@ -115,14 +115,14 @@ def _popular_junk(elements: List[str]) -> Optional[Callable[[str], bool]]:
     return (lambda element: element in popular) if popular else None
 
 
-def _prefix_offsets(parts: List[str]) -> List[int]:
+def _prefix_offsets(parts: list[str]) -> list[int]:
     offsets = [0]
     for part in parts:
         offsets.append(offsets[-1] + len(part))
     return offsets
 
 
-def _refine_hunk(old_slice: str, new_slice: str) -> List[tuple]:
+def _refine_hunk(old_slice: str, new_slice: str) -> list[tuple]:
     """Character spans (local to the slices) for one changed unit hunk.
 
     The hunk is bounded by equal paragraphs, so it is small for local edits;
@@ -150,7 +150,7 @@ def _refine_hunk(old_slice: str, new_slice: str) -> List[tuple]:
     return spans
 
 
-def _diff_spans(old_text: str, new_text: str) -> List[tuple]:
+def _diff_spans(old_text: str, new_text: str) -> list[tuple]:
     """Disjoint changed spans as (old_start, old_end, new_start, new_end) chars.
 
     Contract: the text OUTSIDE the spans is byte-identical between old and new
@@ -221,7 +221,7 @@ def _shrink_span(
 
 
 def compute_incremental_plan(
-    old_text: str, old_chunks: List[str], new_text: str
+    old_text: str, old_chunks: list[str], new_text: str
 ) -> IncrementalPlan:
     """Diff old vs new text and plan the minimal set of chunk replacements."""
     if not old_chunks:
@@ -287,13 +287,13 @@ def compute_incremental_plan(
 
 
 def interleave_texts(
-    old_chunks: List[str], plan: IncrementalPlan, region_texts: List[List[str]]
-) -> List[str]:
+    old_chunks: list[str], plan: IncrementalPlan, region_texts: list[list[str]]
+) -> list[str]:
     """Final document chunk texts: kept chunks and region chunks in order."""
     region_by_start = {
         region.affected_indices[0]: index for index, region in enumerate(plan.regions)
     }
-    result: List[str] = []
+    result: list[str] = []
     position = 0
     while position < len(old_chunks):
         if position in region_by_start:
@@ -307,9 +307,9 @@ def interleave_texts(
 
 
 def validate_no_loss(
-    old_chunks: List[str],
+    old_chunks: list[str],
     plan: IncrementalPlan,
-    region_texts: List[List[str]],
+    region_texts: list[list[str]],
     new_text: str,
 ) -> None:
     """Refuse any plan whose reassembly is not byte-identical to the new text.

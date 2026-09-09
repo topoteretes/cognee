@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-from typing import Optional
 
 import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL

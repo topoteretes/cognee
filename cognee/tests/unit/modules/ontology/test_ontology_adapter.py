@@ -655,7 +655,7 @@ def test_multifile_ontology_with_overlapping_entities():
         assert "mercedes" in resolver.lookup["individuals"]
         assert "bmw" in resolver.lookup["individuals"]
 
-        nodes, relationships, start_node = resolver.get_subgraph("Mercedes", "individuals")
+        nodes, _relationships, _start_node = resolver.get_subgraph("Mercedes", "individuals")
 
         uri_labels = {resolver._uri_to_key(n.uri) for n in nodes}
         assert "mercedes" in uri_labels

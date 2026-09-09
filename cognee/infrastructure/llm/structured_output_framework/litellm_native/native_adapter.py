@@ -130,6 +130,7 @@ def _supports_native_schema(model_name: str) -> bool:
     try:
         return bool(litellm.supports_response_schema(model=model_name))
     except Exception:
+        logger.debug("Falling back to False after error in _supports_native_schema", exc_info=True)
         return False
 
 
@@ -161,7 +162,7 @@ def _enrich_llm_span(model: str, name: str) -> None:
             if stage:
                 current_span.set_attribute(COGNEE_PIPELINE_STAGE, stage)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _enrich_llm_span", exc_info=True)
 
 
 class NativeLiteLLMAdapter:

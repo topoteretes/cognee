@@ -1,6 +1,6 @@
+import logging
 import os
 import pathlib
-from typing import List
 
 import pytest
 import pytest_asyncio
@@ -15,6 +15,8 @@ from cognee.modules.engine.models import Entity
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.tasks.storage import add_data_points
 
+logger = logging.getLogger(__name__)
+
 
 class DocumentChunkWithEntities(DataPoint):
     text: str
@@ -22,7 +24,7 @@ class DocumentChunkWithEntities(DataPoint):
     chunk_index: int
     cut_type: str
     is_part_of: Document
-    contains: List[Entity] = None
+    contains: list[Entity] = None
 
     metadata: dict = {"index_fields": ["text"]}
 
@@ -105,7 +107,9 @@ async def setup_test_environment_with_chunks_simple():
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug(
+            "Ignoring exception in setup_test_environment_with_chunks_simple", exc_info=True
+        )
 
 
 @pytest_asyncio.fixture
@@ -218,7 +222,9 @@ async def setup_test_environment_with_chunks_complex():
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug(
+            "Ignoring exception in setup_test_environment_with_chunks_complex", exc_info=True
+        )
 
 
 @pytest_asyncio.fixture
@@ -262,7 +268,7 @@ async def setup_test_environment_empty():
         _create_vector_engine.cache_clear()
         create_relational_engine.cache_clear()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

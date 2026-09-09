@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -21,7 +20,7 @@ class DeletionCountsPreview:
 
 
 async def get_deletion_counts(
-    dataset_name: Optional[str] = None, user_id: Optional[UUID] = None, all_data: bool = False
+    dataset_name: str | None = None, user_id: UUID | None = None, all_data: bool = False
 ) -> DeletionCountsPreview:
     """
     Calculates the number of items that will be deleted based on the provided arguments.

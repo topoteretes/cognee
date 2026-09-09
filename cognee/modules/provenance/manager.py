@@ -22,8 +22,9 @@ same name would cross-contaminate one version chain. The cognify task
 dataset id for exactly this reason; readers join with the same prefixed key.
 """
 
+from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,13 +70,13 @@ class ProvenanceManager:
         }
     )
 
-    def _warn_unknown_kwargs(self, method: str, kwargs: Dict[str, Any]) -> None:
+    def _warn_unknown_kwargs(self, method: str, kwargs: dict[str, Any]) -> None:
         unknown = set(kwargs) - self._TRACK_ENTITY_KWARGS
         if unknown:
             logger.debug("%s ignoring unknown kwargs: %s", method, sorted(unknown))
 
     @staticmethod
-    def _base_entry_fields(source: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def _base_entry_fields(source: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Shared kwarg -> field resolution for the track_* methods."""
         return {
             "agent_id": kwargs.get("agent_id", "cognee"),
@@ -112,13 +113,13 @@ class ProvenanceManager:
         self,
         entity_id: str,
         source: str,
-        metadata: Optional[Dict[str, Any]],
-        kwargs: Dict[str, Any],
-    ) -> Callable[[AsyncSession, int, Optional[str]], Awaitable[ProvenanceEntry]]:
+        metadata: dict[str, Any] | None,
+        kwargs: dict[str, Any],
+    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
         """Build the chained write for one entity track (see ``track_entity``)."""
 
         async def write(
-            session: AsyncSession, next_seq: int, prev_checksum: Optional[str]
+            session: AsyncSession, next_seq: int, prev_checksum: str | None
         ) -> ProvenanceEntry:
             existing_row = await storage.retrieve_row(session, entity_id)
 
@@ -127,9 +128,13 @@ class ProvenanceManager:
                 derived_from = metadata.get("derived_from")
                 if derived_from and isinstance(derived_from, str):
                     parent_id = derived_from
-            if not parent_id and source and isinstance(source, str):
-                if await storage.retrieve_row(session, source) is not None:
-                    parent_id = source
+            if (
+                not parent_id
+                and source
+                and isinstance(source, str)
+                and await storage.retrieve_row(session, source) is not None
+            ):
+                parent_id = source
             explicit_parent_supplied = parent_id is not None
 
             now = utc_now_iso()
@@ -193,9 +198,9 @@ class ProvenanceManager:
         self,
         entity_id: str,
         source: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         **kwargs,
-    ) -> Optional[ProvenanceEntry]:
+    ) -> ProvenanceEntry | None:
         """Track an entity, auto-versioning (archive + relabel) on re-track.
 
         Parent resolution precedence: ``kwargs["parent_entity_id"]`` >
@@ -220,13 +225,13 @@ class ProvenanceManager:
         self,
         relationship_id: str,
         source: str,
-        metadata: Optional[Dict[str, Any]],
-        kwargs: Dict[str, Any],
-    ) -> Callable[[AsyncSession, int, Optional[str]], Awaitable[ProvenanceEntry]]:
+        metadata: dict[str, Any] | None,
+        kwargs: dict[str, Any],
+    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
         """Build the chained write for one relationship track (never versions)."""
 
         async def write(
-            session: AsyncSession, next_seq: int, prev_checksum: Optional[str]
+            session: AsyncSession, next_seq: int, prev_checksum: str | None
         ) -> ProvenanceEntry:
             existing_row = await storage.retrieve_row(session, relationship_id)
             if existing_row is not None:
@@ -257,9 +262,9 @@ class ProvenanceManager:
         self,
         relationship_id: str,
         source: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         **kwargs,
-    ) -> Optional[ProvenanceEntry]:
+    ) -> ProvenanceEntry | None:
         """Track a relationship. Relationships never version.
 
         Re-tracking an already-recorded relationship id is a no-op returning
@@ -283,12 +288,12 @@ class ProvenanceManager:
         self,
         chunk_id: str,
         source_document: str,
-        source_path: Optional[str],
+        source_path: str | None,
         start_index: int,
         end_index: int,
-        parent_chunk_id: Optional[str],
-        metadata: Dict[str, Any],
-    ) -> Callable[[AsyncSession, int, Optional[str]], Awaitable[ProvenanceEntry]]:
+        parent_chunk_id: str | None,
+        metadata: dict[str, Any],
+    ) -> Callable[[AsyncSession, int, str | None], Awaitable[ProvenanceEntry]]:
         """Build the chained write for one chunk track (see ``track_chunk``)."""
         metadata = dict(metadata)
         column_kwargs = {
@@ -297,7 +302,7 @@ class ProvenanceManager:
         column_kwargs.setdefault("source_location", source_path)
 
         async def write(
-            session: AsyncSession, next_seq: int, prev_checksum: Optional[str]
+            session: AsyncSession, next_seq: int, prev_checksum: str | None
         ) -> ProvenanceEntry:
             existing_row = await storage.retrieve_row(session, chunk_id)
             if existing_row is not None:
@@ -332,12 +337,12 @@ class ProvenanceManager:
         self,
         chunk_id: str,
         source_document: str,
-        source_path: Optional[str] = None,
+        source_path: str | None = None,
         start_index: int = 0,
         end_index: int = 0,
-        parent_chunk_id: Optional[str] = None,
+        parent_chunk_id: str | None = None,
         **metadata,
-    ) -> Optional[ProvenanceEntry]:
+    ) -> ProvenanceEntry | None:
         """Track a chunk. ``parent_chunk_id`` sets BOTH ``parent_entity_id`` and
         ``derived_from_id`` — a split is a derivation, not a correction.
 
@@ -375,8 +380,8 @@ class ProvenanceManager:
         self,
         entity_id: str,
         agent_id: str,
-        reason: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        reason: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ProvenanceEntry:
         """Mark a tracked entity invalidated (prov:Invalidation) — never delete.
 
@@ -390,7 +395,7 @@ class ProvenanceManager:
         """
 
         async def write(
-            session: AsyncSession, next_seq: int, prev_checksum: Optional[str]
+            session: AsyncSession, next_seq: int, prev_checksum: str | None
         ) -> ProvenanceEntry:
             existing_row = await storage.retrieve_row(session, entity_id)
             if existing_row is None:
@@ -433,11 +438,11 @@ class ProvenanceManager:
 
     # === Queries ===
 
-    async def get_provenance(self, entity_id: str) -> Optional[Dict[str, Any]]:
+    async def get_provenance(self, entity_id: str) -> dict[str, Any] | None:
         entry = await storage.retrieve(entity_id)
         return entry.to_dict() if entry else None
 
-    async def get_lineage(self, entity_id: str) -> Dict[str, Any]:
+    async def get_lineage(self, entity_id: str) -> dict[str, Any]:
         """Aggregate the full upstream lineage for an entity ({} if untracked).
 
         Metadata is aggregated ancestors-first so the queried entity's own
@@ -447,7 +452,7 @@ class ProvenanceManager:
         if not lineage_entries:
             return {}
 
-        aggregated_metadata: Dict[str, Any] = {}
+        aggregated_metadata: dict[str, Any] = {}
         for entry in reversed(lineage_entries):
             if isinstance(entry.metadata, dict):
                 aggregated_metadata.update(entry.metadata)
@@ -475,11 +480,11 @@ class ProvenanceManager:
         }
 
     async def trace_lineage(
-        self, entity_id: str, max_depth: Optional[int] = None
-    ) -> List[ProvenanceEntry]:
+        self, entity_id: str, max_depth: int | None = None
+    ) -> list[ProvenanceEntry]:
         return await storage.trace_lineage(entity_id, max_depth=max_depth)
 
-    async def revision_history(self, entity_id: str) -> List[Dict[str, Any]]:
+    async def revision_history(self, entity_id: str) -> list[dict[str, Any]]:
         """Version history, oldest first, walking previous_version_id (cycle-guarded).
 
         ``valid_from``/``valid_until`` use each entry's own explicit fields
@@ -491,7 +496,7 @@ class ProvenanceManager:
         if current is None:
             return []
 
-        chain: List[ProvenanceEntry] = [current]
+        chain: list[ProvenanceEntry] = [current]
         visited = {entity_id}
         cursor = current
         while cursor.previous_version_id:
@@ -507,10 +512,10 @@ class ProvenanceManager:
 
         chain.reverse()  # oldest first
 
-        history: List[Dict[str, Any]] = []
+        history: list[dict[str, Any]] = []
         for index, entry in enumerate(chain):
             default_valid_until = chain[index + 1].timestamp if index + 1 < len(chain) else None
-            version_dict: Dict[str, Any] = {
+            version_dict: dict[str, Any] = {
                 "version": index + 1,
                 "valid_from": entry.valid_from or entry.timestamp,
                 "valid_until": entry.valid_until or default_valid_until,
@@ -526,7 +531,7 @@ class ProvenanceManager:
 
     # === Integrity ===
 
-    async def verify_chain(self) -> Dict[str, Any]:
+    async def verify_chain(self) -> dict[str, Any]:
         """Verify per-row checksums and the sequence hash chain.
 
         Expected state advances from each entry's OWN stored values, so a
@@ -534,10 +539,10 @@ class ProvenanceManager:
         entry after it. Entries are STREAMED in sequence order (keyset
         pagination) — the ledger is never materialized client-side.
         """
-        broken_links: List[Dict[str, Any]] = []
+        broken_links: list[dict[str, Any]] = []
         total_entries = 0
-        expected_previous: Optional[str] = None
-        expected_sequence: Optional[int] = None
+        expected_previous: str | None = None
+        expected_sequence: int | None = None
         async for entry in storage.iter_chained():
             total_entries += 1
             if not verify_checksum(entry):
@@ -576,7 +581,7 @@ class ProvenanceManager:
             "broken_links": broken_links,
         }
 
-    async def check(self, strict: bool = False) -> Dict[str, Any]:
+    async def check(self, strict: bool = False) -> dict[str, Any]:
         """Referential-integrity check (dangling lineage links), not hashes.
 
         Loads only the id columns for the reference sets, then STREAMS full
@@ -585,7 +590,7 @@ class ProvenanceManager:
         all_ids = await storage.retrieve_all_ids()
         all_activity_ids = await storage.retrieve_all_activity_ids()
 
-        missing_refs: List[str] = []
+        missing_refs: list[str] = []
         total_entries = 0
         invalidated_count = 0
         async for entry in storage.iter_all():
@@ -616,7 +621,7 @@ class ProvenanceManager:
 
     # === Utility ===
 
-    async def get_statistics(self) -> Dict[str, Any]:
+    async def get_statistics(self) -> dict[str, Any]:
         """DB-side aggregates (counts, group-by, distinct) — no full-table load."""
         return await storage.aggregate_statistics()
 
@@ -640,20 +645,20 @@ class ProvenanceBatch:
 
     def __init__(self, manager: ProvenanceManager):
         self._manager = manager
-        self._write_fns: List[Callable] = []
+        self._write_fns: list[Callable] = []
 
     def __len__(self) -> int:
         return len(self._write_fns)
 
     def track_entity(
-        self, entity_id: str, source: str, metadata: Optional[Dict[str, Any]] = None, **kwargs
+        self, entity_id: str, source: str, metadata: dict[str, Any] | None = None, **kwargs
     ) -> None:
         self._manager._validate_id(entity_id, "entity_id")
         self._manager._warn_unknown_kwargs("track_entity", kwargs)
         self._write_fns.append(self._manager._entity_write(entity_id, source, metadata, kwargs))
 
     def track_relationship(
-        self, relationship_id: str, source: str, metadata: Optional[Dict[str, Any]] = None, **kwargs
+        self, relationship_id: str, source: str, metadata: dict[str, Any] | None = None, **kwargs
     ) -> None:
         self._manager._validate_id(relationship_id, "relationship_id")
         self._manager._warn_unknown_kwargs("track_relationship", kwargs)
@@ -665,10 +670,10 @@ class ProvenanceBatch:
         self,
         chunk_id: str,
         source_document: str,
-        source_path: Optional[str] = None,
+        source_path: str | None = None,
         start_index: int = 0,
         end_index: int = 0,
-        parent_chunk_id: Optional[str] = None,
+        parent_chunk_id: str | None = None,
         **metadata,
     ) -> None:
         self._manager._validate_id(chunk_id, "chunk_id")
@@ -684,7 +689,7 @@ class ProvenanceBatch:
             )
         )
 
-    async def commit(self) -> Optional[List[Optional[ProvenanceEntry]]]:
+    async def commit(self) -> list[ProvenanceEntry | None] | None:
         write_fns, self._write_fns = self._write_fns, []
         if not write_fns:
             return []

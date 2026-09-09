@@ -1,5 +1,3 @@
-from typing import List
-
 from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError
@@ -16,7 +14,7 @@ logger = get_logger("apply_feedback_weights_pipeline")
 
 async def apply_feedback_weights_pipeline(
     user: User,
-    session_ids: List[str],
+    session_ids: list[str],
     dataset: str = DEFAULT_DATASET_NAME,
     alpha: float = 0.1,
     batch_size: int = 100,

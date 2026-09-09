@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from sqlalchemy import select
@@ -9,7 +8,7 @@ from cognee.modules.users.models import User
 
 
 async def get_unique_data_id(
-    data_identifier: str, user: User, dataset_id: Optional[UUID] = None
+    data_identifier: str, user: User, dataset_id: UUID | None = None
 ) -> UUID:
     """Derive a deterministic data id from an identifier, scoped to its owners.
 

@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 import asyncio
 import os
 from pathlib import Path
@@ -87,7 +86,7 @@ def fetch_texts_from_postgres() -> list[str]:
     return [row[0] for row in rows if row and row[0]]
 
 
-async def main(ontology_path: str = None):
+async def main(ontology_path: str | None = None):
     # Create a small Postgres DB schema to migrate.
     create_example_postgres_db()
 

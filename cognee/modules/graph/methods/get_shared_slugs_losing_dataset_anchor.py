@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from sqlalchemy import and_, exists, or_, select
@@ -14,7 +13,7 @@ async def get_shared_slugs_losing_dataset_anchor(
     dataset_id: UUID,
     data_id: UUID,
     session: AsyncSession,
-) -> List[UUID]:
+) -> list[UUID]:
     """Return slugs that will lose their link to `dataset_id` once
     `(dataset_id, data_id)` is removed from the ledger, but will still
     exist in the graph because another `(dataset_id_other, data_id_other)`

@@ -1,5 +1,4 @@
 import asyncio
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Path, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -37,7 +36,7 @@ def get_ontology_router() -> APIRouter:
                 "— other extensions are rejected with 400. Exactly one file per request."
             ),
         ),
-        description: Optional[str] = Form(
+        description: str | None = Form(
             None,
             examples=["OWL ontology of medical conditions and treatments"],
             description=(

@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from typing import List
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -16,7 +15,7 @@ class Document(DataPoint):
 class DocumentChunk(DataPoint):
     part_of: Document
     text: str
-    contains: List["Entity"] = None
+    contains: list["Entity"] = None
     metadata: dict = {"index_fields": ["text"]}
 
 

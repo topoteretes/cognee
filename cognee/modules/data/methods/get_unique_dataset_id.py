@@ -1,4 +1,3 @@
-from typing import Union
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from sqlalchemy import select
@@ -8,7 +7,7 @@ from cognee.modules.data.models.Dataset import Dataset
 from cognee.modules.users.models import User
 
 
-async def get_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> UUID:
+async def get_unique_dataset_id(dataset_name: str | UUID, user: User) -> UUID:
     """
     Function returns a unique UUID for dataset based on dataset name, user id and tenant id.
     If dataset with legacy ID exists, return that ID to maintain compatibility.
@@ -33,7 +32,7 @@ async def get_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> U
         UUID: Unique identifier for the dataset
     """
 
-    def _get_legacy_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> UUID:
+    def _get_legacy_unique_dataset_id(dataset_name: str | UUID, user: User) -> UUID:
         """
         Legacy function, returns a unique UUID for dataset based on dataset name and user id.
         Needed to support legacy datasets without tenant information.
@@ -48,7 +47,7 @@ async def get_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> U
             return dataset_name
         return uuid5(NAMESPACE_OID, f"{dataset_name}{user.id!s}")
 
-    def _get_modern_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> UUID:
+    def _get_modern_unique_dataset_id(dataset_name: str | UUID, user: User) -> UUID:
         """
         Returns a unique UUID for dataset based on dataset name, user id and tenant_id.
         Args:

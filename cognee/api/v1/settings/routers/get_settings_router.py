@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -35,8 +35,8 @@ class VectorDBConfigInputDTO(InDTO):
 
 
 class SettingsPayloadDTO(InDTO):
-    llm: Optional[LLMConfigInputDTO] = None
-    vector_db: Optional[VectorDBConfigInputDTO] = None
+    llm: LLMConfigInputDTO | None = None
+    vector_db: VectorDBConfigInputDTO | None = None
 
 
 def get_settings_router() -> APIRouter:

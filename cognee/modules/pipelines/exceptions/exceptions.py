@@ -32,10 +32,10 @@ class CognifyFailedError(CogneeSystemError):
 
     def __init__(
         self,
-        dataset_name: str = None,
-        error_class: str = None,
-        error_message: str = None,
-        hint: str = None,
+        dataset_name: str | None = None,
+        error_class: str | None = None,
+        error_message: str | None = None,
+        hint: str | None = None,
     ):
         self.dataset_name = dataset_name
         self.error_class = error_class

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 SSE_MEDIA_TYPE = "text/event-stream"
 JSON_MEDIA_TYPE = "application/json"
@@ -63,7 +64,7 @@ def _quality(accept: str, media_type: str) -> float:
     return 0.0
 
 
-def wants_event_stream(accept: Optional[str], stream_flag: Optional[bool] = None) -> bool:
+def wants_event_stream(accept: str | None, stream_flag: bool | None = None) -> bool:
     """Whether this request asked for SSE.
 
     ``stream`` in the body decides outright when present, for clients that cannot
@@ -112,7 +113,7 @@ class KeepaliveReader:
     def __init__(self, iterator: AsyncIterator[Any], interval: float) -> None:
         self._iterator = iterator
         self._interval = interval
-        self._pending: Optional[asyncio.Future] = None
+        self._pending: asyncio.Future | None = None
 
     async def next_or_keepalive(self) -> tuple[bool, Any]:
         """``(got_event, event)``. ``(False, None)`` means the interval elapsed."""

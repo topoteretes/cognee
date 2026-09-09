@@ -1,5 +1,3 @@
-from typing import List, Optional, Union
-
 from pydantic import PrivateAttr
 
 from cognee.infrastructure.engine import DataPoint
@@ -37,26 +35,26 @@ class DocumentChunk(DataPoint):
     cut_type: str
     # Hex digest of `text` (see chunk_id.chunk_content_hash); the chunk id is
     # derived from it, so identity survives edits that shift chunk positions.
-    content_hash: Optional[str] = None
+    content_hash: str | None = None
     # Token budget this chunk was cut against. Incremental updates re-chunk a
     # region with the budget recorded on the chunks it replaces, so a document
     # stays self-consistent even when the global configuration changes.
-    max_chunk_tokens: Optional[int] = None
+    max_chunk_tokens: int | None = None
     # Which chunker produced this chunk (Chunker.chunker_id). Chunkers disagree
     # on boundaries — an overlapping chunker's output cannot tile its input —
     # so a document may only be updated by the chunker that built it. None on
     # chunks written before the field existed, which reads as "unknown" and
     # falls through to the tiling check.
-    chunker_id: Optional[str] = None
+    chunker_id: str | None = None
     is_part_of: Document
-    contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
-    importance_weight: Optional[float] = 0.5
-    document_id: Optional[str] = None
-    document_name: Optional[str] = None
+    contains: list[Entity | Event | tuple[Edge, Entity]] = None
+    importance_weight: float | None = 0.5
+    document_id: str | None = None
+    document_name: str | None = None
     # Optional truth-alignment fields; never embedded (kept out of index_fields)
     # and not part of id/dedup.
-    truth_alignment: Optional[list[float]] = None
-    truth_epoch: Optional[int] = None
+    truth_alignment: list[float] | None = None
+    truth_epoch: int | None = None
     metadata: dict = {"index_fields": ["text"]}
 
     # Two records of the same extraction, kept apart because their readers

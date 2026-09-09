@@ -12,7 +12,8 @@ REFLECTION, so a newly added document type is covered the day it is written
 """
 
 import asyncio
-from typing import Optional, Union, get_args, get_origin
+import types
+from typing import Union, get_args, get_origin
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest
@@ -45,7 +46,8 @@ def _all_document_classes():
 def _sample_value(annotation):
     """A filled-in sample for a required pydantic field annotation."""
     origin = get_origin(annotation)
-    if origin is Union:  # Optional[X] and unions: use the first non-None arm
+    # Optional[X] / Union[...] have origin typing.Union; `X | None` has types.UnionType.
+    if origin is Union or origin is types.UnionType:  # use the first non-None arm
         for arm in get_args(annotation):
             if arm is not type(None):
                 return _sample_value(arm)

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import NAMESPACE_OID, uuid5
 
 from pydantic import Field
@@ -20,14 +20,14 @@ class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
     text: str = Field(..., description="The coding rule associated with the conversation")
-    belongs_to_set: Optional[NodeSet] = None
+    belongs_to_set: NodeSet | None = None
     metadata: dict = {"index_fields": ["rule"]}
 
 
 class RuleSet(DataPoint):
     """Collection of parsed rules."""
 
-    rules: List[Rule] = Field(
+    rules: list[Rule] = Field(
         ...,
         description="List of developer rules extracted from the input text. Each rule represents a coding best practice or guideline.",
     )
@@ -53,7 +53,7 @@ async def get_existing_rules(rules_nodeset_name: str) -> str:
     return existing_rules
 
 
-async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
+async def get_origin_edges(data: str, rules: list[Rule]) -> list[Any]:
     vector_engine = await get_vector_engine_async()
 
     origin_chunk = await vector_engine.search("DocumentChunk_text", data, limit=1)
@@ -85,14 +85,14 @@ async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
                         )
                     )
             except Exception as e:
-                logger.info(f"Warning: Skipping invalid rule due to error: {e}")
+                logger.info(f"Warning: Skipping invalid rule due to error: {e}", exc_info=True)
     else:
         logger.info("No valid origin_id or rules provided.")
 
     return relationships
 
 
-async def add_rule_associations(data: str, rules_nodeset_name: str, context: Dict):
+async def add_rule_associations(data: str, rules_nodeset_name: str, context: dict):
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
 

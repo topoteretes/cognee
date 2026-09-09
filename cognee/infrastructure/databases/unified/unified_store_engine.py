@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import cast
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -24,8 +24,8 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
     def __init__(
         self,
-        graph_engine: Optional[GraphDBInterface] = None,
-        vector_engine: Optional[VectorDBInterface] = None,
+        graph_engine: GraphDBInterface | None = None,
+        vector_engine: VectorDBInterface | None = None,
         capabilities: EngineCapability = EngineCapability.NONE,
     ):
         self._graph = graph_engine
@@ -82,7 +82,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             and self._vector is not None
         )
 
-    async def delete_by_source_ref(self, source_ref_key: str) -> "SourceRefRemovalResult":
+    async def delete_by_source_ref(self, source_ref_key: str) -> SourceRefRemovalResult:
         """Delete artifacts owned only by the given source ref; detach the rest.
 
         Returns the hard-deleted node/edge identities so callers can invalidate
@@ -111,7 +111,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
-    async def delete_by_source_refs(self, source_ref_keys) -> "SourceRefRemovalResult":
+    async def delete_by_source_refs(self, source_ref_keys) -> SourceRefRemovalResult:
         """Remove MANY source refs in one planner pass (chunk-level updates).
 
         Reads the dataset-independent ref maps once through the per-ref finders
@@ -146,7 +146,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             refs_by_edge=refs_by_edge,
         )
 
-    async def delete_by_document(self, dataset_id: str, data_id: str) -> "SourceRefRemovalResult":
+    async def delete_by_document(self, dataset_id: str, data_id: str) -> SourceRefRemovalResult:
         """Remove EVERY ref a document owns — v1 doc-scope AND v2 chunk-scope.
 
         Chunk-scoped ownership (source_ref:v2) means a document's artifacts

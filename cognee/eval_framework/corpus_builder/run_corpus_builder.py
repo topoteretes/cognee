@@ -1,5 +1,4 @@
 import json
-from typing import List, Optional
 
 from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
@@ -38,7 +37,7 @@ async def run_corpus_builder(
     chunk_size=1024,
     chunker=TextChunker,
     instance_filter=None,
-) -> List[dict]:
+) -> list[dict]:
     if params.get("building_corpus_from_scratch"):
         logger.info("Corpus Builder started...")
 

@@ -1,4 +1,3 @@
-from typing import Optional, Union
 from uuid import UUID
 
 import cognee
@@ -16,9 +15,9 @@ logger = get_logger("cognify_session")
 
 
 async def cognify_session(
-    data: Union[SessionPersistWindow, list[SessionPersistWindow]],
-    dataset_id: Optional[UUID | str] = None,
-    user: Optional[User] = None,
+    data: SessionPersistWindow | list[SessionPersistWindow],
+    dataset_id: UUID | str | None = None,
+    user: User | None = None,
 ) -> None:
     """
     Cognify session windows into the knowledge graph and advance their watermarks.
@@ -98,5 +97,5 @@ async def cognify_session(
             )
 
     except Exception as e:
-        logger.error(f"Error cognifying session data: {e!s}")
+        logger.exception("Error cognifying session data")
         raise CogneeSystemError(message=f"Failed to cognify session data: {e!s}", log=False)

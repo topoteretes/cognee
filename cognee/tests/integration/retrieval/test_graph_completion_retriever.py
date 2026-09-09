@@ -1,6 +1,6 @@
+import logging
 import os
 import pathlib
-from typing import Optional, Union
 
 import pytest
 import pytest_asyncio
@@ -9,6 +9,8 @@ import cognee
 from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 def _detailed_context_check(context: str):
@@ -130,7 +132,7 @@ async def setup_test_environment_simple():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_simple", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -168,7 +170,7 @@ async def setup_test_environment_complex():
     class Person(DataPoint):
         name: str
         works_for: Company
-        owns: Optional[list[Union[Car, Home]]] = None
+        owns: list[Car | Home] | None = None
 
     company1 = Company(name="Figma")
     company2 = Company(name="Canva")
@@ -200,7 +202,7 @@ async def setup_test_environment_complex():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_complex", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -227,7 +229,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

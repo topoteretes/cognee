@@ -5,7 +5,6 @@ record per non-pipeline operation — plus in-memory OTEL spans, so the
 frontend can render an activity timeline and trace viewer.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -30,14 +29,14 @@ def get_activity_router() -> APIRouter:
 
     @router.get("/pipeline-runs")
     async def get_pipeline_runs(
-        dataset_id: Optional[UUID] = Query(
+        dataset_id: UUID | None = Query(
             None,
             description=(
                 "Restrict the feed to a single dataset. When given, a missing read "
                 "permission on that dataset is a 403 rather than an empty list."
             ),
         ),
-        pipeline_name: Optional[str] = Query(
+        pipeline_name: str | None = Query(
             None,
             description=(
                 "Return only rows whose pipeline_name matches exactly. Operation "
@@ -277,6 +276,10 @@ def get_activity_router() -> APIRouter:
                 for u in users
             ]
         except Exception:
+            logger.debug(
+                "Falling back to [] after error in get_activity_router.get_tenant_users",
+                exc_info=True,
+            )
             return []
 
     @router.get("/agents")
@@ -295,7 +298,7 @@ def get_activity_router() -> APIRouter:
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             # Get all users (agents have @cognee.agent, but show all non-default)
-            users_q = select(User).filter(User.is_active.is_(True))  # noqa: E712
+            users_q = select(User).filter(User.is_active.is_(True))
             users_result = await session.execute(users_q)
             all_users = users_result.scalars().all()
 
@@ -447,6 +450,9 @@ def get_activity_router() -> APIRouter:
             nodes = graph.get("nodes", []) if isinstance(graph, dict) else []
             edges = graph.get("edges", []) if isinstance(graph, dict) else []
         except Exception:
+            logger.debug(
+                "Ignoring exception in get_activity_router.export_dataset_markdown", exc_info=True
+            )
             nodes, edges = [], []
 
         # Build markdown
