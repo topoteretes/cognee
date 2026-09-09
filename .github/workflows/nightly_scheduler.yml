@@ -7,12 +7,17 @@ name: Nightly Scheduler
 #
 # This shim keeps the cron on main and hands the work to nightly_tests.yml at
 # the ref we actually want tested:
-#   * daily  18:00 UTC     -> main  (released code, exercised during peak US
+#   * Mon-Sat 18:00 UTC -> main, cadence=daily  (released code at peak US
 #     hours: 18:00 UTC = 19:00 CET / 20:00 CEST, inside the 17:00-22:00 CET
-#     window either side of the DST switch, so the cloud perf arms measure
-#     the platform under real peak load)
-#   * weekly Sun 06:00 UTC -> dev   (in-development code keeps the perf
-#     arms' coverage, which only run here)
+#     window either side of the DST switch, so the cloud arm measures the
+#     platform under real peak load). The daily set is the datasheets corpus
+#     alone — see the cadence gates in nightly_tests.yml.
+#   * Sun     18:00 UTC -> main, cadence=weekly (the FULL set, still at peak
+#     hours). Without this slot "weekly" would mean "dev only", which would
+#     freeze main's War and Peace series and move its cloud arm off the very
+#     peak window that is the reason the daily runs when it does.
+#   * Sun     06:00 UTC -> dev,  cadence=weekly (the FULL set on
+#     in-development code)
 #
 # It works because workflow_dispatch is one of only two events GITHUB_TOKEN may
 # raise that still creates a workflow run:
@@ -23,8 +28,9 @@ name: Nightly Scheduler
 
 on:
   schedule:
-    - cron: '0 18 * * *'   # daily  -> main, peak US hours (see header)
-    - cron: '0 6 * * 0'    # Sunday -> dev (a free slot among the repo's crons)
+    - cron: '0 18 * * 1-6'  # Mon-Sat -> main, DAILY set (datasheets only)
+    - cron: '0 18 * * 0'    # Sunday  -> main, FULL set, still at peak hours
+    - cron: '0 6 * * 0'     # Sunday  -> dev,  FULL set
   workflow_dispatch:
     inputs:
       target_ref:
@@ -64,8 +70,9 @@ jobs:
           # github.event.schedule is the literal cron string that fired, which
           # is how one workflow file serves two cadences.
           case "${SCHEDULE:-}" in
-            '0 18 * * *') ref=main;               cadence=daily  ;;
-            '0 6 * * 0')  ref=dev;                cadence=weekly ;;
+            '0 18 * * 1-6') ref=main;             cadence=daily  ;;
+            '0 18 * * 0')   ref=main;             cadence=weekly ;;
+            '0 6 * * 0')    ref=dev;              cadence=weekly ;;
             '')          ref="${INPUT_REF:-dev}"; cadence=manual ;;
             *) echo "::error::unmapped cron '${SCHEDULE}' — add it to the case"; exit 1 ;;
           esac
