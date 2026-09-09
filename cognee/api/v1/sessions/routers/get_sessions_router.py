@@ -2,17 +2,20 @@
 
 Backs the dashboard: list/detail of sessions, aggregate stats, cost
 by model. Effective status is computed in SQL with the
-abandonment-by-idle rule so no sweeper is needed.
+abandonment-by-idle rule so no sweeper is needed. ``POST /{id}/end``
+is the one write: a client records that its session finished.
 """
 
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from pydantic import Field
 from sqlalchemy import and_, func, or_, select
 
+from cognee.api.DTO import InDTO
 from cognee.exceptions import CogneeApiError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.session_lifecycle.agent_usage import (
@@ -24,6 +27,7 @@ from cognee.modules.session_lifecycle.metrics import (
     get_effective_status_sql,
     get_session_row,
     list_session_rows,
+    mark_ended,
 )
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord
 from cognee.modules.users.methods import get_authenticated_user, get_visible_user_ids
@@ -35,6 +39,16 @@ logger = get_logger("sessions_api")
 
 
 _RangeLiteral = Literal["24h", "7d", "30d", "all"]
+
+
+class SessionEndPayload(InDTO):
+    """Body of ``POST /api/v1/sessions/{session_id}/end``."""
+
+    status: Literal["completed", "failed"] = Field(
+        default="completed",
+        description="Terminal status to record: 'completed' (default) or 'failed'.",
+        examples=["completed"],
+    )
 
 
 def _range_since(range_key: _RangeLiteral) -> datetime | None:
@@ -409,6 +423,71 @@ def get_sessions_router() -> APIRouter:
         except Exception:
             logger.exception("cost_by_user_agent failed")
             return JSONResponse(status_code=500, content={"error": "aggregation failed"})
+
+    @router.post("/{session_id}/end")
+    async def end_session(
+        session_id: str = Path(
+            ...,
+            description=(
+                "Client-supplied session identifier; the same value passed as session_id "
+                "to POST /api/v1/remember."
+            ),
+            examples=["claude-code-1718000000"],
+        ),
+        payload: SessionEndPayload | None = Body(default=None),
+        user: User = Depends(get_authenticated_user),
+    ):
+        """End a session — POST /api/v1/sessions/{session_id}/end.
+
+        Records the terminal status of the caller's own session (SDK-593). Until
+        now a session row only ever left ``running`` by being *inferred*
+        abandoned after ``SESSION_ABANDON_AFTER_SECONDS`` of silence; a client
+        that finished cleanly had no way to say so. The Claude Code plugin calls
+        this from its final sync once the drain and the last improve landed.
+
+        Idempotent: ending an already-ended session returns 200 with the stored
+        status and ``already_ended: true`` and changes nothing — the first
+        ``ended_at`` stands. Only the session owner can end it (a dataset-level
+        read grant does not suffice); an unknown session is a 404. Ending a
+        session does not delete its cache entries and does not run improve.
+
+        ## Path Parameters
+        - **session_id** (str): Client-supplied session identifier.
+
+        ## Request Body (optional)
+        - **status** (Literal["completed", "failed"]): Terminal status to record
+          (default: completed).
+
+        ## Response
+        - **session_id** (str), **status** (str): the stored status after the call.
+        - **ended_at** (str | null): ISO timestamp the session ended.
+        - **already_ended** (bool): true when the session was terminal before this call.
+        """
+        target_status = SessionStatus(payload.status if payload else "completed")
+
+        row = await get_session_row(session_id=session_id, user_id=user.id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        transitioned = False
+        if row.status == SessionStatus.RUNNING.value:
+            transitioned = await mark_ended(
+                session_id=session_id, user_id=user.id, status=target_status
+            )
+
+        # Re-read so the answer reflects the stored row, whichever caller won.
+        row = await get_session_row(session_id=session_id, user_id=user.id)
+        if row is None:  # pragma: no cover - deleted between the two reads
+            raise HTTPException(status_code=404, detail="session not found")
+        ended_at = getattr(row, "ended_at", None)
+        return jsonable_encoder(
+            {
+                "session_id": session_id,
+                "status": row.status,
+                "ended_at": ended_at.isoformat() if ended_at is not None else None,
+                "already_ended": not transitioned,
+            }
+        )
 
     @router.get("/{session_id}")
     async def get_session_detail(

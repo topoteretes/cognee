@@ -125,7 +125,7 @@ As of cognee 1.x the memory API is the primary surface. All functions are async.
 
 1. **remember()** - Store data in memory. Without `session_id` it runs `add()` + `cognify()` and then `improve()` (`self_improvement=True` by default); with `session_id` it writes to the fast session cache and bridges into the graph in the background.
 2. **recall()** - Query memory. Auto-routes to a search strategy unless `query_type` is passed (`auto_route=False` falls back to `HYBRID_COMPLETION`). A `session_id` reads the session cache first and falls through to the graph.
-3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A and distilled learnings into the permanent graph.
+3. **improve()** - Enrich/index the graph: triplet embeddings, feedback weights, and (with `session_ids`) bridging session Q&A, trace steps and distilled learnings into the permanent graph. Every session stage sits behind a per-session watermark, and `improve()` probes them first: with nothing pending it answers `{"status": "no_op"}` (no LLM call, no pipeline run, no operation record). A single-session improve holds a cross-worker lock stored on the `session_records` row (`IMPROVE_LOCK_TTL_SECONDS`, default 1800); a caller that finds it held gets `{"status": "busy", "rerun_requested": true}` and the holder runs one more watermark-driven pass before releasing, so callers never retry. `run_in_background=True` with sessions answers `{"status": "accepted"}` and runs the whole ordered stage sequence in one background task.
 4. **forget()** - Unified deletion (`data_id` / `dataset` / `dataset_id` / `everything=True`, plus `memory_only=True` to drop graph+vectors but keep raw files).
 
 #### Low level operations: add → cognify → search/memify
@@ -378,6 +378,9 @@ GRAPH_DATABASE_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 ```bash
 # Session/conversation cache backend: sqlite (default), postgres, redis, fs, tapes
 CACHE_BACKEND=sqlite
+# Seconds after which a held per-session improve() lock counts as expired
+# and may be taken over (a hung or killed holder can no longer wedge a session)
+IMPROVE_LOCK_TTL_SECONDS=1800
 # Optional explicit SQLAlchemy URL for sqlite/postgres cache backends (overrides defaults)
 CACHE_DB_URL=postgresql+asyncpg://cognee:cognee@localhost:5432/cognee_db
 # Session-search execution mode: concurrent (default) or sequential
@@ -667,6 +670,7 @@ FastAPI application with versioned routes under `/api/v1/` (routers registered i
 - `/forget` - Unified deletion
 - `/add`, `/cognify`, `/search`, `/memify`, `/delete` - Low level operations
 - `/datasets` - Dataset management
+- `/sessions` - Session dashboard reads, plus `POST /sessions/{id}/end` to record that a client's session finished (`completed`/`failed`; owner-only, idempotent)
 - `/users` - Authentication (when `REQUIRE_AUTHENTICATION` is effectively true; see auth posture below)
 - `/visualize` - Graph visualization server
 

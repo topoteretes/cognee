@@ -7,7 +7,8 @@ All public functions are async and idempotent where possible:
 * ``accumulate_usage`` atomically adds tokens / cost to the session row
   and, when a model is named, updates the ``session_model_usage``
   table so ``cost-by-model`` attributes mixed-model sessions correctly.
-* ``mark_ended`` transitions to a terminal status.
+* ``mark_ended`` transitions a running session to a terminal status;
+  ``POST /api/v1/sessions/{id}/end`` is its HTTP entry point.
 
 Writes to ``running`` sessions only — terminal sessions (completed /
 failed) stay frozen so late tool-calls don't resurrect or distort them.
@@ -285,8 +286,14 @@ async def mark_ended(
     session_id: str,
     user_id: UUIDType,
     status: SessionStatus,
-) -> None:
-    """Transition to a terminal status (completed / failed)."""
+) -> bool:
+    """Transition a ``running`` session to a terminal status (completed / failed).
+
+    Returns True iff the row was transitioned by this call. A session that is
+    already terminal is left untouched (its first ``ended_at`` stands), so the
+    call is idempotent and a late duplicate cannot flip ``completed`` to
+    ``failed`` or move the end time.
+    """
     if status == SessionStatus.RUNNING or status == SessionStatus.ABANDONED:
         raise ValueError(f"mark_ended requires a terminal status (completed/failed), got {status}")
 
@@ -299,12 +306,14 @@ async def mark_ended(
                 and_(
                     SessionRecord.session_id == session_id,
                     SessionRecord.user_id == user_id,
+                    SessionRecord.status == SessionStatus.RUNNING.value,
                 )
             )
             .values(status=status.value, ended_at=now)
         )
-        await session.execute(stmt)
+        result = await session.execute(stmt)
         await session.commit()
+        return getattr(result, "rowcount", 0) == 1
 
 
 def get_effective_status_sql():
