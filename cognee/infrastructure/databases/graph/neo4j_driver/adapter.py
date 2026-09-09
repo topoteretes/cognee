@@ -1829,6 +1829,27 @@ class Neo4jAdapter(GraphDBInterface):
 
         return (nodes, edges)
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Rank seeds in Cypher rather than by reading the graph into Python.
+
+        The inherited default calls get_graph_data() and counts degree in
+        memory, which on a large graph exhausts the worker to produce ten ids.
+        """
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+
+        rows = await self.query(
+            """
+            MATCH (n)
+            WHERE n.id IS NOT NULL
+            RETURN n.id AS id, COUNT { (n)--() } AS degree
+            ORDER BY degree DESC, id
+            LIMIT $top_k
+            """,
+            {"top_k": top_k},
+        )
+        return [str(row["id"]) for row in rows if row.get("id") is not None]
+
     async def get_graph_data(self):
         """
         Retrieve comprehensive data about nodes and relationships within the graph.
