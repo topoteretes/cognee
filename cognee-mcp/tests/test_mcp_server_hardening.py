@@ -57,7 +57,7 @@ def test_format_recall_results_handles_normalized_rows():
 # contract documents intent rather than just enumerating names. The hardening
 # rule is that the LLM-direct memory API stays minimal (V2: remember/recall/
 # forget).
-MEMORY_API_TOOLS = {"remember", "recall", "forget"}
+MEMORY_API_TOOLS = {"remember", "recall", "forget", "search_sources"}
 STATUS_TOOLS = {
     # Ingestion is queued (remember(background=True)) because it outruns the
     # host's request deadline, so progress and failures are only observable

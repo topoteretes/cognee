@@ -129,7 +129,10 @@ class DatasetSchemaPayloadDTO(InDTO):
 
 
 def get_datasets_router() -> APIRouter:
+    from .source_routes import get_source_routes
+
     router = APIRouter()
+    router.include_router(get_source_routes())
 
     @router.get("", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):

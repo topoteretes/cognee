@@ -458,6 +458,43 @@ async def remember(
 
 
 @registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
+async def search_sources(
+    query: str,
+    source_hint: str | None = None,
+    dataset_ids: list[str] | None = None,
+    include_connections: bool = True,
+    top_k: int = 10,
+) -> list:
+    """Search authorized connected sources using metadata-driven routing.
+
+    Use for source questions, including live database facts. Cognee selects
+    document retrieval or native read-only SQL from each source's capability.
+    source_hint is free text, not a provider enum. dataset_ids restricts the
+    search to those datasets and excludes SQL connections. SQL never ingests
+    rows. Results include routing, evidence, SQL provenance and partial failures.
+    Requires a server with the source-search API; no legacy fallback.
+    """
+    with redirect_stdout(sys.stderr):
+        try:
+            result = await cognee_client.search_sources(
+                query, source_hint, dataset_ids, include_connections, top_k
+            )
+            return [types.TextContent(type="text", text=json.dumps(result, cls=JSONEncoder))]
+        except Exception:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "error": "Source search unavailable; check server capability and caller permissions.",
+                            "complete": False,
+                        }
+                    ),
+                )
+            ]
+
+
+@registry.tool(tags={DEFAULT_TAG, MEMORY_TAG})
 async def recall(
     query: str,
     search_type: str = None,

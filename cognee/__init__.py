@@ -104,6 +104,7 @@ from cognee.modules.agent_memory import agent_memory
 
 # Tool connections (authorized external databases for recall's "tools" scope)
 from .api.v1.tools import tools
+from .api.v1 import sources
 
 # Relational DB models
 from cognee.modules.session_lifecycle.models import SessionModelUsage, SessionRecord

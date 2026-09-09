@@ -256,7 +256,7 @@ class ImageLoader(LoaderInterface):
 
         try:
             with Image.open(file_path) as img:
-                exif_data = img._getexif()  # ty:ignore[unresolved-attribute]
+                exif_data = img._getexif()
         except Exception:
             return None
 
@@ -350,7 +350,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     """
     from PIL import Image  # ty: ignore[unresolved-import]
 
-    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)  # ty:ignore[unresolved-attribute]
+    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
     bits: list[str] = []

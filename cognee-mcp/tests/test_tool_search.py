@@ -22,7 +22,7 @@ import src.server as server  # noqa: E402
 from src.tool_registry import DEFAULT_TAG, MEMORY_TAG  # noqa: E402
 
 SYNTHETIC_TOOLS = {"search_tools", "call_tool"}
-MEMORY_TOOLS = {"remember", "recall", "forget"}
+MEMORY_TOOLS = {"remember", "recall", "forget", "search_sources"}
 
 # Deliberately not enumerated: the unpinned tools are derived from the registry so
 # this file keeps working as the catalog changes. Only the pinned sets are spelled
