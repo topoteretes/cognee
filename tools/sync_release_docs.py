@@ -236,26 +236,19 @@ def changelog_has_tag(content: str, tag: str) -> bool:
     return re.search(pattern, content, flags=re.MULTILINE) is not None
 
 
-def prepend_entry_to_changelog(existing: str, entry: str) -> str:
+def insert_entry_into_changelog(existing: str, entry: str) -> str:
+    """Insert below the standing "Unreleased" section, or at the top if absent."""
     frontmatter, body = split_frontmatter(existing)
 
-    first_h2 = re.search(r"^##\s+", body, flags=re.MULTILINE)
-    if first_h2:
-        intro = body[: first_h2.start()].rstrip()
-        existing_entries = body[first_h2.start() :].lstrip("\n")
-    else:
-        intro = body.rstrip()
-        existing_entries = ""
+    unreleased = re.search(r"^##\s+Unreleased\s*$", body, flags=re.MULTILINE)
+    start = unreleased.end() if unreleased else 0
+    next_heading = re.search(r"^##\s+", body[start:], flags=re.MULTILINE)
+    split_at = start + next_heading.start() if next_heading else len(body)
 
-    parts = []
-    if intro:
-        parts.append(intro)
-    parts.append(entry.rstrip())
-    if existing_entries:
-        parts.append(existing_entries.rstrip())
-
-    updated_body = "\n\n".join(parts).rstrip() + "\n"
-    return frontmatter + updated_body
+    before = body[:split_at].rstrip()
+    after = body[split_at:].strip("\n").rstrip()
+    parts = [part for part in (before, entry.rstrip(), after) if part]
+    return frontmatter + "\n\n".join(parts).rstrip() + "\n"
 
 
 def copy_if_changed(source: Path, target: Path) -> bool:
@@ -280,7 +273,7 @@ def update_changelog_if_needed(
 
     release_date = format_release_date(published_at)
     entry = build_changelog_entry(tag, release_url, release_date, release_body)
-    updated = prepend_entry_to_changelog(existing, entry)
+    updated = insert_entry_into_changelog(existing, entry)
 
     if updated == existing:
         return False
@@ -328,6 +321,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip OpenAPI generation and only sync existing openapi-output file",
     )
+    parser.add_argument(
+        "--skip-changelog",
+        action="store_true",
+        help="Sync the OpenAPI spec only; a non-release run's tag is synthetic.",
+    )
     return parser.parse_args()
 
 
@@ -351,13 +349,15 @@ def main() -> int:
     docs_changelog_path = docs_repo / args.docs_changelog_file
 
     openapi_changed = copy_if_changed(args.openapi_output, docs_openapi_path)
-    changelog_changed = update_changelog_if_needed(
-        docs_changelog_path,
-        tag=args.tag,
-        release_url=args.release_url,
-        published_at=args.published_at,
-        release_body=release_body,
-    )
+    changelog_changed = False
+    if not args.skip_changelog:
+        changelog_changed = update_changelog_if_needed(
+            docs_changelog_path,
+            tag=args.tag,
+            release_url=args.release_url,
+            published_at=args.published_at,
+            release_body=release_body,
+        )
 
     print(f"openapi_changed={str(openapi_changed).lower()}")
     print(f"changelog_changed={str(changelog_changed).lower()}")
