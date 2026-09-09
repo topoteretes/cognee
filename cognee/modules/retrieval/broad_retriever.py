@@ -178,13 +178,23 @@ def parse_rows(text: str) -> list[dict[str, str]]:
     return parse_plain_rows(text)
 
 
-def build_aggregate_block(retrieved_objects: Any) -> str:
+def build_aggregate_block(retrieved_objects: Any, retrieval_capped: bool = False) -> str:
     """Exact per-column value frequencies over every retrieved row.
 
     Returns "" when the retrieved objects are not rows (the document-chunk
-    fallback), so BROAD degrades to plain wide RAG rather than emitting a
-    meaningless table.
+    fallback), and when ``retrieval_capped`` says the rows are only a sample of
+    a larger table — in both cases BROAD degrades to plain wide RAG rather than
+    putting a number in front of the model that does not mean what it says.
     """
+    if retrieval_capped:
+        # Measured on a 2000-row table with the default top_k of 500: the block
+        # read "EXACT COUNTS computed over all 500 retrieved rows" and the model
+        # answered 321 where the truth was 676. Every word of that header was
+        # true and the answer was still wrong by half, because "all retrieved
+        # rows" is not "the table" and nobody reads it that way. A count is only
+        # worth stating when it is a count of everything.
+        logger.info("BROAD: retrieval hit its top_k cap - rows are a sample, omitting exact counts")
+        return ""
     parsed: list[dict[str, str]] = []
     for found in retrieved_objects:
         payload = getattr(found, "payload", None) or {}
@@ -293,6 +303,9 @@ class BroadRetriever(CompletionRetriever):
         self.context_max_chars = (
             context_max_chars if context_max_chars is not None else BROAD_DEFAULT_CONTEXT_CHARS
         )
+        # Set by get_retrieved_objects: True when the search returned exactly
+        # top_k rows, so the store may hold more than was seen.
+        self._retrieval_capped = False
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """Search the row collection, falling back to document chunks.
@@ -317,7 +330,17 @@ class BroadRetriever(CompletionRetriever):
                 logger.debug("BROAD: collection %s not present, trying next", collection)
                 continue
             if found:
-                logger.debug("BROAD: %s returned %d rows", collection, len(found))
+                # Hitting the limit exactly means the store had at least this
+                # many matches and may have had more: the set is a
+                # similarity-ranked SAMPLE, not the table. build_aggregate_block
+                # refuses to call a sample exact.
+                self._retrieval_capped = len(found) >= self.top_k
+                logger.debug(
+                    "BROAD: %s returned %d rows (capped=%s)",
+                    collection,
+                    len(found),
+                    self._retrieval_capped,
+                )
                 return found
 
         raise NoDataError("No data found in the system, please add data first.")
@@ -334,7 +357,7 @@ class BroadRetriever(CompletionRetriever):
 
         # Counted first, and over the FULL retrieved set — the aggregate must
         # not depend on how many rows survive the character budget below.
-        aggregate = build_aggregate_block(retrieved_objects)
+        aggregate = build_aggregate_block(retrieved_objects, self._retrieval_capped)
 
         parts: list[str] = [aggregate] if aggregate else []
         used = len(aggregate)

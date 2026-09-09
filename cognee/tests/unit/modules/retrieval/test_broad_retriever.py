@@ -259,3 +259,32 @@ def test_row_index_never_leaks_into_the_counts():
     chunks = [_plain_chunk((1, {"assignee": "ada"})), _plain_chunk((2, {"assignee": "ada"}))]
     block = build_aggregate_block(chunks)
     assert "__row_index__" not in block
+
+
+# --- a sample must never be presented as a total -----------------------------
+
+
+def test_capped_retrieval_emits_no_counts():
+    """When the search returns exactly top_k rows the store may hold more, so
+    the rows are a similarity-ranked sample of the table.
+
+    Measured on a 2000-row table with the default top_k of 500: the block read
+    "EXACT COUNTS computed over all 500 retrieved rows" and the model answered
+    321 where the truth was 676. Every word was true and the answer was still
+    wrong by half.
+    """
+    rows = [_row(assignee="ada") for _ in range(10)]
+    assert build_aggregate_block(rows, retrieval_capped=True) == ""
+    assert "EXACT COUNTS" in build_aggregate_block(rows, retrieval_capped=False)
+
+
+@pytest.mark.asyncio
+async def test_context_has_no_counts_when_retrieval_was_capped():
+    retriever = BroadRetriever(top_k=3)
+    retriever._retrieval_capped = True
+    rows = [_row(assignee="ada") for _ in range(3)]
+
+    context = await retriever.get_context_from_objects("q", rows)
+
+    assert "EXACT COUNTS" not in context
+    assert "ada" in context  # the rows themselves are still shown
