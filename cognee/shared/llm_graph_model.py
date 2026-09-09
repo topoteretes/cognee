@@ -334,7 +334,9 @@ def _llm_model_for(
         for field_name in field_names
     }
 
-    converted_model = create_model(model.__name__, __base__=ConfiguredBase, **converted_fields)
+    converted_model = create_model(  # ty: ignore[no-matching-overload] - dynamic **fields
+        model.__name__, __base__=ConfiguredBase, **converted_fields
+    )
     converted_model.model_rebuild()
     cache[model] = converted_model
 
@@ -399,7 +401,7 @@ def _llm_edge_field_for(
     if _list_edge_inner(field_info.annotation) is None:
         return None
     *_, row_model = _edge_field_spec(model, field_name)
-    row_list: Any = list[row_model]
+    row_list: Any = list[row_model]  # ty: ignore[invalid-type-form] - runtime-built alias
     core, _ = _strip_annotated(field_info.annotation)
     if _is_union(get_origin(core)):
         # The declared field was optional; keep the LLM field optional too.
@@ -420,7 +422,7 @@ def _llm_annotation_for(annotation: Any, cache: dict, strip_metadata: bool) -> A
     if markers:
         # Keep the markers: one of them may be a pydantic Field carrying a
         # description or a constraint the LLM schema should still show.
-        return Annotated[(_llm_annotation_for(core, cache, strip_metadata), *markers)]
+        return Annotated[(_llm_annotation_for(core, cache, strip_metadata), *markers)]  # ty: ignore[invalid-type-form] - runtime-built annotation
 
     origin = get_origin(core)
     args = get_args(core)
