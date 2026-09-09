@@ -70,9 +70,12 @@ def _run(**overrides) -> PipelineRun:
     return PipelineRun(**fields)
 
 
-def _joined(run: PipelineRun, ds_name=None, owner_id=None, owner_email=None):
-    """One result row of the pipeline_runs → datasets → users outer join."""
-    return (run, ds_name, owner_id, owner_email)
+def _joined(run: PipelineRun, ds_name=None, owner_id=None, owner_email=None, *, has_terminal=False):
+    """One result row of the pipeline_runs → datasets → users outer join,
+    plus the correlated EXISTS column the router adds to detect a terminal
+    sibling row (SDK-591 follow-up, PR #4983). has_terminal defaults to
+    False since most of these tests aren't about that column at all."""
+    return (run, ds_name, owner_id, owner_email, has_terminal)
 
 
 class _FakeResult:
@@ -599,6 +602,46 @@ def test_pipeline_name_none_with_status_set_returns_raw_status(monkeypatch):
     body = _client(user_id).get("/activity/pipeline-runs").json()
 
     assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
+
+
+def test_terminal_sibling_column_is_forwarded_to_the_staleness_check(monkeypatch):
+    """The router must pass the EXISTS column through as
+    run_has_terminal_row rather than deriving it some other way -- a stale
+    STARTED row whose joined row says a terminal sibling exists must not
+    read ABANDONED, even though the row itself is old enough to."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    run = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    _stub_engine(monkeypatch, [_joined(run, has_terminal=True)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
+
+
+def test_no_terminal_sibling_column_still_reports_abandoned(monkeypatch):
+    """Same row, but the joined column now says no terminal sibling exists
+    -- must fall back to the age check and read ABANDONED."""
+    user_id = uuid4()
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    run = _run(
+        user_id=user_id,
+        pipeline_name="cognify_pipeline",
+        status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    _stub_engine(monkeypatch, [_joined(run, has_terminal=False)])
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert body[0]["status"] == "ABANDONED"
 
 
 # --------------------------------------------------------------------------- #
