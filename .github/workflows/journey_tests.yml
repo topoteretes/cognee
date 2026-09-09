@@ -1,0 +1,78 @@
+name: Reusable Product Journey Tests
+
+# High-level product contract tests (cognee/tests/journeys). The mock tier needs
+# no secrets, so it runs for fork PRs too and gives them a real signal.
+# Real-LLM runs of the same journeys are wired separately (nightly) via
+# COGNEE_JOURNEY_MODE=llm.
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '3.12.x'
+      ci-image:
+        required: false
+        type: string
+        default: ''
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+  TELEMETRY_DISABLED: '1'
+  COGNEE_JOURNEY_MODE: mock
+  # Mock mode never calls a provider; config validation still wants these present.
+  LLM_PROVIDER: openai
+  LLM_MODEL: openai/gpt-5-mini
+  LLM_API_KEY: mock-key
+  EMBEDDING_PROVIDER: openai
+  EMBEDDING_MODEL: openai/text-embedding-3-small
+  EMBEDDING_DIMENSIONS: '256'
+  EMBEDDING_API_KEY: mock-key
+  COGNEE_SKIP_PREFLIGHT: '1'
+  COGNEE_SKIP_CONNECTION_TEST: 'true'
+
+jobs:
+  journeys-mock:
+    name: Product Journeys (mock LLM)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Memory correctness, sessions, lifecycle, idempotency, HTTP API
+        run: |
+          uv run pytest cognee/tests/journeys -m "journey and not quickstart" \
+            -v --timeout=1500 -p no:cacheprovider -W ignore
+
+  quickstart-mock:
+    name: Quickstart in a fresh venv (wheel install)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Build wheel, install into empty venv, run README quickstart
+        env:
+          COGNEE_JOURNEY_QUICKSTART: '1'
+        run: |
+          uv run pytest cognee/tests/journeys/test_quickstart.py -m quickstart \
+            -v --timeout=1500 -p no:cacheprovider -W ignore

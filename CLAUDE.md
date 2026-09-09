@@ -655,6 +655,7 @@ Tests are organized in `cognee/tests/`:
 - `e2e/` - Full-stack end-to-end suites run per backend in CI (e.g. `e2e/incremental_update/` runs on LadybugDB + LanceDB, Postgres graph + PGVector, and Neo4j + LanceDB)
 - `cli_tests/` - CLI command tests
 - `tasks/` - Task-specific tests
+- `journeys/` - High-level product contract tests (quickstart, golden-corpus correctness, sessions, lifecycle, idempotency, HTTP API). Deterministic mock-LLM mode by default, `COGNEE_JOURNEY_MODE=llm` for real providers. See `cognee/tests/journeys/README.md`.
 
 When adding features, add corresponding tests. Integration tests should cover the full remember → recall flow (or add → cognify → search when the feature lives in one of those stages).
 

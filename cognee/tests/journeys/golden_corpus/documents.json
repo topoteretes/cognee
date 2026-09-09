@@ -1,0 +1,367 @@
+{
+  "_comment": "Fictional town of Kestrel Hollow. Every fact is invented so a real LLM cannot answer from prior knowledge; it must use retrieved context. `knowledge_graph` and `summary` are what the mock LLM replays for a chunk containing `title` (same shape as the perf suite's mock_memories.json).",
+  "documents": [
+    {
+      "id": "varenholt_observatory",
+      "title": "Varenholt Observatory",
+      "text": "Title: Varenholt Observatory\n\nThe Varenholt Observatory sits on the ridge above the town of Kestrel Hollow. It was founded in 1987 by the astronomer Ilse Marrow, who raised the funds through a public subscription. Its primary instrument is the Aldous Reflector, a 2.4 metre telescope. The observatory opens to the public on clear Friday nights and runs a schools programme every spring.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "varenholt_observatory", "name": "Varenholt Observatory", "type": "Organization", "description": "Astronomical observatory on the ridge above Kestrel Hollow, founded in 1987."},
+          {"id": "ilse_marrow", "name": "Ilse Marrow", "type": "Person", "description": "Astronomer who founded the Varenholt Observatory in 1987."},
+          {"id": "aldous_reflector", "name": "Aldous Reflector", "type": "Instrument", "description": "2.4 metre telescope, the primary instrument of the Varenholt Observatory."},
+          {"id": "kestrel_hollow", "name": "Kestrel Hollow", "type": "Location", "description": "Town below the Varenholt Observatory."}
+        ],
+        "edges": [
+          {"source_node_id": "ilse_marrow", "target_node_id": "varenholt_observatory", "relationship_name": "founded", "description": "Ilse Marrow founded the Varenholt Observatory in 1987."},
+          {"source_node_id": "varenholt_observatory", "target_node_id": "aldous_reflector", "relationship_name": "primary_instrument"},
+          {"source_node_id": "varenholt_observatory", "target_node_id": "kestrel_hollow", "relationship_name": "located_above"}
+        ]
+      },
+      "summary": {"summary": "The Varenholt Observatory, founded in 1987 by Ilse Marrow above Kestrel Hollow, houses the 2.4 metre Aldous Reflector.", "description": ""}
+    },
+    {
+      "id": "brindlewick_ferry",
+      "title": "Brindlewick Ferry Company",
+      "text": "Title: Brindlewick Ferry Company\n\nThe Brindlewick Ferry Company operates the Tamsin route across Lake Orrin, linking Kestrel Hollow with the eastern shore villages. Its flagship vessel is the Quiet Heron, a forty metre catamaran. The company was founded by Rowan Petch, a former fisherman, and still keeps its ticket office on the old stone quay.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "brindlewick_ferry_company", "name": "Brindlewick Ferry Company", "type": "Organization", "description": "Ferry operator running the Tamsin route across Lake Orrin."},
+          {"id": "quiet_heron", "name": "Quiet Heron", "type": "Vessel", "description": "Forty metre catamaran, flagship vessel of the Brindlewick Ferry Company."},
+          {"id": "rowan_petch", "name": "Rowan Petch", "type": "Person", "description": "Former fisherman who founded the Brindlewick Ferry Company."},
+          {"id": "lake_orrin", "name": "Lake Orrin", "type": "Location", "description": "Lake crossed by the Brindlewick ferry on the Tamsin route."}
+        ],
+        "edges": [
+          {"source_node_id": "rowan_petch", "target_node_id": "brindlewick_ferry_company", "relationship_name": "founded"},
+          {"source_node_id": "brindlewick_ferry_company", "target_node_id": "quiet_heron", "relationship_name": "flagship_vessel"},
+          {"source_node_id": "brindlewick_ferry_company", "target_node_id": "lake_orrin", "relationship_name": "operates_on"}
+        ]
+      },
+      "summary": {"summary": "The Brindlewick Ferry Company, founded by Rowan Petch, crosses Lake Orrin with its flagship Quiet Heron.", "description": ""}
+    },
+    {
+      "id": "solenne_bakery",
+      "title": "Solenne Bakery",
+      "text": "Title: Solenne Bakery\n\nThe Solenne Bakery opened on Pewter Street in 2003 and is run by Maribel Quist. It is famous for the Larkloaf, a cardamom rye bread that sells out most mornings before nine. The bakery supplies bread to the Hollow Gazette staff canteen and to the Saturday market stalls.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "solenne_bakery", "name": "Solenne Bakery", "type": "Organization", "description": "Bakery on Pewter Street opened in 2003, famous for the Larkloaf."},
+          {"id": "maribel_quist", "name": "Maribel Quist", "type": "Person", "description": "Owner and baker who runs the Solenne Bakery."},
+          {"id": "larkloaf", "name": "Larkloaf", "type": "Product", "description": "Cardamom rye bread, the Solenne Bakery's famous loaf."},
+          {"id": "pewter_street", "name": "Pewter Street", "type": "Location", "description": "Street in Kestrel Hollow where the Solenne Bakery stands."}
+        ],
+        "edges": [
+          {"source_node_id": "maribel_quist", "target_node_id": "solenne_bakery", "relationship_name": "runs"},
+          {"source_node_id": "solenne_bakery", "target_node_id": "larkloaf", "relationship_name": "famous_for"},
+          {"source_node_id": "solenne_bakery", "target_node_id": "pewter_street", "relationship_name": "located_on"}
+        ]
+      },
+      "summary": {"summary": "Maribel Quist's Solenne Bakery on Pewter Street is famous for the Larkloaf cardamom rye.", "description": ""}
+    },
+    {
+      "id": "town_council",
+      "title": "Kestrel Hollow Town Council",
+      "text": "Title: Kestrel Hollow Town Council\n\nThe Kestrel Hollow Town Council meets on the first Tuesday of every month in Tolliver Hall. The current mayor is Oskar Lindqvist-Vale, elected in 2022. The town has a population of 14,200 residents according to the latest census, and the council employs a staff of thirty-eight.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "kestrel_hollow_town_council", "name": "Kestrel Hollow Town Council", "type": "Organization", "description": "Local government of Kestrel Hollow, meeting monthly in Tolliver Hall."},
+          {"id": "oskar_lindqvist_vale", "name": "Oskar Lindqvist-Vale", "type": "Person", "description": "Mayor of Kestrel Hollow, elected in 2022."},
+          {"id": "tolliver_hall", "name": "Tolliver Hall", "type": "Location", "description": "Hall where the Kestrel Hollow Town Council meets."},
+          {"id": "kestrel_hollow", "name": "Kestrel Hollow", "type": "Location", "description": "Town with a population of 14,200 residents."}
+        ],
+        "edges": [
+          {"source_node_id": "oskar_lindqvist_vale", "target_node_id": "kestrel_hollow", "relationship_name": "mayor_of"},
+          {"source_node_id": "kestrel_hollow_town_council", "target_node_id": "tolliver_hall", "relationship_name": "meets_in"},
+          {"source_node_id": "kestrel_hollow_town_council", "target_node_id": "kestrel_hollow", "relationship_name": "governs"}
+        ]
+      },
+      "summary": {"summary": "Kestrel Hollow, population 14,200, is governed by a council meeting in Tolliver Hall under mayor Oskar Lindqvist-Vale.", "description": ""}
+    },
+    {
+      "id": "project_halcyon",
+      "title": "Project Halcyon",
+      "text": "Title: Project Halcyon\n\nProject Halcyon is a battery research programme at the Dunmere Institute, led by Dr. Priya Vantongeren. The team develops sodium-graphite anodes and targets an energy density of 400 watt-hours per kilogram. The programme began in 2020 with a grant from the regional energy board and employs fourteen researchers.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "project_halcyon", "name": "Project Halcyon", "type": "Project", "description": "Battery research programme at the Dunmere Institute targeting 400 Wh/kg with sodium-graphite anodes."},
+          {"id": "priya_vantongeren", "name": "Priya Vantongeren", "type": "Person", "description": "Scientist who leads Project Halcyon."},
+          {"id": "dunmere_institute", "name": "Dunmere Institute", "type": "Organization", "description": "Research institute hosting Project Halcyon."},
+          {"id": "sodium_graphite_anode", "name": "Sodium-graphite anode", "type": "Technology", "description": "Anode technology developed by Project Halcyon."}
+        ],
+        "edges": [
+          {"source_node_id": "priya_vantongeren", "target_node_id": "project_halcyon", "relationship_name": "leads"},
+          {"source_node_id": "project_halcyon", "target_node_id": "dunmere_institute", "relationship_name": "hosted_at"},
+          {"source_node_id": "project_halcyon", "target_node_id": "sodium_graphite_anode", "relationship_name": "develops"}
+        ]
+      },
+      "summary": {"summary": "Project Halcyon, led by Priya Vantongeren at the Dunmere Institute, develops sodium-graphite anodes targeting 400 Wh/kg.", "description": ""}
+    },
+    {
+      "id": "dunmere_institute",
+      "title": "Dunmere Institute",
+      "text": "Title: Dunmere Institute\n\nThe Dunmere Institute was founded in 1952 as a materials science laboratory. Its campus is located in Wexcombe, twelve kilometres north of Kestrel Hollow. The institute is directed by Dr. Anselm Faraday-Roux and hosts about two hundred staff across six research groups, including the Halcyon battery programme.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "dunmere_institute", "name": "Dunmere Institute", "type": "Organization", "description": "Materials science institute founded in 1952 with a campus in Wexcombe."},
+          {"id": "anselm_faraday_roux", "name": "Anselm Faraday-Roux", "type": "Person", "description": "Director of the Dunmere Institute."},
+          {"id": "wexcombe", "name": "Wexcombe", "type": "Location", "description": "Town twelve kilometres north of Kestrel Hollow, home to the Dunmere Institute campus."}
+        ],
+        "edges": [
+          {"source_node_id": "anselm_faraday_roux", "target_node_id": "dunmere_institute", "relationship_name": "directs"},
+          {"source_node_id": "dunmere_institute", "target_node_id": "wexcombe", "relationship_name": "located_in"}
+        ]
+      },
+      "summary": {"summary": "The Dunmere Institute, founded 1952 and directed by Anselm Faraday-Roux, has its campus in Wexcombe.", "description": ""}
+    },
+    {
+      "id": "orrin_regatta",
+      "title": "Orrin Lake Regatta",
+      "text": "Title: Orrin Lake Regatta\n\nThe Orrin Lake Regatta is held every August on Lake Orrin. The course record is held by Thessaly Brandt, who sailed the boat Marigold Nine to victory in 2019 in a time of two hours and eleven minutes. Around sixty boats enter each year and the finish line is beside the ferry quay.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "orrin_lake_regatta", "name": "Orrin Lake Regatta", "type": "Event", "description": "Annual August sailing race on Lake Orrin."},
+          {"id": "thessaly_brandt", "name": "Thessaly Brandt", "type": "Person", "description": "Sailor who holds the Orrin Lake Regatta course record, set in 2019."},
+          {"id": "marigold_nine", "name": "Marigold Nine", "type": "Vessel", "description": "Boat sailed by Thessaly Brandt to the 2019 record."},
+          {"id": "lake_orrin", "name": "Lake Orrin", "type": "Location", "description": "Lake hosting the regatta."}
+        ],
+        "edges": [
+          {"source_node_id": "thessaly_brandt", "target_node_id": "orrin_lake_regatta", "relationship_name": "holds_record"},
+          {"source_node_id": "thessaly_brandt", "target_node_id": "marigold_nine", "relationship_name": "sails"},
+          {"source_node_id": "orrin_lake_regatta", "target_node_id": "lake_orrin", "relationship_name": "held_on"}
+        ]
+      },
+      "summary": {"summary": "Thessaly Brandt holds the Orrin Lake Regatta record, set in 2019 aboard Marigold Nine.", "description": ""}
+    },
+    {
+      "id": "copperline_railway",
+      "title": "Copperline Railway",
+      "text": "Title: Copperline Railway\n\nThe Copperline Railway is a narrow gauge line running 41 kilometres from Kestrel Hollow to Wexcombe. It opened in 1911 to carry copper ore and now runs heritage services on weekends. Its steam locomotive, the Ember Queen, was built in 1923 and restored by volunteers in 1998.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "copperline_railway", "name": "Copperline Railway", "type": "Infrastructure", "description": "41 kilometre narrow gauge railway from Kestrel Hollow to Wexcombe, opened 1911."},
+          {"id": "ember_queen", "name": "Ember Queen", "type": "Vehicle", "description": "Steam locomotive of the Copperline Railway, built 1923, restored 1998."},
+          {"id": "kestrel_hollow", "name": "Kestrel Hollow", "type": "Location", "description": "Southern terminus of the Copperline Railway."},
+          {"id": "wexcombe", "name": "Wexcombe", "type": "Location", "description": "Northern terminus of the Copperline Railway."}
+        ],
+        "edges": [
+          {"source_node_id": "copperline_railway", "target_node_id": "ember_queen", "relationship_name": "operates_locomotive"},
+          {"source_node_id": "copperline_railway", "target_node_id": "kestrel_hollow", "relationship_name": "runs_from"},
+          {"source_node_id": "copperline_railway", "target_node_id": "wexcombe", "relationship_name": "runs_to"}
+        ]
+      },
+      "summary": {"summary": "The 41 kilometre Copperline Railway, opened 1911, links Kestrel Hollow and Wexcombe with the steam locomotive Ember Queen.", "description": ""}
+    },
+    {
+      "id": "fennimore_press",
+      "title": "Fennimore Press",
+      "text": "Title: Fennimore Press\n\nFennimore Press publishes the Hollow Gazette, a weekly newspaper with a circulation of 6,000. The editor is Beatrix Oyelaran, who joined the paper in 2015. The press occupies a converted warehouse on the quay and also prints the programme for the Orrin Lake Regatta each summer.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "fennimore_press", "name": "Fennimore Press", "type": "Organization", "description": "Publisher of the Hollow Gazette, based in a converted quay warehouse."},
+          {"id": "hollow_gazette", "name": "Hollow Gazette", "type": "Publication", "description": "Weekly newspaper with a circulation of 6,000."},
+          {"id": "beatrix_oyelaran", "name": "Beatrix Oyelaran", "type": "Person", "description": "Editor of the Hollow Gazette since 2015."}
+        ],
+        "edges": [
+          {"source_node_id": "fennimore_press", "target_node_id": "hollow_gazette", "relationship_name": "publishes"},
+          {"source_node_id": "beatrix_oyelaran", "target_node_id": "hollow_gazette", "relationship_name": "edits"}
+        ]
+      },
+      "summary": {"summary": "Fennimore Press publishes the Hollow Gazette, a 6,000 circulation weekly edited by Beatrix Oyelaran.", "description": ""}
+    },
+    {
+      "id": "wexcombe_glassworks",
+      "title": "Wexcombe Glassworks",
+      "text": "Title: Wexcombe Glassworks\n\nThe Wexcombe Glassworks produces the Seaglass Blue range of tableware, coloured with a cobalt recipe kept since 1904. The master glassblower is Tobiah Renn, who trained in the works as an apprentice at sixteen. The main furnace is nicknamed Old Wren and runs day and night from September to May.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "wexcombe_glassworks", "name": "Wexcombe Glassworks", "type": "Organization", "description": "Glass factory in Wexcombe producing Seaglass Blue tableware."},
+          {"id": "tobiah_renn", "name": "Tobiah Renn", "type": "Person", "description": "Master glassblower at the Wexcombe Glassworks."},
+          {"id": "seaglass_blue", "name": "Seaglass Blue", "type": "Product", "description": "Cobalt-coloured tableware range made by the Wexcombe Glassworks."},
+          {"id": "old_wren", "name": "Old Wren", "type": "Equipment", "description": "Nickname of the main furnace at the Wexcombe Glassworks."}
+        ],
+        "edges": [
+          {"source_node_id": "tobiah_renn", "target_node_id": "wexcombe_glassworks", "relationship_name": "master_glassblower_at"},
+          {"source_node_id": "wexcombe_glassworks", "target_node_id": "seaglass_blue", "relationship_name": "produces"},
+          {"source_node_id": "wexcombe_glassworks", "target_node_id": "old_wren", "relationship_name": "operates_furnace"}
+        ]
+      },
+      "summary": {"summary": "The Wexcombe Glassworks, with master glassblower Tobiah Renn and the Old Wren furnace, makes Seaglass Blue tableware.", "description": ""}
+    },
+    {
+      "id": "larkspur_clinic",
+      "title": "Larkspur Clinic",
+      "text": "Title: Larkspur Clinic\n\nThe Larkspur Clinic on Quarry Road is run by Dr. Halvard Mensah, who specialises in sleep medicine. The clinic opened in 2011 and runs an overnight sleep laboratory with four beds. Referrals come from across the Orrin valley and waiting times average three weeks.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "larkspur_clinic", "name": "Larkspur Clinic", "type": "Organization", "description": "Sleep medicine clinic on Quarry Road, opened 2011."},
+          {"id": "halvard_mensah", "name": "Halvard Mensah", "type": "Person", "description": "Doctor specialising in sleep medicine who runs the Larkspur Clinic."},
+          {"id": "quarry_road", "name": "Quarry Road", "type": "Location", "description": "Road where the Larkspur Clinic is located."}
+        ],
+        "edges": [
+          {"source_node_id": "halvard_mensah", "target_node_id": "larkspur_clinic", "relationship_name": "runs"},
+          {"source_node_id": "larkspur_clinic", "target_node_id": "quarry_road", "relationship_name": "located_on"}
+        ]
+      },
+      "summary": {"summary": "Dr. Halvard Mensah runs the Larkspur Clinic on Quarry Road, specialising in sleep medicine.", "description": ""}
+    },
+    {
+      "id": "merrow_tate",
+      "title": "Merrow & Tate Solicitors",
+      "text": "Title: Merrow & Tate Solicitors\n\nMerrow & Tate Solicitors is a two-partner law firm founded in 1996 by Cordelia Merrow and Ignatius Tate. The office sits on the first floor above the Solenne Bakery on Pewter Street. The firm handles property conveyancing and maritime contracts for the ferry and fishing trades.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "merrow_and_tate_solicitors", "name": "Merrow & Tate Solicitors", "type": "Organization", "description": "Law firm founded 1996, office above the Solenne Bakery on Pewter Street."},
+          {"id": "cordelia_merrow", "name": "Cordelia Merrow", "type": "Person", "description": "Founding partner of Merrow & Tate Solicitors."},
+          {"id": "ignatius_tate", "name": "Ignatius Tate", "type": "Person", "description": "Founding partner of Merrow & Tate Solicitors."},
+          {"id": "solenne_bakery", "name": "Solenne Bakery", "type": "Organization", "description": "Bakery below the Merrow & Tate office."}
+        ],
+        "edges": [
+          {"source_node_id": "cordelia_merrow", "target_node_id": "merrow_and_tate_solicitors", "relationship_name": "partner_at"},
+          {"source_node_id": "ignatius_tate", "target_node_id": "merrow_and_tate_solicitors", "relationship_name": "partner_at"},
+          {"source_node_id": "merrow_and_tate_solicitors", "target_node_id": "solenne_bakery", "relationship_name": "located_above"}
+        ]
+      },
+      "summary": {"summary": "Merrow & Tate Solicitors, founded by Cordelia Merrow and Ignatius Tate, has its office above the Solenne Bakery.", "description": ""}
+    },
+    {
+      "id": "library",
+      "title": "Kestrel Hollow Library",
+      "text": "Title: Kestrel Hollow Library\n\nThe Kestrel Hollow Library opens at nine each weekday and is run by the librarian Sunniva Achebe. It holds the Petch Maritime Archive, a collection of ferry logs and charts donated by the Petch family. The reading room overlooks Lake Orrin and hosts a children's story hour on Wednesdays.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "kestrel_hollow_library", "name": "Kestrel Hollow Library", "type": "Organization", "description": "Public library holding the Petch Maritime Archive."},
+          {"id": "sunniva_achebe", "name": "Sunniva Achebe", "type": "Person", "description": "Librarian who runs the Kestrel Hollow Library."},
+          {"id": "petch_maritime_archive", "name": "Petch Maritime Archive", "type": "Collection", "description": "Collection of ferry logs and charts donated by the Petch family."}
+        ],
+        "edges": [
+          {"source_node_id": "sunniva_achebe", "target_node_id": "kestrel_hollow_library", "relationship_name": "runs"},
+          {"source_node_id": "kestrel_hollow_library", "target_node_id": "petch_maritime_archive", "relationship_name": "holds"}
+        ]
+      },
+      "summary": {"summary": "The Kestrel Hollow Library, run by Sunniva Achebe, holds the Petch Maritime Archive.", "description": ""}
+    },
+    {
+      "id": "tamsin_bridge",
+      "title": "Tamsin Bridge",
+      "text": "Title: Tamsin Bridge\n\nThe Tamsin Bridge is a suspension bridge across the Tamsin narrows at the southern end of Lake Orrin. It was completed in 1968 and designed by the engineer Leopold Nkemelu. The main span measures 310 metres and the deck carries two road lanes and a footpath used by the annual Lantern Walk.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "tamsin_bridge", "name": "Tamsin Bridge", "type": "Infrastructure", "description": "Suspension bridge completed in 1968 with a 310 metre main span."},
+          {"id": "leopold_nkemelu", "name": "Leopold Nkemelu", "type": "Person", "description": "Engineer who designed the Tamsin Bridge."},
+          {"id": "tamsin_narrows", "name": "Tamsin narrows", "type": "Location", "description": "Strait at the southern end of Lake Orrin crossed by the Tamsin Bridge."}
+        ],
+        "edges": [
+          {"source_node_id": "leopold_nkemelu", "target_node_id": "tamsin_bridge", "relationship_name": "designed"},
+          {"source_node_id": "tamsin_bridge", "target_node_id": "tamsin_narrows", "relationship_name": "crosses"}
+        ]
+      },
+      "summary": {"summary": "The Tamsin Bridge, a 310 metre span suspension bridge designed by Leopold Nkemelu, was completed in 1968.", "description": ""}
+    },
+    {
+      "id": "hollow_brewing",
+      "title": "Hollow Brewing",
+      "text": "Title: Hollow Brewing\n\nHollow Brewing is a small brewery run by the brewer Jonquil Sato. Its flagship ale is Ferryman's Gold, brewed with water drawn from the Orrin spring and a single local hop variety. The brewery taproom opens on Thursday and Friday evenings and supplies the ferry company's onboard bar.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "hollow_brewing", "name": "Hollow Brewing", "type": "Organization", "description": "Small brewery in Kestrel Hollow run by Jonquil Sato."},
+          {"id": "jonquil_sato", "name": "Jonquil Sato", "type": "Person", "description": "Brewer who runs Hollow Brewing."},
+          {"id": "ferrymans_gold", "name": "Ferryman's Gold", "type": "Product", "description": "Flagship ale of Hollow Brewing, brewed with Orrin spring water."}
+        ],
+        "edges": [
+          {"source_node_id": "jonquil_sato", "target_node_id": "hollow_brewing", "relationship_name": "runs"},
+          {"source_node_id": "hollow_brewing", "target_node_id": "ferrymans_gold", "relationship_name": "flagship_ale"}
+        ]
+      },
+      "summary": {"summary": "Hollow Brewing, run by Jonquil Sato, brews the flagship ale Ferryman's Gold with Orrin spring water.", "description": ""}
+    },
+    {
+      "id": "nightjar_software",
+      "title": "Nightjar Software",
+      "text": "Title: Nightjar Software\n\nNightjar Software is a twelve-person firm in Wexcombe founded by Ezekiel Marrow, the son of the astronomer Ilse Marrow. Its product, Ledgerlight, is a bookkeeping application used by small businesses across the Orrin valley, including the Solenne Bakery and Hollow Brewing.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "nightjar_software", "name": "Nightjar Software", "type": "Organization", "description": "Twelve-person software firm in Wexcombe that makes Ledgerlight."},
+          {"id": "ezekiel_marrow", "name": "Ezekiel Marrow", "type": "Person", "description": "Founder of Nightjar Software, son of Ilse Marrow."},
+          {"id": "ilse_marrow", "name": "Ilse Marrow", "type": "Person", "description": "Astronomer, mother of Ezekiel Marrow."},
+          {"id": "ledgerlight", "name": "Ledgerlight", "type": "Product", "description": "Bookkeeping application made by Nightjar Software."}
+        ],
+        "edges": [
+          {"source_node_id": "ezekiel_marrow", "target_node_id": "nightjar_software", "relationship_name": "founded"},
+          {"source_node_id": "ezekiel_marrow", "target_node_id": "ilse_marrow", "relationship_name": "son_of"},
+          {"source_node_id": "nightjar_software", "target_node_id": "ledgerlight", "relationship_name": "makes"}
+        ]
+      },
+      "summary": {"summary": "Nightjar Software, founded in Wexcombe by Ezekiel Marrow, makes the Ledgerlight bookkeeping app.", "description": ""}
+    },
+    {
+      "id": "pewter_market",
+      "title": "Pewter Street Market",
+      "text": "Title: Pewter Street Market\n\nThe Pewter Street Market takes place every Saturday and dates from the 1890s. The stallholder association is chaired by Wilhelmina Ostrowski, a cheesemaker who has kept a stall for twenty-six years. Around seventy stalls trade from eight until two, and the market closes only for the Lantern Walk weekend.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "pewter_street_market", "name": "Pewter Street Market", "type": "Event", "description": "Saturday street market dating from the 1890s with around seventy stalls."},
+          {"id": "wilhelmina_ostrowski", "name": "Wilhelmina Ostrowski", "type": "Person", "description": "Cheesemaker who chairs the Pewter Street Market stallholder association."},
+          {"id": "pewter_street", "name": "Pewter Street", "type": "Location", "description": "Street hosting the Saturday market."}
+        ],
+        "edges": [
+          {"source_node_id": "wilhelmina_ostrowski", "target_node_id": "pewter_street_market", "relationship_name": "chairs_association_of"},
+          {"source_node_id": "pewter_street_market", "target_node_id": "pewter_street", "relationship_name": "held_on"}
+        ]
+      },
+      "summary": {"summary": "The Saturday Pewter Street Market, dating from the 1890s, has a stallholder association chaired by Wilhelmina Ostrowski.", "description": ""}
+    },
+    {
+      "id": "aldous_reflector",
+      "title": "Aldous Reflector",
+      "text": "Title: Aldous Reflector\n\nThe Aldous Reflector is a 2.4 metre telescope whose mirror was ground by the optician Casimir Aldous over two years, finishing in 1985. It was installed at the Varenholt Observatory in 1987 and remains the largest telescope in the region. The mirror is re-aluminised every five years.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "aldous_reflector", "name": "Aldous Reflector", "type": "Instrument", "description": "2.4 metre telescope installed at the Varenholt Observatory in 1987."},
+          {"id": "casimir_aldous", "name": "Casimir Aldous", "type": "Person", "description": "Optician who ground the mirror of the Aldous Reflector, finishing in 1985."},
+          {"id": "varenholt_observatory", "name": "Varenholt Observatory", "type": "Organization", "description": "Observatory housing the Aldous Reflector."}
+        ],
+        "edges": [
+          {"source_node_id": "casimir_aldous", "target_node_id": "aldous_reflector", "relationship_name": "ground_mirror_of"},
+          {"source_node_id": "aldous_reflector", "target_node_id": "varenholt_observatory", "relationship_name": "installed_at"}
+        ]
+      },
+      "summary": {"summary": "The Aldous Reflector's 2.4 metre mirror was ground by Casimir Aldous and installed at Varenholt in 1987.", "description": ""}
+    },
+    {
+      "id": "orrin_fisheries",
+      "title": "Orrin Fisheries Cooperative",
+      "text": "Title: Orrin Fisheries Cooperative\n\nThe Orrin Fisheries Cooperative represents twenty-three boats working Lake Orrin. It is chaired by Rafferty Duquesne, who has fished the lake for thirty years. The cooperative's whitefish quota is 180 tonnes a year, and its catch is landed at the stone quay beside the ferry office.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "orrin_fisheries_cooperative", "name": "Orrin Fisheries Cooperative", "type": "Organization", "description": "Cooperative of twenty-three fishing boats on Lake Orrin with a 180 tonne whitefish quota."},
+          {"id": "rafferty_duquesne", "name": "Rafferty Duquesne", "type": "Person", "description": "Chair of the Orrin Fisheries Cooperative."},
+          {"id": "lake_orrin", "name": "Lake Orrin", "type": "Location", "description": "Lake fished by the cooperative."}
+        ],
+        "edges": [
+          {"source_node_id": "rafferty_duquesne", "target_node_id": "orrin_fisheries_cooperative", "relationship_name": "chairs"},
+          {"source_node_id": "orrin_fisheries_cooperative", "target_node_id": "lake_orrin", "relationship_name": "fishes"}
+        ]
+      },
+      "summary": {"summary": "The Orrin Fisheries Cooperative, chaired by Rafferty Duquesne, has a whitefish quota of 180 tonnes.", "description": ""}
+    },
+    {
+      "id": "lantern_walk",
+      "title": "Kestrel Hollow Lantern Walk",
+      "text": "Title: Kestrel Hollow Lantern Walk\n\nThe Kestrel Hollow Lantern Walk is held on the second Saturday of November. Walkers gather at Tolliver Hall at dusk and follow a lit route down to the Tamsin Bridge. The event is organized by the librarian Sunniva Achebe and raises money for the library's children's programme.",
+      "knowledge_graph": {
+        "nodes": [
+          {"id": "kestrel_hollow_lantern_walk", "name": "Kestrel Hollow Lantern Walk", "type": "Event", "description": "November evening walk from Tolliver Hall to the Tamsin Bridge."},
+          {"id": "sunniva_achebe", "name": "Sunniva Achebe", "type": "Person", "description": "Librarian who organizes the Lantern Walk."},
+          {"id": "tolliver_hall", "name": "Tolliver Hall", "type": "Location", "description": "Starting point of the Lantern Walk."},
+          {"id": "tamsin_bridge", "name": "Tamsin Bridge", "type": "Infrastructure", "description": "End point of the Lantern Walk."}
+        ],
+        "edges": [
+          {"source_node_id": "sunniva_achebe", "target_node_id": "kestrel_hollow_lantern_walk", "relationship_name": "organizes"},
+          {"source_node_id": "kestrel_hollow_lantern_walk", "target_node_id": "tolliver_hall", "relationship_name": "starts_at"},
+          {"source_node_id": "kestrel_hollow_lantern_walk", "target_node_id": "tamsin_bridge", "relationship_name": "ends_at"}
+        ]
+      },
+      "summary": {"summary": "The Kestrel Hollow Lantern Walk, organized by Sunniva Achebe, runs from Tolliver Hall to the Tamsin Bridge each November.", "description": ""}
+    }
+  ]
+}
