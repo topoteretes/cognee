@@ -46,6 +46,7 @@ SEARCH_TYPE_CHOICES = [
     "CODE",
     "CYPHER",
     "GRAPH_REPORT",
+    "BROAD",
     "SKILLS",
 ]
 
