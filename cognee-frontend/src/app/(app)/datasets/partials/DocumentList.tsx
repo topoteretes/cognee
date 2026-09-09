@@ -8,7 +8,10 @@ export interface DocRow {
   id: string;
   name: string;
   extension?: string;
+  /** Set by callers that map API rows to their own shape. */
   size?: number;
+  /** What the API sends (DataDTO.data_size). Callers passing raw rows use this. */
+  dataSize?: number;
   createdAt?: string;
 }
 
@@ -30,7 +33,7 @@ export default function DocumentList<T extends DocRow>({
             <span style={{ flex: 1, fontSize: 13, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.55)", fontWeight: 500, minWidth: 32, textAlign: "right" }}>{meta.label}</span>
-              <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", minWidth: 52, textAlign: "right" }}>{formatFileSize(doc.size)}</span>
+              <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", minWidth: 52, textAlign: "right" }}>{formatFileSize(doc.size ?? doc.dataSize)}</span>
               <span style={{ fontSize: 11, color: "rgba(237,236,234,0.35)", minWidth: 80, textAlign: "right", whiteSpace: "nowrap" }}>{formatDate(doc.createdAt)}</span>
               <button
                 onClick={() => onDelete(doc)}

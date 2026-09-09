@@ -20,7 +20,15 @@ async def get_dataset_data(
     """
     db_engine = get_relational_engine()
 
-    query = select(Data).filter(Data.dataset_id == dataset_id).order_by(Data.data_size.desc())
+    # Newest first, tiebroken on id so paging is stable when timestamps collide.
+    # This ordering (with the dataset_id filter) is served end to end by
+    # ix_data_dataset_created; the previous order_by(data_size.desc()) was on an
+    # unindexed column, so every listing seq-scanned the table and sorted it --
+    # externally, spilling to disk, on a dataset of any size. A LIMIT does not
+    # avoid that: the whole partition still has to be sorted to find the top N.
+    query = (
+        select(Data).filter(Data.dataset_id == dataset_id).order_by(Data.created_at.desc(), Data.id)
+    )
 
     if offset:
         query = query.offset(offset)

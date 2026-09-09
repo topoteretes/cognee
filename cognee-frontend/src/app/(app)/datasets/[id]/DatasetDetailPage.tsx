@@ -425,12 +425,14 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     if (!cogniInstance) return;
     try {
       const data = await getDatasetData(datasetId, cogniInstance);
-      setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number }) => ({
+      setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; dataSize?: number; size_bytes?: number; file_size?: number }) => ({
         id: d.id,
         name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
         extension: d.originalExtension || d.original_extension || d.extension,
         mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
-        size: d.size ?? d.size_bytes ?? d.file_size,
+        // dataSize is what the API actually sends; the rest were guesses at a
+        // field name that never existed, so the size column was always blank.
+        size: d.dataSize ?? d.size ?? d.size_bytes ?? d.file_size,
         createdAt: d.createdAt,
       })) : []);
       setFilesError(false);

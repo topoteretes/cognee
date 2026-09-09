@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import JSON, UUID, Column, DateTime, Float, Index, Integer, String
+from sqlalchemy import JSON, UUID, Column, DateTime, Float, Index, Integer, String, text
 from sqlalchemy.ext.mutable import MutableDict
 
 from cognee.infrastructure.databases.relational import Base
@@ -15,6 +15,13 @@ class Data(Base):
     # document's content changes.
     __table_args__ = (
         Index("data_dataset_content_lookup", "dataset_id", "owner_id", "content_hash"),
+        # Serves the dataset listing: filter on dataset_id, newest first,
+        # tiebroken on id. Without it a listing seq-scans and sorts the table,
+        # which a LIMIT cannot avoid. Kept in lockstep with alembic revision
+        # e7f9a1c3d5b8.
+        # text() rather than created_at.desc(): __table_args__ is evaluated
+        # before the columns below exist.
+        Index("ix_data_dataset_created", "dataset_id", text("created_at DESC"), "id"),
     )
 
     id = Column(UUID, primary_key=True, default=uuid4)
