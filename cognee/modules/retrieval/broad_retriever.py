@@ -12,12 +12,14 @@ BROAD changes two things and nothing else:
 
 * it retrieves with its own wide default (``BROAD_DEFAULT_TOP_K``) instead of
   the global 15, because a row costs a fraction of a chunk; and
-* it bounds what reaches the prompt by a CHARACTER budget rather than a row
-  count, so widening retrieval cannot grow the completion input without limit.
+* it bounds what reaches the prompt by a RECORD COUNT whose value depends on
+  whether rows or document chunks answered, so widening retrieval cannot grow
+  the completion input without limit.
 
-A character budget, not a row cap, is what "bounded context" has to mean here:
-rows vary in width by an order of magnitude between sources, so any fixed count
-is either wasteful on narrow rows or over budget on wide ones.
+The cap is per-unit rather than a single number because a row and a document
+chunk differ in size by two orders of magnitude: 500 rows is a modest prompt,
+500 chunks is millions of characters. Text itself is concatenated whole, as in
+every other retriever.
 
 Widening alone is NOT enough, and this was measured rather than assumed. With
 all 140 rows of the SDK-324 CSV in context the model still answered "Akshats-git
@@ -48,14 +50,21 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("BroadRetriever")
 
 # Retrieval budget. Rows are small, so this buys breadth cheaply; the prompt is
-# bounded separately by BROAD_DEFAULT_CONTEXT_CHARS, so a wide value here can
+# bounded separately by the per-unit record caps, so a wide value here can
 # never on its own blow up the completion input.
 BROAD_DEFAULT_TOP_K = 500
 
-# Ceiling on the characters formatted into the completion prompt. ~60k chars is
-# roughly 15k tokens — comfortably inside current context windows while holding
-# a few hundred typical rows.
-BROAD_DEFAULT_CONTEXT_CHARS = 60_000
+# How many retrieved records may be formatted into the completion prompt.
+#
+# The cap keys off WHAT was retrieved, because the two collections hold units
+# that differ in size by two orders of magnitude. A row is ~150-500 chars, so
+# hundreds cost less than one chunk; a document chunk at the default budget is
+# ~32k chars, so a handful is already a large prompt. One shared number would
+# either throw away the rows BROAD exists to count or send 500 chunks to the
+# model. There is deliberately no character ceiling — context length is the
+# caller's business here, exactly as in the other retrievers.
+BROAD_MAX_CONTEXT_ROWS = 5_000
+BROAD_MAX_CONTEXT_CHUNKS = 15
 
 # Row text is written as "<schema header>\n\nRow Data:\n<fields>". Rows from one
 # table repeat the header verbatim, so it is emitted once and elided after that.
@@ -295,14 +304,20 @@ class BroadRetriever(CompletionRetriever):
     def __init__(
         self,
         *args: Any,
-        context_max_chars: int | None = None,
+        max_context_rows: int | None = None,
+        max_context_chunks: int | None = None,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("top_k", BROAD_DEFAULT_TOP_K)
         super().__init__(*args, **kwargs)
-        self.context_max_chars = (
-            context_max_chars if context_max_chars is not None else BROAD_DEFAULT_CONTEXT_CHARS
+        self.max_context_rows = (
+            max_context_rows if max_context_rows is not None else BROAD_MAX_CONTEXT_ROWS
         )
+        self.max_context_chunks = (
+            max_context_chunks if max_context_chunks is not None else BROAD_MAX_CONTEXT_CHUNKS
+        )
+        # Which collection answered, so the record cap can match the unit size.
+        self._served_from_rows = False
         # Set by get_retrieved_objects: True when the search returned exactly
         # top_k rows, so the store may hold more than was seen.
         self._retrieval_capped = False
@@ -335,6 +350,7 @@ class BroadRetriever(CompletionRetriever):
                 # similarity-ranked SAMPLE, not the table. build_aggregate_block
                 # refuses to call a sample exact.
                 self._retrieval_capped = len(found) >= self.top_k
+                self._served_from_rows = collection == BROAD_ROW_COLLECTION
                 logger.debug(
                     "BROAD: %s returned %d rows (capped=%s)",
                     collection,
@@ -346,30 +362,29 @@ class BroadRetriever(CompletionRetriever):
         raise NoDataError("No data found in the system, please add data first.")
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
-        """Format rows into a context bounded by ``context_max_chars``.
+        """Format the retrieved records into the completion context.
 
-        The schema header is emitted once; subsequent rows contribute only their
-        own data. When the budget runs out the context says so explicitly, so a
-        truncated answer is visible in the context rather than silently wrong.
+        Bounded by a RECORD COUNT, not a character budget, and the count that
+        applies depends on which collection answered. Text is concatenated
+        whole, as every other retriever does.
         """
         if not retrieved_objects:
             return ""
 
         # Counted first, and over the FULL retrieved set — the aggregate must
-        # not depend on how many rows survive the character budget below.
+        # not depend on how many records survive the cap below.
         aggregate = build_aggregate_block(retrieved_objects, self._retrieval_capped)
 
-        parts: list[str] = [aggregate] if aggregate else []
-        used = len(aggregate)
-        header_emitted = ""
-        included = 0
+        limit = self.max_context_rows if self._served_from_rows else self.max_context_chunks
+        shown = retrieved_objects[:limit]
 
-        for found in retrieved_objects:
+        parts: list[str] = [aggregate] if aggregate else []
+        header_emitted = ""
+        for found in shown:
             payload = getattr(found, "payload", None) or {}
             text = payload.get("text") or ""
             if not text:
                 continue
-
             header, body = _split_schema_header(text)
             piece = body
             if header and header != header_emitted:
@@ -377,28 +392,27 @@ class BroadRetriever(CompletionRetriever):
                 # carry its header so the LLM can read the column names.
                 piece = f"{header}\n{body}"
                 header_emitted = header
-
-            if used + len(piece) > self.context_max_chars:
-                break
             parts.append(piece)
-            used += len(piece)
-            included += 1
 
-        omitted = len(retrieved_objects) - included
+        omitted = len(retrieved_objects) - len(shown)
         if omitted > 0:
-            # Say it in the context: an aggregate computed over a truncated set
-            # is wrong, and the model should be able to see that it happened.
+            # Say it in the context. When the aggregate survived it already
+            # covers everything retrieved, so only the raw evidence is partial.
             parts.append(
-                f"\n[NOTE: context truncated to {included} of {len(retrieved_objects)} "
-                f"retrieved records; {omitted} were omitted. Any count or ranking "
-                f"below is computed over the shown records only. The EXACT COUNTS "
-                f"block above still covers all {len(retrieved_objects)} retrieved rows.]"
+                f"\n[NOTE: showing {len(shown)} of {len(retrieved_objects)} retrieved "
+                f"records; {omitted} were omitted to bound the prompt."
+                + (
+                    f" The EXACT COUNTS block above still covers all "
+                    f"{len(retrieved_objects)} of them.]"
+                    if aggregate
+                    else " Any count below is over the shown records only.]"
+                )
             )
             logger.info(
-                "BROAD context truncated: %d/%d records (%d chars budget)",
-                included,
+                "BROAD context: showing %d/%d records (%s cap)",
+                len(shown),
                 len(retrieved_objects),
-                self.context_max_chars,
+                "row" if self._served_from_rows else "chunk",
             )
 
         return "\n".join(parts)

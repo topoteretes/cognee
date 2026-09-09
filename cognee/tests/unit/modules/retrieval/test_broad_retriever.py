@@ -134,31 +134,56 @@ def test_no_block_for_non_row_objects():
 
 
 @pytest.mark.asyncio
-async def test_context_is_bounded_by_the_character_budget():
-    """AC: prompt context stays bounded regardless of how wide retrieval goes."""
-    retriever = BroadRetriever(context_max_chars=2000)
-    rows = [_row(assignee=f"user{i}", filler="y" * 400) for i in range(200)]
+async def test_chunk_evidence_is_capped_by_count():
+    """AC: prompt context stays bounded regardless of how wide retrieval goes.
 
-    context = await retriever.get_context_from_objects("q", rows)
+    A document chunk at the default budget is ~32k chars, so the cap here is a
+    handful; 500 of them would be millions of characters.
+    """
+    retriever = BroadRetriever(max_context_chunks=4)
+    retriever._served_from_rows = False
+    chunks = [SimpleNamespace(payload={"text": "prose " * 500}) for _ in range(200)]
 
-    assert len(context) < 2000 * 2  # budget plus the aggregate block and note
-    assert "context truncated" in context
+    context = await retriever.get_context_from_objects("q", chunks)
+
+    assert context.count("prose prose") <= 4 * 500
+    assert "showing 4 of 200" in context
 
 
 @pytest.mark.asyncio
-async def test_counts_cover_every_row_even_when_evidence_is_truncated():
-    """The aggregate is computed over the full retrieved set, so truncating the
-    evidence shown to the LLM must not change the numbers."""
-    retriever = BroadRetriever(context_max_chars=1500)
-    rows = [_row(assignee="ada", filler="y" * 300) for _ in range(30)]
-    rows += [_row(assignee="grace", filler="y" * 300) for _ in range(10)]
+async def test_rows_get_a_far_higher_cap_than_chunks():
+    """A row is two orders of magnitude smaller than a chunk. One shared cap
+    would either drop the rows BROAD exists to count or send 500 chunks."""
+    from cognee.modules.retrieval.broad_retriever import (
+        BROAD_MAX_CONTEXT_CHUNKS,
+        BROAD_MAX_CONTEXT_ROWS,
+    )
+
+    assert BROAD_MAX_CONTEXT_ROWS > BROAD_MAX_CONTEXT_CHUNKS * 50
+    retriever = BroadRetriever()
+    retriever._served_from_rows = True
+    rows = [_row(assignee=f"user{i}") for i in range(300)]
 
     context = await retriever.get_context_from_objects("q", rows)
 
+    assert "showing" not in context  # 300 rows are well inside the row cap
+    assert "user299" in context
+
+
+@pytest.mark.asyncio
+async def test_counts_cover_every_record_even_when_evidence_is_capped():
+    """The aggregate is computed over the full retrieved set, so capping the
+    evidence shown to the LLM must not change the numbers."""
+    retriever = BroadRetriever(max_context_chunks=2)
+    retriever._served_from_rows = False
+    chunks = [_plain_chunk((i, {"assignee": "ada"})) for i in range(1, 31)]
+    chunks += [_plain_chunk((i, {"assignee": "grace"})) for i in range(31, 41)]
+
+    context = await retriever.get_context_from_objects("q", chunks)
+
     assert "ada: 30" in context
     assert "grace: 10" in context
-    assert "40 retrieved rows" in context
-    assert "context truncated" in context
+    assert "showing 2 of 40" in context
 
 
 @pytest.mark.asyncio
@@ -282,6 +307,7 @@ def test_capped_retrieval_emits_no_counts():
 async def test_context_has_no_counts_when_retrieval_was_capped():
     retriever = BroadRetriever(top_k=3)
     retriever._retrieval_capped = True
+    retriever._served_from_rows = True
     rows = [_row(assignee="ada") for _ in range(3)]
 
     context = await retriever.get_context_from_objects("q", rows)

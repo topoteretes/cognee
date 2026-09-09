@@ -175,7 +175,8 @@ async def get_search_type_retriever_instance(
                 "include_references": include_references,
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
-                "context_max_chars": retriever_specific_config.get("context_max_chars"),
+                "max_context_rows": retriever_specific_config.get("max_context_rows"),
+                "max_context_chunks": retriever_specific_config.get("max_context_chunks"),
             },
         ),
         SearchType.HYBRID_COMPLETION: (
