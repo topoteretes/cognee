@@ -11,10 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 from cognee.modules.retrieval.broad_retriever import (
+    _ROW_INDEX_KEY,
     BROAD_DEFAULT_TOP_K,
     BroadRetriever,
     build_aggregate_block,
     parse_row_fields,
+    parse_rows,
 )
 from cognee.modules.search.methods.get_search_type_retriever_instance import (
     DEFAULT_TOP_K,
@@ -179,3 +181,81 @@ async def test_empty_retrieval_gives_empty_context():
 def test_broad_retriever_defaults_to_the_wide_budget():
     assert BroadRetriever().top_k == BROAD_DEFAULT_TOP_K
     assert BroadRetriever(top_k=25).top_k == 25
+
+
+# --- the plain (non-DLT) cognify route --------------------------------------
+# csv_loader renders rows differently from DltRow: "Row 7:" then one line of
+# comma-joined pairs, and a document chunk holds MANY rows rather than one.
+
+
+def _plain_chunk(*rows) -> SimpleNamespace:
+    """A DocumentChunk in csv_loader's rendering. `rows` are (index, fields)."""
+    blocks = []
+    for index, fields in rows:
+        pairs = ", ".join(f"{k}: {v}" for k, v in fields.items())
+        blocks.append(f"Row {index}:\n{pairs}\n")
+    return SimpleNamespace(payload={"text": "\n".join(blocks)})
+
+
+def test_parses_many_rows_out_of_one_chunk():
+    chunk = _plain_chunk(
+        (1, {"assignee": "ada", "state": "open"}),
+        (2, {"assignee": "grace", "state": "open"}),
+    )
+    rows = parse_rows(chunk.payload["text"])
+    assert [r["assignee"] for r in rows] == ["ada", "grace"]
+
+
+def test_plain_values_may_contain_commas():
+    """csv_loader joins pairs with ', ' and free-text values contain commas —
+    splitting naively invents columns out of prose."""
+    chunk = _plain_chunk(
+        (1, {"assignee": "ada", "notes": "broke, then fixed, then shipped", "state": "open"}),
+    )
+    fields = parse_rows(chunk.payload["text"])[0]
+    assert fields["notes"] == "broke, then fixed, then shipped"
+    # parse_rows carries the source row index alongside the columns so the
+    # caller can detect boundary loss; build_aggregate_block strips it.
+    assert set(fields) - {_ROW_INDEX_KEY} == {"assignee", "notes", "state"}
+
+
+def test_counts_the_plain_route_when_no_row_was_lost():
+    chunks = [
+        _plain_chunk((1, {"assignee": "ada"}), (2, {"assignee": "ada"})),
+        _plain_chunk((3, {"assignee": "grace"})),
+    ]
+    block = build_aggregate_block(chunks)
+    assert "ada: 2" in block
+    assert "EXACT COUNTS" in block
+
+
+def test_no_counts_when_chunking_cut_a_row():
+    """Chunk boundaries do not respect rows, so the document route can lose one.
+    A tally that is short by an unknown amount is worse than none: the model
+    trusts a labelled number over its own reading of the rows. Exact or nothing.
+    """
+    chunks = [
+        _plain_chunk((1, {"assignee": "ada"})),
+        _plain_chunk((3, {"assignee": "grace"})),  # row 2 was cut in half
+    ]
+    assert build_aggregate_block(chunks) == ""
+
+
+def test_dlt_rows_always_count_even_though_they_carry_no_index():
+    """A DltRow record IS one whole row, so nothing can be lost mid-row and the
+    missing-row check must not suppress the block for it."""
+    rows = [_row(assignee="ada") for _ in range(3)]
+    assert "EXACT COUNTS" in build_aggregate_block(rows)
+
+
+def test_inconsistent_column_sets_are_refused():
+    """If the pair split went wrong the recovered columns disagree row to row;
+    counting that would be quietly incorrect."""
+    chunks = [_plain_chunk((i, {f"col{i}": "v", f"other{i}": "w"})) for i in range(1, 11)]
+    assert build_aggregate_block(chunks) == ""
+
+
+def test_row_index_never_leaks_into_the_counts():
+    chunks = [_plain_chunk((1, {"assignee": "ada"})), _plain_chunk((2, {"assignee": "ada"}))]
+    block = build_aggregate_block(chunks)
+    assert "__row_index__" not in block

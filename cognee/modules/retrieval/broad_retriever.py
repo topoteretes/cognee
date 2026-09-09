@@ -80,10 +80,34 @@ def _split_schema_header(text: str) -> tuple[str, str]:
 
 
 # --- deterministic aggregation ---------------------------------------------
-# A row line is exactly two spaces, a column name, a colon and the value (see
-# _build_schema_context_text). Anything else is a continuation of the previous
-# value — free-text columns such as `notes` legitimately contain newlines.
+# Two row renderings exist and BROAD has to count both, because which one a CSV
+# gets depends only on whether the `dlt` extra is installed:
+#
+#   DLT route   (DltRow)      "Row Data:" then "  col: value" lines
+#                             one row per retrieved record, values may span lines
+#   plain route (csv_loader)  "Row 7:" then "col: value, col: value, ..."
+#                             MANY rows per retrieved chunk, all on one line
+#
+# A row line in the DLT form is exactly two spaces, a column name, a colon and
+# the value. Anything else is a continuation — free-text columns such as `notes`
+# legitimately contain newlines.
 _ROW_FIELD = re.compile(r"^  (\w+): ?(.*)$")
+
+# Start of a csv_loader row block: "Row 7:" on its own line.
+_PLAIN_ROW_HEADER = re.compile(r"^Row (\d+):$", re.MULTILINE)
+
+# csv_loader joins pairs with ", ", and free-text values contain commas too, so
+# split only where a comma is followed by something that really looks like a
+# column name and a colon. build_aggregate_block additionally refuses the parse
+# unless the recovered column set agrees across rows, which is what catches a
+# bad split rather than silently counting garbage.
+_PLAIN_PAIR_SPLIT = re.compile(r",\s+(?=[A-Za-z_][A-Za-z0-9_]*:\s)")
+
+# Private key carrying a csv_loader row's source index. Stripped before counting.
+_ROW_INDEX_KEY = "__row_index__"
+
+# Fraction of rows that must share one column set before the parse is trusted.
+_MIN_CONSISTENT_SHAPE_RATIO = 0.8
 
 # Values longer than this on average mark a free-text column (notes, comments).
 # Counting them produces one bucket per row and tells the reader nothing.
@@ -119,6 +143,41 @@ def parse_row_fields(text: str) -> dict[str, str]:
     return fields
 
 
+def parse_plain_rows(text: str) -> list[dict[str, str]]:
+    """Extract every ``Row N:`` block from a csv_loader chunk.
+
+    A document chunk holds several rows, not one, so this returns a list.
+    """
+    rows: list[dict[str, str]] = []
+    parts = _PLAIN_ROW_HEADER.split(text)
+    # split() with one capture group yields [pre, index, block, index, block, ...]
+    for index, block in zip(parts[1::2], parts[2::2]):
+        line = block.strip().split("\n\n", 1)[0].replace("\n", " ").strip()
+        if not line:
+            continue
+        fields: dict[str, str] = {}
+        for part in _PLAIN_PAIR_SPLIT.split(line):
+            key, sep, value = part.partition(":")
+            key = key.strip()
+            if sep and key and " " not in key:
+                fields[key] = value.strip()
+        if fields:
+            # The source row number rides along so build_aggregate_block can tell
+            # whether chunking dropped rows at a boundary. It is stripped before
+            # counting.
+            fields[_ROW_INDEX_KEY] = index
+            rows.append(fields)
+    return rows
+
+
+def parse_rows(text: str) -> list[dict[str, str]]:
+    """Every row this retrieved record carries, in whichever rendering."""
+    fields = parse_row_fields(text)
+    if fields:
+        return [fields]
+    return parse_plain_rows(text)
+
+
 def build_aggregate_block(retrieved_objects: Any) -> str:
     """Exact per-column value frequencies over every retrieved row.
 
@@ -126,14 +185,54 @@ def build_aggregate_block(retrieved_objects: Any) -> str:
     fallback), so BROAD degrades to plain wide RAG rather than emitting a
     meaningless table.
     """
-    parsed = []
+    parsed: list[dict[str, str]] = []
     for found in retrieved_objects:
         payload = getattr(found, "payload", None) or {}
-        fields = parse_row_fields(payload.get("text") or "")
-        if fields:
-            parsed.append(fields)
+        parsed.extend(parse_rows(payload.get("text") or ""))
     if not parsed:
         return ""
+
+    # Refuse an unreliable parse rather than count garbage. Rows of one table
+    # render the same column set every time; if most of them disagree, the split
+    # went wrong (a free-text value that happens to look like "key: ") and any
+    # total built on it would be quietly incorrect.
+    # Chunking does not respect row boundaries: a "Row 7:" block can be cut in
+    # half, so the document route loses rows silently. csv_loader numbers its
+    # rows, which makes the loss measurable — and where any row is missing this
+    # emits NOTHING rather than a short total.
+    #
+    # Exact or nothing is the only safe rule here. A tally labelled approximate
+    # is still a number in front of the model, and it will trust it over its own
+    # reading of the rows: on this CSV a 3-row loss turned one assignee's 4 into
+    # a 3 while leaving the header's caveat easy to ignore. Handing over a
+    # quietly-short count is the precise failure this retriever exists to stop.
+    # With no block, BROAD is still a wide retrieval, which on the document
+    # route already answers the aggregate correctly.
+    #
+    # DltRow records carry no index because each one IS a whole row — nothing
+    # can be lost mid-row — so that route always reports exact.
+    indices = {int(f[_ROW_INDEX_KEY]) for f in parsed if _ROW_INDEX_KEY in f}
+    for fields in parsed:
+        fields.pop(_ROW_INDEX_KEY, None)
+    if indices:
+        missing = (max(indices) - min(indices) + 1) - len(indices)
+        if missing:
+            logger.info(
+                "BROAD: %d row(s) cut across chunk boundaries — omitting exact counts",
+                missing,
+            )
+            return ""
+
+    shapes = Counter(tuple(sorted(fields)) for fields in parsed)
+    dominant_shape, dominant_count = shapes.most_common(1)[0]
+    if dominant_count / len(parsed) < _MIN_CONSISTENT_SHAPE_RATIO:
+        logger.info(
+            "BROAD: row parse inconsistent (%d/%d share a column set) - no exact counts",
+            dominant_count,
+            len(parsed),
+        )
+        return ""
+    parsed = [fields for fields in parsed if tuple(sorted(fields)) == dominant_shape]
 
     columns: dict[str, Counter] = {}
     lengths: dict[str, list[int]] = {}
