@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 import fastmcp
 import uvicorn
 from fastmcp import FastMCP
+from fastmcp.server.http import HostOriginGuardMiddleware
 from fastmcp.server.transforms.search import BM25SearchTransform
 from fastmcp.server.transforms.search.base import BaseSearchTransform
-from fastmcp.server.http import HostOriginGuardMiddleware
 from mcp import types
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware

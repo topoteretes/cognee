@@ -308,7 +308,9 @@ class FakeCogneeModule:
         # client deletes it as soon as remember() returns.
         if isinstance(data, str) and os.path.isfile(data):
             self.seen_paths.append(data)
-            with open(data, "rb") as handle:
+            # ASYNC230: a blocking read is fine in a test double — there is no
+            # event loop to starve, and the file is a few bytes on tmpfs.
+            with open(data, "rb") as handle:  # noqa: ASYNC230
                 self.seen_payloads.append(handle.read())
         if self._error is not None:
             raise self._error
