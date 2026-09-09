@@ -28,6 +28,10 @@ import { mapProcessingStatus, type DatasetRaw, type FileEntry, type DisplayStatu
 
 export type { FileEntry, DisplayStatus, Dataset, UseBrainsDataResult } from "./brainsTypes";
 
+// Documents fetched per page. Matches the API's own default so a page is one
+// request, and stays well under the render cap so a page is never truncated.
+const DOCS_PAGE_SIZE = 100;
+
 // Owns all data and interaction state for the brains (datasets) finder:
 // loading the dataset list + per-dataset doc counts, live status polling,
 // selection, upload/paste/delete flows, and the create/delete/share modal
@@ -52,6 +56,11 @@ export function useBrainsData(): UseBrainsDataResult {
   const [selectedDocs, setSelectedDocs] = useState<FileEntry[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState(false);
+  // The list is one page of the dataset, not the dataset. docsTotal comes from
+  // /data/count, so the header can say "1-100 of 171,828" instead of implying
+  // the page is everything there is.
+  const [docsPage, setDocsPage] = useState(0);
+  const [docsTotal, setDocsTotal] = useState(0);
 
   const { isUploading, stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -167,11 +176,13 @@ export function useBrainsData(): UseBrainsDataResult {
       // The document list is a page; the badge is a total. Two questions now,
       // so ask them separately rather than counting whichever rows arrived.
       Promise.all([
-        getDatasetData(completedSelectedId, cogniInstance),
+        getDatasetData(completedSelectedId, cogniInstance, { limit: DOCS_PAGE_SIZE }),
         getDatasetDataCount(completedSelectedId, cogniInstance),
       ])
         .then(([docs, count]) => {
           setSelectedDocs(Array.isArray(docs) ? docs : []);
+          setDocsPage(0);
+          setDocsTotal(count);
           setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
         })
         .catch((err) => {
@@ -181,12 +192,21 @@ export function useBrainsData(): UseBrainsDataResult {
     }
   }, [statusDetails, cogniInstance, selectedId]);
 
-  async function refreshSelectedDocs(id: string): Promise<void> {
+  async function refreshSelectedDocs(id: string, page = 0): Promise<void> {
     if (!cogniInstance) return;
     setDocsLoading(true);
     try {
-      const data = await getDatasetData(id, cogniInstance);
+      // The count is what the header and the dataset badge display; the page is
+      // what renders. Asking for both costs one extra indexed count query and
+      // saves transferring every row in the dataset to measure it.
+      const [data, count] = await Promise.all([
+        getDatasetData(id, cogniInstance, { limit: DOCS_PAGE_SIZE, offset: page * DOCS_PAGE_SIZE }),
+        getDatasetDataCount(id, cogniInstance),
+      ]);
       setSelectedDocs(Array.isArray(data) ? data : []);
+      setDocsPage(page);
+      setDocsTotal(count);
+      setDatasets((prev) => prev.map((d) => d.id === id ? { ...d, documents: count } : d));
       setDocsError(false);
     } catch {
       // Surface the fetch failure instead of rendering a false "no documents"
@@ -195,6 +215,13 @@ export function useBrainsData(): UseBrainsDataResult {
     } finally {
       setDocsLoading(false);
     }
+  }
+
+  async function goToDocsPage(page: number): Promise<void> {
+    const lastPage = Math.max(0, Math.ceil(docsTotal / DOCS_PAGE_SIZE) - 1);
+    const target = Math.min(Math.max(page, 0), lastPage);
+    if (!selectedId || target === docsPage) return;
+    await refreshSelectedDocs(selectedId, target);
   }
 
   async function handleRefresh(): Promise<void> {
@@ -207,8 +234,10 @@ export function useBrainsData(): UseBrainsDataResult {
     if (selectedId === id) return;
     setSelectedId(id);
     setSelectedDocs([]);
+    setDocsPage(0);
+    setDocsTotal(0);
     setDocsError(false);
-    await refreshSelectedDocs(id);
+    await refreshSelectedDocs(id, 0);
   }
 
   async function handleUploadFiles(files: File[]): Promise<void> {
@@ -455,7 +484,11 @@ export function useBrainsData(): UseBrainsDataResult {
     selectedDocs,
     docsLoading,
     docsError,
-    retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId); },
+    retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId, docsPage); },
+    docsPage,
+    docsTotal,
+    docsPageSize: DOCS_PAGE_SIZE,
+    goToDocsPage,
     outdatedDatasets,
     refreshing,
     isUploading,

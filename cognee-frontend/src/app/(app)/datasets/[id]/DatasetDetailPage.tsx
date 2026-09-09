@@ -8,7 +8,8 @@ import Link from "next/link";
 import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import PageLoading from "@/ui/elements/PageLoading";
-import getDatasetData from "@/modules/datasets/getDatasetData";
+import getDatasetData, { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import Pager from "../partials/Pager";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
@@ -56,6 +57,9 @@ interface FileEntry {
 
 
 // Default extraction prompt from cognee OSS (generate_graph_prompt.txt)
+// Documents fetched per page. Matches the API default, so a page is one request.
+const FILES_PAGE_SIZE = 100;
+
 const DEFAULT_EXTRACTION_PROMPT = `You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
 **Nodes** represent entities and concepts. They're akin to Wikipedia nodes.
 **Edges** represent relationships between concepts. They're akin to Wikipedia links.
@@ -101,6 +105,11 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [, setLastSynced] = useState<string | null>(null);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filesError, setFilesError] = useState(false);
+  // files is one page. filesTotal is the dataset — the header count and the
+  // "Empty" state must read the total, or a 171,828-document dataset reports
+  // whatever the page size happens to be.
+  const [filesPage, setFilesPage] = useState(0);
+  const [filesTotal, setFilesTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   // data id → session id parsed from the memory blob ("Session ID: <id>"
   // header written by the session→graph bridge), or null when none found.
@@ -421,10 +430,15 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     }
   }
 
-  const loadFiles = useCallback(async () => {
+  const loadFiles = useCallback(async (page = 0) => {
     if (!cogniInstance) return;
     try {
-      const data = await getDatasetData(datasetId, cogniInstance);
+      const [data, total] = await Promise.all([
+        getDatasetData(datasetId, cogniInstance, { limit: FILES_PAGE_SIZE, offset: page * FILES_PAGE_SIZE }),
+        getDatasetDataCount(datasetId, cogniInstance),
+      ]);
+      setFilesPage(page);
+      setFilesTotal(total);
       setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number }) => ({
         id: d.id,
         name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
@@ -467,7 +481,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   useEffect(() => {
     const detail = statusDetails[datasetId];
     if (!detail) {
-      if (files.length === 0) setDatasetStatus("empty");
+      if (filesTotal === 0) setDatasetStatus("empty");
       else if (graphOutdated) setDatasetStatus("outdated");
       else setDatasetStatus("ready");
       setProcessing(false);
@@ -483,7 +497,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       setDatasetStatus("processing");
       setProcessing(true);
     }
-  }, [statusDetails, datasetId, graphOutdated, files.length]);
+  }, [statusDetails, datasetId, graphOutdated, filesTotal]);
 
   async function handleUpload(newFiles: FileList | File[]) {
     if (!cogniInstance) return;
@@ -719,7 +733,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
             )}
           </div>
           <span style={{ fontSize: 14, color: "rgba(237,236,234,0.55)", display: "flex", alignItems: "center", gap: 6 }}>
-            {files.length} documents
+            {filesTotal.toLocaleString()} documents
             {datasetStatus === "processing" || processing ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#6510F4", fontWeight: 500 }}>
                 · <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6510F4" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
@@ -737,7 +751,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#22C55E", fontWeight: 500 }}>
                 · <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22C55E", display: "inline-block" }} /> Ready
               </span>
-            ) : files.length === 0 ? (
+            ) : filesTotal === 0 ? (
               <span style={{ color: "rgba(237,236,234,0.35)" }}>· Empty</span>
             ) : null}
           </span>
@@ -1008,9 +1022,27 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         loadError={filesError}
         onDelete={(id) => setDeleteFileTarget(filtered.find((f) => f.id === id) ?? null)}
         onUploadClick={() => fileInputRef.current?.click()}
-        onRetry={loadFiles}
+        onRetry={() => loadFiles(filesPage)}
         deletingId={deletingFileId}
       />
+
+      {/* The filter above runs over the loaded page, not the dataset. Say so
+          rather than let an empty result read as "no such document". */}
+      {search && filesTotal > FILES_PAGE_SIZE && (
+        <div style={{ fontSize: 12, color: "rgba(237,236,234,0.45)", padding: "0 4px" }}>
+          Searching the {files.length.toLocaleString()} documents on this page, not all{" "}
+          {filesTotal.toLocaleString()}.
+        </div>
+      )}
+
+      {!search && (
+        <Pager
+          page={filesPage}
+          pageSize={FILES_PAGE_SIZE}
+          total={filesTotal}
+          onGoTo={(page) => loadFiles(page)}
+        />
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>

@@ -58,6 +58,12 @@ export interface UseBrainsDataResult {
   docsLoading: boolean;
   docsError: boolean;
   retryDocs: () => void;
+  /** Zero-based index of the page currently in selectedDocs. */
+  docsPage: number;
+  /** Documents in the dataset, from /data/count — not selectedDocs.length. */
+  docsTotal: number;
+  docsPageSize: number;
+  goToDocsPage: (page: number) => Promise<void>;
   outdatedDatasets: Set<string>;
   refreshing: boolean;
   isUploading: boolean;

@@ -9,6 +9,7 @@ import type { BrainUploadStage } from "@/modules/ingestion/useBrainUpload";
 import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
 import UploadProgressBar from "./UploadProgressBar";
 import DocumentList, { type DocRow } from "./DocumentList";
+import Pager from "./Pager";
 
 // The Documents column of the brains finder: hidden file input, drag-and-drop,
 // header with add/paste actions, upload progress/error banners, and the doc
@@ -32,6 +33,10 @@ export default function DocumentsPanel<T extends DocRow>({
   onClearUploadError,
   onRetryBuild,
   onRetryDocs,
+  docsPage,
+  docsTotal,
+  docsPageSize,
+  onGoToDocsPage,
 }: {
   selectedId: string | null;
   selectedName: string | null;
@@ -52,6 +57,11 @@ export default function DocumentsPanel<T extends DocRow>({
   onClearUploadError: () => void;
   onRetryBuild: () => void;
   onRetryDocs: () => void;
+  /** Paging over the dataset. docs is one page of docsTotal, not all of it. */
+  docsPage: number;
+  docsTotal: number;
+  docsPageSize: number;
+  onGoToDocsPage: (page: number) => void;
 }): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -152,7 +162,17 @@ export default function DocumentsPanel<T extends DocRow>({
               </span>
             </div>
           ) : (
-            <DocumentList docs={docs} onDelete={onDeleteDoc} />
+            <>
+              <DocumentList docs={docs} onDelete={onDeleteDoc} />
+              <Pager
+                page={docsPage}
+                pageSize={docsPageSize}
+                total={docsTotal}
+                busy={docsLoading}
+                onGoTo={onGoToDocsPage}
+                compact
+              />
+            </>
           )}
         </div>
       </div>
