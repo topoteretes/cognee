@@ -79,7 +79,7 @@
 
 ## Quickstart
 
-Requires **Python 3.10–3.14**. 
+Requires **Python 3.10–3.14**.
 
 You can install Cognee with **pip**, **uv**, or your preferred Python package manager.
 
@@ -168,9 +168,9 @@ claude plugin marketplace add topoteretes/cognee-integrations
 claude plugin install cognee-memory@cognee
 ```
 
-or Codex plugin 
+or Codex plugin
 
-Make sure to enable hooks: 
+Make sure to enable hooks:
 ```bash
 # ~/.codex/config.toml
 [features]
