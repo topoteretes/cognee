@@ -40,6 +40,7 @@ def _row(index: int) -> SimpleNamespace:
         dataset_id=None,
         label=None,
         external_metadata=None,
+        data_size=1024 + index,
     )
 
 

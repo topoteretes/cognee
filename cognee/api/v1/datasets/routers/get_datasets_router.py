@@ -473,6 +473,7 @@ def get_datasets_router() -> APIRouter:
                 dataset_id=dataset_id,
                 label=data.label,
                 external_metadata=data.external_metadata,
+                data_size=data.data_size,
             )
             for data in dataset_data
         ]
