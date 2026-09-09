@@ -5,7 +5,7 @@ not part of the contract.
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 import pytest
 

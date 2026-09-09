@@ -1,4 +1,3 @@
-from typing import List, Union
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query

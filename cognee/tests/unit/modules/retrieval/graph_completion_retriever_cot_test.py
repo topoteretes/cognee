@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,6 +9,8 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +37,9 @@ def _no_real_llm_calls():
         try:
             return response_model.model_construct()
         except Exception:
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
             return "reasoning"
 
     with patch.object(

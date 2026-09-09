@@ -18,7 +18,6 @@ graceful-degradation catch lives one level up and writes nothing on failure.
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Dict, List, Optional, Tuple
 from weakref import WeakKeyDictionary
 
 from sqlalchemy import delete, distinct, func, select, text

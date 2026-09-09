@@ -7,6 +7,10 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 _TURN_START = re.compile(
     r"^(?:\[(?P<time_anchor>.*?)\]\s*)?(?P<role>User|Assistant):\s?(?P<content>.*)$"
 )
@@ -67,7 +71,7 @@ def estimate_tokens(text: str) -> int:
         if tokenizer:
             return max(1, tokenizer.count_tokens(text) * 2)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in estimate_tokens", exc_info=True)
 
     return max(1, len(text) // 4, len(text.split()) * 2)
 
@@ -894,9 +898,13 @@ def build_preprocessed_fragments_from_turns(
                 text = _format_chunk_text(split_prefix, fragment.body)
             else:
                 text = fragment.body
-            if include_time_metadata_header and time_anchor:
-                if not include_location_prefix and part_count == 1:
-                    text = _format_chunk_text(_format_time_metadata_prefix(time_anchor), text)
+            if (
+                include_time_metadata_header
+                and time_anchor
+                and not include_location_prefix
+                and part_count == 1
+            ):
+                text = _format_chunk_text(_format_time_metadata_prefix(time_anchor), text)
             fragments.append(
                 PreprocessedFragment(
                     text=text,

@@ -13,7 +13,7 @@ are identical across runs — no scikit-learn, which lives only in the evals ext
 import math
 from collections import Counter
 from collections.abc import Callable
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 

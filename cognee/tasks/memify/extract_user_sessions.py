@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.session.get_session_manager import get_session_manager
@@ -109,7 +107,7 @@ async def extract_user_sessions(
                         persisted_qa_count=len(qa_data),
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to extract session {session_id}: {e!s}")
+                    logger.warning(f"Failed to extract session {session_id}: {e!s}", exc_info=True)
                     continue
         else:
             logger.info(
@@ -119,5 +117,5 @@ async def extract_user_sessions(
     except CogneeSystemError:
         raise
     except Exception as e:
-        logger.error(f"Error extracting user sessions: {e!s}")
+        logger.exception("Error extracting user sessions")
         raise CogneeSystemError(message=f"Failed to extract user sessions: {e!s}", log=False)

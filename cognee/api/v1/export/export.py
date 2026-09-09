@@ -1,7 +1,7 @@
 """SDK entry point: export a dataset's memory to a portable format."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, overload
 from uuid import UUID
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME

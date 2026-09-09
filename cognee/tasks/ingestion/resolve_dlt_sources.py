@@ -14,7 +14,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Callable
-from typing import Any, List, Optional, Set
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import UUID

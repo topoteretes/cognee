@@ -1,7 +1,6 @@
 import platform
 import subprocess
 from pathlib import Path
-from typing import List
 
 from cognee.shared.logging_utils import get_logger
 
@@ -24,6 +23,7 @@ def run_npm_command(cmd: list[str], cwd: Path, timeout: int = 300) -> subprocess
             text=True,
             timeout=timeout,
             shell=True,
+            check=False,
         )
     else:
         # On Unix-like systems, try direct command first
@@ -33,6 +33,7 @@ def run_npm_command(cmd: list[str], cwd: Path, timeout: int = 300) -> subprocess
             capture_output=True,
             text=True,
             timeout=timeout,
+            check=False,
         )
         # If it fails and nvm might be installed, try with nvm sourced
         if result.returncode != 0:
@@ -45,6 +46,7 @@ def run_npm_command(cmd: list[str], cwd: Path, timeout: int = 300) -> subprocess
                     capture_output=True,
                     text=True,
                     timeout=timeout,
+                    check=False,
                 )
                 if result.returncode != 0 and result.stderr:
                     logger.debug(f"npm command failed with nvm: {result.stderr.strip()}")

@@ -7,7 +7,6 @@ and — the whole point — the embedding engine is never called.
 import socket
 import tempfile
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 import pytest

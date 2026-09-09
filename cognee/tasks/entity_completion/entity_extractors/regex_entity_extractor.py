@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.modules.engine.models import Entity
 from cognee.root_dir import get_absolute_path
@@ -67,6 +65,6 @@ class RegexEntityExtractor(BaseEntityExtractor):
         try:
             logger.info(f"Extracting entities from text: {text[:100]}...")
             return self._text_to_entities(text)
-        except Exception as e:
-            logger.error(f"Entity extraction failed: {e!s}")
+        except Exception:
+            logger.exception("Entity extraction failed")
             return []

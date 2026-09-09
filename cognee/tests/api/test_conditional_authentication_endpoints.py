@@ -1,10 +1,13 @@
 import importlib
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+
+logger = logging.getLogger(__name__)
 
 with patch("dotenv.load_dotenv"):
     # This prevents the .env file from ever loading during tests
@@ -177,7 +180,10 @@ with patch("dotenv.load_dotenv"):
                     assert "authenticate" not in error_detail.lower()
                     assert "unauthorized" not in error_detail.lower()
                 except Exception:
-                    pass  # If response is not JSON, that's fine
+                    logger.debug(
+                        "Ignoring exception in TestConditionalAuthenticationBehavior.test_get_endpoints_work_without_auth",
+                        exc_info=True,
+                    )
 
         gsm_mod = importlib.import_module("cognee.modules.settings.get_settings")
 

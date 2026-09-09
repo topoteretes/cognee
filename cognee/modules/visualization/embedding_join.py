@@ -24,7 +24,7 @@ render must never break because the semantic tab couldn't fetch vectors.
 import inspect
 import random
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -166,7 +166,9 @@ async def fetch_node_embeddings(
                 continue
             found = await _fetch_for_collection(vector_engine, collection, type_nodes, field)
         except Exception as exc:  # never let a vector-store failure break the render
-            logger.warning("fetch_node_embeddings: fetch failed for %s: %s", collection, exc)
+            logger.warning(
+                "fetch_node_embeddings: fetch failed for %s: %s", collection, exc, exc_info=True
+            )
             continue
         if found:
             hit_collections += 1

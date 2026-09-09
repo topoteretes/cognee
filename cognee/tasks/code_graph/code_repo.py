@@ -33,7 +33,7 @@ shallow clone (``resolve_code_repository_url``): the clone directory is the
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.code_graph.resolve_repo import (

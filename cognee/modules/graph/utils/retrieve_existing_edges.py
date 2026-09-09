@@ -1,5 +1,5 @@
 from collections.abc import Collection
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.provenance import (

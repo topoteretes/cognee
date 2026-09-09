@@ -14,7 +14,6 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
 from uuid import UUID
 
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME

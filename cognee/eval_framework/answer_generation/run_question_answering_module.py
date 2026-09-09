@@ -1,5 +1,4 @@
 import json
-from typing import List, Optional
 
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     AnswerGeneratorExecutor,

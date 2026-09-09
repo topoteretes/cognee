@@ -177,7 +177,6 @@ def test_custom_graph_model_chunks_are_walked_as_they_are():
     """A custom graph model stores its whole extracted model in ``contains``
     (a pydantic object, not a list of entities); the scoped walk must leave it
     alone rather than iterate it as fields."""
-    from typing import List
 
     from cognee.infrastructure.engine import DataPoint
 

@@ -1,4 +1,3 @@
-from typing import List, Tuple
 from uuid import UUID
 
 from sqlalchemy import and_, select

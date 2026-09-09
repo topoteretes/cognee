@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 
-import cognee.api.v1.update.update  # noqa: F401  (bind the real submodule)
+import cognee.api.v1.update.update  # bind the real submodule
 
 update_module = sys.modules["cognee.api.v1.update.update"]
 data_methods_module = sys.modules["cognee.modules.data.methods"]

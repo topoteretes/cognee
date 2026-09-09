@@ -47,7 +47,6 @@ import logging
 import uuid
 from collections.abc import Sequence
 from contextlib import nullcontext
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -326,5 +325,5 @@ def downgrade() -> None:
         try:
             op.drop_index("ix_data_legacy_id", table_name="data")
         except Exception:
-            pass
+            logger.debug("Ignoring exception in downgrade", exc_info=True)
         op.drop_column("data", "legacy_id")

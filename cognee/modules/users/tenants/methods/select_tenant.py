@@ -1,4 +1,3 @@
-from typing import Union
 from uuid import UUID
 
 import sqlalchemy.exc

@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Optional, Union
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.data.constants import DEFAULT_DATASET_NAME

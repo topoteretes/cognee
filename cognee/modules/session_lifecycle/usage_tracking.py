@@ -20,7 +20,6 @@ enough for the dashboard's "are we spending?" question on those paths.
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID as UUIDType
 
 # Submodule import on purpose: avoids the cognee.modules.operations
@@ -182,4 +181,4 @@ async def record_llm_call(
             model=model,
         )
     except Exception as exc:
-        logger.debug("record_llm_call: accumulate failed (%s)", exc)
+        logger.debug("record_llm_call: accumulate failed (%s)", exc, exc_info=True)

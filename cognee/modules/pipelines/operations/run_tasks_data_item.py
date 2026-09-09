@@ -7,7 +7,7 @@ within pipeline operations, supporting both incremental and regular processing m
 
 import os
 from collections.abc import AsyncGenerator
-from typing import Any, Dict, Optional
+from typing import Any
 
 from sqlalchemy import select
 
@@ -192,20 +192,19 @@ async def run_tasks_data_item_incremental(
             ).scalar_one_or_none()
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
-    if data_point:
-        if (
-            data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-            == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-        ):
-            yield {
-                "run_info": PipelineRunAlreadyCompleted(
-                    pipeline_run_id=pipeline_run_id,
-                    dataset_id=dataset.id,
-                    dataset_name=dataset.name,
-                ),
-                "data_id": data_id,
-            }
-            return
+    if data_point and (
+        data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
+        == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+    ):
+        yield {
+            "run_info": PipelineRunAlreadyCompleted(
+                pipeline_run_id=pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+            ),
+            "data_id": data_id,
+        }
+        return
 
     try:
         # Process data based on data_item and list of tasks

@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def read_results(dir_path: str) -> dict[str, Any]:
@@ -19,6 +22,7 @@ def read_results(dir_path: str) -> dict[str, Any]:
         except json.JSONDecodeError as e:
             print(f"Error reading {file_path}: {e}")
         except Exception as e:
+            logger.debug("Ignoring exception in read_results", exc_info=True)
             print(f"Error processing {file_path}: {e}")
 
     return results
@@ -58,10 +62,9 @@ def validate_file_results(
             return False
 
         # Validate metrics if present
-        if "metrics" in item:
-            if not validate_metrics(item["metrics"]):
-                print(f"Metrics validation failed in {filename}[{i}]")
-                return False
+        if "metrics" in item and not validate_metrics(item["metrics"]):
+            print(f"Metrics validation failed in {filename}[{i}]")
+            return False
 
     return True
 

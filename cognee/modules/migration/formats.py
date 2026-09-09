@@ -8,7 +8,7 @@ access here; emitters are pure and unit-testable.
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 from xml.sax.saxutils import escape, quoteattr
 
 Node = tuple[Any, dict[str, Any]]

@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from types import SimpleNamespace
@@ -8,6 +9,8 @@ import pytest
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +36,9 @@ def _no_real_llm_calls():
         try:
             return response_model.model_construct()
         except Exception:
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
             return QueryInterval()
 
     with patch.object(

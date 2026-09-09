@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig

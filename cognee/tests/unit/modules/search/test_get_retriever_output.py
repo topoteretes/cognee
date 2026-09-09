@@ -369,11 +369,10 @@ async def test_unknown_context_format_is_rejected_before_retrieval():
     """One shared rule at every entry point: the same error, and no wasted retrieval."""
     retriever = _OnlyContextRetriever()
     graph_patch, retriever_patch = _only_context_patches(retriever)
-    with graph_patch, retriever_patch as factory:
-        with pytest.raises(CogneeValidationError) as excinfo:
-            await get_retriever_output(
-                SearchType.GRAPH_COMPLETION, "why?", only_context=True, context_format="bogus"
-            )
+    with graph_patch, retriever_patch as factory, pytest.raises(CogneeValidationError) as excinfo:
+        await get_retriever_output(
+            SearchType.GRAPH_COMPLETION, "why?", only_context=True, context_format="bogus"
+        )
 
     assert excinfo.value.name == "InvalidContextFormatError"
     factory.assert_not_awaited()
@@ -731,9 +730,8 @@ async def test_nodeset_scope_stays_on_hybrid_and_forwards_node_name():
 async def test_hybrid_rejects_graph_only_knobs(kwargs, match):
     retriever = _DeterministicRetriever()
     graph, factory, session = _factory_and_session_patches(retriever)
-    with graph, factory as factory_mock, session:
-        with pytest.raises(CogneeValidationError, match=match):
-            await get_retriever_output(SearchType.HYBRID_COMPLETION, "q", **kwargs)
+    with graph, factory as factory_mock, session, pytest.raises(CogneeValidationError, match=match):
+        await get_retriever_output(SearchType.HYBRID_COMPLETION, "q", **kwargs)
 
     factory_mock.assert_not_awaited()
 

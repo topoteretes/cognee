@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import session_user
@@ -67,7 +67,7 @@ async def _weights_matching_collection(
     try:
         rows = await vector_engine.retrieve(collection_name, list(weights))
     except Exception as error:
-        logger.debug("Preference weight collection check failed open: %s", error)
+        logger.debug("Preference weight collection check failed open: %s", error, exc_info=True)
         return weights
 
     present = set()

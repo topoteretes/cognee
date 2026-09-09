@@ -15,7 +15,7 @@ blocking path raises — is a bug here, not a quirk of streaming.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import litellm
 
@@ -112,7 +112,7 @@ async def stream_text_completion(
             if aclose is not None:
                 try:
                     await aclose()
-                except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                except Exception:  # cleanup must not mask the real error
                     logger.debug("Failed to close LLM stream", exc_info=True)
 
     # An empty result is returned, never raised. The blocking path is

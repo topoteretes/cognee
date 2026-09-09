@@ -22,7 +22,7 @@ Hard rules honoured here:
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -350,7 +350,7 @@ async def _run_preference_update(
             await write_prefers_edges(scope.user_id, scope.dataset_id, pending_writes, turn_counter)
             edges_written = len(pending_writes)
         except Exception as error:
-            logger.warning("Preference update: prefers-edge write failed: %s", error)
+            logger.warning("Preference update: prefers-edge write failed: %s", error, exc_info=True)
             write_ok = False
 
     # Step 6: prune whenever the counter moved — the clock advances on unrated

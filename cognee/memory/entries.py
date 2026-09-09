@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -126,7 +126,7 @@ class SkillRunEntry(BaseModel):
         return value
 
 
-MemoryEntry = Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]
+MemoryEntry = QAEntry | TraceEntry | FeedbackEntry | SkillRunEntry
 
 
 # Tuple used at runtime for isinstance checks; Union itself isn't

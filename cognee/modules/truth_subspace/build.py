@@ -6,7 +6,6 @@ onto those slots and persisted with the centroid epoch used to compute them.
 """
 
 from datetime import datetime, timezone
-from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.context_global_variables import session_user, set_database_global_context_variables
@@ -67,7 +66,7 @@ async def _fetch_learning_statements(graph_engine, session_ids: list[str] | None
             node_name=_truth_node_sets(session_ids),
         )
     except Exception as error:
-        logger.warning("truth_subspace: learning lookup failed open: %s", error)
+        logger.warning("truth_subspace: learning lookup failed open: %s", error, exc_info=True)
         return []
 
     statements: list[str] = []
@@ -93,7 +92,9 @@ async def _embed_in_batches(embedding_engine, texts: list[str]) -> list[list[flo
         try:
             vectors.extend(await embedding_engine.embed_text(batch))
         except Exception as error:
-            logger.warning("truth_subspace: node embedding batch failed open: %s", error)
+            logger.warning(
+                "truth_subspace: node embedding batch failed open: %s", error, exc_info=True
+            )
             # Keep alignment: pad failed batch with empty vectors (NEUTRAL coords).
             vectors.extend([[] for _ in batch])
     return vectors
@@ -136,7 +137,7 @@ async def build_truth_subspace(
         try:
             existing_centroids = await load_centroids(vector_engine, str(dataset_obj.id), k)
         except Exception as error:
-            logger.debug("truth_subspace: centroid load failed open: %s", error)
+            logger.debug("truth_subspace: centroid load failed open: %s", error, exc_info=True)
             existing_centroids = []
 
         previous_epoch = max((centroid.truth_epoch for centroid in existing_centroids), default=0)
@@ -156,7 +157,9 @@ async def build_truth_subspace(
         try:
             learning_vecs = await embedding_engine.embed_text(learning_texts)
         except Exception as error:
-            logger.warning("truth_subspace: learning embedding failed open: %s", error)
+            logger.warning(
+                "truth_subspace: learning embedding failed open: %s", error, exc_info=True
+            )
             return {
                 "anchors": len(existing_centroids),
                 "nodes_scored": 0,
@@ -195,7 +198,9 @@ async def build_truth_subspace(
             try:
                 await upsert_centroids(vector_engine, centroids)
             except Exception as error:
-                logger.warning("truth_subspace: centroid upsert failed open: %s", error)
+                logger.warning(
+                    "truth_subspace: centroid upsert failed open: %s", error, exc_info=True
+                )
                 return {
                     "anchors": len(centroids),
                     "nodes_scored": 0,
@@ -219,7 +224,7 @@ async def build_truth_subspace(
         try:
             nodes, _edges = await graph_engine.get_graph_data()
         except Exception as error:
-            logger.warning("truth_subspace: node load failed open: %s", error)
+            logger.warning("truth_subspace: node load failed open: %s", error, exc_info=True)
             return {
                 "anchors": len(centroids),
                 "nodes_scored": 0,
@@ -260,7 +265,9 @@ async def build_truth_subspace(
                 }
             except Exception as error:
                 # Per-node fail-open: one bad node never sinks the batch.
-                logger.debug("truth_subspace: coords failed for node %s: %s", node_id, error)
+                logger.debug(
+                    "truth_subspace: coords failed for node %s: %s", node_id, error, exc_info=True
+                )
 
         if not scored:
             return {
@@ -274,7 +281,9 @@ async def build_truth_subspace(
         try:
             write_result = await graph_engine.set_node_truth_state(scored)
         except Exception as error:
-            logger.warning("truth_subspace: persisting alignments failed open: %s", error)
+            logger.warning(
+                "truth_subspace: persisting alignments failed open: %s", error, exc_info=True
+            )
             return {
                 "anchors": len(centroids),
                 "nodes_scored": 0,

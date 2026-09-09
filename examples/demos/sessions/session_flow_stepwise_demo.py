@@ -38,7 +38,7 @@ Requires a configured LLM provider (see CLAUDE.md). Wording of answers/lessons v
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Load the repo .env BEFORE importing cognee, with override=True so the real keys in
@@ -108,7 +108,9 @@ os.environ.setdefault("LOG_LEVEL", "ERROR")
 # --------------------------------------------------------------------------- #
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-LOG_PATH = LOG_DIR / f"session_flow_stepwise_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_PATH = (
+    LOG_DIR / f"session_flow_stepwise_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.log"
+)
 VIZ_PATH = LOG_PATH.with_suffix(".html")
 
 
@@ -129,7 +131,7 @@ class _Tee:
         self._log.flush()
 
 
-_LOG_FILE = open(LOG_PATH, "w", encoding="utf-8")
+_LOG_FILE = open(LOG_PATH, "w", encoding="utf-8")  # noqa: SIM115 - tee target for the whole process
 sys.stdout = _Tee(sys.__stdout__, _LOG_FILE)
 sys.stderr = _Tee(sys.__stderr__, _LOG_FILE)
 
@@ -142,10 +144,14 @@ DATASET_NAME = "stepwise_remember_recall_demo"
 SESSION_ID = "stepwise_session"
 
 DOCUMENTS = [
-    "Aurora Robotics builds two products: the VoltaArm industrial gripper and the "
-    "TerraScout warehouse rover.",
-    "The VoltaArm gripper uses firmware version 4 and a calibration routine that maps "
-    "joint torque to grip strength.",
+    (
+        "Aurora Robotics builds two products: the VoltaArm industrial gripper and the "
+        "TerraScout warehouse rover."
+    ),
+    (
+        "The VoltaArm gripper uses firmware version 4 and a calibration routine that maps "
+        "joint torque to grip strength."
+    ),
     "The TerraScout rover navigates warehouses using lidar maps and charging dock beacons.",
     "Dana Voss leads the VoltaArm firmware team at Aurora Robotics.",
     "Calibration data for the VoltaArm gripper is stored in a battery-backed memory bank.",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import cast
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface

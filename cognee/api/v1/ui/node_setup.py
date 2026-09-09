@@ -44,6 +44,7 @@ def check_nvm_installed() -> bool:
                 text=True,
                 timeout=10,
                 shell=True,
+                check=False,
             )
         else:
             # On Unix-like systems, nvm is a shell function, so we need to source it
@@ -59,6 +60,7 @@ def check_nvm_installed() -> bool:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
 
             if result.returncode != 0:
@@ -69,7 +71,7 @@ def check_nvm_installed() -> bool:
 
         return result.returncode == 0
     except Exception as e:
-        logger.debug(f"Exception checking nvm: {e!s}")
+        logger.debug(f"Exception checking nvm: {e!s}", exc_info=True)
         return False
 
 
@@ -107,6 +109,7 @@ def install_nvm() -> bool:
                 capture_output=True,
                 text=True,
                 timeout=120,
+                check=False,
             )
 
             if result.returncode == 0:
@@ -128,13 +131,13 @@ def install_nvm() -> bool:
             try:
                 os.unlink(install_script_path)
             except Exception:
-                pass
+                logger.debug("Ignoring exception in install_nvm", exc_info=True)
 
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to download nvm installer: {e!s}")
         return False
-    except Exception as e:
-        logger.error(f"Failed to install nvm: {e!s}")
+    except Exception:
+        logger.exception("Failed to install nvm")
         return False
 
 
@@ -164,7 +167,8 @@ def install_node_with_nvm() -> bool:
             ["bash", "-c", install_cmd],
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minutes timeout for Node.js installation
+            timeout=300,
+            check=False,  # 5 minutes timeout for Node.js installation
         )
 
         if result.returncode == 0:
@@ -177,6 +181,7 @@ def install_node_with_nvm() -> bool:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                check=False,
             )
 
             # Add nvm to PATH for current session
@@ -202,8 +207,8 @@ def install_node_with_nvm() -> bool:
     except subprocess.TimeoutExpired:
         logger.error("Timeout installing Node.js (this can take several minutes)")
         return False
-    except Exception as e:
-        logger.error(f"Error installing Node.js: {e!s}")
+    except Exception:
+        logger.exception("Error installing Node.js")
         return False
 
 
@@ -215,7 +220,9 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
 
     try:
         # Check Node.js - try direct command first, then with nvm if needed
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["node", "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
         if result.returncode != 0:
             # If direct command fails, try with nvm sourced (in case nvm is installed but not in PATH)
             nvm_path = get_nvm_sh_path()
@@ -225,6 +232,7 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    check=False,
                 )
                 if result.returncode != 0 and result.stderr:
                     logger.debug(f"Failed to source nvm or run node: {result.stderr.strip()}")
@@ -257,6 +265,7 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                     capture_output=True,
                     text=True,
                     timeout=10,
+                    check=False,
                 )
                 if result.returncode != 0 and result.stderr:
                     logger.debug(
@@ -264,7 +273,7 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                     )
             else:
                 result = subprocess.run(
-                    ["node", "--version"], capture_output=True, text=True, timeout=10
+                    ["node", "--version"], capture_output=True, text=True, timeout=10, check=False
                 )
             if result.returncode != 0:
                 nvm_path = get_nvm_sh_path()
@@ -280,13 +289,18 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
         if platform.system() == "Windows":
             # On Windows, npm might be a PowerShell script, so we need to use shell=True
             result = subprocess.run(
-                ["npm", "--version"], capture_output=True, text=True, timeout=10, shell=True
+                ["npm", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=True,
+                check=False,
             )
         else:
             # On Unix-like systems, if we just installed via nvm, we may need to source nvm
             # Try direct command first
             result = subprocess.run(
-                ["npm", "--version"], capture_output=True, text=True, timeout=10
+                ["npm", "--version"], capture_output=True, text=True, timeout=10, check=False
             )
             if result.returncode != 0:
                 # Try with nvm sourced
@@ -297,6 +311,7 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                         capture_output=True,
                         text=True,
                         timeout=10,
+                        check=False,
                     )
                     if result.returncode != 0 and result.stderr:
                         logger.debug(f"Failed to source nvm or run npm: {result.stderr.strip()}")
@@ -334,7 +349,7 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
         # Retry checking Node.js after installation
         try:
             result = subprocess.run(
-                ["node", "--version"], capture_output=True, text=True, timeout=10
+                ["node", "--version"], capture_output=True, text=True, timeout=10, check=False
             )
             if result.returncode == 0:
                 node_version = result.stdout.strip()
@@ -346,6 +361,7 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                         capture_output=True,
                         text=True,
                         timeout=10,
+                        check=False,
                     )
                     if result.returncode == 0:
                         npm_version = result.stdout.strip()
@@ -353,8 +369,9 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
                     elif result.stderr:
                         logger.debug(f"Failed to source nvm or run npm: {result.stderr.strip()}")
         except Exception as e:
-            logger.debug(f"Exception retrying node/npm check: {e!s}")
+            logger.debug(f"Exception retrying node/npm check: {e!s}", exc_info=True)
 
         return False, "Node.js/npm not found. Please install Node.js from https://nodejs.org/"
     except Exception as e:
+        logger.debug("Falling back after error in check_node_npm", exc_info=True)
         return False, f"Error checking Node.js/npm: {e!s}"

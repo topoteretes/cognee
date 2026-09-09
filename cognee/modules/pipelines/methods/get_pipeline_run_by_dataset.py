@@ -1,4 +1,3 @@
-from typing import Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import func, select

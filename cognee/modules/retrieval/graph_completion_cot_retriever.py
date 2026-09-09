@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Any, List, Optional, Type, Union
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -173,7 +173,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             )
             return block or ""
         except Exception as exc:
-            logger.warning("CoT active session-context block failed: %s", exc)
+            logger.warning("CoT active session-context block failed: %s", exc, exc_info=True)
             return ""
 
     # -- CoT orchestrator --

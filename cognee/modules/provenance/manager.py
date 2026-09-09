@@ -24,7 +24,7 @@ dataset id for exactly this reason; readers join with the same prefixed key.
 
 from collections.abc import Awaitable, Callable, Mapping
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,9 +128,13 @@ class ProvenanceManager:
                 derived_from = metadata.get("derived_from")
                 if derived_from and isinstance(derived_from, str):
                     parent_id = derived_from
-            if not parent_id and source and isinstance(source, str):
-                if await storage.retrieve_row(session, source) is not None:
-                    parent_id = source
+            if (
+                not parent_id
+                and source
+                and isinstance(source, str)
+                and await storage.retrieve_row(session, source) is not None
+            ):
+                parent_id = source
             explicit_parent_supplied = parent_id is not None
 
             now = utc_now_iso()

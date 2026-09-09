@@ -17,8 +17,8 @@ from fastapi.responses import JSONResponse
 # and Linear mount no routers of their own (webhooks arrive on the generic
 # /api/v1/integrations/{provider}/events routes), so the registration imports
 # are explicit here.
-import cognee.modules.integrations.github  # noqa: F401,E402
-import cognee.modules.integrations.linear  # noqa: F401,E402
+import cognee.modules.integrations.github
+import cognee.modules.integrations.linear
 from cognee.api.v1.activity.routers import get_activity_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.agents.routers import get_agents_router
@@ -90,6 +90,7 @@ async def lifespan(app: FastAPI):
     try:
         await run_migrations()
     except Exception:
+        logger.debug("Ignoring exception in lifespan", exc_info=True)
         db_engine = get_relational_engine()
         await db_engine.create_database()
 

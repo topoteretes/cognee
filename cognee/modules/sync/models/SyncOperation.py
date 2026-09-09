@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
 from uuid import uuid4
 
 from sqlalchemy import (

@@ -20,7 +20,7 @@ import pytest
 # under test is deliberately not registered.
 pytest.importorskip("dlt")
 
-import importlib  # noqa: E402
+import importlib
 
 # The ingestion package re-exports these names, shadowing the submodules on
 # plain ``import a.b.c as m`` — import_module returns the real modules.

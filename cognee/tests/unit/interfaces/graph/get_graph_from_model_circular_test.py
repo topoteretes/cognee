@@ -1,6 +1,5 @@
 import asyncio
 import random
-from typing import List
 from uuid import NAMESPACE_OID, uuid5
 
 import pytest

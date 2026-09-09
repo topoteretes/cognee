@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.retrieval.hybrid.entities import format_entities
 from cognee.modules.retrieval.hybrid.facts import format_facts

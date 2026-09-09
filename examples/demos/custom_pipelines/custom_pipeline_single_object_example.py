@@ -13,7 +13,7 @@ Requires:
 """
 
 import asyncio
-from typing import Annotated, List, Optional
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 

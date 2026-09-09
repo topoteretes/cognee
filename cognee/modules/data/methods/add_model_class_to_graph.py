@@ -1,6 +1,6 @@
 # PROPOSED TO BE DEPRECATED
 
-from typing import Optional, Type, get_args, get_origin
+from typing import get_args, get_origin
 
 from pydantic import BaseModel
 

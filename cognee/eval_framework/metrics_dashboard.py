@@ -1,7 +1,6 @@
 import html
 import json
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import plotly.graph_objects as go
 

@@ -66,7 +66,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from cognee.shared.logging_utils import get_logger
 

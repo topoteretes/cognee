@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.relational import get_relational_engine

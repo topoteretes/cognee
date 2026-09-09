@@ -3,7 +3,7 @@
 import asyncio
 import json
 import threading
-from typing import Any, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
@@ -493,8 +493,10 @@ class TursoVectorAdapter(VectorDBInterface):
             # errors here and is skipped quietly.
             try:
                 rows = await self._execute(select_sql, [tags_json] + scope_params, fetch=True)
-            except Exception as error:  # noqa: BLE001 - not a vector collection; skip
-                logger.debug("remove_belongs_to_set_tags skipped '%s': %s", table_name, error)
+            except Exception as error:  # not a vector collection; skip
+                logger.debug(
+                    "remove_belongs_to_set_tags skipped '%s': %s", table_name, error, exc_info=True
+                )
                 continue
 
             target_ids = [row[0] for row in rows or []]
@@ -520,9 +522,12 @@ class TursoVectorAdapter(VectorDBInterface):
             try:
                 await self._execute(update_sql, [tags_json] + target_ids, commit=True)
                 await self._execute(delete_sql, target_ids, commit=True)
-            except Exception as error:  # noqa: BLE001 - surface, but continue other tables
+            except Exception as error:  # surface, but continue other tables
                 logger.warning(
-                    "remove_belongs_to_set_tags failed to update '%s': %s", table_name, error
+                    "remove_belongs_to_set_tags failed to update '%s': %s",
+                    table_name,
+                    error,
+                    exc_info=True,
                 )
 
         return

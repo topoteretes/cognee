@@ -18,7 +18,6 @@ pipeline layer can import it without cycles.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Optional
 
 ORIGIN_SDK = "sdk"
 ORIGIN_API = "api"

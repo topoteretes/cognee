@@ -6,7 +6,7 @@ import posixpath
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import ValidationError
@@ -547,7 +547,9 @@ async def extract_code_graph(
             stored_id = await _stored_snapshot_identity(fallback_repo)
         except Exception as error:
             # The skip check is an optimization; never let it break ingestion.
-            logger.warning("Could not read the stored snapshot id (%s); loading fully.", error)
+            logger.warning(
+                "Could not read the stored snapshot id (%s); loading fully.", error, exc_info=True
+            )
             stored_id = None
         if stored_id == snapshot_id:
             logger.info(

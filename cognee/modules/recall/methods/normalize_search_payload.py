@@ -7,7 +7,7 @@ same wire shape regardless of search type.
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 

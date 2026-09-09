@@ -11,7 +11,6 @@ lifecycle code fills the column on the next touch of the session.
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

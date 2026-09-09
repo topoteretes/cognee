@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import re
-from typing import List, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -140,6 +139,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             try:
                 parsed = urlparse(self.endpoint)
             except Exception:
+                logger.debug("Ignoring exception in LiteLLMEmbeddingEngine.__init__", exc_info=True)
                 parsed = None
             if not parsed or parsed.scheme not in ("http", "https") or not parsed.netloc:
                 logger.error(
@@ -347,10 +347,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             # already bypasses the handlers below and propagates unwrapped.)
             raise
 
-        except (
-            litellm.exceptions.BadRequestError,
-            litellm.exceptions.NotFoundError,
-        ) as e:
+        except litellm.exceptions.NotFoundError as e:
             logger.error(f"Embedding error with model {self.model}: {e!s}")
             raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 

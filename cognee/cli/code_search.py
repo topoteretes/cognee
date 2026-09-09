@@ -23,7 +23,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandInnerException
@@ -267,6 +267,7 @@ def write_diagram(results: Any, path: str) -> str:
             input=source.encode("utf-8"),
             capture_output=True,
             timeout=120,
+            check=False,
         )
         if completed.returncode != 0:
             raise CliCommandInnerException(

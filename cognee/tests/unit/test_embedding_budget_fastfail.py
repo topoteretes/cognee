@@ -29,6 +29,7 @@ import httpx
 import litellm
 import openai
 import pytest
+from typing_extensions import Self
 
 from cognee.infrastructure.databases.exceptions import (
     EmbeddingCredentialsError,
@@ -365,7 +366,7 @@ class _FakeAiohttpResponse:
     async def json(self) -> dict:
         return self._payload
 
-    async def __aenter__(self) -> "_FakeAiohttpResponse":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc_info) -> bool:

@@ -9,7 +9,7 @@ efficiency and storage optimization through whole-document removal.
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -159,8 +159,8 @@ async def _cleanup_via_sql(
             )
             deleted_count += 1
             logger.info(f"Deleted document {data.id} from dataset {data.dataset_id}")
-        except Exception as e:
-            logger.error(f"Failed to delete document {data.id}: {e}")
+        except Exception:
+            logger.exception(f"Failed to delete document {data.id}")
 
     logger.info("Cleanup completed", deleted_count=deleted_count)
 
