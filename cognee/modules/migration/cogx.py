@@ -14,7 +14,7 @@ import math
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 from typing_extensions import Self
@@ -157,15 +157,9 @@ class COGXRawNode(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
 
 
-COGXRecord = Union[
-    COGXDocument,
-    COGXEpisode,
-    COGXEntity,
-    COGXFact,
-    COGXMemory,
-    COGXMemoryBlock,
-    COGXRawNode,
-]
+COGXRecord = (
+    COGXDocument | COGXEpisode | COGXEntity | COGXFact | COGXMemory | COGXMemoryBlock | COGXRawNode
+)
 
 _record_adapter: TypeAdapter = TypeAdapter(COGXRecord)
 
@@ -245,7 +239,7 @@ class COGXArchiveWriter:
         file_name = RECORD_FILES[record.kind]
         handle = self._handles.get(file_name)
         if handle is None:
-            handle = open(self.directory / file_name, "a", encoding="utf-8")
+            handle = open(self.directory / file_name, "a", encoding="utf-8")  # noqa: SIM115 - kept in self._handles, closed by __exit__
             self._handles[file_name] = handle
         handle.write(record.model_dump_json(exclude_none=True) + "\n")
         self.counts[record.kind] = self.counts.get(record.kind, 0) + 1
@@ -254,7 +248,7 @@ class COGXArchiveWriter:
         """Persist a graph node that has no typed COGX mapping (full fidelity)."""
         handle = self._handles.get(RAW_NODES_FILE)
         if handle is None:
-            handle = open(self.directory / RAW_NODES_FILE, "a", encoding="utf-8")
+            handle = open(self.directory / RAW_NODES_FILE, "a", encoding="utf-8")  # noqa: SIM115 - kept in self._handles, closed by __exit__
             self._handles[RAW_NODES_FILE] = handle
         handle.write(json.dumps(node, default=str) + "\n")
         self.counts["raw_node"] = self.counts.get("raw_node", 0) + 1

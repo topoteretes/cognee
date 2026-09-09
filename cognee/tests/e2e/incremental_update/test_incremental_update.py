@@ -307,7 +307,7 @@ async def test_incremental_update_full_flow(incremental_env):
     from starlette.datastructures import UploadFile
 
     def _upload(content: bytes, filename: str) -> UploadFile:
-        spooled = tempfile.SpooledTemporaryFile()
+        spooled = tempfile.SpooledTemporaryFile()  # noqa: SIM115 - handed to UploadFile, which owns it
         spooled.write(content)
         spooled.seek(0)
         return UploadFile(file=spooled, filename=filename)

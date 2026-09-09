@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Union
+from typing import Annotated, Any
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -443,7 +443,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get(
         "/status",
-        response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
+        response_model=dict[str, PipelineRunStatus] | dict[str, dict[str, PipelineRunStatus]],
     )
     async def get_dataset_status(
         datasets: StatusDatasetIdsQuery = [],
@@ -521,10 +521,8 @@ def get_datasets_router() -> APIRouter:
 
     @router.get(
         "/status/progress",
-        response_model=Union[
-            dict[str, PipelineRunStatusWithProgress],
-            dict[str, dict[str, PipelineRunStatusWithProgress]],
-        ],
+        response_model=dict[str, PipelineRunStatusWithProgress]
+        | dict[str, dict[str, PipelineRunStatusWithProgress]],
     )
     async def get_dataset_progress(
         datasets: StatusDatasetIdsQuery = [],

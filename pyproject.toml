@@ -314,6 +314,15 @@ ignore = [
     # most of the rest validate the shape of decoded data, which callers and
     # tests catch as ValueError. The rule's advice conflicts with both.
     "TRY004",
+    # ASYNC230/220/221/251: blocking file, subprocess and sleep calls inside async
+    # functions. The document loaders and the local storage layer do their file IO
+    # synchronously by design today, and the parser holding the handle is the real
+    # blocking work, so the fix is moving each loader's parse off the event loop
+    # (SDK-600), not wrapping open() calls. Re-enable when that lands.
+    "ASYNC230",
+    "ASYNC220",
+    "ASYNC221",
+    "ASYNC251",
 ]
 
 [tool.ruff.lint.flake8-bugbear]

@@ -131,7 +131,7 @@ class _Tee:
         self._log.flush()
 
 
-_LOG_FILE = open(LOG_PATH, "w", encoding="utf-8")
+_LOG_FILE = open(LOG_PATH, "w", encoding="utf-8")  # noqa: SIM115 - tee target for the whole process
 sys.stdout = _Tee(sys.__stdout__, _LOG_FILE)
 sys.stderr = _Tee(sys.__stderr__, _LOG_FILE)
 
