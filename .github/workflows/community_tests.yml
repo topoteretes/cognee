@@ -122,6 +122,7 @@ jobs:
             cognee/tests/unit/infrastructure/databases/vector/test_vector_db_config.py \
             cognee/tests/unit/infrastructure/databases/relational/ \
             cognee/tests/unit/infrastructure/databases/test_unified_store_engine.py \
+            cognee/tests/unit/infrastructure/databases/test_dataset_database_provisioning_race.py \
             cognee/tests/unit/infrastructure/session/ \
             cognee/tests/unit/infrastructure/llm/ \
             cognee/tests/unit/infrastructure/test_rate_limiting_retry.py \
