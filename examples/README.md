@@ -22,7 +22,7 @@ They double as the smoke-test corpus the team uses to verify behaviour across th
 |---|---|---|
 | [`guides/`](guides/) | One feature per script: concise, self-contained how-tos | 31 |
 | [`advanced_guides/`](advanced_guides/) | Deeper takes on topics a guide already covers | 8 |
-| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 25 |
+| [`demos/`](demos/) | Multiple features stitched into use cases, grouped by topic | 26 |
 
 One line each: **guides teach a feature, advanced guides deepen a feature, demos combine
 features.** See [Contributing](#-contributing-a-new-example) for the precise category rules.
@@ -106,7 +106,13 @@ Each script names the simpler guide it builds on and states what it adds.
 
 ## 🎯 `demos/` — features combined into use cases
 
-Every demo lives in a topic folder.
+Every demo lives in a topic folder — with one root-level exception, the showcase
+linked from the root README.
+
+### Root level — the root-README showcase
+| Script | Demonstrates |
+|---|---|
+| [`company_brain_demo.py`](demos/company_brain_demo.py) | Text, code (Enola extraction), and session lessons distilled into one queryable company brain; supports `--recall-only` |
 
 ### [`comprehensive_example/`](demos/comprehensive_example/) — everything at once
 | Script | Demonstrates |
