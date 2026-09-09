@@ -21,6 +21,14 @@ class EffectivePipelineRunStatus(str, enum.Enum):
     Member values are identical to PipelineRunStatus's for the four shared
     states, so the wire format for anything already terminal or freshly
     started is unchanged.
+
+    ABANDONED is uppercase on purpose, even though the equivalent on the
+    sessions side is SessionStatus.ABANDONED = "abandoned". The other four
+    values here are the stored enum's and cannot change without breaking
+    the wire format, and a lowercase value sitting next to
+    "DATASET_PROCESSING_STARTED" in the same field is worse than differing
+    from /v1/sessions: a client reads this one field and meets both
+    spellings at once, while the two endpoints are consumed separately.
     """
 
     DATASET_PROCESSING_INITIATED = "DATASET_PROCESSING_INITIATED"
