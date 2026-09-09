@@ -28,6 +28,19 @@ def chunk_by_paragraph(
           separate chunk. If set to False, individual paragraphs are yielded as they are
           processed. (default True)
     """
+    from cognee.infrastructure.ingestion.execution import is_rust_available, chunk_by_paragraph_rust
+    from .chunk_by_sentence import get_word_size
+
+    if is_rust_available():
+        for chunk in chunk_by_paragraph_rust(
+            data,
+            max_chunk_size,
+            batch_paragraphs,
+            get_word_size,
+        ):
+            yield chunk
+        return
+
     current_chunk = ""
     chunk_index = 0
     paragraph_ids = []

@@ -89,15 +89,15 @@ async def run_pipeline_as_background_process(
     pipeline_run_started_info = {}
 
     async def handle_rest_of_the_run(pipeline_list):
-        # Execute all provided pipelines one by one to avoid database write conflicts
-        # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
-        for pipeline in pipeline_list:
+        async def run_single_pipeline(pipeline):
             while True:
                 try:
                     pipeline_run_info = await anext(pipeline)
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
                 except StopAsyncIteration:
                     break
+
+        await asyncio.gather(*(run_single_pipeline(p) for p in pipeline_list))
 
     # Start all pipelines to get started status
     pipeline_list = []
