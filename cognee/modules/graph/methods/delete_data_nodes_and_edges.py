@@ -110,6 +110,7 @@ async def delete_data_nodes_and_edges(
                 "Shared-slug graph detag failed for dataset %s (non-fatal): %s",
                 dataset_id,
                 e,
+                exc_info=True,
             )
         try:
             vector_engine = await get_vector_engine_async()
@@ -121,6 +122,7 @@ async def delete_data_nodes_and_edges(
                 "Shared-slug vector detag failed for dataset %s (non-fatal): %s",
                 dataset_id,
                 e,
+                exc_info=True,
             )
 
     return DeletedGraphElements.from_ledger_rows(affected_nodes or [], affected_edges or [])

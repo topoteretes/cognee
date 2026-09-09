@@ -1,5 +1,3 @@
-from typing import Optional, Union
-
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
 from cognee.modules.pipelines.models import PipelineRunStatus

@@ -22,7 +22,6 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import Optional
 
 from fastapi import status
 
@@ -95,13 +94,15 @@ def installed_binary_path() -> Path:
 
 
 def _download(url: str, destination: Path) -> None:
-    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
-        with open(destination, "wb") as archive_file:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                archive_file.write(chunk)
+    with (
+        urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response,
+        open(destination, "wb") as archive_file,
+    ):
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            archive_file.write(chunk)
 
 
 def _extract_single_binary(archive_path: Path, destination: Path) -> None:

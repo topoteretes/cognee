@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
-from typing import Any, Dict, Union
+from typing import Any
 
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
@@ -9,12 +9,12 @@ from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.methods.get_default_user import get_default_user
 
-AsyncGenLike = Union[
-    AsyncIterable[Any],
-    AsyncGenerator[Any, None],
-    Callable[..., AsyncIterable[Any]],
-    Callable[..., AsyncGenerator[Any, None]],
-]
+AsyncGenLike = (
+    AsyncIterable[Any]
+    | AsyncGenerator[Any, None]
+    | Callable[..., AsyncIterable[Any]]
+    | Callable[..., AsyncGenerator[Any, None]]
+)
 
 # Strong refs for fire-and-forget background pipeline tasks. The event loop only
 # keeps weak references to tasks, so without anchoring here Python's gc can collect
@@ -93,10 +93,10 @@ async def run_pipeline_as_background_process(
     async def handle_rest_of_the_run(pipeline_list):
         # Execute all provided pipelines one by one to avoid database write conflicts
         # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
-        for pipeline in pipeline_list:
+        for pipeline_run in pipeline_list:
             while True:
                 try:
-                    pipeline_run_info = await anext(pipeline)
+                    pipeline_run_info = await anext(pipeline_run)
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
                 except StopAsyncIteration:
                     break

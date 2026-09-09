@@ -1,7 +1,6 @@
 import csv
 import os
 import re
-from typing import Optional
 
 DB_CONNECTION_PATTERNS = [
     "postgresql://",

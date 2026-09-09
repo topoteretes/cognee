@@ -1,4 +1,3 @@
-from typing import Dict, List, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession

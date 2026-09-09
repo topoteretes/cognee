@@ -23,7 +23,7 @@ import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 from uuid import NAMESPACE_OID, UUID, uuid5
@@ -184,6 +184,7 @@ def _llm_tokenizer() -> TikTokenTokenizer:
         return TikTokenTokenizer(model=model)
     except Exception:
         # Model unknown to tiktoken — fall back to its default encoding.
+        logger.debug("Falling back after error in _llm_tokenizer", exc_info=True)
         return TikTokenTokenizer(model=None)
 
 

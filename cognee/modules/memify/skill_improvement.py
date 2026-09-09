@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field
@@ -137,6 +137,7 @@ async def improve_skill(
 
             model_name = get_llm_config().llm_model
         except Exception:
+            logger.debug("Ignoring exception in improve_skill", exc_info=True)
             model_name = ""
         proposal = SkillImprovementProposal(
             proposal_id=str(uuid4()),
@@ -293,11 +294,13 @@ async def _load_nodes_by_type(model):
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception:
+        logger.debug("Optional import unavailable, continuing without it", exc_info=True)
         return []
 
     try:
         graph_engine = await get_graph_engine()
     except Exception:
+        logger.debug("Falling back to [] after error in _load_nodes_by_type", exc_info=True)
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -305,7 +308,7 @@ async def _load_nodes_by_type(model):
         try:
             return await get_by_type(node_type=model)
         except Exception as exc:
-            logger.warning("Skill improvement lookup failed: %s", exc)
+            logger.warning("Skill improvement lookup failed: %s", exc, exc_info=True)
             return []
 
     get_nodeset = getattr(graph_engine, "get_nodeset_subgraph", None)
@@ -315,7 +318,7 @@ async def _load_nodes_by_type(model):
             if nodes:
                 return nodes
         except Exception as exc:
-            logger.warning("Skill improvement nodeset lookup failed: %s", exc)
+            logger.warning("Skill improvement nodeset lookup failed: %s", exc, exc_info=True)
 
     get_graph_data = getattr(graph_engine, "get_graph_data", None)
     if get_graph_data is None:
@@ -324,7 +327,7 @@ async def _load_nodes_by_type(model):
         nodes, _ = await get_graph_data()
         return nodes
     except Exception as exc:
-        logger.warning("Skill improvement full graph lookup failed: %s", exc)
+        logger.warning("Skill improvement full graph lookup failed: %s", exc, exc_info=True)
         return []
 
 
@@ -344,4 +347,5 @@ def _coerce_model(raw, model):
     try:
         return model.model_validate(data)
     except Exception:
+        logger.debug("Falling back to None after error in _coerce_model", exc_info=True)
         return None

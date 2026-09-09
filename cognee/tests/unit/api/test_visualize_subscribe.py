@@ -106,7 +106,7 @@ def test_a_reconnect_cursor_is_passed_through_to_the_events_query(app, monkeypat
         while connection.receive_json()["kind"] != "heartbeat":
             pass
 
-    assert seen and seen[0] == datetime(2026, 8, 3, 9, 0, 5)
+    assert seen and seen[0] == datetime(2026, 8, 3, 9, 0, 5)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
 
 
 def test_events_are_pushed_only_when_the_delta_is_non_empty(app, monkeypatch):
@@ -156,7 +156,7 @@ def test_the_cursor_advances_so_the_same_event_is_never_delivered_twice(app, mon
             pass
 
     assert seen[0] is None
-    assert seen[1] == datetime(2026, 8, 3, 9, 0, 10)
+    assert seen[1] == datetime(2026, 8, 3, 9, 0, 10)  # noqa: DTZ001 - naive by contract: event cursors are naive ISO strings
 
 
 def test_a_run_completing_is_announced_but_one_already_complete_is_not(app, monkeypatch):

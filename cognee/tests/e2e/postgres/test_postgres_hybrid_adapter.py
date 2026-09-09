@@ -5,6 +5,7 @@ Connection defaults: DB_HOST=localhost, DB_PORT=5432,
 DB_USERNAME=cognee, DB_PASSWORD=cognee, DB_NAME=cognee_db.
 """
 
+import logging
 import os
 
 import pytest
@@ -14,6 +15,8 @@ from cognee.infrastructure.databases.graph.postgres_demo.adapter import Postgres
 from cognee.infrastructure.databases.hybrid.postgres.adapter import PostgresHybridAdapter
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.infrastructure.databases.vector.pgvector.PGVectorAdapter import PGVectorAdapter
+
+logger = logging.getLogger(__name__)
 
 # -- Session-scoped event loop so async engines stay on a single loop.
 
@@ -70,7 +73,7 @@ async def adapter():
     try:
         await a.delete_graph()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in adapter", exc_info=True)
 
     # Drop any vector collection tables created during the test
     try:
@@ -85,7 +88,7 @@ async def adapter():
                 await session.execute(sa_text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
             await session.commit()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in adapter", exc_info=True)
 
 
 # -- Helpers --

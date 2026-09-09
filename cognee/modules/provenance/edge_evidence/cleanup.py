@@ -14,7 +14,6 @@ so the sweep is hygiene against unbounded growth, not correctness. It never
 raises: deletion must not fail because of a sidecar.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import delete
@@ -50,5 +49,6 @@ async def delete_edge_evidence(dataset_id: UUID, data_id: UUID | None = None) ->
             dataset_id,
             data_id,
             error,
+            exc_info=True,
         )
         return 0

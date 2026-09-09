@@ -1,5 +1,5 @@
+import logging
 import pathlib
-from typing import Optional, Union
 
 import pytest
 import pytest_asyncio
@@ -9,6 +9,8 @@ from cognee.exceptions import CogneeValidationError
 from cognee.low_level import DataPoint, setup
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -52,7 +54,7 @@ async def setup_test_environment_simple():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_simple", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -124,7 +126,7 @@ async def setup_test_environment_complex():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_complex", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -151,7 +153,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

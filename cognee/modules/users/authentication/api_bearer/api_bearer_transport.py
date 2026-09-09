@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi.security import OAuth2PasswordBearer
 from fastapi_users.authentication import BearerTransport
 from starlette.requests import HTTPConnection

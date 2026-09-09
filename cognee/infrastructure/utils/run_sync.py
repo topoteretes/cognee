@@ -3,6 +3,10 @@ import threading
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 T = TypeVar("T")
 
 
@@ -27,6 +31,7 @@ def run_sync(
                 result = asyncio.run(coro)
 
         except Exception as e:
+            logger.debug("Ignoring exception in run_sync.runner", exc_info=True)
             exception = e
 
     thread = threading.Thread(target=runner)

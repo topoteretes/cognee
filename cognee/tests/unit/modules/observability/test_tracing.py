@@ -287,7 +287,7 @@ class TestTracingLifecycle:
 
     def test_enable_disable(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -313,7 +313,7 @@ class TestTracingLifecycle:
 
     def test_full_lifecycle(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -348,7 +348,7 @@ class TestSetupTracing:
 
     def test_setup_returns_tracer(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -357,7 +357,7 @@ class TestSetupTracing:
 
     def test_setup_with_console(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
@@ -366,7 +366,7 @@ class TestSetupTracing:
 
     def test_exporter_available_after_setup(self):
         try:
-            import opentelemetry  # noqa: F401
+            import opentelemetry
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 

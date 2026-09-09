@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment

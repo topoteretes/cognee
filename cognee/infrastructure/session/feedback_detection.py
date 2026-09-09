@@ -33,6 +33,7 @@ def _render_served_context(served_context) -> str:
                 continue
             lines.append(f"{str(entry_id).strip()}: {str(content).strip()}")
     except Exception:
+        logger.debug("Falling back to  after error in _render_served_context", exc_info=True)
         return ""
     return "\n".join(lines)
 
@@ -107,7 +108,7 @@ async def analyze_turn_for_session_context(
         logger.warning(
             "Session turn analysis failed, proceeding with empty analysis: %s",
             e,
-            exc_info=False,
+            exc_info=True,
         )
         return SessionTurnAnalysis()
 

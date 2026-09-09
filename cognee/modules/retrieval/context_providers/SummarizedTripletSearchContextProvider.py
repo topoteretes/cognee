@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from cognee.modules.retrieval.context_providers.TripletSearchContextProvider import (
     TripletSearchContextProvider,
 )

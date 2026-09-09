@@ -4,7 +4,6 @@ import json
 import os
 import re
 from collections import Counter
-from typing import List, Optional
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine

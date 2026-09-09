@@ -1,7 +1,6 @@
 import asyncio
 import re
 from time import monotonic
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.dataset_database_handler import (
@@ -17,6 +16,9 @@ from cognee.infrastructure.databases.graph.get_graph_engine import (
     graph_engine_cache,
 )
 from cognee.modules.users.models import DatasetDatabase, User
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 NEO4J_DATASET_DATABASE_HANDLER = "neo4j"
 NEO4J_SYSTEM_DATABASE = "system"
@@ -168,6 +170,10 @@ class Neo4jDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         try:
             records = await cls._run_system_query(driver, NEO4J_EDITION_QUERY)
         except Exception:
+            logger.debug(
+                "Giving up after error in Neo4jDatasetDatabaseHandler._ensure_multi_database_support",
+                exc_info=True,
+            )
             return
 
         edition = records[0].get("edition", "") if records else ""

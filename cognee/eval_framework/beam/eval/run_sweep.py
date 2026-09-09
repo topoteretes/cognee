@@ -11,14 +11,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Keep Cognee's normal logging quiet; this script prints its own progress.
 os.environ["LOG_LEVEL"] = "ERROR"
 os.environ["COGNEE_LOG_FILE"] = "false"
 os.environ["COGNEE_CLI_MODE"] = "true"
 
-from cognee.eval_framework.beam.eval.sweep import (  # noqa: E402
+from cognee.eval_framework.beam.eval.sweep import (
     build_beam_eval_params,
     build_registry_base_configs,
     filter_questions_by_type,
@@ -27,13 +27,13 @@ from cognee.eval_framework.beam.eval.sweep import (  # noqa: E402
     make_timestamped_output_dir,
     resolve_beam_sweep_config,
 )
-from cognee.eval_framework.benchmark_adapters.beam_adapter import (  # noqa: E402
+from cognee.eval_framework.benchmark_adapters.beam_adapter import (
     load_beam_row,
     parse_beam_probing_questions,
     truncate_beam_chat_batches,
 )
-from cognee.eval_framework.reporting.io import write_json  # noqa: E402
-from cognee.eval_framework.sweeps.retriever_sweep_runner import (  # noqa: E402
+from cognee.eval_framework.reporting.io import write_json
+from cognee.eval_framework.sweeps.retriever_sweep_runner import (
     RetrieverSweepSettings,
     _run_retriever_all_runs,
     validate_retriever_configs,
@@ -48,7 +48,7 @@ BEAM_SUPPORTED_SPLITS = ("100K", "500K", "1M", "10M")
 
 
 def print_step(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {message}", flush=True)
 
 
 def configure_quiet_logging() -> None:

@@ -29,7 +29,7 @@ audit trail) still breaks verification.
 
 import hashlib
 import json
-from typing import Any, Optional
+from typing import Any
 
 # Order is the contract. Every ProvenanceEntry field except ``checksum`` (the
 # hash output) and ``entity_id`` (hashed in canonical form, see module docstring).

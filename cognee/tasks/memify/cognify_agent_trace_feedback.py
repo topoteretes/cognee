@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 import cognee
@@ -68,7 +67,7 @@ async def cognify_agent_trace_feedback(
     except CogneeValidationError:
         raise
     except Exception as error:
-        logger.error("Error cognifying agent trace content: %s", error)
+        logger.exception("Error cognifying agent trace content")
         raise CogneeSystemError(
             message=f"Failed to cognify agent trace content: {error}",
             log=False,

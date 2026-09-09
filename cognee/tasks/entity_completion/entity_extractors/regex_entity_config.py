@@ -2,7 +2,7 @@ import json
 import os
 import re
 from re import Pattern
-from typing import Any, Dict, List
+from typing import Any
 
 from cognee.modules.engine.models.EntityType import EntityType
 from cognee.root_dir import get_absolute_path

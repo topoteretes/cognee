@@ -31,7 +31,6 @@ missing created_at or id raises: see _require_index_columns.
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

@@ -1,7 +1,7 @@
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,7 +70,7 @@ async def data_item_to_text_file(
             # create it with delete=False, close our handle first, and clean it up
             # ourselves. (Mirrors the delete=False pattern used by the SQLAlchemy and
             # ladybug S3 temp-file paths.)
-            temp_file = tempfile.NamedTemporaryFile(
+            temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed below after the write; delete=False keeps the path
                 mode="wb", suffix=path_info.suffix, delete=False
             )
             try:

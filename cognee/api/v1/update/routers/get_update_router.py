@@ -1,4 +1,4 @@
-from typing import Annotated, Dict, List, Literal, Optional, Union
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, status
@@ -40,7 +40,7 @@ def get_update_router() -> APIRouter:
 
     @router.patch(
         "",
-        response_model=Union[IncrementalUpdateResponse, dict[UUID, PipelineRunInfo]],
+        response_model=IncrementalUpdateResponse | dict[UUID, PipelineRunInfo],
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},

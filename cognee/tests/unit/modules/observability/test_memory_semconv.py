@@ -4,9 +4,12 @@ Validates that the core memory operations emit correct spans (with memory.*
 attributes), metrics, and that the log bridge attaches without error.
 """
 
+import logging
 import time
 
 import pytest
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -22,7 +25,7 @@ def _clean_otel_state():
 
         disable_tracing()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _clean_otel_state", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

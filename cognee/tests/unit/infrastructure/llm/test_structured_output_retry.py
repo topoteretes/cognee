@@ -129,9 +129,11 @@ async def test_structured_output_does_not_retry_quota_errors():
         side_effect=RuntimeError("insufficient_quota: exceeded your current quota")
     )
 
-    with patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter):
-        with pytest.raises(RuntimeError, match="insufficient_quota"):
-            await adapter.acreate_structured_output("hi", "system", _Resp)
+    with (
+        patch(f"{_MODULE}.llm_rate_limiter_context_manager", _null_rate_limiter),
+        pytest.raises(RuntimeError, match="insufficient_quota"),
+    ):
+        await adapter.acreate_structured_output("hi", "system", _Resp)
 
     assert adapter.aclient.chat.completions.create.await_count == 1
 
@@ -149,8 +151,8 @@ async def test_llm_gateway_converts_quota_errors():
     # versions). sys.modules is keyed by name and always gives the module.
     import sys
 
-    import cognee.infrastructure.llm.LLMGateway  # noqa: F401 — ensure in sys.modules
-    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client  # noqa: E501,F401
+    import cognee.infrastructure.llm.LLMGateway  # ensure in sys.modules
+    import cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client
 
     gateway_module = sys.modules["cognee.infrastructure.llm.LLMGateway"]
     get_llm_client_module = sys.modules[
@@ -166,9 +168,9 @@ async def test_llm_gateway_converts_quota_errors():
     with (
         patch.object(gateway_module, "get_llm_config", return_value=fake_config),
         patch.object(get_llm_client_module, "get_llm_client", return_value=failing_client),
+        pytest.raises(LLMQuotaExceededError, match="not retryable"),
     ):
-        with pytest.raises(LLMQuotaExceededError, match="not retryable"):
-            await gateway_module.LLMGateway.acreate_structured_output("hi", "system", _Resp)
+        await gateway_module.LLMGateway.acreate_structured_output("hi", "system", _Resp)
 
     assert failing_client.acreate_structured_output.await_count == 1
 

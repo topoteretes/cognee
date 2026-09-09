@@ -1,5 +1,3 @@
-from typing import List
-
 from cognee.infrastructure.llm.extraction import extract_event_entities
 from cognee.modules.engine.models import Event
 from cognee.tasks.temporal_graph.models import EventEntityList, EventWithEntities

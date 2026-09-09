@@ -1,7 +1,8 @@
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -15,6 +16,8 @@ from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusB
 from cognee.eval_framework.corpus_builder.task_getters.TaskGetters import TaskGetters
 
 from .qa_benchmark_base import QABenchmarkConfig, QABenchmarkRAG
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -152,6 +155,7 @@ class QABenchmarkCognee(QABenchmarkRAG):
                 return "No relevant information found."
 
         except Exception as e:
+            logger.debug("Falling back after error in QABenchmarkCognee.query_rag", exc_info=True)
             print(f"Error during retrieval: {e}")
             return f"Error: {e!s}"
 

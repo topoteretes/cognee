@@ -15,7 +15,7 @@ with optional metadata, so they map cleanly onto COGX's atomic memory record.
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import (
     COGXMemory,

@@ -9,7 +9,6 @@ import sys
 from collections import deque
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
-from typing import Deque, List, Optional, Tuple
 
 import uvicorn
 from fastmcp import FastMCP
@@ -452,7 +451,7 @@ async def cognify(
         except Exception as e:
             dataset = kwargs.get("dataset_name", "main_dataset")
             _record_task_error(dataset, str(e))
-            logger.error(f"Background cognify task failed for dataset '{dataset}': {e}")
+            logger.exception(f"Background cognify task failed for dataset '{dataset}'")
 
     _track_background(
         cognify_task_wrapper(
@@ -538,7 +537,7 @@ async def save_interaction(data: str) -> list:
             await save_user_agent_interaction(**kwargs)
         except Exception as e:
             _record_task_error("main_dataset", str(e))
-            logger.error(f"Background save_interaction task failed: {e}")
+            logger.exception("Background save_interaction task failed")
 
     _track_background(save_task_wrapper(data=data))
 
@@ -738,7 +737,7 @@ async def search(
         )
     except Exception as e:
         error_msg = f"Search failed: {e!s}"
-        logger.error(error_msg)
+        logger.exception(error_msg)
         return [types.TextContent(type="text", text=f"Error: {error_msg}")]
     return [types.TextContent(type="text", text=search_results)]
 
@@ -781,7 +780,7 @@ async def get_document(
             ]
         except Exception as e:
             error_msg = f"get_document failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
@@ -825,7 +824,7 @@ async def get_chunk_neighbors(
             ]
         except Exception as e:
             error_msg = f"get_chunk_neighbors failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
@@ -953,7 +952,7 @@ async def list_data(dataset_id: str | None = None) -> list:
 
         except Exception as e:
             error_msg = f"❌ Failed to list data: {e!s}"
-            logger.error(f"List data error: {e!s}")
+            logger.exception("List data error")
             return [types.TextContent(type="text", text=error_msg)]
 
 
@@ -1013,6 +1012,7 @@ async def delete_dataset(dataset_name: str) -> list:
                 )
             ]
         except Exception as e:
+            logger.debug("Falling back after error in delete_dataset", exc_info=True)
             return [types.TextContent(type="text", text=f"Error deleting dataset: {e!s}")]
 
 
@@ -1091,7 +1091,7 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
         except Exception as e:
             # Handle all other errors (DocumentNotFoundError, DatasetNotFoundError, etc.)
             error_msg = f"❌ Delete operation failed: {e!s}"
-            logger.error(f"Delete operation error: {e!s}")
+            logger.exception("Delete operation error")
             return [types.TextContent(type="text", text=error_msg)]
 
 
@@ -1127,7 +1127,7 @@ async def prune():
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
             error_msg = f"❌ Prune operation failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
 
@@ -1212,6 +1212,7 @@ async def remember(
         try:
             decoded = base64.b64decode(content_base64, validate=True)
         except Exception as e:
+            logger.debug("Falling back after error in remember", exc_info=True)
             return [types.TextContent(type="text", text=f"Error: invalid base64 content ({e}).")]
         if len(decoded) > _MAX_UPLOAD_BYTES:
             return [
@@ -1237,7 +1238,7 @@ async def remember(
                 await cognee_client.remember(**kwargs)
             except Exception as e:
                 _record_task_error(dataset_name, str(e))
-                logger.error(f"Background remember task failed for dataset '{dataset_name}': {e}")
+                logger.exception(f"Background remember task failed for dataset '{dataset_name}'")
 
         _track_background(
             remember_task_wrapper(
@@ -1285,7 +1286,7 @@ async def remember(
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = f"Remember failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
@@ -1346,7 +1347,7 @@ async def recall(
             ]
         except Exception as e:
             error_msg = f"Recall failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
@@ -1423,7 +1424,7 @@ async def forget(
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = f"Forget failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
@@ -1470,7 +1471,7 @@ async def improve(
             return [types.TextContent(type="text", text=text)]
         except Exception as e:
             error_msg = f"Improve failed: {e!s}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=f"Error: {error_msg}")]
 
 
@@ -1577,7 +1578,7 @@ async def cognify_status(
                 for ts, err in sorted(dataset_errors, reverse=True):
                     error_lines.append(f"  [{ts}] {err}")
                 error_msg += "\n".join(error_lines)
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
 

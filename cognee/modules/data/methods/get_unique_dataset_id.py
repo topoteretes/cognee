@@ -1,4 +1,3 @@
-from typing import Union
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from sqlalchemy import select

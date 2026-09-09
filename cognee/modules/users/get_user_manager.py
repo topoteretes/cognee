@@ -5,7 +5,6 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -106,7 +105,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             try:
                 await self._touch_api_key_last_used(session, user_api_key)
             except Exception as error:
-                logger.warning("Failed to update API key last_used_at: %s", error)
+                logger.warning("Failed to update API key last_used_at: %s", error, exc_info=True)
 
             return user
 

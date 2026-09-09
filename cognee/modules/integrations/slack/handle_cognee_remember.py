@@ -134,7 +134,7 @@ async def _remember_and_confirm(
     """
     try:
         await remember_note(user_id, text=text, author_id=slack_user_id)
-    except Exception:  # noqa: BLE001 - a save failure must degrade to a chat message, not a crash
+    except Exception:  # a save failure must degrade to a chat message, not a crash
         logger.exception("Remember failed for Slack team %s", team_id)
         await post_to_response_url(
             response_url, _ephemeral(SAVE_FAILED_MESSAGE, replace_original=True)

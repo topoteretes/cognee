@@ -13,7 +13,7 @@ REFLECTION, so a newly added document type is covered the day it is written
 
 import asyncio
 import types
-from typing import Optional, Union, get_args, get_origin
+from typing import Union, get_args, get_origin
 from uuid import NAMESPACE_OID, uuid4, uuid5
 
 import pytest

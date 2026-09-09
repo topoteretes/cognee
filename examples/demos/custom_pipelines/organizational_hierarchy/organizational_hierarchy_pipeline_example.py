@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from pydantic import BaseModel
@@ -108,9 +108,11 @@ async def main():
 
     # Prepare data for pipeline
     companies_file_path = os.path.join(os.path.dirname(__file__), "data", "companies.json")
-    companies = json.loads(open(companies_file_path, "r").read())
+    with open(companies_file_path, "r") as companies_file:
+        companies = json.load(companies_file)
     people_file_path = os.path.join(os.path.dirname(__file__), "data", "people.json")
-    people = json.loads(open(people_file_path, "r").read())
+    with open(people_file_path, "r") as people_file:
+        people = json.load(people_file)
 
     # Run tasks expects a list of data even if it is just one document
     data = [{"companies": companies, "people": people}]

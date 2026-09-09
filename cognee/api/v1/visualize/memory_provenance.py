@@ -22,7 +22,7 @@ Entry points:
       one ``preprocess()`` call so the two cannot drift.
 """
 
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict, cast
 
 from cognee.shared.logging_utils import get_logger
 
@@ -311,7 +311,7 @@ async def _read_agents(user_ids: list[str]) -> list[AgentRecord]:
         try:
             connections += list(list_registered_agent_connections() or [])
         except Exception as error:  # pragma: no cover - defensive
-            logger.debug(f"registered agent enumeration skipped: {error}")
+            logger.debug(f"registered agent enumeration skipped: {error}", exc_info=True)
         try:
             connections += list(
                 await list_persisted_agent_connections(
@@ -320,9 +320,9 @@ async def _read_agents(user_ids: list[str]) -> list[AgentRecord]:
                 or []
             )
         except Exception as error:  # pragma: no cover - defensive
-            logger.debug(f"persisted agent enumeration skipped: {error}")
+            logger.debug(f"persisted agent enumeration skipped: {error}", exc_info=True)
     except Exception as error:  # pragma: no cover - module unavailable
-        logger.debug(f"agent registry unavailable: {error}")
+        logger.debug(f"agent registry unavailable: {error}", exc_info=True)
         return []
 
     agents: list[AgentRecord] = []
@@ -371,7 +371,7 @@ async def _read_sessions(user_ids: list[str], agents: list[AgentRecord]) -> list
                 }
             )
     except Exception as error:  # pragma: no cover - defensive
-        logger.debug(f"session enumeration skipped: {error}")
+        logger.debug(f"session enumeration skipped: {error}", exc_info=True)
     return sessions
 
 
@@ -395,7 +395,7 @@ async def _read_memory_relational(
         from cognee.modules.graph.models.Edge import Edge as EdgeRow
         from cognee.modules.graph.models.Node import Node as NodeRow
     except Exception as error:  # pragma: no cover - models unavailable
-        logger.debug(f"relational memory models unavailable: {error}")
+        logger.debug(f"relational memory models unavailable: {error}", exc_info=True)
         return None
 
     nodes: list[tuple[str, dict[str, Any]]] = []
@@ -433,7 +433,7 @@ async def _read_memory_relational(
                     continue
                 edges.append(EdgeData(src, dst, row.relationship_name or "related", {}))
     except Exception as error:  # pragma: no cover - defensive
-        logger.debug(f"relational memory read skipped: {error}")
+        logger.debug(f"relational memory read skipped: {error}", exc_info=True)
         return None
 
     if not nodes:

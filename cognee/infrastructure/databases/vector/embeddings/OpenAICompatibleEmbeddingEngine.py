@@ -16,7 +16,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import httpx
 import numpy as np

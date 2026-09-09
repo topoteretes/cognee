@@ -22,7 +22,6 @@ inferred — only declared.
 """
 
 from collections.abc import Collection
-from typing import List, Optional, Set
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
@@ -109,6 +108,8 @@ async def resolve_temporal_contradictions(
     except Exception as error:
         # The graph is already persisted at this point; an advisory pass must
         # never fail the ingestion run.
-        logger.warning("Temporal contradiction resolution skipped due to an error: %s", error)
+        logger.warning(
+            "Temporal contradiction resolution skipped due to an error: %s", error, exc_info=True
+        )
 
     return data_points

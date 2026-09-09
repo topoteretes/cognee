@@ -1,7 +1,7 @@
 import hashlib
 import os
 from os import path
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from ..exceptions import FileContentHashingError
 from ..storage import get_file_storage

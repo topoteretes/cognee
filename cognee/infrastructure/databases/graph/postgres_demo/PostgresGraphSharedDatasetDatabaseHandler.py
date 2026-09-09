@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph.config import get_graph_config

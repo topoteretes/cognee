@@ -6,7 +6,7 @@ its DataPoint children. Nothing here stores anything - resolution happens before
 walk decides what to write.
 """
 
-from typing import Any, List, Optional
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.extract_field_relationships import (
@@ -42,6 +42,7 @@ def _warn_dropped_field(data_point: DataPoint, field_name: str, value: Any) -> N
     try:
         carries = bool(value)
     except Exception:
+        logger.debug("Ignoring exception in _warn_dropped_field", exc_info=True)
         carries = True
 
     key = (type(data_point).__qualname__, field_name)

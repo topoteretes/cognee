@@ -1,7 +1,6 @@
 import builtins
 import csv
 import io
-from typing import Type
 
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.chunking.Chunker import Chunker

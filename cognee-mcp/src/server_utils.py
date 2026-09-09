@@ -5,7 +5,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 MAX_TOP_K = 100
 COMPLETION_SEARCH_TYPES = {

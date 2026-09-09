@@ -2,7 +2,7 @@ import inspect
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, List, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 

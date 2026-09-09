@@ -16,10 +16,10 @@ import pytest
 pytest.importorskip("asyncpg", reason="PostgresHybridAdapter requires the postgres extra")
 pytest.importorskip("pgvector", reason="PostgresHybridAdapter requires the postgres extra")
 
-from cognee.infrastructure.databases.hybrid.postgres.adapter import (  # noqa: E402
+from cognee.infrastructure.databases.hybrid.postgres.adapter import (
     PostgresHybridAdapter,
 )
-from cognee.infrastructure.engine import DataPoint  # noqa: E402
+from cognee.infrastructure.engine import DataPoint
 
 
 class _Node(DataPoint):

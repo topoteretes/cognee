@@ -10,7 +10,6 @@ payload / metadata / account id) has moved onto that adapter, which is the
 one place a provider's response-shape knowledge should live.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.integrations.credentials import (

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 import pytest
@@ -11,6 +12,8 @@ from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
 from cognee.modules.users.methods import get_authenticated_user, get_default_user
 
+logger = logging.getLogger(__name__)
+
 
 async def _reset_engines_and_prune():
     """Reset db engine caches and prune data/system."""
@@ -21,7 +24,7 @@ async def _reset_engines_and_prune():
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)

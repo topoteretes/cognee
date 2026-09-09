@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import NAMESPACE_OID, uuid5
 
 from pydantic import Field
@@ -85,7 +85,7 @@ async def get_origin_edges(data: str, rules: list[Rule]) -> list[Any]:
                         )
                     )
             except Exception as e:
-                logger.info(f"Warning: Skipping invalid rule due to error: {e}")
+                logger.info(f"Warning: Skipping invalid rule due to error: {e}", exc_info=True)
     else:
         logger.info("No valid origin_id or rules provided.")
 

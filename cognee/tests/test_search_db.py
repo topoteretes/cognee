@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 from collections import Counter
@@ -28,9 +29,8 @@ from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import get_logger
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 async def _reset_engines_and_prune() -> None:
@@ -49,7 +49,7 @@ async def _reset_engines_and_prune() -> None:
             await vector_engine.engine.dispose(close=True)
     except Exception:
         # Engine might not exist yet
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (

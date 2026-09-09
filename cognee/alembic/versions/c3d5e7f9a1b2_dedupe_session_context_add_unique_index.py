@@ -27,7 +27,6 @@ import logging
 import os
 import sqlite3
 from collections.abc import Sequence
-from typing import Optional, Union
 
 import sqlalchemy as sa
 from alembic import op

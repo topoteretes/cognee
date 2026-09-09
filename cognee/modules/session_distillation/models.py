@@ -8,13 +8,9 @@ documents in the knowledge graph. The flow:
 Curator calls run in parallel by batch; judge/write calls run in parallel by lesson.
 """
 
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
-
-from cognee.infrastructure.session.session_context_models import (
-    MIN_GATE_CONFIDENCE as MIN_GATE_CONFIDENCE,
-)
 
 # -- Tunables ----------------------------------------------------------------
 

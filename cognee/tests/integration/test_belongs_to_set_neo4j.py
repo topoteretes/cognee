@@ -12,7 +12,6 @@ them at whatever local Neo4j instance you're running.
 from __future__ import annotations
 
 import os
-from typing import List, Optional
 from uuid import UUID, uuid4
 
 import pytest

@@ -1,5 +1,4 @@
 import asyncio
-from typing import List, Optional
 
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
 from cognee.infrastructure.engine import DataPoint

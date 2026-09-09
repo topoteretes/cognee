@@ -12,7 +12,7 @@ instruction_following).
 
 import ast
 import json
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
 from cognee.shared.logging_utils import get_logger

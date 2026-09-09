@@ -5,7 +5,6 @@ provenance-carrying text — bare message text alone loses who said it and
 where, both useful context for the resulting knowledge graph.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from cognee.api.v1.remember.remember import remember as cognee_remember

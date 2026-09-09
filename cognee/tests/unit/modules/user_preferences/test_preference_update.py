@@ -562,7 +562,7 @@ class TestRefreshPreferenceText:
 
     def test_cap_drops_the_oldest_lines(self):
         # Enough old whole lines to overflow the cap once a new line lands.
-        old_lines = ["old line %03d" % index for index in range(200)]
+        old_lines = [f"old line {index:03d}" for index in range(200)]
         old_text = "\n".join(old_lines)
         assert len(old_text) > MAX_PREFERENCE_TEXT_CHARS - len("newest line\n")
         entries = [_context_entry("e1", "newest line", "2026-01-05T00:00:00")]

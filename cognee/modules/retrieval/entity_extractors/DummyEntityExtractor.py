@@ -1,5 +1,3 @@
-from typing import List
-
 from cognee.infrastructure.entities.BaseEntityExtractor import (
     BaseEntityExtractor,
 )

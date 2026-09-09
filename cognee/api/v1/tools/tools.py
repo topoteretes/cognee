@@ -13,7 +13,7 @@ Connections registered here become usable via
 ``cognee.recall(query, scope=["tools"])`` once ``TOOL_CALLS_ENABLED=true``.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 async def _resolve_user_id(user: object | None):

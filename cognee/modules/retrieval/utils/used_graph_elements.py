@@ -1,6 +1,6 @@
 """Helpers to extract used graph element IDs from retriever results for session QA."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 def is_edge_list(obj: Any) -> bool:
