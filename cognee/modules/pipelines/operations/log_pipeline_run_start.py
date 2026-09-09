@@ -53,6 +53,10 @@ async def log_pipeline_run_start(
         # written by one user for a dataset another user then cognifies would
         # never be matched, leaving behind the phantom this clears. It also
         # rides the existing (dataset_id, pipeline_name, created_at) index.
+        #
+        # So a marker is per (dataset, pipeline_name), not per run: a starting
+        # run clears every marker for its pair, not only the one that unblocked
+        # it. Do not read one marker as standing for one run.
         await session.execute(
             delete(PipelineRun).where(
                 PipelineRun.dataset_id == dataset_id,

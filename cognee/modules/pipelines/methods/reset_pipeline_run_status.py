@@ -6,7 +6,7 @@ from cognee.modules.pipelines.operations.log_pipeline_run_initiated import (
 )
 
 
-async def reset_pipeline_run_status(pipeline_run: PipelineRun, user_id: UUID | None = None):
+async def reset_pipeline_run_status(pipeline_run: PipelineRun, user_id: UUID):
     """Clear a finished or stuck status so the pipeline may run again.
 
     Takes the run being reset rather than its parts. The marker describes that
@@ -16,7 +16,9 @@ async def reset_pipeline_run_status(pipeline_run: PipelineRun, user_id: UUID | N
     recovery always is, since it acts as the dataset owner.
 
     *user_id* is who asked for the reset, which is not necessarily the run's own
-    user, and is recorded as such.
+    user, and is recorded as such. It is required rather than defaulted: a
+    marker with a NULL user_id is one /activity/pipeline-runs can show nobody,
+    since it filters visibility on that column.
     """
     # Without this the pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
     await log_pipeline_run_initiated(
