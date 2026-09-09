@@ -5,7 +5,6 @@ import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
@@ -42,7 +41,7 @@ def load_credentials() -> CloudCredentials | None:
             **{k: v for k, v in data.items() if k in CloudCredentials.__dataclass_fields__}
         )
     except Exception as e:
-        logger.debug("Failed to load cloud credentials: %s", e)
+        logger.debug("Failed to load cloud credentials: %s", e, exc_info=True)
         return None
 
 

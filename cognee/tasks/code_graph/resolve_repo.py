@@ -15,7 +15,6 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Optional, Union
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import status

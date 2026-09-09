@@ -13,7 +13,6 @@ fail a search.
 """
 
 from contextvars import ContextVar
-from typing import Dict, List, Optional, Tuple
 
 from cognee.base_config import get_base_config
 from cognee.context_global_variables import current_dataset_id, session_user
@@ -87,7 +86,7 @@ async def _load_raw_preferences() -> tuple[str, dict[str, float]]:
         _active_preferences_cache.set((cache_key, result))
         return result
     except Exception as error:
-        logger.debug("Preference lookup failed open: %s", error)
+        logger.debug("Preference lookup failed open: %s", error, exc_info=True)
         return "", {}
 
 

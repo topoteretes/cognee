@@ -14,6 +14,9 @@ from cognee.infrastructure.llm.exceptions import LLMAPIKeyNotSetError
 from cognee.infrastructure.llm.structured_output_framework.litellm_native.native_adapter import (
     NativeLiteLLMAdapter,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 # Providers that do not require ``llm_api_key`` (mirrors get_llm_client): Bedrock
 # authenticates with AWS credentials and llama.cpp runs locally.
@@ -61,6 +64,7 @@ def _qualify_model(model: str, provider: str) -> str:
         litellm.get_llm_provider(model=model)
         return model
     except Exception:
+        logger.debug("Falling back after error in _qualify_model", exc_info=True)
         prefix = _LITELLM_PROVIDER_PREFIX.get((provider or "").lower())
         return f"{prefix}/{model}" if prefix else model
 

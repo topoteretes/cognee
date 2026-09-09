@@ -6,7 +6,7 @@ skill is relevant. Active skills for the current turn live in a ContextVar so
 the handler does not need another graph round-trip.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from cognee.modules.engine.models import Tool
 from cognee.modules.tools.context import active_skills_var, opened_skills_var
@@ -37,7 +37,7 @@ async def handler(args: dict[str, Any], **_) -> str:
     if not name:
         raise ToolInvocationError("load_skill requires a 'name' argument")
 
-    skills = active_skills_var.get()
+    skills = active_skills_var.get({})
     skill = skills.get(name)
     if skill is None:
         available = ", ".join(sorted(skills)) or "(none in scope)"

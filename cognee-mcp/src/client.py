@@ -30,29 +30,31 @@ more accurate classifications or predictions over time.
 
 
 async def run():
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write, timedelta(minutes=3)) as session:
-            await session.initialize()
+    async with (
+        stdio_client(server_params) as (read, write),
+        ClientSession(read, write, timedelta(minutes=3)) as session,
+    ):
+        await session.initialize()
 
-            tools_result = await session.list_tools()
-            print(f"Available tools: {[tool.name for tool in tools_result.tools]}")
+        tools_result = await session.list_tools()
+        print(f"Available tools: {[tool.name for tool in tools_result.tools]}")
 
-            session_id = "example-session"
-            remember_result = await session.call_tool(
-                "remember",
-                arguments={"data": text, "session_id": session_id},
-            )
+        session_id = "example-session"
+        remember_result = await session.call_tool(
+            "remember",
+            arguments={"data": text, "session_id": session_id},
+        )
 
-            recall_result = await session.call_tool(
-                "recall",
-                arguments={"query": "What is artificial intelligence?", "session_id": session_id},
-            )
+        recall_result = await session.call_tool(
+            "recall",
+            arguments={"query": "What is artificial intelligence?", "session_id": session_id},
+        )
 
-            forget_validation_result = await session.call_tool("forget", arguments={})
+        forget_validation_result = await session.call_tool("forget", arguments={})
 
-            print(f"Remember result: {remember_result.content}")
-            print(f"Recall result: {recall_result.content}")
-            print(f"Forget validation result: {forget_validation_result.content}")
+        print(f"Remember result: {remember_result.content}")
+        print(f"Recall result: {recall_result.content}")
+        print(f"Forget validation result: {forget_validation_result.content}")
 
 
 if __name__ == "__main__":

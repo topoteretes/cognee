@@ -15,7 +15,7 @@ filter blank entries out of their string-list fields. The JSON schema stays
 ``string/binary`` so Swagger UI keeps rendering a file picker.
 """
 
-from typing import Annotated, List, Optional, Union
+from typing import Annotated
 
 from fastapi import HTTPException
 from fastapi import UploadFile as UF

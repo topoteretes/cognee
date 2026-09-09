@@ -19,7 +19,7 @@ access control.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 

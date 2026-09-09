@@ -1,5 +1,5 @@
 from collections.abc import AsyncGenerator
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.engine import DataPoint, is_internal_node
@@ -251,7 +251,8 @@ async def get_triplet_datapoints(
                 except Exception as e:
                     logger.warning(
                         f"Error processing triplet at offset {offset + idx}: {e}. "
-                        f"Skipping this triplet and continuing."
+                        f"Skipping this triplet and continuing.",
+                        exc_info=True,
                     )
                     skipped_count += 1
                     continue

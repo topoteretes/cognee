@@ -5,7 +5,7 @@ These helpers perform no database, vector, embedding, or LLM calls. They describ
 supports a particular statement in the generated answer.
 """
 
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_source_ref_key

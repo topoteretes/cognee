@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.graph.utils.extract_field_relationships import EdgeTargets, iter_fields

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import networkx as nx
 from pydantic import BaseModel
@@ -54,7 +54,7 @@ def _pagerank(graph: nx.DiGraph) -> dict[str, float]:
     try:
         return nx.pagerank(graph)
     except Exception as exc:  # scipy missing or numerical issue
-        logger.warning("PageRank unavailable, ranking hubs by degree only: %s", exc)
+        logger.warning("PageRank unavailable, ranking hubs by degree only: %s", exc, exc_info=True)
         return {}
 
 
@@ -213,7 +213,9 @@ class GraphReportRetriever(BaseRetriever):
             )
             questions = resp.questions
         except Exception as exc:
-            logger.warning("GraphReportRetriever: suggested-questions call failed: %s", exc)
+            logger.warning(
+                "GraphReportRetriever: suggested-questions call failed: %s", exc, exc_info=True
+            )
             questions = ["What are the main topics in this knowledge graph?"]
 
         lines = [

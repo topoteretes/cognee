@@ -15,7 +15,6 @@ Create Date: 2026-08-11
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

@@ -1,5 +1,3 @@
-from typing import Union
-
 from llama_index.core import Document
 from llama_index.core.schema import ImageDocument
 

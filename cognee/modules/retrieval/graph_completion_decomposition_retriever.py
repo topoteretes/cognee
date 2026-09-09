@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, List, Optional, Type
+from typing import Any
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.unified import get_unified_engine
@@ -103,7 +103,7 @@ class GraphCompletionDecompositionRetriever(GraphCompletionRetriever):
             logger.warning(
                 "Query decomposition failed, falling back to original query: %s",
                 error,
-                exc_info=False,
+                exc_info=True,
             )
             return [query]
 

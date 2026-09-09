@@ -93,7 +93,6 @@ import weakref
 from collections import OrderedDict
 from functools import wraps
 from threading import Lock
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from .adapter import Neo4jAdapter
 from .neo4j_community_containers import get_container_manager

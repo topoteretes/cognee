@@ -1,4 +1,3 @@
-from typing import Type
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

@@ -1,5 +1,3 @@
-from typing import List
-
 from pydantic import BaseModel
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
@@ -67,6 +65,6 @@ class LLMEntityExtractor(BaseEntityExtractor):
             logger.info(f"Extracted {len(response.entities)} entities")
             return response.entities
 
-        except Exception as e:
-            logger.error(f"Entity extraction failed: {e!s}")
+        except Exception:
+            logger.exception("Entity extraction failed")
             return []

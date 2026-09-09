@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import logging
 import pathlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -31,6 +32,8 @@ from cognee.modules.users.methods import create_user, get_default_user
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes_not_present
 from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
+
+logger = logging.getLogger(__name__)
 
 
 class Person(DataPoint):
@@ -113,7 +116,7 @@ async def clean_test_environment(request, tmp_path, monkeypatch):
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
 
 
 async def _get_data_record(data_id):

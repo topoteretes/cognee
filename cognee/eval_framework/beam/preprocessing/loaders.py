@@ -13,7 +13,7 @@ that don't touch dataset loading at all — copied over unchanged from ``beam_10
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 def _datasets_load_dataset():

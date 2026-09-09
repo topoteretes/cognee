@@ -1,6 +1,3 @@
-from typing import Optional
-
-
 class CliCommandException(Exception):
     """Exception raised by CLI commands with additional context"""
 

@@ -19,7 +19,8 @@ class TestCliIntegration:
             ["cognee-cli", "--help"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode == 0
@@ -32,7 +33,8 @@ class TestCliIntegration:
             ["cognee-cli", "--version"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode == 0
@@ -47,7 +49,8 @@ class TestCliIntegration:
                 ["cognee-cli", command, "--help"],
                 capture_output=True,
                 text=True,
-                cwd=Path(__file__).parent.parent.parent,  # Go to project root
+                cwd=Path(__file__).parent.parent.parent,
+                check=False,  # Go to project root
             )
 
             assert result.returncode == 0, f"Command {command} help failed"
@@ -59,7 +62,8 @@ class TestCliIntegration:
             [sys.executable, "-m", "cognee.cli._cognee", "invalid_command"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode != 0
@@ -78,7 +82,8 @@ class TestCliIntegration:
                 ["cognee-cli", "add", temp_file],
                 capture_output=True,
                 text=True,
-                cwd=Path(__file__).parent.parent.parent,  # Go to project root
+                cwd=Path(__file__).parent.parent.parent,
+                check=False,  # Go to project root
             )
 
             # Note: This might fail due to dependencies, but we're testing the CLI structure
@@ -105,7 +110,8 @@ class TestCliIntegration:
                 ["cognee-cli", "config", subcommand, "--help"],
                 capture_output=True,
                 text=True,
-                cwd=Path(__file__).parent.parent.parent,  # Go to project root
+                cwd=Path(__file__).parent.parent.parent,
+                check=False,  # Go to project root
             )
 
             assert result.returncode == 0, f"Config {subcommand} help failed"
@@ -116,7 +122,8 @@ class TestCliIntegration:
             ["cognee-cli", "search"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode != 0
@@ -128,7 +135,8 @@ class TestCliIntegration:
             ["cognee-cli", "delete"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         # Should run but show error message about missing target
@@ -166,7 +174,8 @@ class TestCliArgumentParsing:
                 ],
                 capture_output=True,
                 text=True,
-                cwd=Path(__file__).parent.parent.parent,  # Go to project root
+                cwd=Path(__file__).parent.parent.parent,
+                check=False,  # Go to project root
             )
 
             # Test that argument parsing works (regardless of actual execution)
@@ -193,7 +202,8 @@ class TestCliArgumentParsing:
             ],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         # Should not have argument parsing errors
@@ -218,7 +228,8 @@ class TestCliArgumentParsing:
             ],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         # Should not have argument parsing errors
@@ -231,7 +242,8 @@ class TestCliArgumentParsing:
             [sys.executable, "-m", "cognee.cli._cognee", "config", "set", "test_key", "test_value"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         # Should not have argument parsing errors
@@ -250,7 +262,8 @@ class TestCliArgumentParsing:
             ],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         # Should not have argument parsing errors
@@ -266,7 +279,8 @@ class TestCliErrorHandling:
             ["cognee-cli", "--debug", "search", "test query"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         # Should not have argument parsing errors for debug flag
@@ -286,7 +300,8 @@ class TestCliErrorHandling:
             ],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode != 0
@@ -298,7 +313,8 @@ class TestCliErrorHandling:
             ["cognee-cli", "cognify", "--chunker", "InvalidChunker"],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode != 0
@@ -316,7 +332,8 @@ class TestCliErrorHandling:
             ],
             capture_output=True,
             text=True,
-            cwd=Path(__file__).parent.parent.parent,  # Go to project root
+            cwd=Path(__file__).parent.parent.parent,
+            check=False,  # Go to project root
         )
 
         assert result.returncode != 0

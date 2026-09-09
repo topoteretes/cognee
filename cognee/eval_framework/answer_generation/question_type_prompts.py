@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 QUESTION_TYPE_DEFAULT_KEY = "DEFAULT"
 

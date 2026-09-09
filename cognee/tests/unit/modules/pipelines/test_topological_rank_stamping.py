@@ -9,7 +9,6 @@ Uses inline reimplementation to avoid the cognee.__init__ import chain
 (matches the pattern in test_provenance_stamping.py).
 """
 
-from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field

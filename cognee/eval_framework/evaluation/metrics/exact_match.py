@@ -1,5 +1,3 @@
-from typing import Optional
-
 from deepeval.test_case import LLMTestCase
 
 

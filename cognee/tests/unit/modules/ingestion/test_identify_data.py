@@ -36,15 +36,15 @@ def _patch_engine(engine):
 
 
 async def _make_engine(rows: list[dict]) -> tuple[SQLAlchemyAdapter, str]:
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{tmp.name}")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        db_path = tmp.name
+    engine = SQLAlchemyAdapter(f"sqlite+aiosqlite:///{db_path}")
     await engine.create_database()
     async with engine.get_async_session() as session:
         for row in rows:
             session.add(Data(**row))
         await session.commit()
-    return engine, tmp.name
+    return engine, db_path
 
 
 def _user(tenant_id=None):

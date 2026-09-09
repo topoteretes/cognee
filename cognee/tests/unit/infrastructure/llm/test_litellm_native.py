@@ -147,13 +147,15 @@ async def test_auth_error_raises_immediately():
         )
     )
 
-    with patch("litellm.acompletion", mock_acompletion):
-        with pytest.raises(litellm.exceptions.AuthenticationError):
-            await adapter.acreate_structured_output(
-                text_input="Test input",
-                system_prompt="Test prompt",
-                response_model=PersonModel,
-            )
+    with (
+        patch("litellm.acompletion", mock_acompletion),
+        pytest.raises(litellm.exceptions.AuthenticationError),
+    ):
+        await adapter.acreate_structured_output(
+            text_input="Test input",
+            system_prompt="Test prompt",
+            response_model=PersonModel,
+        )
 
     assert mock_acompletion.call_count == 1
 
@@ -236,13 +238,14 @@ def test_no_instructor_import_in_litellm_native():
                         instructor_imports.append(
                             f"{py_file.name}:{node.lineno} import {alias.name}"
                         )
-            elif isinstance(node, ast.ImportFrom):
-                if node.module and (
-                    node.module == "instructor" or node.module.startswith("instructor.")
-                ):
-                    instructor_imports.append(
-                        f"{py_file.name}:{node.lineno} from {node.module} import ..."
-                    )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and (node.module == "instructor" or node.module.startswith("instructor."))
+            ):
+                instructor_imports.append(
+                    f"{py_file.name}:{node.lineno} from {node.module} import ..."
+                )
 
     assert instructor_imports == [], (
         f"Found instructor imports in litellm_native: {instructor_imports}"

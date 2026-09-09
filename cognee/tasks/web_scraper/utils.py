@@ -6,7 +6,6 @@ BeautifulSoup for custom extraction rules and Tavily or Keenable for API-based s
 
 import asyncio
 import os
-from typing import List, Optional, Union
 
 import httpx
 

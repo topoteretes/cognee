@@ -11,7 +11,7 @@ owned by someone else.
 """
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select

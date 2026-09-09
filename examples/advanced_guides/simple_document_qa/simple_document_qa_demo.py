@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """
 Q&A over a full real document.
 

@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Collection
-from typing import Literal, Optional, Union
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel

@@ -1,5 +1,4 @@
 from asyncio import Queue
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.pipelines.models import PipelineRunInfo

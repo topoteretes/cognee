@@ -1,7 +1,7 @@
 import difflib
 import os
 from collections import deque
-from typing import IO, Any, Dict, List, Optional, Tuple, Union
+from typing import IO
 
 from rdflib import OWL, RDF, RDFS, Graph, URIRef
 from rdflib.util import guess_format
@@ -85,6 +85,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                                 "Failed to parse ontology file object '%s': %s",
                                 self._get_file_object_name(file_obj),
                                 str(e),
+                                exc_info=True,
                             )
 
                     if not loaded_objects:
@@ -190,6 +191,10 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
             try:
                 parsed_graph.parse(data=content, format=rdf_format)
             except Exception as error:
+                logger.debug(
+                    "Skipping item after error in RDFLibOntologyResolver._parse_file_object",
+                    exc_info=True,
+                )
                 parse_errors.append(f"{rdf_format}: {error}")
                 continue
 

@@ -10,7 +10,7 @@ Permission is gated by get_authorized_existing_datasets — the same function
 used by the search API — so tool execution inherits the existing ACL path.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.modules.data.methods.get_authorized_existing_datasets import (

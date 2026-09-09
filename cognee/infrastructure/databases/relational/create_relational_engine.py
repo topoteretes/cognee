@@ -76,7 +76,7 @@ def create_relational_engine(
         try:
             # libsql-experimental keeps the local replica in sync with a remote
             # Turso database; the query path itself is plain aiosqlite.
-            import libsql_experimental  # noqa: F401
+            import libsql_experimental
         except ImportError:
             raise ImportError(
                 "Turso/libSQL dependencies are not installed. Please install with 'pip install cognee\"[turso]\"' to use Turso functionality."

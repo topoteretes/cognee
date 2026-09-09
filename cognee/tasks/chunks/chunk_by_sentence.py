@@ -1,5 +1,4 @@
 from collections.abc import Iterator
-from typing import Optional, Tuple
 from uuid import UUID, uuid4
 
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine

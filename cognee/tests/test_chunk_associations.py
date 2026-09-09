@@ -1,3 +1,4 @@
+import logging
 import pathlib
 
 import pytest
@@ -10,6 +11,8 @@ from cognee.low_level import setup
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.chunks.create_chunk_associations import create_chunk_associations
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -31,7 +34,7 @@ async def clean_test_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_test_environment", exc_info=True)
 
 
 def _get_association_edges(edges):

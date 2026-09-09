@@ -1,5 +1,4 @@
 import asyncio
-from typing import List, Optional, Type, Union
 
 from cognee.base_config import get_base_config
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge

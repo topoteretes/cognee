@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.data.methods.get_authorized_existing_datasets import (

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import pathlib
 from unittest.mock import AsyncMock, patch
@@ -25,6 +26,8 @@ from cognee.modules.users.tenants.methods import (
     select_tenant,
 )
 
+logger = logging.getLogger(__name__)
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -42,7 +45,7 @@ async def _reset_engines_and_prune() -> None:
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (

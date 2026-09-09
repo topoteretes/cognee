@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from typing import List, Literal, Optional, Type
+from typing import Literal
 
 from pydantic import BaseModel
 

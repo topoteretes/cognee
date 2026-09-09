@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.hybrid.pairs import (

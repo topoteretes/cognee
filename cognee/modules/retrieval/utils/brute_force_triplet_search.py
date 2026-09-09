@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Type, Union
+from typing import TYPE_CHECKING
 
 from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
@@ -110,8 +110,8 @@ async def get_memory_fragment(
             )
     except EntityNotFoundError:
         pass
-    except Exception as e:
-        logger.error(f"Error during memory fragment creation: {e!s}")
+    except Exception:
+        logger.exception("Error during memory fragment creation")
 
     return memory_fragment
 

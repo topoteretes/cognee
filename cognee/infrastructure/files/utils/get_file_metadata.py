@@ -1,7 +1,7 @@
 import io
 import os.path
 from pathlib import PureWindowsPath
-from typing import BinaryIO, Optional, TypedDict
+from typing import BinaryIO, TypedDict
 from urllib.parse import unquote, urlparse
 
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash

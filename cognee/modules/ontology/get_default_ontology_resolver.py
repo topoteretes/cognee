@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.construct_data_points_and_edges_with_ontology import (
     ensure_ontology_usable_in_strict_mode,
