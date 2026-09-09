@@ -66,12 +66,14 @@ async def get_effective_pipeline_status_by_datasets(dataset_ids: list[UUID], pip
             run,
             abandon_cutoff=abandon_cutoff,
             # get_latest_pipeline_runs_by_datasets returns each dataset's
-            # single newest row. A STARTED row of a run that already has a
-            # terminal row can never be that newest row —
-            # log_pipeline_run_progress drops progress ticks instead of
-            # inserting a later STARTED row once a terminal row exists for
-            # the same pipeline_run_id — so a STARTED row surfacing here
-            # never has a terminal sibling.
+            # single newest row, and a STARTED row of an already finished run
+            # can never be that newest row. This leans on
+            # log_pipeline_run_progress, which keeps it true two ways: a tick
+            # normally updates the existing STARTED row in place, so no row is
+            # added and created_at does not move, and the fallback branch that
+            # would insert one refuses to when a terminal row already exists
+            # for the pipeline_run_id. Break either and finished runs start
+            # reporting ABANDONED here.
             run_has_terminal_row=False,
         )
         for dataset_id, run in runs.items()
