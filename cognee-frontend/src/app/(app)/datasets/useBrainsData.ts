@@ -6,7 +6,7 @@ import { captureException, recordUploadSuccess, recordUploadFailure } from "@/ut
 import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
-import getDatasetData from "@/modules/datasets/getDatasetData";
+import getDatasetData, { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
 import createDataset from "@/modules/datasets/createDataset";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
@@ -121,9 +121,10 @@ export function useBrainsData(): UseBrainsDataResult {
         : {};
 
       for (const ds of list) {
-        getDatasetData(ds.id, cogniInstance)
-          .then((data) => {
-            const count = Array.isArray(data) ? data.length : 0;
+        // Only the count is wanted here. Fetching the rows to measure them
+        // downloaded every dataset in full, once per dataset on this page.
+        getDatasetDataCount(ds.id, cogniInstance)
+          .then((count) => {
             setDatasets((prev) => prev.map((d) => d.id === ds.id ? { ...d, documents: count, status: mapProcessingStatus(statusData[ds.id]?.status, count, statusData[ds.id]?.reason ?? null) } : d));
           })
           .catch(() => {
@@ -163,10 +164,15 @@ export function useBrainsData(): UseBrainsDataResult {
       }),
     );
     if (completedSelectedId) {
-      getDatasetData(completedSelectedId, cogniInstance)
-        .then((docs) => {
+      // The document list is a page; the badge is a total. Two questions now,
+      // so ask them separately rather than counting whichever rows arrived.
+      Promise.all([
+        getDatasetData(completedSelectedId, cogniInstance),
+        getDatasetDataCount(completedSelectedId, cogniInstance),
+      ])
+        .then(([docs, count]) => {
           setSelectedDocs(Array.isArray(docs) ? docs : []);
-          setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: Array.isArray(docs) ? docs.length : d.documents } : d));
+          setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
         })
         .catch((err) => {
           console.error("Failed to fetch dataset documents:", err);
@@ -250,7 +256,11 @@ export function useBrainsData(): UseBrainsDataResult {
     };
 
     const refreshDocs = async (): Promise<void> => {
-      const list = await fetchSelectedDocs();
+      // list is a page, so it cannot supply the badge's total — count separately.
+      const [, count] = await Promise.all([
+        fetchSelectedDocs(),
+        getDatasetDataCount(ds.id, cogniInstance).catch(() => null),
+      ]);
       // "completed", NOT "running": onProcessed fires only after the status
       // poll reached COMPLETED (useBrainUpload.ts). Writing "running" here
       // left the row stuck on "Processing" forever when the shared status
@@ -259,7 +269,9 @@ export function useBrainsData(): UseBrainsDataResult {
       // statusDetails effect never fired again to correct it.
       setDatasets((prev) =>
         prev.map((d) =>
-          d.id === ds.id ? { ...d, documents: list.length, status: "completed" } : d,
+          d.id === ds.id
+            ? { ...d, documents: count ?? d.documents, status: "completed" }
+            : d,
         ),
       );
     };
