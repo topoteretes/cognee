@@ -570,7 +570,7 @@ async def test_edge_with_transparent_source_is_skipped_with_a_warning(caplog):
     holder = Holder(name="Holder", links=[Edge(source=team, target=bob)])
 
     with caplog.at_level(logging.WARNING):
-        nodes, edges = await get_graph_from_model(holder)
+        _nodes, edges = await get_graph_from_model(holder)
 
     assert str(team.id) not in {str(source) for source, _, _, _ in edges}
     assert all(name != "links" for _, _, name, _ in edges)

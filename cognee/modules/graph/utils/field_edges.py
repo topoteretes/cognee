@@ -14,7 +14,8 @@ per field and answers both halves of the question in the same pass, so no ``Edge
 ever built twice or built only to be discarded.
 """
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from pydantic import BaseModel
 

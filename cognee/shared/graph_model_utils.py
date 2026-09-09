@@ -49,7 +49,7 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
     mod = types.ModuleType(module_name)
     sys.modules[module_name] = mod
 
-    exec(result, mod.__dict__)
+    exec(result, mod.__dict__)  # noqa: S102 - runs the generated model module source on purpose
     namespace = mod.__dict__
 
     # Extract the generated graph model class from the module's namespace

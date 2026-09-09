@@ -444,7 +444,7 @@ def _llm_annotation_for(annotation: Any, cache: dict, strip_metadata: bool) -> A
         return dict[key_type, value_type]
 
     if _is_union(origin):
-        return Union[tuple(_llm_annotation_for(arg, cache, strip_metadata) for arg in args)]
+        return Union[tuple(_llm_annotation_for(arg, cache, strip_metadata) for arg in args)]  # noqa: UP007 - built from a runtime tuple; no | spelling
 
     return core
 

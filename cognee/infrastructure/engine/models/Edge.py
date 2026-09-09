@@ -7,7 +7,7 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 Source = TypeVar("Source", bound=DataPoint, default=DataPoint)
 Target = TypeVar("Target", bound=DataPoint, default=DataPoint)
-RelationshipType = TypeVar("RelationshipType", default=Optional[str])
+RelationshipType = TypeVar("RelationshipType", default=str | None)
 
 
 class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
@@ -46,8 +46,8 @@ class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    source: Optional[Source] = None
-    target: Optional[Target] = None
+    source: Source | None = None
+    target: Target | None = None
     relationship_type: RelationshipType = cast(Any, None)
 
     weight: float | None = None

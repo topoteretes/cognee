@@ -2,7 +2,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Lock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.graph.utils.field_edges import split_field_edges
@@ -108,8 +108,8 @@ def _graph_node_from(
 
 
 def _create_edge_properties(
-    source_id: str, target_id: str, relationship_name: str, edge_metadata: Optional[Edge]
-) -> Dict[str, Any]:
+    source_id: str, target_id: str, relationship_name: str, edge_metadata: Edge | None
+) -> dict[str, Any]:
     """Create edge properties dictionary with metadata if present."""
     properties = {
         "source_node_id": source_id,
@@ -128,12 +128,12 @@ def _create_edge_properties(
 class _WalkState:
     """The accumulators every step of one walk shares."""
 
-    added_nodes: Dict[str, bool] = field(default_factory=dict)
-    added_edges: Dict[str, bool] = field(default_factory=dict)
+    added_nodes: dict[str, bool] = field(default_factory=dict)
+    added_edges: dict[str, bool] = field(default_factory=dict)
     # When present, collects the DataPoint behind every graph node the walk writes.
     # The returned nodes have edge fields stripped, so a caller linking into the
     # graph cannot use them.
-    claimed_datapoints: Optional[List[DataPoint]] = None
+    claimed_datapoints: list[DataPoint] | None = None
 
     def claim_node(self, data_point) -> bool:
         """True the first time this node is seen. Records the claimed datapoint."""
@@ -156,15 +156,15 @@ class _WalkState:
 def _walk_data_point(
     data_point: DataPoint,
     state: _WalkState,
-) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
+) -> tuple[list[DataPoint], list[tuple[str, str, str, dict[str, Any]]]]:
     """Walk ``data_point``, or each of its children when it is a transparent container.
 
     Synchronous on purpose: nothing in the walk touches I/O, and the only thing this
     function ever awaited was itself, so no step of it could ever suspend. The public
     entry points stay ``async`` so callers do not change.
     """
-    nodes: List[DataPoint] = []
-    edges: List[Tuple[str, str, str, Dict[str, Any]]] = []
+    nodes: list[DataPoint] = []
+    edges: list[tuple[str, str, str, dict[str, Any]]] = []
 
     if is_transparent(data_point):
         for root in unwrap_transparent(data_point):
@@ -207,10 +207,10 @@ def _walk_data_point(
 
 async def get_graph_from_model(
     data_point: DataPoint,
-    added_nodes: Optional[Dict[str, bool]] = None,
-    added_edges: Optional[Dict[str, bool]] = None,
-    visited_properties: Optional[Dict[str, bool]] = None,
-) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    added_nodes: dict[str, bool] | None = None,
+    added_edges: dict[str, bool] | None = None,
+    visited_properties: dict[str, bool] | None = None,
+) -> tuple[list[DataPoint], list[tuple[str, str, str, dict[str, Any]]]]:
     """
     Extract graph representation from a DataPoint model.
 
@@ -237,7 +237,7 @@ async def get_graph_from_model(
     )
 
 
-async def collect_stored_data_points(root: DataPoint) -> List[DataPoint]:
+async def collect_stored_data_points(root: DataPoint) -> list[DataPoint]:
     """The original DataPoints that storing ``root`` would persist.
 
     Drives the real storage walk with throwaway accumulators, so this cannot drift from
@@ -246,6 +246,6 @@ async def collect_stored_data_points(root: DataPoint) -> List[DataPoint]:
 
     Order follows the walk; treat the result as a set.
     """
-    stored: List[DataPoint] = []
+    stored: list[DataPoint] = []
     _walk_data_point(root, _WalkState(claimed_datapoints=stored))
     return stored

@@ -6,7 +6,7 @@ its DataPoint children. Nothing here stores anything - resolution happens before
 walk decides what to write.
 """
 
-from typing import Any, List
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.field_edges import split_field_edges
@@ -86,7 +86,7 @@ def warn_transparent_source_edge(source_node: DataPoint, field_name: str) -> Non
     )
 
 
-def unwrap_transparent(data_point: DataPoint) -> List[DataPoint]:
+def unwrap_transparent(data_point: DataPoint) -> list[DataPoint]:
     """Replace a transparent node with its DataPoint children, recursively.
 
     A non-transparent node resolves to ``[data_point]`` — the same object — so callers
@@ -97,7 +97,7 @@ def unwrap_transparent(data_point: DataPoint) -> List[DataPoint]:
     if not is_transparent(data_point):
         return [data_point]
 
-    resolved: List[DataPoint] = []
+    resolved: list[DataPoint] = []
     _resolve_children(
         data_point, active=frozenset(), expanded=set(), seen_ids=set(), resolved=resolved
     )
@@ -109,7 +109,7 @@ def _resolve_children(
     active: frozenset,
     expanded: set,
     seen_ids: set,
-    resolved: List[DataPoint],
+    resolved: list[DataPoint],
 ) -> None:
     """Append ``container``'s resolved children to ``resolved``, each node once.
 
