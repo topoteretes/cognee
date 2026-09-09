@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import delete
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 from cognee.modules.pipelines.utils import generate_pipeline_run_id, summarize_run_info_data
@@ -38,6 +40,26 @@ async def log_pipeline_run_start(
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
+        # An INITIATED row is a reset marker saying "this pipeline may run
+        # again" (see log_pipeline_run_initiated), not a record of work. The run
+        # it unblocked is starting now, so the marker has served its purpose;
+        # leaving it behind is what grew pipeline_runs by a permanent row that
+        # no later row superseded, one or two per add.
+        #
+        # Keyed on dataset_id + pipeline_name, deliberately not on pipeline_id.
+        # That pair is the unit every status reader works in (they partition on
+        # exactly it, see get_pipeline_runs_by_dataset), so it is the unit the
+        # marker speaks for. pipeline_id folds in the acting user, and a marker
+        # written by one user for a dataset another user then cognifies would
+        # never be matched, leaving behind the phantom this clears. It also
+        # rides the existing (dataset_id, pipeline_name, created_at) index.
+        await session.execute(
+            delete(PipelineRun).where(
+                PipelineRun.dataset_id == dataset_id,
+                PipelineRun.pipeline_name == pipeline_name,
+                PipelineRun.status == PipelineRunStatus.DATASET_PROCESSING_INITIATED,
+            )
+        )
         session.add(pipeline_run)
         await session.commit()
 

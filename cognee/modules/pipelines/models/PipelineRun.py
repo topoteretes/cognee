@@ -28,10 +28,14 @@ class OperationOutcome(str, enum.Enum):
 
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
+    # One tuple, not one per index: a second __table_args__ assignment silently
+    # replaces the first, and that is what kept the composite below out of every
+    # create_all database until it was noticed.
     __table_args__ = (
         # Covers get_pipeline_status.py / get_pipeline_progress.py's
         # ROW_NUMBER() lookup of each dataset's latest run for a pipeline
-        # (filter on dataset_id + pipeline_name, order by created_at DESC).
+        # (filter on dataset_id + pipeline_name, order by created_at DESC),
+        # and log_pipeline_run_start.py's delete of that pair's reset marker.
         # See alembic/versions/d1e2f3a4b5c6_add_pipeline_runs_status_index.py
         # for the migration that adds this to existing databases.
         Index(
@@ -40,14 +44,13 @@ class PipelineRun(Base):
             "pipeline_name",
             "created_at",
         ),
+        # Readers of this table page newest-first with id as the tiebreaker
+        # (ORDER BY created_at DESC, id DESC) or range-scan a created_at window,
+        # so the two columns are indexed together. Composite, not created_at
+        # alone: without id, OFFSET paging re-serves rows sharing a timestamp.
+        # Mirrored by migration c4e8a1f6b3d7 for databases created before it.
+        Index("ix_pipeline_runs_created_at_id", "created_at", "id"),
     )
-
-    # Readers of this table page newest-first with id as the tiebreaker
-    # (ORDER BY created_at DESC, id DESC) or range-scan a created_at window,
-    # so the two columns are indexed together. Composite, not created_at
-    # alone: without id, OFFSET paging re-serves rows sharing a timestamp.
-    # Mirrored by migration c4e8a1f6b3d7 for databases created before it.
-    __table_args__ = (Index("ix_pipeline_runs_created_at_id", "created_at", "id"),)
 
     id = Column(UUID, primary_key=True, default=uuid4)
 
