@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from textwrap import dedent
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any
 from uuid import UUID
 
 from neo4j import AsyncGraphDatabase, AsyncSession
@@ -1127,7 +1127,7 @@ class Neo4jAdapter(GraphDBInterface):
         from_node: UUID,
         to_node: UUID,
         relationship_name: str,
-        edge_properties: dict[str, Any] | None = {},
+        edge_properties: dict[str, Any] | None = None,
     ):
         """
         Create a new edge between two nodes with specified properties.
@@ -1146,6 +1146,8 @@ class Neo4jAdapter(GraphDBInterface):
 
             The result of the query execution, typically indicating the created edge.
         """
+        if edge_properties is None:
+            edge_properties = {}
         serialized_properties = self.serialize_properties(edge_properties)
 
         query = dedent(
@@ -1774,7 +1776,7 @@ class Neo4jAdapter(GraphDBInterface):
 
             await self.query(query)
 
-    def serialize_properties(self, properties={}):
+    def serialize_properties(self, properties=None):
         """
         Convert properties of a node or edge into a serializable format suitable for storage.
 
@@ -1782,13 +1784,15 @@ class Neo4jAdapter(GraphDBInterface):
         -----------
 
             - properties: A dictionary of properties to serialize, defaults to an empty
-              dictionary. (default dict())
+              dictionary. (default None)
 
         Returns:
         --------
 
             A dictionary with serialized property values.
         """
+        if properties is None:
+            properties = {}
         serialized_properties = {}
 
         for property_key, property_value in properties.items():

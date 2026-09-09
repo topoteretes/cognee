@@ -1,5 +1,4 @@
 from uuid import UUID
-from typing import Optional
 
 from deprecated import deprecated
 

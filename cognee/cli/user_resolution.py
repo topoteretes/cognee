@@ -1,6 +1,5 @@
 """Resolve a CLI --user-id flag into a User object."""
 
-from typing import Optional
 from uuid import UUID
 
 import cognee.cli.echo as fmt

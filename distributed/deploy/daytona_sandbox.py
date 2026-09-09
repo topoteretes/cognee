@@ -18,6 +18,7 @@ Usage:
 """
 
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -30,6 +31,8 @@ from daytona import (  # type: ignore[import-untyped]
     Resources,
     SessionExecuteRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 DAYTONA_API_URL = "https://app.daytona.io/api"
 
@@ -125,6 +128,7 @@ def deploy_cognee():
             result = sandbox.process.exec("python /tmp/healthcheck.py", timeout=10)
             status = result.result.strip()
         except Exception:
+            logger.debug("Ignoring exception in deploy_cognee", exc_info=True)
             status = "WAITING"
         if "OK" in status:
             print("Server is ready!")
@@ -136,7 +140,7 @@ def deploy_cognee():
             log = sandbox.process.exec("tail -30 /tmp/cognee-server.log", timeout=5)
             print(f"\nServer log:\n{log.result}")
         except Exception:
-            pass
+            logger.debug("Ignoring exception in deploy_cognee", exc_info=True)
         print("WARNING: Server may not be ready yet.")
 
     # Generate a signed preview URL (no auth headers needed)

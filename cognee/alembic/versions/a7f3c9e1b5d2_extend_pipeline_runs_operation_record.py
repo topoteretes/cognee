@@ -19,7 +19,6 @@ add/drop is inspector-guarded.
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op

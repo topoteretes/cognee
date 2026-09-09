@@ -15,7 +15,6 @@ with no I/O) match by the stored path the save returns.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from cognee.modules.ingestion import StoredFile
 

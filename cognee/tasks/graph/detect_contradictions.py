@@ -22,8 +22,6 @@ under, so a new fact and the stored fact it contradicts share a subject and land
 in the same 1-hop neighbourhood.
 """
 
-from typing import Dict, List, Optional, Set, Tuple
-
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint, is_internal_node
 from cognee.infrastructure.llm import LLMGateway
@@ -238,6 +236,6 @@ async def detect_contradictions(data_points: list[DataPoint], **kwargs) -> list[
             logger.info("Flagged %s contradiction(s) in the graph.", len(contradiction_edges))
     except Exception as error:
         # Contradiction detection is auxiliary and must never break ingestion.
-        logger.warning("Contradiction detection skipped due to an error: %s", error)
+        logger.warning("Contradiction detection skipped due to an error: %s", error, exc_info=True)
 
     return data_points

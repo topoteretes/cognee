@@ -757,4 +757,4 @@ class RedisAdapter(CacheDBInterface):
         try:
             await self.async_redis.aclose()
         except Exception as e:
-            logger.debug("Error closing Redis async connection: %s", e)
+            logger.debug("Error closing Redis async connection: %s", e, exc_info=True)

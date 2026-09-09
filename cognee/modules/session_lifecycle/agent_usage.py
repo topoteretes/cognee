@@ -16,7 +16,6 @@ without spinning up FastAPI.
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import UUID as UUIDType
 
 from sqlalchemy import or_, select

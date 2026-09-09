@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 
 try:
-    import libsql_experimental  # noqa: F401
+    import libsql_experimental
 
     from cognee.infrastructure.databases.vector.turso.TursoVectorAdapter import (
         TursoVectorAdapter,

@@ -230,20 +230,20 @@ def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> Non
             fmt.echo(output)
 
     elif action == "delete":
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset {args.dataset_id}? This cannot be undone"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset {args.dataset_id}? This cannot be undone"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(args.dataset_id)
         fmt.success(f"Dataset {args.dataset_id} deleted.")
 
 
 def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
     if getattr(args, "all", False):
-        if not getattr(args, "force", False):
-            if not fmt.confirm("Delete ALL data?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm("Delete ALL data?"):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete_all()
         fmt.success("All data deleted.")
     elif getattr(args, "dataset_name", None):
@@ -253,10 +253,11 @@ def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
         if not match:
             fmt.error(f"No dataset found with name '{args.dataset_name}'.")
             return
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset '{args.dataset_name}'?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset '{args.dataset_name}'?"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(match[0]["id"])
         fmt.success(f"Dataset '{args.dataset_name}' deleted.")
     else:

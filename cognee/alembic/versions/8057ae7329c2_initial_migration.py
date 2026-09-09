@@ -27,7 +27,6 @@ already recorded (it never runs there — Alembic considers it applied).
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 from alembic import op
 

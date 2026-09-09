@@ -2,7 +2,6 @@ import asyncio
 import logging
 import math
 import os
-from typing import List, Optional
 
 import numpy as np
 

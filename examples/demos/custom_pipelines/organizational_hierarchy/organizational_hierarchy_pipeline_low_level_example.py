@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from cognee import SearchType, config, prune, search, visualize_graph
 from cognee.low_level import DataPoint, setup
@@ -17,6 +17,8 @@ from cognee.modules.users.methods import get_default_user
 from cognee.pipelines import Task, run_tasks
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
+
+logger = logging.getLogger(__name__)
 
 
 class Person(DataPoint):
@@ -213,7 +215,7 @@ async def execute_pipeline() -> None:
     """Execute Cognee pipeline."""
 
     # Configure system paths
-    logging.info("Configuring Cognee directories at %s", COGNEE_DIR)
+    logger.info("Configuring Cognee directories at %s", COGNEE_DIR)
     config.system_root_directory(str(COGNEE_DIR))
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -230,7 +232,7 @@ async def execute_pipeline() -> None:
     tasks = [Task(ingest_payloads), Task(add_data_points)]
     pipeline = run_tasks(tasks, dataset_id, None, user, "demo_pipeline")
     async for status in pipeline:
-        logging.info("Pipeline status: %s", status)
+        logger.info("Pipeline status: %s", status)
 
     # Post-process: index graph edges and visualize
     await index_graph_edges()
@@ -242,7 +244,7 @@ async def execute_pipeline() -> None:
         query_type=SearchType.GRAPH_COMPLETION,
     )
     result = completion
-    logging.info("Graph completion result: %s", result)
+    logger.info("Graph completion result: %s", result)
 
 
 def configure_logging() -> None:
@@ -259,7 +261,7 @@ async def main() -> None:
     try:
         await execute_pipeline()
     except Exception:
-        logging.exception("Run failed")
+        logger.exception("Run failed")
         raise
 
 

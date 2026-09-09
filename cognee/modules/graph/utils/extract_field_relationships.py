@@ -5,7 +5,7 @@ graph walk asks that question, and this module is the only place it is answered.
 """
 
 from collections.abc import Iterator
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from cognee.infrastructure.engine import DataPoint, Edge
 

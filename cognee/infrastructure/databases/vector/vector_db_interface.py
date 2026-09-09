@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from cognee.infrastructure.engine import DataPoint

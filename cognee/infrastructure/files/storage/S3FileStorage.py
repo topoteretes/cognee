@@ -341,6 +341,10 @@ class S3FileStorage(Storage):
                 return relative_files
             except Exception:
                 # If directory doesn't exist or other error, return empty list
+                logger.debug(
+                    "Falling back to [] after error in S3FileStorage.list_files.list_files_sync",
+                    exc_info=True,
+                )
                 return []
 
         return await run_async(list_files_sync)

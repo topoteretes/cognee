@@ -21,7 +21,6 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import List, Optional
 
 
 class IncrementalPlanError(Exception):

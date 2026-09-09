@@ -1,5 +1,3 @@
-from typing import List
-
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.root_dir import get_absolute_path

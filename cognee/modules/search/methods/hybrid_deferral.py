@@ -1,5 +1,3 @@
-from typing import Optional
-
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.modules.engine.models.node_set import NodeSet
@@ -71,6 +69,6 @@ async def hybrid_deferral_reason(kwargs: dict, *, graph_is_empty: bool) -> str |
         if not await vector_engine.has_collection(_DOCUMENT_CHUNK_COLLECTION):
             return f"{_DOCUMENT_CHUNK_COLLECTION} collection missing"
     except Exception as error:
-        logger.debug("Hybrid collection check failed; running hybrid: %s", error)
+        logger.debug("Hybrid collection check failed; running hybrid: %s", error, exc_info=True)
 
     return None

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from typing import Any, Optional
+from typing import Any
 
 SSE_MEDIA_TYPE = "text/event-stream"
 JSON_MEDIA_TYPE = "application/json"

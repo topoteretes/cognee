@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, Union
+from typing import Annotated, Any
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -537,8 +537,8 @@ def get_datasets_router() -> APIRouter:
 
         try:
             return await get_dataset_processing_status(dataset[0].id, pipeline_name=pipeline)
-        except Exception as error:
-            logger.error("Error retrieving dataset processing status: %s", error)
+        except Exception:
+            logger.exception("Error retrieving dataset processing status")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset processing status."},
@@ -546,7 +546,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get(
         "/status",
-        response_model=Union[dict[str, PipelineRunStatus], dict[str, dict[str, PipelineRunStatus]]],
+        response_model=dict[str, PipelineRunStatus] | dict[str, dict[str, PipelineRunStatus]],
     )
     async def get_dataset_status(
         datasets: StatusDatasetIdsQuery = [],
@@ -615,8 +615,8 @@ def get_datasets_router() -> APIRouter:
             )
 
             return datasets_statuses
-        except Exception as error:
-            logger.error("Error retrieving dataset statuses: %s", error)
+        except Exception:
+            logger.exception("Error retrieving dataset statuses")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset statuses."},
@@ -624,10 +624,8 @@ def get_datasets_router() -> APIRouter:
 
     @router.get(
         "/status/progress",
-        response_model=Union[
-            dict[str, PipelineRunStatusWithProgress],
-            dict[str, dict[str, PipelineRunStatusWithProgress]],
-        ],
+        response_model=dict[str, PipelineRunStatusWithProgress]
+        | dict[str, dict[str, PipelineRunStatusWithProgress]],
     )
     async def get_dataset_progress(
         datasets: StatusDatasetIdsQuery = [],
@@ -685,8 +683,8 @@ def get_datasets_router() -> APIRouter:
             )
 
             return datasets_progress
-        except Exception as error:
-            logger.error("Error retrieving dataset progress: %s", error)
+        except Exception:
+            logger.exception("Error retrieving dataset progress")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset progress."},
@@ -752,7 +750,7 @@ def get_datasets_router() -> APIRouter:
                 return []
 
             counts = await get_datasets_graph_counts(authorized_datasets)
-        except Exception as error:
+        except Exception:
             # Same posture as GET /statuses above and the sibling
             # GET /visualize/brains-summary: a poll that fails transiently is a
             # 409 with a generic message, not an unhandled 500 carrying
@@ -761,7 +759,7 @@ def get_datasets_router() -> APIRouter:
             # over an already-validated shape, so a bug there still surfaces
             # as a real 500 instead of being misreported as this endpoint's
             # documented transient-failure case.
-            logger.error("Error retrieving dataset graph summary: %s", error)
+            logger.exception("Error retrieving dataset graph summary")
             return JSONResponse(
                 status_code=409,
                 content={"error": "Unable to retrieve dataset graph summary."},

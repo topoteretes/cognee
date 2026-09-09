@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
@@ -6,9 +7,8 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     sleep_and_retry_async,
     sleep_and_retry_sync,
 )
-from cognee.shared.logging_utils import get_logger
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 # Test function to be decorated
@@ -23,7 +23,7 @@ def test_function_sync():
     if test_function_sync.counter <= 2:
         error_msg = "429 Too Many Requests: Rate limit exceeded"
         logger.info(f"Attempt {test_function_sync.counter}: Raising rate limit error")
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
     logger.info(f"Attempt {test_function_sync.counter}: Success!")
     return f"Success on attempt {test_function_sync.counter}"
@@ -41,7 +41,7 @@ async def test_function_async():
     if test_function_async.counter <= 2:
         error_msg = "429 Too Many Requests: Rate limit exceeded"
         logger.info(f"Attempt {test_function_async.counter}: Raising rate limit error")
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
     logger.info(f"Attempt {test_function_async.counter}: Success!")
     return f"Success on attempt {test_function_async.counter}"
@@ -164,13 +164,14 @@ async def test_retry_max_exceeded():
         """A function that always raises a rate limit error."""
         error_msg = "429 Too Many Requests: Rate limit always exceeded"
         logger.info(f"Always fails with: {error_msg}")
-        raise Exception(error_msg)
+        raise RuntimeError(error_msg)
 
     try:
         # This should fail after 2 retries (3 attempts total)
         await always_fails()
         print("❌ FAIL: Function should have failed but succeeded")
     except Exception as e:
+        logger.debug("Ignoring exception in test_retry_max_exceeded", exc_info=True)
         print(f"Expected error after max retries: {e!s}")
         print("✅ PASS: Function correctly failed after max retries exceeded")
 

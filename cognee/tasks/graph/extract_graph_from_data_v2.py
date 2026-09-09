@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver

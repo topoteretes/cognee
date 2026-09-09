@@ -22,7 +22,7 @@ telemetry, provenance stamping, and error handling.
 """
 
 import asyncio
-from typing import Any, List, Optional
+from typing import Any
 
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base

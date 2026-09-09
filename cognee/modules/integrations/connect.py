@@ -9,7 +9,6 @@ see :mod:`cognee.api.v1.integrations.routers.get_integrations_router`, whose
 callback endpoint calls this for whichever provider is in the URL.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from cognee.modules.integrations.base import OAuthIntegration

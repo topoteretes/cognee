@@ -1,6 +1,6 @@
 import hashlib
 from dataclasses import dataclass
-from typing import BinaryIO, Optional, Union
+from typing import BinaryIO
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 

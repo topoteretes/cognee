@@ -62,7 +62,7 @@ def _context_evidence(retriever_instance, retrieved_objects, kwargs: dict) -> li
     try:
         return evidence_method(retrieved_objects, dataset_id=getattr(dataset, "id", None))
     except Exception as error:
-        logger.warning("Unable to build structured context evidence: %s", error)
+        logger.warning("Unable to build structured context evidence: %s", error, exc_info=True)
         return []
 
 
@@ -120,7 +120,7 @@ async def get_retriever_output(
                 evidence.extend(await graph_source_evidence(evidence, getattr(dataset, "id", None)))
                 completion = append_source_evidence_text(completion, evidence)
             except Exception as error:
-                logger.warning("Unable to resolve graph source evidence: %s", error)
+                logger.warning("Unable to resolve graph source evidence: %s", error, exc_info=True)
 
     return SearchResultPayload(
         result_object=retrieved_objects,

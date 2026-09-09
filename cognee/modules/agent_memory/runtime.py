@@ -4,7 +4,7 @@ import contextvars
 import inspect
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.exceptions import CogneeValidationError
@@ -430,7 +430,7 @@ async def retrieve_cognee_memory_context(context: AgentMemoryContext) -> str:
                 "Agent memory retrieval failed for %s: %s",
                 context.origin_function,
                 error,
-                exc_info=False,
+                exc_info=True,
             )
             span.set_attribute("cognee.agent_memory.retrieval_failed", True)
             return ""
@@ -459,7 +459,7 @@ async def retrieve_session_memory_context(context: AgentMemoryContext) -> str:
             "Session agent memory retrieval failed for %s: %s",
             context.origin_function,
             error,
-            exc_info=False,
+            exc_info=True,
         )
         return ""
 
@@ -501,7 +501,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             "Agent trace persistence failed for %s: %s",
             context.origin_function,
             error,
-            exc_info=False,
+            exc_info=True,
         )
         return
 
@@ -541,7 +541,7 @@ async def persist_trace(context: AgentMemoryContext) -> None:
             "Agent trace memify persistence failed for %s: %s",
             context.origin_function,
             error,
-            exc_info=False,
+            exc_info=True,
         )
 
 

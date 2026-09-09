@@ -1,6 +1,7 @@
 """Integration tests for usage logger with real Redis components."""
 
 import asyncio
+import logging
 import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -15,6 +16,8 @@ from cognee.infrastructure.databases.cache.get_cache_engine import (
     get_cache_engine,
 )
 from cognee.shared.usage_logger import log_usage
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -57,6 +60,7 @@ def redis_adapter():
     try:
         yield RedisAdapter(host=host, port=6379, log_key="test_usage_logs")
     except Exception as e:
+        logger.debug("Ignoring exception in redis_adapter", exc_info=True)
         pytest.skip(f"Redis not available: {e}")
 
 

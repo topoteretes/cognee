@@ -11,7 +11,6 @@ This module must stay import-light (stdlib only).
 """
 
 import re
-from typing import Optional
 
 ERROR_MESSAGE_MAX_LENGTH = 512
 

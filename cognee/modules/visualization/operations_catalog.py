@@ -21,7 +21,7 @@ present type of the same name.
 """
 
 from copy import deepcopy
-from typing import Any, Dict, List
+from typing import Any
 
 # effect ∈ {"produces", "enriches", "modifies", "removes"}
 # kind   ∈ {"pipeline", "self_improve", "lifecycle"}

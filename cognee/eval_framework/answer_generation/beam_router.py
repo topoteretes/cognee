@@ -5,7 +5,7 @@ The router classifies the question (using pre-labeled types from the dataset)
 and delegates to the matching retrieval strategy.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
@@ -161,7 +161,7 @@ class BEAMRouter:
                 answer_text = search_results[0] if search_results else ""
 
             except Exception as e:
-                logger.error(f"Failed to answer '{query_text[:80]}...': {e}")
+                logger.exception(f"Failed to answer '{query_text[:80]}...'")
                 answer_text = f"ERROR: {e}"
                 retrieval_context = ""
 

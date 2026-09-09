@@ -198,4 +198,5 @@ async def record_operation(
                     "record_operation: failed to persist %s record (%s)",
                     operation_name,
                     write_error,
+                    exc_info=True,
                 )

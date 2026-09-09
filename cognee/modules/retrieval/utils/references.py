@@ -20,7 +20,7 @@ when there is nothing usable, and never raise on backend failures.
 """
 
 import re
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -419,7 +419,7 @@ async def build_answer_grounded_chunk_references(
             include_payload=True,
         )
     except Exception as error:
-        logger.debug(f"Answer-grounded chunk search failed: {error}")
+        logger.debug(f"Answer-grounded chunk search failed: {error}", exc_info=True)
         return ""
 
     return format_chunk_references(found_chunks, answer=cleaned_answer, limit=limit)
@@ -463,7 +463,7 @@ async def append_answer_grounded_evidence(completions: list[Any], enabled: bool)
 
         vector_engine = await get_vector_engine_async()
     except Exception as error:
-        logger.debug(f"Unable to obtain vector engine for references: {error}")
+        logger.debug(f"Unable to obtain vector engine for references: {error}", exc_info=True)
         return completions
 
     appended: list[Any] = []

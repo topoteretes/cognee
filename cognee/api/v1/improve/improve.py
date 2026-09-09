@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Type, Union
+from typing import Any
 from uuid import UUID
 
 try:
@@ -260,7 +260,9 @@ async def improve(
                             stages_run.append("build_truth_subspace")
                         except Exception as e:
                             logger.warning(
-                                "improve: truth subspace build failed (non-fatal): %s", e
+                                "improve: truth subspace build failed (non-fatal): %s",
+                                e,
+                                exc_info=True,
                             )
 
                 # Stage 3: default enrichment (triplet embeddings)
@@ -331,7 +333,9 @@ async def _build_global_context_index(
         logger.info("improve: global context index updated")
         return True
     except Exception as e:
-        logger.warning("improve: global context index update failed (non-fatal): %s", e)
+        logger.warning(
+            "improve: global context index update failed (non-fatal): %s", e, exc_info=True
+        )
         return False
 
 
@@ -368,7 +372,7 @@ async def _bridge_sessions(
         )
         logger.info("improve: feedback weights applied from %d session(s)", len(session_ids))
     except Exception as e:
-        logger.warning("improve: feedback weights failed (non-fatal): %s", e)
+        logger.warning("improve: feedback weights failed (non-fatal): %s", e, exc_info=True)
 
     # Stage 2: persist session Q&A into permanent graph
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
@@ -421,6 +425,7 @@ async def _extract_agent_context(
                 "improve: agent-context extraction failed for '%s' (non-fatal): %s",
                 session_id,
                 e,
+                exc_info=True,
             )
     return touched
 
@@ -463,6 +468,7 @@ async def _distill_sessions(
                 "improve: session distillation failed for '%s' (non-fatal): %s",
                 session_id,
                 e,
+                exc_info=True,
             )
     return distilled
 
@@ -507,7 +513,7 @@ async def _update_user_preferences(
         )
         return result
     except Exception as e:
-        logger.warning("improve: user preference update failed (non-fatal): %s", e)
+        logger.warning("improve: user preference update failed (non-fatal): %s", e, exc_info=True)
         return None
 
 
@@ -547,4 +553,4 @@ async def _persist_session_traces(
             len(session_ids),
         )
     except Exception as e:
-        logger.warning("improve: trace persistence failed (non-fatal): %s", e)
+        logger.warning("improve: trace persistence failed (non-fatal): %s", e, exc_info=True)

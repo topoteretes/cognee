@@ -7,7 +7,7 @@ within pipeline operations, supporting both incremental and regular processing m
 
 import os
 from collections.abc import AsyncGenerator
-from typing import Any, Dict, Optional
+from typing import Any
 
 from sqlalchemy import select
 

@@ -1,6 +1,5 @@
 import sys
 import unittest
-from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import numpy as np

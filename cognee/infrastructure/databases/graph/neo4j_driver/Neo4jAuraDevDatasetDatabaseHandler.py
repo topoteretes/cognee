@@ -2,7 +2,6 @@ import asyncio
 import base64
 import hashlib
 import os
-from typing import Optional
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -91,10 +90,12 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         }
 
         async def _create_database_instance_request():
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    resp.raise_for_status()
-                    return await resp.json()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(url, headers=headers, json=payload) as resp,
+            ):
+                resp.raise_for_status()
+                return await resp.json()
 
         resp_create = await _create_database_instance_request()
 
@@ -109,14 +110,16 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             status_url = f"https://api.neo4j.io/v1/instances/{instance_id}"
             status = ""
             for attempt in range(30):  # Try for up to ~5 minutes
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(status_url, headers=headers) as resp:
-                        resp.raise_for_status()
-                        status_resp = await resp.json()
-                        status = status_resp["data"]["status"]
-                        if status.lower() == "running":
-                            return
-                        await asyncio.sleep(10)
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.get(status_url, headers=headers) as resp,
+                ):
+                    resp.raise_for_status()
+                    status_resp = await resp.json()
+                    status = status_resp["data"]["status"]
+                    if status.lower() == "running":
+                        return
+                    await asyncio.sleep(10)
             raise TimeoutError(
                 f"Neo4j instance '{graph_db_name}' did not become ready within 5 minutes. Status: {status}"
             )
@@ -186,10 +189,9 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "Content-Type": "application/json",
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(url, headers=headers) as resp:
-                resp.raise_for_status()
-                return await resp.json()
+        async with aiohttp.ClientSession() as session, session.delete(url, headers=headers) as resp:
+            resp.raise_for_status()
+            return await resp.json()
 
     @classmethod
     async def _get_aura_token(cls, client_id: str, client_secret: str) -> dict:

@@ -1,8 +1,9 @@
 import os
 import warnings
 from contextvars import ContextVar
-from typing import Optional
 from uuid import UUID
+
+from typing_extensions import Self
 
 from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
@@ -212,6 +213,32 @@ class DatabaseContextManager:
 
         await dataset_queue().ensure_slot(dataset)
 
+        try:
+            await self._bind_dataset_databases(dataset, user_id, permission_type)
+        except BaseException:
+            # The slot is taken above, but everything below it can still raise
+            # (a deleted dataset owner, a provisioning or connection failure).
+            # When it does, __aenter__ never returns, so __aexit__ never runs
+            # and nothing hands the slot back. In a request task the queue's
+            # task-end cleanup eventually does; in the API lifespan task, which
+            # ends only with the process, it never does, and
+            # DATASET_QUEUE_MAX_CONCURRENT leaked slots wedge every later
+            # ensure_slot. Releasing here is the missing half of the pair.
+            #
+            # Only reachable once ensure_slot has returned, so this never
+            # releases a slot that was not acquired -- which is what keeps a
+            # re-entrant inner apply from dropping the permit its outer scope
+            # still holds.
+            await dataset_queue().release_slot_for(dataset)
+            raise
+
+    async def _bind_dataset_databases(
+        self,
+        dataset: UUID,
+        user_id: UUID | None,
+        permission_type: str | None,
+    ) -> None:
+        """Resolve and bind the dataset's own databases. Runs holding a queue slot."""
         # Optional permission gate: checked only when the caller asked for it
         # by passing a permission_type — callers that already authorized at the
         # API layer pass nothing and no check is performed here.
@@ -339,7 +366,7 @@ class DatabaseContextManager:
         )
         return self._apply().__await__()
 
-    async def __aenter__(self) -> "DatabaseContextManager":
+    async def __aenter__(self) -> Self:
         await self._apply()
         return self
 

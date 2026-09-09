@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 try:
-    from opentelemetry.sdk.trace import TracerProvider  # noqa: F401
+    from opentelemetry.sdk.trace import TracerProvider
 
     _OTEL_AVAILABLE = True
 except ImportError:

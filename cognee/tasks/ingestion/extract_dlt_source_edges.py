@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.shared.logging_utils import get_logger

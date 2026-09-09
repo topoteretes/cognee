@@ -1,4 +1,3 @@
-from typing import Optional
 from contextlib import contextmanager
 
 from .trace_context import (

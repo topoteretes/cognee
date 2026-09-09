@@ -1,3 +1,4 @@
+import logging
 import pathlib
 
 import pytest
@@ -9,6 +10,8 @@ from cognee.low_level import setup
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -30,7 +33,7 @@ async def clean_environment():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in clean_environment", exc_info=True)
 
 
 @pytest.mark.asyncio

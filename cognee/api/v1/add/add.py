@@ -1,4 +1,4 @@
-from typing import Any, BinaryIO, List, Optional, Union
+from typing import Any, BinaryIO
 from uuid import UUID
 
 from cognee.infrastructure.databases.vector.embeddings.config import EmbeddingConfig

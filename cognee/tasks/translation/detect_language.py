@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 from cognee.shared.logging_utils import get_logger
 
@@ -160,7 +159,7 @@ def detect_language(
         logger.warning(f"Language detection failed: {e}")
         raise LanguageDetectionError(f"Language detection failed: {e}", original_error=e)
     except Exception as e:
-        logger.error(f"Unexpected error during language detection: {e}")
+        logger.exception("Unexpected error during language detection")
         raise LanguageDetectionError(
             f"Unexpected error during language detection: {e}", original_error=e
         )
