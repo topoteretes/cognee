@@ -398,9 +398,9 @@ async def recover_abandoned_pipeline_runs() -> None:
     rollback_handlers = _rollback_handlers()
     slots = asyncio.Semaphore(_max_concurrent_dataset_recoveries())
 
-    async def _recover_dataset_within_bound(dataset_id: UUID) -> None:
+    async def _recover_dataset_within_bound(dataset_id: UUID) -> int:
         async with slots:
-            await _recover_dataset(
+            return await _recover_dataset(
                 datasets_by_id[dataset_id],
                 runs_by_dataset[dataset_id],
                 users_by_id,

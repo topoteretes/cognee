@@ -520,3 +520,54 @@ async def test_a_dataset_that_fails_does_not_cost_the_others_their_recovery(
     # And the one that failed is still selectable, so a later attempt sees it.
     still_open = await recovery_module.get_unclosed_pipeline_runs([broken_dataset.id])
     assert [run.pipeline_run_id for run in still_open] == [broken_run.pipeline_run_id]
+
+
+@pytest.mark.asyncio
+async def test_the_closing_summary_counts_what_it_closed(recovery_db, caplog):
+    """The summary line is the only operator-visible account of a whole sweep,
+    so it has to agree with the database. Asserting only on rows let a dropped
+    return value report "0 of 3 closed" right after three closing lines, which
+    reads like a failure of a sweep that worked."""
+    first_dataset, second_dataset = _dataset(), _dataset()
+    runs = [
+        _started_run(first_dataset.id, "add_pipeline", hours_ago=4),
+        _started_run(first_dataset.id, "memify_pipeline", hours_ago=3),
+        _started_run(second_dataset.id, "add_pipeline", hours_ago=2),
+    ]
+    await _insert(recovery_db.engine, first_dataset, second_dataset, *runs)
+
+    with caplog.at_level("INFO", logger="pipelines.recovery"):
+        await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert len(await _rows(recovery_db.engine, status=ERRORED)) == 3
+    assert any(
+        "Recovery finished: 3 of 3 abandoned run(s) closed across 2 dataset(s)." in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_summary_does_not_count_a_dataset_that_failed(recovery_db, caplog, monkeypatch):
+    """The other half: a dataset whose recovery failed must be missing from the
+    count, so the line says how much of the sweep actually landed."""
+    healthy_dataset, broken_dataset = _dataset(), _dataset()
+    await _insert(
+        recovery_db.engine,
+        healthy_dataset,
+        broken_dataset,
+        _started_run(healthy_dataset.id, "add_pipeline"),
+        _started_run(broken_dataset.id, "cognify_pipeline"),
+    )
+
+    async def _failing_rollback(**_kwargs):
+        raise EntityNotFoundError(message="Could not find user")
+
+    monkeypatch.setattr(recovery_module, "cognify_rollback_handler", _failing_rollback)
+
+    with caplog.at_level("INFO", logger="pipelines.recovery"):
+        await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert any(
+        "Recovery finished: 1 of 2 abandoned run(s) closed across 2 dataset(s)." in record.message
+        for record in caplog.records
+    )
