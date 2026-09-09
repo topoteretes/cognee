@@ -58,6 +58,13 @@ export interface UseBrainsDataResult {
   docsLoading: boolean;
   docsError: boolean;
   retryDocs: () => void;
+  /** Documents in the dataset, from /data/count — not selectedDocs.length. */
+  docsTotal: number;
+  /** A scroll step is in flight; distinct from docsLoading (first load). */
+  docsLoadingMore: boolean;
+  /** Upper bound on rows selectedDocs will ever hold. */
+  docsMaxLoaded: number;
+  loadMoreDocs: () => Promise<void>;
   outdatedDatasets: Set<string>;
   refreshing: boolean;
   isUploading: boolean;

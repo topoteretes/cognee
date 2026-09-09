@@ -5,6 +5,7 @@ import FileIcon, { getExtMeta } from "@/ui/elements/FileIcon";
 import TrashIcon from "@/ui/elements/TrashIcon";
 import { formatDate, formatFileSize } from "@/utils/fileFormat";
 import isMemoryBlobName from "@/modules/datasets/isMemoryBlobName";
+import { capRows, MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 
 export interface FileRow {
   id: string;
@@ -58,6 +59,8 @@ export default function FilesTable({
     );
   }
 
+  const { visible, hidden } = capRows(files);
+
   return (
     <div style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 20px" }}>
@@ -67,7 +70,7 @@ export default function FilesTable({
         <span style={{ width: 170, fontSize: 12, fontWeight: 700, color: "rgba(237,236,234,0.55)", flexShrink: 0 }}>Added</span>
         <span style={{ width: 40, flexShrink: 0 }} />
       </div>
-      {files.map((file, i) => {
+      {visible.map((file, i) => {
         const isMemory = isMemoryBlobName(file.name);
         const memorySession = memorySessionIds[file.id];
         const meta = isMemory
@@ -81,7 +84,7 @@ export default function FilesTable({
           <div
             key={file.id}
             className="hover:bg-white/10"
-            style={{ display: "flex", alignItems: "center", padding: "14px 20px", borderBottom: i < files.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none", transition: "background 150ms" }}
+            style={{ display: "flex", alignItems: "center", padding: "14px 20px", borderBottom: i < visible.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none", transition: "background 150ms" }}
           >
             <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
               <FileIcon fill={meta.fill} stroke={meta.stroke} text={meta.text} label={meta.label} />
@@ -106,6 +109,11 @@ export default function FilesTable({
           </div>
         );
       })}
+      {hidden > 0 && (
+        <div style={{ padding: "12px 20px", fontSize: 12, color: "rgba(237,236,234,0.35)", textAlign: "center", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+          Showing {MAX_RENDERED_ROWS.toLocaleString()} of {files.length.toLocaleString()} files
+        </div>
+      )}
     </div>
   );
 }

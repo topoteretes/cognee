@@ -3,6 +3,7 @@
 import type { ReactElement } from "react";
 import FileIcon, { getExtMeta } from "@/ui/elements/FileIcon";
 import { decodeFilename, formatDate, formatFileSize } from "@/utils/fileFormat";
+import { capRows, MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 
 export interface DocRow {
   id: string;
@@ -19,13 +20,15 @@ export default function DocumentList<T extends DocRow>({
   docs: T[];
   onDelete: (doc: T) => void;
 }): ReactElement {
+  const { visible, hidden } = capRows(docs);
+
   return (
     <>
-      {docs.map((doc, i) => {
+      {visible.map((doc, i) => {
         const displayName = decodeFilename(doc.name);
         const meta = getExtMeta(displayName, doc.extension);
         return (
-          <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < docs.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
+          <div key={doc.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 16px", borderBottom: i < visible.length - 1 ? "1px solid rgba(255,255,255,0.07)" : "none" }}>
             <FileIcon {...meta} />
             <span style={{ flex: 1, fontSize: 13, color: "#EDECEA", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
@@ -43,6 +46,11 @@ export default function DocumentList<T extends DocRow>({
           </div>
         );
       })}
+      {hidden > 0 && (
+        <div style={{ padding: "8px 16px", fontSize: 11, color: "rgba(237,236,234,0.35)", textAlign: "center" }}>
+          Showing {MAX_RENDERED_ROWS.toLocaleString()} of {docs.length.toLocaleString()} documents
+        </div>
+      )}
     </>
   );
 }

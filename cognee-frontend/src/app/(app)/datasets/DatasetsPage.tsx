@@ -25,6 +25,10 @@ export default function DatasetsPage() {
     docsLoading,
     docsError,
     retryDocs,
+    docsTotal,
+    docsLoadingMore,
+    docsMaxLoaded,
+    loadMoreDocs,
     outdatedDatasets,
     refreshing,
     isUploading,
@@ -180,6 +184,10 @@ export default function DatasetsPage() {
             onClearUploadError={() => setUploadError(null)}
             onRetryBuild={handleRetryBuild}
             onRetryDocs={retryDocs}
+            docsTotal={docsTotal}
+            docsLoadingMore={docsLoadingMore}
+            docsMaxLoaded={docsMaxLoaded}
+            onLoadMoreDocs={loadMoreDocs}
           />
 
         </div>
