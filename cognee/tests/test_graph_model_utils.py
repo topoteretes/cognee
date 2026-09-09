@@ -632,3 +632,43 @@ def test_from_identity_under_an_unsupported_shape_raises_naming_the_field():
 
     with pytest.raises(InvalidReferenceTypeError, match="roles_by_team"):
         datapoint_model_to_basemodel(Person, strip_metadata=True)
+
+
+def test_optional_edge_list_field_is_a_typed_edge_field():
+    """Adding `| None` to the default must not turn off row extraction."""
+
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Graph(DataPoint):
+        people: list[Person] = []
+        friends_with: list[Edge[Person, Person]] | None = None
+
+    assert "friends_with" in _edge_field_types(Graph)
+
+    simplified = datapoint_model_to_basemodel(Graph, strip_metadata=True)
+    defs = simplified.model_json_schema().get("$defs", {})
+    assert "FriendsWithEdge" in defs
+    assert "Edge" not in defs
+
+
+def test_edge_in_an_unsupported_shape_raises_naming_the_field():
+    """A raw Edge class must never leak into the LLM schema."""
+
+    class Person(DataPoint):
+        name: str
+        metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
+
+    class Graph(DataPoint):
+        best_friend: Edge[Person, Person] | None = None
+
+    with pytest.raises(InvalidReferenceTypeError, match="best_friend"):
+        datapoint_model_to_basemodel(Graph, strip_metadata=True)
+
+
+def test_row_class_names_do_not_collapse_case():
+    from cognee.shared.llm_graph_model import _row_class_name
+
+    assert _row_class_name("HTTP_link") == "HTTPLinkEdge"
+    assert _row_class_name("http_link") == "HttpLinkEdge"

@@ -230,3 +230,29 @@ def test_datapoint_imports_in_a_fresh_interpreter():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_mixed_tuple_targets_only_emit_datapoint_edges():
+    """A loosely-typed field can hold a mixed list; non-DataPoint items are skipped."""
+    car = Car(name="Beetle")
+    person = Owner(name="Alice", purchased=(Edge(weight=0.8), [car, "junk"]))
+
+    edges = [edge for name, edge in get_edges_from_fields(person) if name == "purchased"]
+
+    assert [edge.target for edge in edges] == [car]
+
+
+def test_targetless_edge_carrying_a_datapoint_is_dropped_from_node_properties(caplog):
+    """A property cannot hold a serialized node; storing it would lose the node inside."""
+    import logging
+
+    from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
+
+    car = Car(name="Beetle")
+    person = Owner(name="Alice", extra=Edge(source=car, weight=0.8))
+
+    with caplog.at_level(logging.WARNING):
+        nodes, _edges = asyncio.run(get_graph_from_model(person))
+
+    assert nodes[0].extra is None
+    assert any("cannot be stored as a node property" in r.getMessage() for r in caplog.records)

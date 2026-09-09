@@ -452,3 +452,24 @@ async def test_union_member_wrapped_in_annotated_is_still_a_candidate():
     assert len(root.items[0].friends_with) == 1
     _, edges = await get_graph_from_model(root)
     assert "friends_with" in _rel_names(edges)
+
+
+class OptionalEdgesGraph(DataPoint):
+    people: list[NamedPerson] = []
+    friends_with: list[Edge[NamedPerson, NamedPerson]] | None = None
+
+
+@pytest.mark.asyncio
+async def test_optional_edge_field_round_trips_rows():
+    root = await _from_dump(
+        OptionalEdgesGraph,
+        {
+            "people": [{"name": "Alice"}, {"name": "Bob"}],
+            "friends_with": [{"source": "Alice", "target": "Bob"}],
+        },
+    )
+
+    assert len(root.friends_with) == 1
+    assert root.friends_with[0].source.id == NamedPerson.id_for("Alice")
+    _, edges = await get_graph_from_model(root)
+    assert "friends_with" in _rel_names(edges)

@@ -11,11 +11,24 @@ RelationshipType = TypeVar("RelationshipType", default=Optional[str])
 
 
 class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
-    """
-    Represents edge metadata for relationships between DataPoints.
+    """One relationship between DataPoints: endpoints plus metadata.
 
-    This class is used to define edge properties like weight when creating
-    relationships between DataPoints using tuple syntax:
+    As a type, ``Edge[Source, Target, RelationshipType]`` declares a typed edge field
+    on a custom graph model: ``friends_with: list[Edge[Person, Person]]`` asks the LLM
+    for flat relationship rows that cognee resolves into real edges. The third
+    parameter controls naming — omitted: the field name; ``Literal["a", "b"]``: the
+    LLM picks one; ``str``: free-form.
+
+    As a value, an Edge may be written partially; ``fill_endpoints`` completes it from
+    the field it is declared on. The relationship name falls back to the field name and
+    the source falls back to the declaring node — on a parametrized edge the declaring
+    node must match the declared ``Source``, so set ``source=`` explicitly for edges
+    declared on a container. A missing target is always an error.
+
+    ``to_properties`` is the storage property bag: every set metadata field, endpoints
+    excluded.
+
+    The tuple spelling is the older form, still supported:
 
     Example:
         # Single weight (backward compatible)
@@ -77,6 +90,9 @@ class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
                 "Edge.fill_endpoints requires a target: set Edge.target or pass target=..."
             )
 
+        if self.source is None:
+            self._check_owner_is_declared_source(owner, field_name)
+
         if (
             self.source is resolved_source
             and self.target is resolved_target
@@ -92,13 +108,57 @@ class Edge(BaseModel, Generic[Source, Target, RelationshipType]):
             }
         )
 
+    def _check_owner_is_declared_source(self, owner: Any, field_name: str) -> None:
+        """An omitted source falls back to ``owner``; hold the fallback to the generics.
+
+        On an owner-declared edge the owner *is* the declared ``Source``, so the
+        fallback passes. On a root container it silently made the container the
+        subject, contradicting the declared type — that now raises, like a missing
+        target. Matching is by ``isinstance``, or by class name against the owner's
+        MRO: string endpoints (``Edge["Person", "Person"]``) and ``copy_model`` copies
+        carry the class name without the class object. An unparametrized Edge (the
+        tuple form and other legacy spellings) records no generics and keeps the
+        permissive fallback.
+        """
+        metadata = getattr(type(self), "__pydantic_generic_metadata__", None) or {}
+        args = metadata.get("args") or ()
+        if not args:
+            return
+
+        declared = args[0]
+        if isinstance(declared, type):
+            if isinstance(owner, declared):
+                return
+            declared_name = declared.__name__
+        else:
+            declared_name = getattr(declared, "__forward_arg__", declared)
+
+        if isinstance(declared_name, str) and declared_name in {
+            base.__name__ for base in type(owner).__mro__
+        }:
+            return
+
+        raise ValueError(
+            f"Edge.fill_endpoints: {field_name!r} left source unset on a "
+            f"{type(owner).__name__}, which is not the declared source type "
+            f"({declared!r}). An omitted source falls back to the node the field is "
+            f"declared on; set source= explicitly for edges declared on a container."
+        )
+
     def to_properties(self) -> dict[str, Any]:
-        """Edge metadata for storage, excluding source, target and relationship_type."""
+        """Edge metadata for storage, excluding source and target.
+
+        ``relationship_type`` stays in the bag: stored-edge readers (visualization,
+        edge-to-text, the global context index) still look it up there. Migrating them
+        to the first-class ``relationship_name`` is tracked separately.
+        """
         data = self.model_dump(
             exclude_none=True,
-            exclude={"source", "target", "relationship_type"},
+            exclude={"source", "target"},
         )
         if self.weights is not None:
+            # Flattened to scalar weight_<name> properties so graph backends can
+            # filter on them without JSON support.
             for weight_name, weight_value in self.weights.items():
                 data[f"weight_{weight_name}"] = weight_value
         return data

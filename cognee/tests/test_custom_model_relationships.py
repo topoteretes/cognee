@@ -1,6 +1,7 @@
 import os
 import pathlib
 import cognee
+from cognee.api.v1.search import SearchType
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import Edge
 from cognee.low_level import DataPoint
@@ -65,6 +66,16 @@ async def main():
     }
     assert friend_pairs, f"No friends_with edges in { {edge[2] for edge in edges} }"
     assert ("Alice", "Bob") in friend_pairs or ("Bob", "Alice") in friend_pairs, friend_pairs
+
+    # Written edges must also be retrievable: a graph search's context has to surface
+    # the relationship, not just the graph engine's raw dump.
+    search_context = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Who is friends with whom?",
+        only_context=True,
+    )
+    context_text = " ".join(str(item) for item in search_context)
+    assert "friends_with" in context_text, context_text
 
 
 if __name__ == "__main__":

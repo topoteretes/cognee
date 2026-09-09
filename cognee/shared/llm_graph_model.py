@@ -18,7 +18,6 @@ recursion here starts by peeling ``Annotated`` with ``_strip_annotated``, so a m
 wrapper can never hide a shape from either half.
 """
 
-import logging
 import sys
 import types
 from functools import lru_cache
@@ -31,9 +30,10 @@ from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.infrastructure.engine.models.FieldAnnotations import _FromIdentity
 from cognee.modules.engine.utils import generate_edge_name
 from cognee.modules.graph.utils.get_graph_from_model import collect_stored_data_points
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.graph.exceptions import InvalidReferenceTypeError
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 # --- Annotation shapes -----------------------------------------------------------
@@ -46,6 +46,16 @@ def _strip_annotated(annotation: Any) -> tuple[Any, tuple]:
         markers = (*markers, *annotation.__metadata__)
         annotation = annotation.__origin__
     return annotation, markers
+
+
+def _is_union(origin: Any) -> bool:
+    """True for both union spellings: ``Union[A, B]`` and ``A | B``."""
+    return origin in (Union, types.UnionType)
+
+
+def _non_none_members(args: tuple) -> list:
+    """The union's members with ``None`` removed — what ``X | None`` says besides None."""
+    return [arg for arg in args if arg is not type(None)]
 
 
 def _annotation_markers(annotation: Any) -> list:
@@ -93,9 +103,9 @@ def _identity_reference(
         inner, _ = _strip_annotated(get_args(core)[0])
         if isinstance(inner, type) and issubclass(inner, DataPoint):
             return inner, list[str]
-    if origin in (Union, types.UnionType):
+    if _is_union(origin):
         args = get_args(core)
-        members = [arg for arg in args if arg is not type(None)]
+        members = _non_none_members(args)
         if len(members) == 1 and len(args) == 2:
             target_type, llm_annotation = _identity_reference(members[0], model, field_name)
             return target_type, llm_annotation | None
@@ -145,14 +155,32 @@ def _check_constructible_from_identity(target_type: type[DataPoint], owning_fiel
 
 
 def _list_edge_inner(annotation: Any) -> type[Edge] | None:
-    """Return the Edge[...] class if this is list[Edge[...]], else None."""
+    """Return the Edge[...] class if this is list[Edge[...]], optionally | None, else None."""
     core, _ = _strip_annotated(annotation)
-    if get_origin(core) is not list:
+    origin = get_origin(core)
+    if _is_union(origin):
+        members = _non_none_members(get_args(core))
+        if len(members) == 1:
+            return _list_edge_inner(members[0])
+        return None
+    if origin is not list:
         return None
     inner, _ = _strip_annotated(get_args(core)[0])
     if isinstance(inner, type) and issubclass(inner, Edge):
         return inner
     return None
+
+
+def _contains_edge_annotation(annotation: Any) -> bool:
+    """True when an ``Edge`` class appears anywhere in the annotation."""
+    core, _ = _strip_annotated(annotation)
+    if isinstance(core, type):
+        return issubclass(core, Edge)
+    return any(
+        _contains_edge_annotation(arg)
+        for arg in get_args(core)
+        if arg is not type(None) and arg is not Ellipsis
+    )
 
 
 def _edge_endpoint_type(arg: Any, model: type[BaseModel], field_name: str) -> type[DataPoint]:
@@ -223,7 +251,10 @@ def _edge_field_types(
 
 
 def _row_class_name(field_name: str) -> str:
-    return "".join(part.title() for part in field_name.split("_")) + "Edge"
+    # Capitalize without lowercasing the rest: str.title() would collapse HTTP_link
+    # and http_link into one class name, and pydantic's disambiguated fallback name
+    # is what the LLM would then see.
+    return "".join(part[:1].upper() + part[1:] for part in field_name.split("_")) + "Edge"
 
 
 @lru_cache(maxsize=128)
@@ -331,6 +362,13 @@ def _llm_field_for(
     if edge_field is not None:
         return edge_field
 
+    if _contains_edge_annotation(field_info.annotation):
+        raise InvalidReferenceTypeError(
+            f"{field_name} on {model.__name__} declares Edge in a shape the LLM "
+            f"extraction cannot fill. Supported: list[Edge[Source, Target]], optionally "
+            f"| None. Anything else would hand the raw Edge schema to the LLM."
+        )
+
     return (
         _llm_annotation_for(field_info.annotation, cache, strip_metadata),
         default_value if default_value is not PydanticUndefined else PydanticUndefined,
@@ -361,8 +399,13 @@ def _llm_edge_field_for(
     if _list_edge_inner(field_info.annotation) is None:
         return None
     *_, row_model = _edge_field_spec(model, field_name)
+    row_list: Any = list[row_model]
+    core, _ = _strip_annotated(field_info.annotation)
+    if _is_union(get_origin(core)):
+        # The declared field was optional; keep the LLM field optional too.
+        row_list = row_list | None
     return (
-        types.GenericAlias(list, (row_model,)),
+        row_list,
         default_value if default_value is not PydanticUndefined else PydanticUndefined,
     )
 
@@ -400,7 +443,7 @@ def _llm_annotation_for(annotation: Any, cache: dict, strip_metadata: bool) -> A
         value_type = _llm_annotation_for(args[1], cache, strip_metadata)
         return dict[key_type, value_type]
 
-    if origin in (Union, types.UnionType):
+    if _is_union(origin):
         return Union[tuple(_llm_annotation_for(arg, cache, strip_metadata) for arg in args)]
 
     return core
@@ -512,7 +555,7 @@ def _datapoint_value_for(value: Any, annotation: Any, path: tuple[Any, ...]) -> 
             rows.update(nested)
         return converted_map, rows
 
-    if origin in (Union, types.UnionType):
+    if _is_union(origin):
         member = _union_member_for(value, get_args(core))
         if member is None:
             return value, {}
@@ -548,7 +591,7 @@ def _union_member_for(value: Any, args: tuple) -> Any:
     answer the two can disagree; ``_attach_edge_rows`` re-checks the validated node
     before attaching rows, so a wrong guess degrades to a dropped row, not a crash.
     """
-    members = [arg for arg in args if arg is not type(None)]
+    members = _non_none_members(args)
     if len(members) == 1:
         return members[0]
     if not isinstance(value, dict):
@@ -615,7 +658,12 @@ def _resolve_edge_row(
     source_node = _lookup_endpoint(index, source_type, validated["source"])
     target_node = _lookup_endpoint(index, target_type, validated["target"])
     if source_node is None or target_node is None:
-        logger.warning("Skipping unresolved edge on %s: %s", field_name, row)
+        logger.warning(
+            "Skipping unresolved edge on %s: %s",
+            field_name,
+            row,
+            extra={"field": field_name, "row": row, "edge_resolution_failed": True},
+        )
         return None
     name = validated.get("relationship_type")
     rel_field = row_model.model_fields.get("relationship_type")
@@ -642,6 +690,11 @@ async def _attach_edge_rows(root: DataPoint, rows: dict) -> None:
                 "the position the LLM answered them under",
                 len(row_dicts),
                 field_name,
+                extra={
+                    "field": field_name,
+                    "dropped_rows": len(row_dicts),
+                    "edge_resolution_failed": True,
+                },
             )
             continue
         if field_name not in _edge_field_types(type(owner)):
@@ -651,6 +704,11 @@ async def _attach_edge_rows(root: DataPoint, rows: dict) -> None:
                 len(row_dicts),
                 field_name,
                 type(owner).__name__,
+                extra={
+                    "field": field_name,
+                    "dropped_rows": len(row_dicts),
+                    "edge_resolution_failed": True,
+                },
             )
             continue
         source_type, target_type, row_model = _edge_field_spec(type(owner), field_name)

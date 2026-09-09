@@ -3,8 +3,7 @@ import os
 from typing import Annotated, Literal
 
 from cognee import forget, remember, visualize_graph
-from cognee.infrastructure.engine import Edge, FromIdentity
-from cognee.low_level import DataPoint
+from cognee.low_level import DataPoint, Edge, FromIdentity
 
 CUSTOM_PROMPT = (
     "Extract every person, the role they hold, and every group with its members. "
@@ -37,6 +36,8 @@ class Group(DataPoint):
 class PeopleGraph(DataPoint):
     # Edges on the root suit a relationship with no obvious owner. Each one shows a way
     # of naming: fixed by the field, chosen from a Literal, or free-form from the LLM.
+    # When building Edge values by hand, set source= explicitly here: an omitted source
+    # falls back to the declaring node, and this root is not a Person.
     people: list[Person]
     groups: list[Group] = []
     friends_with: list[Edge[Person, Person]] = []

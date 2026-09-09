@@ -28,9 +28,11 @@ def test_bare_edge_constructs_and_dumps_weight():
     assert edge.to_properties() == {"weight": 0.8}
 
 
-def test_to_properties_excludes_relationship_type():
+def test_to_properties_keeps_relationship_type_for_stored_edge_readers():
+    # Redundant with the first-class relationship_name, kept because stored-edge
+    # readers still look it up in the property bag; migration tracked separately.
     edge = Edge(relationship_type="purchased", weight=0.8)
-    assert edge.to_properties() == {"weight": 0.8}
+    assert edge.to_properties() == {"relationship_type": "purchased", "weight": 0.8}
 
 
 def test_two_type_arguments_resolve_defaults():
@@ -110,8 +112,71 @@ def test_to_properties_excludes_endpoints():
     assert props == {"weight": 0.5}
 
 
-def test_model_construct_to_properties_is_empty():
+def test_model_construct_to_properties_keeps_only_the_name():
     alice = Person(name="Alice")
     bob = Person(name="Bob")
     edge = Edge.model_construct(source=alice, target=bob, relationship_type="x")
-    assert edge.to_properties() == {}
+    assert edge.to_properties() == {"relationship_type": "x"}
+
+
+def test_fill_endpoints_source_fallback_rejects_a_container_owner():
+    """An omitted source on a parametrized edge must not make the container the subject."""
+    bob = Person(name="Bob")
+    graph = SocialGraph(friends=[Edge(target=bob)])
+
+    with pytest.raises(ValueError, match="friends"):
+        graph.friends[0].fill_endpoints(graph, "friends")
+
+
+def test_fill_endpoints_source_fallback_accepts_a_declared_source_owner():
+    alice = Person(name="Alice")
+    bob = Person(name="Bob")
+    edge = Edge[Person, Person].model_validate(Edge(target=bob))
+
+    filled = edge.fill_endpoints(alice, "friends")
+
+    assert filled.source is alice
+
+
+def test_fill_endpoints_source_fallback_accepts_string_declared_owner():
+    """Self-referential edges name their endpoints as strings; match by class name."""
+
+    class Colleague(DataPoint):
+        name: str
+        works_with: list[Edge["Colleague", "Colleague"]] = []
+
+    one = Colleague(name="One")
+    other = Colleague(name="Other")
+    one.works_with = [Edge(target=other)]
+
+    filled = one.works_with[0].fill_endpoints(one, "works_with")
+
+    assert filled.source is one
+
+
+def test_fill_endpoints_source_fallback_accepts_a_plain_model_copy_owner():
+    """copy_model copies keep the class name but not the class; match by MRO names."""
+    from cognee.modules.storage.utils import copy_model
+
+    PersonCopy = copy_model(Person)
+    owner = PersonCopy(name="Alice")
+    bob = Person(name="Bob")
+    edge = Edge[Person, Person].model_validate(Edge(target=bob))
+
+    filled = edge.fill_endpoints(owner, "friends")
+
+    assert filled.source is owner
+
+
+def test_fill_endpoints_unparametrized_edge_keeps_the_permissive_fallback():
+    """The tuple form and other legacy spellings record no generics; owner always fits."""
+
+    class Container(DataPoint):
+        name: str
+
+    container = Container(name="box")
+    bob = Person(name="Bob")
+
+    filled = Edge(target=bob).fill_endpoints(container, "links")
+
+    assert filled.source is container

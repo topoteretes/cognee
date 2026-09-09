@@ -6,7 +6,7 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import NodeSet
 from cognee.modules.graph.utils import get_graph_from_model
-from cognee.modules.graph.utils.unwrap_transparent_nodes import _WARNED_DROPPED_FIELDS
+from cognee.shared.logging_utils import _warned_once_keys
 
 
 class Car(DataPoint):
@@ -97,17 +97,23 @@ async def test_local_edge_stores_weight_not_endpoints():
     assert owns[3]["weight"] == 0.8
     assert "source" not in owns[3]
     assert "target" not in owns[3]
-    assert "relationship_type" not in owns[3]
+    assert owns[3]["relationship_type"] == "owns"
 
 
 @pytest.mark.asyncio
-async def test_nested_list_edge_properties_are_the_four_standard_keys():
+async def test_nested_list_edge_properties_are_the_standard_keys():
     car = Car(name="Beetle")
     alice = Person(name="Alice", cars=[car])
 
     _, edges = await get_graph_from_model(alice)
     props = next(e for e in edges if e[2] == "cars")[3]
-    assert set(props) == {"source_node_id", "target_node_id", "relationship_name", "updated_at"}
+    assert set(props) == {
+        "source_node_id",
+        "target_node_id",
+        "relationship_name",
+        "relationship_type",
+        "updated_at",
+    }
 
 
 @pytest.mark.asyncio
@@ -134,7 +140,7 @@ async def test_transparent_root_contributes_children_not_itself():
 
 @pytest.mark.asyncio
 async def test_transparent_foreign_source_edge_is_skipped_whole(caplog):
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     alice = Person(name="Alice")
     bob = Person(name="Bob")
     crowd = Crowd(friends_with=[Edge(source=alice, target=bob)])
@@ -147,7 +153,7 @@ async def test_transparent_foreign_source_edge_is_skipped_whole(caplog):
     warnings = [r for r in caplog.records if "half-hoisted" in r.getMessage()]
     assert len(warnings) == 1
 
-    _WARNED_DROPPED_FIELDS.clear()
+    _warned_once_keys.clear()
     child = Person(name="Cara")
     crowd = Crowd(
         friends_with=[Edge(source=alice, target=bob)],
