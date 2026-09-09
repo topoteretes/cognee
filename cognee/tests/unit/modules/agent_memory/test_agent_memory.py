@@ -18,6 +18,7 @@ from cognee.modules.agent_memory.runtime import (
     retrieve_memory_context,
     set_current_agent_memory_context,
 )
+from cognee.modules.agent_memory.sanitization import truncate_text
 
 
 def _make_user():
@@ -256,6 +257,22 @@ async def test_agent_memory_with_session_memory_resolves_user_but_not_dataset_sc
     resolve_user.assert_awaited_once()
     resolve_scope.assert_not_awaited()
     retrieve_memory.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("limit", "expected"),
+    [
+        (0, ""),
+        (1, "a"),
+        (2, "ab"),
+        (3, "..."),
+    ],
+)
+def test_truncate_text_keeps_small_limits_within_bounds(limit, expected):
+    value = "abcdef"
+
+    assert truncate_text(value, limit) == expected
+    assert len(truncate_text(value, limit)) <= limit
 
 
 @pytest.mark.asyncio
