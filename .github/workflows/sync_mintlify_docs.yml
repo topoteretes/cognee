@@ -1,7 +1,6 @@
 name: automation | Sync Mintlify Docs
 
 on:
-  # Kept for a release a human publishes through the UI, which does fire this.
   release:
     types: [published]
   workflow_dispatch:
