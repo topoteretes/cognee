@@ -49,8 +49,21 @@ def _pipeline_run_abandon_after_seconds() -> int:
     return value
 
 
+def get_abandon_cutoff() -> datetime:
+    """The instant a STARTED row has to predate to count as abandoned.
+
+    Computed once per request and handed to get_effective_pipeline_status
+    rather than recomputed inside it. A page holds up to 500 rows, and
+    taking a fresh now() per row would judge the first and last rows of one
+    response against slightly different clocks, so the boundary would not be
+    consistent within a single response. It also keeps the env var read to
+    once per request, and lets a frozen-clock test cover a whole page.
+    """
+    return datetime.now(timezone.utc) - timedelta(seconds=_pipeline_run_abandon_after_seconds())
+
+
 def get_effective_pipeline_status(
-    run: PipelineRun, *, run_has_terminal_row: bool
+    run: PipelineRun, *, run_has_terminal_row: bool, abandon_cutoff: datetime
 ) -> Optional[EffectivePipelineRunStatus]:
     """Stored status, with a stale STARTED row reported as ABANDONED.
 
@@ -79,6 +92,10 @@ def get_effective_pipeline_status(
     default would silently pick the dangerous direction (labelling a
     finished run's start row as failed).
 
+    abandon_cutoff comes from get_abandon_cutoff() and is also required, so
+    that one value covers every row of a response instead of each row
+    picking up its own clock.
+
     Only applies to pipeline rows (pipeline_name set) — SDK-399 operation
     rows have no status column at all and are untouched.
     """
@@ -92,12 +109,9 @@ def get_effective_pipeline_status(
         return EffectivePipelineRunStatus(run.status.value)
     if run.created_at is None:
         return EffectivePipelineRunStatus(run.status.value)
-    threshold = datetime.now(timezone.utc) - timedelta(
-        seconds=_pipeline_run_abandon_after_seconds()
-    )
     created_at = run.created_at
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
-    if created_at < threshold:
+    if created_at < abandon_cutoff:
         return EffectivePipelineRunStatus.ABANDONED
     return EffectivePipelineRunStatus(run.status.value)

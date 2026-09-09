@@ -545,10 +545,10 @@ def test_threshold_boundary_is_strictly_less_than(monkeypatch):
     ABANDONED; one second older must. Mutating the source's `<` to `<=`
     must turn this test red (verified manually, see SDK-591 review notes).
 
-    The router computes `threshold = datetime.now(...) - abandon_after`
-    itself, so the "now" used for the comparison isn't observable from the
-    test — freeze it via monkeypatch so the boundary is exact instead of a
-    race against wall-clock time between test setup and the request."""
+    `get_abandon_cutoff()` computes `datetime.now(...) - abandon_after`, so
+    the "now" used for the comparison isn't observable from the test —
+    freeze it via monkeypatch so the boundary is exact instead of a race
+    against wall-clock time between test setup and the request."""
     user_id = uuid4()
     monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
     now = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -579,6 +579,45 @@ def test_threshold_boundary_is_strictly_less_than(monkeypatch):
 
     assert body[0]["status"] == "DATASET_PROCESSING_STARTED"
     assert body[1]["status"] == "ABANDONED"
+
+
+def test_one_cutoff_is_computed_per_request_not_per_row(monkeypatch):
+    """Every row of a page has to be judged against the same clock.
+
+    The cutoff used to be recomputed inside the per-row helper, so a full
+    500-row page read the env var and took a fresh now() 500 times and the
+    first and last rows of one response were compared against slightly
+    different instants. Counting the reads is the only way to notice if it
+    moves back: per-row and per-page produce the same statuses, so no
+    assertion on the response body would catch the regression."""
+    user_id = uuid4()
+    calls = []
+    real = status_module._pipeline_run_abandon_after_seconds
+
+    def _counting():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(status_module, "_pipeline_run_abandon_after_seconds", _counting)
+
+    stale = [
+        _joined(
+            _run(
+                user_id=user_id,
+                pipeline_name="cognify_pipeline",
+                status=PipelineRunStatus.DATASET_PROCESSING_STARTED,
+                created_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+        )
+        for _ in range(3)
+    ]
+    _stub_engine(monkeypatch, stale)
+    _stub_visibility(monkeypatch, visible_user_ids=[user_id], permitted_dataset_ids=[])
+
+    body = _client(user_id).get("/activity/pipeline-runs").json()
+
+    assert [row["status"] for row in body] == ["ABANDONED"] * 3
+    assert len(calls) == 1
 
 
 def test_pipeline_name_none_with_status_set_returns_raw_status(monkeypatch):

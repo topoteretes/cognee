@@ -1,6 +1,10 @@
 from uuid import UUID
 
-from ..methods import get_effective_pipeline_status, get_latest_pipeline_runs_by_datasets
+from ..methods import (
+    get_abandon_cutoff,
+    get_effective_pipeline_status,
+    get_latest_pipeline_runs_by_datasets,
+)
 
 
 async def get_pipeline_status(dataset_ids: list[UUID], pipeline_name: str):
@@ -55,10 +59,12 @@ async def get_effective_pipeline_status_by_datasets(dataset_ids: list[UUID], pip
     its comment for why.
     """
     runs = await get_latest_pipeline_runs_by_datasets(dataset_ids, pipeline_name)
+    abandon_cutoff = get_abandon_cutoff()
 
     return {
         str(dataset_id): get_effective_pipeline_status(
             run,
+            abandon_cutoff=abandon_cutoff,
             # get_latest_pipeline_runs_by_datasets returns each dataset's
             # single newest row. A STARTED row of a run that already has a
             # terminal row can never be that newest row —
@@ -78,13 +84,16 @@ async def get_effective_pipeline_progress_by_datasets(dataset_ids: list[UUID], p
     than the raw stored PipelineRunStatus. Backs GET /v1/datasets/status/progress.
     """
     runs = await get_latest_pipeline_runs_by_datasets(dataset_ids, pipeline_name)
+    abandon_cutoff = get_abandon_cutoff()
 
     return {
         str(dataset_id): {
             # Same reasoning as get_effective_pipeline_status_by_datasets:
             # the newest row per dataset can never be a STARTED row with a
             # terminal sibling.
-            "status": get_effective_pipeline_status(run, run_has_terminal_row=False),
+            "status": get_effective_pipeline_status(
+                run, run_has_terminal_row=False, abandon_cutoff=abandon_cutoff
+            ),
             "progress": (run.run_info or {}).get("progress"),
         }
         for dataset_id, run in runs.items()

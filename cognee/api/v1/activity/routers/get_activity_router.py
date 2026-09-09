@@ -10,7 +10,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
-from cognee.modules.pipelines.methods import get_effective_pipeline_status
+from cognee.modules.pipelines.methods import (
+    get_abandon_cutoff,
+    get_effective_pipeline_status,
+)
 from cognee.modules.users.methods.get_authenticated_user import get_authenticated_user
 from cognee.modules.users.methods.get_visible_user_ids import get_visible_user_ids
 from cognee.modules.users.models import User
@@ -225,6 +228,10 @@ def get_activity_router() -> APIRouter:
             result = await session.execute(stmt)
             rows = result.all()
 
+        # One cutoff for the whole page, so the first and last row of a
+        # response are judged against the same clock.
+        abandon_cutoff = get_abandon_cutoff()
+
         return [
             {
                 "id": str(run.id),
@@ -234,7 +241,9 @@ def get_activity_router() -> APIRouter:
                 "pipeline_name": run.pipeline_name,
                 # "ABANDONED" is never stored — see get_effective_pipeline_status.
                 "status": get_effective_pipeline_status(
-                    run, run_has_terminal_row=bool(has_terminal_row)
+                    run,
+                    run_has_terminal_row=bool(has_terminal_row),
+                    abandon_cutoff=abandon_cutoff,
                 ),
                 "dataset_id": str(run.dataset_id) if run.dataset_id else None,
                 # The row itself is visible via the user_id term even when its
