@@ -3,6 +3,8 @@ import warnings
 from contextvars import ContextVar
 from uuid import UUID
 
+from typing_extensions import Self
+
 from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
@@ -364,7 +366,7 @@ class DatabaseContextManager:
         )
         return self._apply().__await__()
 
-    async def __aenter__(self) -> "DatabaseContextManager":
+    async def __aenter__(self) -> Self:
         await self._apply()
         return self
 

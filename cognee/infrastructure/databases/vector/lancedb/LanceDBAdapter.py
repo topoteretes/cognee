@@ -6,7 +6,14 @@ import types
 from collections import OrderedDict
 from enum import Enum
 from os import path
-from typing import List, Optional, Union, get_args, get_origin, get_type_hints
+from typing import (  # noqa: UP035 - typing.List is a distinct origin key, not an annotation
+    List,
+    Optional,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 from uuid import UUID
 
 import lancedb
@@ -1493,7 +1500,7 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
-                "belongs_to_set": (Optional[list[str]], None),
+                "belongs_to_set": (list[str] | None, None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )

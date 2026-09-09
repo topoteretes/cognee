@@ -835,7 +835,9 @@ class SQLAlchemyAdapter:
                 for schema_name in schema_list:
                     # Get tables for the current schema via the inspector.
                     tables = await connection.run_sync(
-                        lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema_name)
+                        lambda sync_conn, schema_name=schema_name: inspect(
+                            sync_conn
+                        ).get_table_names(schema=schema_name)
                     )
                     for table_name in tables:
                         # Optionally, qualify the table name with the schema if not in the default schema.

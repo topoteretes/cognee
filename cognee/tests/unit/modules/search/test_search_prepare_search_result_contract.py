@@ -17,7 +17,10 @@ class DummyDataset(BaseModel):
     owner_id: object
 
 
-def _ds(name="ds1", tenant_id=uuid5(NAMESPACE_OID, "t1")):
+_TENANT_1 = uuid5(NAMESPACE_OID, "t1")
+
+
+def _ds(name="ds1", tenant_id=_TENANT_1):
     return DummyDataset(
         id=uuid5(NAMESPACE_OID, name), name=name, tenant_id=tenant_id, owner_id=uuid4()
     )

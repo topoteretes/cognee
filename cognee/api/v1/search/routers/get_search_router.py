@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Union
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -191,7 +191,7 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[list[SearchResult], list],
+        response_model=list[SearchResult] | list,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},

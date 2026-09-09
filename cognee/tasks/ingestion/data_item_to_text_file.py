@@ -70,7 +70,7 @@ async def data_item_to_text_file(
             # create it with delete=False, close our handle first, and clean it up
             # ourselves. (Mirrors the delete=False pattern used by the SQLAlchemy and
             # ladybug S3 temp-file paths.)
-            temp_file = tempfile.NamedTemporaryFile(
+            temp_file = tempfile.NamedTemporaryFile(  # noqa: SIM115 - closed below after the write; delete=False keeps the path
                 mode="wb", suffix=path_info.suffix, delete=False
             )
             try:

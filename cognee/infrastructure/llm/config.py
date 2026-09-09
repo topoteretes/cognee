@@ -307,7 +307,7 @@ class LLMConfig(BaseSettings):
         """
         return _apply_local_rate_limit_default(self)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:

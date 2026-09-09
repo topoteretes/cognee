@@ -156,9 +156,9 @@ async def test_ratelimited_gives_up_after_max_retries():
     with (
         patch("aiohttp.ClientSession", return_value=_FakeSessionContext(session)),
         patch("cognee.modules.integrations.slack.channels.asyncio.sleep", new=_no_sleep),
+        pytest.raises(RuntimeError, match="ratelimited"),
     ):
-        with pytest.raises(RuntimeError, match="ratelimited"):
-            await list_channels("xoxb-token")
+        await list_channels("xoxb-token")
 
     assert session.get.call_count == 4  # 1 initial attempt + 3 retries
 

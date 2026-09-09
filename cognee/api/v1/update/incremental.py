@@ -574,44 +574,45 @@ async def incremental_update(
     # inner add() pipeline can take it again). Inside, establish the dataset's
     # database context — with backend access control on, graph/vector engines
     # resolve per user+dataset, and a fresh API request arrives without it.
-    async with dataset_lock(dataset.id):
+    async with (
+        dataset_lock(dataset.id),
         # Resolve the dataset's databases as the DATASET OWNER, matching
         # run_tasks and datasets.delete_data. Passing the caller would send a
         # collaborator's update to a different per-user store than the one
         # cognify and delete use for this dataset.
-        async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-            graph_engine = await get_graph_engine()
-            vector_engine = await get_vector_engine_async()
-            if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
-                raise IncrementalUpdateNotPossible(
-                    f"graph backend {type(graph_engine).__name__} does not support "
-                    "chunk-level updates",
-                    RefusalReason.UNSUPPORTED_BACKEND,
-                )
-            if not getattr(vector_engine, "supports_payload_update", False):
-                raise IncrementalUpdateNotPossible(
-                    f"vector backend {type(vector_engine).__name__} does not support "
-                    "payload-only chunk moves",
-                    RefusalReason.UNSUPPORTED_BACKEND,
-                )
-            if not await stores_provenance_in_graph(graph_engine):
-                raise IncrementalUpdateNotPossible(
-                    "the selected graph does not store ownership provenance in-graph",
-                    RefusalReason.UNSUPPORTED_BACKEND,
-                )
-            return await _run_incremental_update(
-                data_id,
-                data,
-                dataset,
-                user,
-                old_data,
-                node_set,
-                preferred_loaders,
-                graph_model,
-                custom_prompt,
-                chunker,
-                policy,
+        set_database_global_context_variables(dataset.id, dataset.owner_id),
+    ):
+        graph_engine = await get_graph_engine()
+        vector_engine = await get_vector_engine_async()
+        if not getattr(graph_engine, "supports_incremental_chunk_updates", False):
+            raise IncrementalUpdateNotPossible(
+                f"graph backend {type(graph_engine).__name__} does not support chunk-level updates",
+                RefusalReason.UNSUPPORTED_BACKEND,
             )
+        if not getattr(vector_engine, "supports_payload_update", False):
+            raise IncrementalUpdateNotPossible(
+                f"vector backend {type(vector_engine).__name__} does not support "
+                "payload-only chunk moves",
+                RefusalReason.UNSUPPORTED_BACKEND,
+            )
+        if not await stores_provenance_in_graph(graph_engine):
+            raise IncrementalUpdateNotPossible(
+                "the selected graph does not store ownership provenance in-graph",
+                RefusalReason.UNSUPPORTED_BACKEND,
+            )
+        return await _run_incremental_update(
+            data_id,
+            data,
+            dataset,
+            user,
+            old_data,
+            node_set,
+            preferred_loaders,
+            graph_model,
+            custom_prompt,
+            chunker,
+            policy,
+        )
 
 
 async def _run_incremental_update(

@@ -32,45 +32,57 @@ from __future__ import annotations
 _TABLE: tuple[tuple[tuple[str, ...], str], ...] = (
     (
         ("authenticationerror", "invalid api key", "incorrect api key"),
-        "The LLM provider rejected the API key. Fix: set LLM_API_KEY in "
-        "your .env to a valid key for the LLM_PROVIDER you configured "
-        "(default provider: openai).",
+        (
+            "The LLM provider rejected the API key. Fix: set LLM_API_KEY in "
+            "your .env to a valid key for the LLM_PROVIDER you configured "
+            "(default provider: openai)."
+        ),
     ),
     (
         ("permissiondeniederror", "insufficient_quota", "billing"),
-        "The LLM provider accepted the key but denied the request. Fix: "
-        "confirm the account has active billing and quota, or switch "
-        "LLM_PROVIDER/LLM_MODEL to one your account can use.",
+        (
+            "The LLM provider accepted the key but denied the request. Fix: "
+            "confirm the account has active billing and quota, or switch "
+            "LLM_PROVIDER/LLM_MODEL to one your account can use."
+        ),
     ),
     (
         # Real error: LLMAPIKeyNotSetError("LLM API key is not set.").
         ("llmapikeynotset", "api key is not set", "no api key"),
-        "LLM_API_KEY is not set. Fix: copy .env.template to .env and "
-        "populate LLM_API_KEY. Cognee defaults to the OpenAI provider "
-        "so an OpenAI key is the simplest starting point.",
+        (
+            "LLM_API_KEY is not set. Fix: copy .env.template to .env and "
+            "populate LLM_API_KEY. Cognee defaults to the OpenAI provider "
+            "so an OpenAI key is the simplest starting point."
+        ),
     ),
     (
         # Real raised messages: "Cannot connect to embedding endpoint. Check
         # EMBEDDING_ENDPOINT." and "Embedding request timed out. Check
         # EMBEDDING_ENDPOINT connectivity."
         ("embedding_endpoint", "cannot connect to embedding", "embedding request timed out"),
-        "The configured EMBEDDING_ENDPOINT is not reachable. Fix: verify "
-        "the URL, that the host is running, and that the port is open. "
-        "Unset EMBEDDING_ENDPOINT to fall back to the provider default.",
+        (
+            "The configured EMBEDDING_ENDPOINT is not reachable. Fix: verify "
+            "the URL, that the host is running, and that the port is open. "
+            "Unset EMBEDDING_ENDPOINT to fall back to the provider default."
+        ),
     ),
     (
         ("ontology file not found",),
-        "The --ontology-file path does not exist. Fix: pass an absolute "
-        "path to an .owl / .ttl file, or drop the flag to use the built-in "
-        "resolver.",
+        (
+            "The --ontology-file path does not exist. Fix: pass an absolute "
+            "path to an .owl / .ttl file, or drop the flag to use the built-in "
+            "resolver."
+        ),
     ),
     (
         # Real error: ProviderConfigMismatchError raised by the config
         # preflight in add()/remember(); its message names the exact env vars.
         ("providerconfigmismatch", "silently default to openai"),
-        "The LLM and embedding provider settings are inconsistent. Run "
-        "`cognee-cli doctor` for a full diagnosis, or set the env vars named "
-        "in the error above.",
+        (
+            "The LLM and embedding provider settings are inconsistent. Run "
+            "`cognee-cli doctor` for a full diagnosis, or set the env vars named "
+            "in the error above."
+        ),
     ),
 )
 

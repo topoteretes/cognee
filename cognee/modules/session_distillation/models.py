@@ -12,10 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from cognee.infrastructure.session.session_context_models import (
-    MIN_GATE_CONFIDENCE as MIN_GATE_CONFIDENCE,
-)
-
 # -- Tunables ----------------------------------------------------------------
 
 # Gate: a context entry is distillable only when it passes the shared usability

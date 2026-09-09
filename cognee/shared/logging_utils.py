@@ -7,7 +7,7 @@ import sys
 import tempfile
 import traceback
 from collections.abc import MutableMapping
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -136,8 +136,8 @@ def resolve_logs_dir() -> Path | None:
 MAX_LOG_FILES = 10
 
 # Log rotation defaults — override via COGNEE_LOG_MAX_BYTES / COGNEE_LOG_BACKUP_COUNT
-LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", 50 * 1024 * 1024))  # 50 MB
-LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", 5))  # 5 backups → 300 MB cap
+LOG_MAX_BYTES = int(os.getenv("COGNEE_LOG_MAX_BYTES", "52428800"))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("COGNEE_LOG_BACKUP_COUNT", "5"))  # 5 backups → 300 MB cap
 
 # Version information
 PYTHON_VERSION = platform.python_version()
@@ -200,7 +200,7 @@ class PlainFileHandler(logging.handlers.RotatingFileHandler):
                 logger_name = record.msg.get("logger", record.name)
 
                 # Format timestamp
-                timestamp = datetime.now().strftime(get_timestamp_format())
+                timestamp = datetime.now(timezone.utc).strftime(get_timestamp_format())
 
                 # Create the log entry
                 log_entry = f"{timestamp} [{record.levelname.ljust(8)}] {message}{context_str} [{logger_name}]\n"
@@ -450,7 +450,7 @@ def setup_logging(log_level=None, name=None) -> bool:
         if event_dict.get("exc_info"):
             # If it's already a tuple, use it directly
             if isinstance(event_dict["exc_info"], tuple):
-                exc_type, exc_value, tb = event_dict["exc_info"]
+                exc_type, exc_value, _tb = event_dict["exc_info"]
             else:
                 exc_type, exc_value, _tb = sys.exc_info()
 
@@ -577,7 +577,7 @@ def setup_logging(log_level=None, name=None) -> bool:
         log_file_path = os.environ.get("LOG_FILE_NAME")
         if not log_file_path and logs_dir is not None:
             # Create a new log file name with the cognee start time
-            start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            start_time = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
             log_file_path = str((logs_dir / f"{start_time}.log").resolve())
             os.environ["LOG_FILE_NAME"] = log_file_path
 
@@ -681,7 +681,7 @@ def get_timestamp_format() -> str:
     try:
         # We call datetime.now() here to test if microseconds are supported.
         # If they are not supported a ValueError will be raised
-        datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")
         return "%Y-%m-%dT%H:%M:%S.%f"
     except Exception as e:
         logger.debug(f"Exception caught: {e}", exc_info=True)
@@ -689,6 +689,6 @@ def get_timestamp_format() -> str:
             "Could not use microseconds for the logging timestamp, defaulting to use hours minutes and seconds only"
         )
         # We call datetime.now() here to test if won't break.
-        datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         # We return the timestamp format without microseconds as they are not supported
         return "%Y-%m-%dT%H:%M:%S"

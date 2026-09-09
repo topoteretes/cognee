@@ -101,8 +101,8 @@ class TestGetDefaultUserDatabaseNotCreated:
         with (
             patch.object(gdu_mod, "get_relational_engine", return_value=engine),
             patch.object(exc_mod, "logger") as mock_logger,
+            pytest.raises(DatabaseNotCreatedError),
         ):
-            with pytest.raises(DatabaseNotCreatedError):
-                await gdu_mod.get_default_user()
+            await gdu_mod.get_default_user()
         mock_logger.error.assert_not_called()
         mock_logger.warning.assert_not_called()

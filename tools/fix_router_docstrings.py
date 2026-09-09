@@ -151,7 +151,7 @@ def format_annotation(annotation) -> str:
     name = getattr(annotation, "__name__", None)
     if name:
         return name
-    return re.sub(r"\w+(\.\w+)+\.", "", str(annotation))
+    return re.sub(r"\b\w+(\.\w+)+\.", "", str(annotation))
 
 
 @dataclass

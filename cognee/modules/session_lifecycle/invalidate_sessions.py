@@ -111,11 +111,11 @@ async def invalidate_sessions_for_deleted_data(
             sessions.append(candidate)
     totals["sessions_considered"] = len(sessions)
 
-    for user_id, session_id in sessions:
+    for session_user_id, session_id in sessions:
         try:
             counts = await _invalidate_session_entries(
                 session_manager,
-                user_id=str(user_id),
+                user_id=str(session_user_id),
                 session_id=session_id,
                 deleted_node_ids=deleted_node_ids,
                 deleted_edge_ids=deleted_edge_ids,
@@ -127,7 +127,7 @@ async def invalidate_sessions_for_deleted_data(
                 "Session invalidation: targeted cleanup failed for session %s, user %s "
                 "(non-fatal): %s",
                 session_id,
-                user_id,
+                session_user_id,
                 error,
                 exc_info=True,
             )

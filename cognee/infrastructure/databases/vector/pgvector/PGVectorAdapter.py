@@ -421,14 +421,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         point_dicts = [to_dict(data_point) for data_point in pgvector_data_points]
 
-        async with self._get_write_lock(collection_name):
-            async with self.get_async_session() as session:
-                for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
-                    point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
-                    insert_statement = insert(PGVectorDataPoint).values(point_batch)
-                    quoted_table = f'"{collection_name}"'
-                    merged_payload_expr = text(
-                        f"""
+        async with self._get_write_lock(collection_name), self.get_async_session() as session:
+            for start_index in range(0, len(point_dicts), QUERY_BATCH_SIZE):
+                point_batch = point_dicts[start_index : start_index + QUERY_BATCH_SIZE]
+                insert_statement = insert(PGVectorDataPoint).values(point_batch)
+                quoted_table = f'"{collection_name}"'
+                merged_payload_expr = text(
+                    f"""
                                     jsonb_set(
                                         EXCLUDED.payload::jsonb,
                                         '{{belongs_to_set}}',
@@ -441,13 +440,13 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                                         )
                                     )::json
                                     """
-                    )
-                    insert_statement = insert_statement.on_conflict_do_update(
-                        index_elements=["id"],
-                        set_={"payload": merged_payload_expr},
-                    )
-                    await session.execute(insert_statement)
-                await session.commit()
+                )
+                insert_statement = insert_statement.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={"payload": merged_payload_expr},
+                )
+                await session.execute(insert_statement)
+            await session.commit()
 
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """Create the underlying index collection (table) for the given name/property pair."""

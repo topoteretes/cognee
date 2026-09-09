@@ -1999,7 +1999,7 @@ class LadybugAdapter(GraphDBInterface):
         from_node: str,
         to_node: str,
         relationship_name: str,
-        edge_properties: dict[str, Any] = {},
+        edge_properties: dict[str, Any] | None = None,
     ) -> None:
         """
         Add an edge between two nodes.
@@ -2018,6 +2018,8 @@ class LadybugAdapter(GraphDBInterface):
             - edge_properties (Dict[str, Any]): A dictionary containing properties for the edge.
               (default {})
         """
+        if edge_properties is None:
+            edge_properties = {}
         try:
             query, params = self._edge_query_and_params(
                 from_node, to_node, relationship_name, edge_properties
