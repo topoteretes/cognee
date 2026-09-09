@@ -8,6 +8,6 @@ def run_tasks_parallel(tasks: List[Task]) -> Callable[[Any], Generator[Any, Any,
         parallel_tasks = [asyncio.create_task(task.run(*args, **kwargs)) for task in tasks]
 
         results = await asyncio.gather(*parallel_tasks)
-        return results[len(results) - 1] if len(results) > 1 else []
+        return results
 
     return Task(parallel_run)
