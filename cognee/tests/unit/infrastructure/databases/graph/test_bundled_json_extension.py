@@ -70,6 +70,16 @@ def _bundle(tmp_path, version="v9.9.9", platform="test_arch", content=b"\x7fELF"
     return target
 
 
+def _load_stmt(target) -> str:
+    """The exact statement load_json_extension emits for a bundled path.
+
+    Mirrors production quoting: backslashes become forward slashes on every
+    platform, so a literal comparison also holds on Windows.
+    """
+    escaped = str(target).replace("\\", "/").replace("'", "''")
+    return f"LOAD EXTENSION '{escaped}';"
+
+
 def test_by_name_load_succeeds_first():
     execute = RecordingExecute()
     load_json_extension(execute)
@@ -85,7 +95,7 @@ def test_probe_announced_bundle_is_loaded(monkeypatch, tmp_path):
     assert execute.statements == [
         "LOAD EXTENSION JSON;",
         PROBE_STMT,
-        f"LOAD EXTENSION '{target}';",
+        _load_stmt(target),
     ]
 
 
@@ -126,14 +136,14 @@ def test_broken_bundle_falls_back_to_remote_install(monkeypatch, tmp_path):
     execute = RecordingExecute(
         failures={
             "LOAD EXTENSION JSON;": NOT_INSTALLED,
-            f"LOAD EXTENSION '{target}';": RuntimeError("Failed to load library"),
+            _load_stmt(target): RuntimeError("Failed to load library"),
         }
     )
     load_json_extension(execute)
     assert execute.statements == [
         "LOAD EXTENSION JSON;",
         PROBE_STMT,
-        f"LOAD EXTENSION '{target}';",
+        _load_stmt(target),
         "INSTALL JSON;",
         "LOAD EXTENSION JSON;",
     ]
