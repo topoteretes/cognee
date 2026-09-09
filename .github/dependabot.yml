@@ -1,0 +1,37 @@
+# Keeps the SHA-pinned actions and digest-pinned base images current.
+# Both ecosystems are pinned to immutable references for OSSF Scorecard's
+# Pinned-Dependencies check; Dependabot is what moves those pins forward, with
+# the version kept in the trailing comment / tag so reviewers can read them.
+# Python and npm dependencies are deliberately not here: uv.lock and
+# package-lock.json are refreshed by the maintainers on their own cadence.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: dev
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies"]
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /cognee-mcp
+      - /cognee-frontend
+      - /cognee/eval_framework
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: dev
+    groups:
+      docker-base-images:
+        patterns: ["*"]
+    commit-message:
+      prefix: "build"
+    labels: ["dependencies", "docker"]

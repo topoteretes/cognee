@@ -15,9 +15,6 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -29,6 +26,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -160,7 +160,7 @@ class GeminiAdapter(GenericAPIAdapter):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
@@ -196,7 +196,7 @@ class GeminiAdapter(GenericAPIAdapter):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

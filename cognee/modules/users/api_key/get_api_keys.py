@@ -1,11 +1,11 @@
 from sqlalchemy import select
 
-from cognee.modules.users.models import User
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.models import User
 from cognee.modules.users.models.UserApiKey import UserApiKey
-from .exceptions import ApiKeyQueryError
+from cognee.shared.logging_utils import get_logger
 
+from .exceptions import ApiKeyQueryError
 
 logger = get_logger(__name__)
 
@@ -22,7 +22,7 @@ async def get_api_keys(user: User):
             )
 
             return user_api_keys
-        except Exception as error:
-            logger.error(f"Failed to get API keys for user {user.id}: {str(error)}")
+        except Exception:
+            logger.exception(f"Failed to get API keys for user {user.id}")
 
             raise ApiKeyQueryError(f"Failed to get API keys for user {user.id}.")

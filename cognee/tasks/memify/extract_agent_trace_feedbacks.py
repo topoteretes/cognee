@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
@@ -11,7 +10,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("extract_agent_trace_feedbacks")
 
 
-def _normalize_trace_content(value) -> Optional[str]:
+def _normalize_trace_content(value) -> str | None:
     """Convert raw trace content into a non-empty string suitable for memify payloads."""
     if value is None:
         return None
@@ -28,9 +27,9 @@ def _normalize_trace_content(value) -> Optional[str]:
 
 async def extract_agent_trace_feedbacks(
     data,
-    session_ids: Optional[list[str]] = None,
+    session_ids: list[str] | None = None,
     raw_trace_content: bool = False,
-    last_n_steps: Optional[int] = None,
+    last_n_steps: int | None = None,
 ):
     """
     Extract step-level agent trace content for the current user.
@@ -120,6 +119,7 @@ async def extract_agent_trace_feedbacks(
                         content_label,
                         session_id,
                         error,
+                        exc_info=True,
                     )
                     continue
         else:
@@ -130,7 +130,7 @@ async def extract_agent_trace_feedbacks(
     except CogneeSystemError:
         raise
     except Exception as error:
-        logger.error("Error extracting agent trace feedbacks: %s", error)
+        logger.exception("Error extracting agent trace feedbacks")
         raise CogneeSystemError(
             message=f"Failed to extract agent trace feedbacks: {error}",
             log=False,

@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
@@ -561,14 +562,16 @@ async def test_ensure_state_raises_for_missing_query():
 async def test_ensure_state_raises_when_retrieval_does_not_initialize_state():
     retriever = GraphCompletionDecompositionRetriever()
 
-    with patch.object(
-        retriever,
-        "get_retrieved_objects",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch.object(
+            retriever,
+            "get_retrieved_objects",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        pytest.raises(QueryValidationError, match="Failed to initialize decomposition state"),
     ):
-        with pytest.raises(QueryValidationError, match="Failed to initialize decomposition state"):
-            await retriever._ensure_state("Original query")
+        await retriever._ensure_state("Original query")
 
 
 @pytest.mark.asyncio

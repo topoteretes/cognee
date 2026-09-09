@@ -22,7 +22,7 @@ import pytest
 # the submodule by its module path (bypassing the shadowed attribute); we then
 # grab the module object from sys.modules and patch on it (patch.object), which
 # is import-order independent.
-from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph  # noqa: F401
+from cognee.api.v1.visualize.visualize import visualize_graph as _visualize_graph
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]
 

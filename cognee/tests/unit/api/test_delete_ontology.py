@@ -9,15 +9,15 @@ Covers:
 
 import json
 import uuid
-import pytest
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 from fastapi.testclient import TestClient
 
-from cognee.api.v1.ontologies.ontologies import OntologyService
 from cognee.api.client import app
+from cognee.api.v1.ontologies.ontologies import OntologyService
 from cognee.modules.users.methods import get_authenticated_user
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

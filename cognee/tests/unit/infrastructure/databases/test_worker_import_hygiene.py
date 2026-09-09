@@ -33,21 +33,21 @@ pytestmark = pytest.mark.skipif(
 
 def _probe_kuzu_worker(result_q):
     # Import the worker; make sure ``cognee`` isn't dragged in.
-    import cognee_db_workers.kuzu_worker  # noqa: F401
+    import cognee_db_workers.kuzu_worker
 
     cognee_modules = sorted(m for m in sys.modules if m == "cognee" or m.startswith("cognee."))
     result_q.put(cognee_modules)
 
 
 def _probe_lancedb_worker(result_q):
-    import cognee_db_workers.lancedb_worker  # noqa: F401
+    import cognee_db_workers.lancedb_worker
 
     cognee_modules = sorted(m for m in sys.modules if m == "cognee" or m.startswith("cognee."))
     result_q.put(cognee_modules)
 
 
 def _probe_harness(result_q):
-    import cognee_db_workers.harness  # noqa: F401
+    import cognee_db_workers.harness
 
     cognee_modules = sorted(m for m in sys.modules if m == "cognee" or m.startswith("cognee."))
     result_q.put(cognee_modules)
@@ -79,7 +79,7 @@ def test_kuzu_worker_does_not_import_cognee():
 def test_lancedb_worker_does_not_import_cognee():
     # Skip gracefully if lancedb isn't installed in this environment.
     try:
-        import lancedb  # noqa: F401
+        import lancedb
     except ImportError:
         pytest.skip("lancedb not installed")
 

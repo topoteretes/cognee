@@ -5,10 +5,12 @@ on:
     types: [opened]
 
 permissions:
-  issues: write
+  contents: read
 
 jobs:
   greeting:
+    permissions:
+      issues: write
     if: github.actor != 'github-actions[bot]' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-22.04
     steps:

@@ -1,7 +1,7 @@
 import asyncio
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
 
 try:
@@ -54,7 +54,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
-    node_set: List[str]
+    node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
     data_cache: bool
@@ -193,9 +193,9 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user,
-    skill_improvement: Optional[dict[str, Any]] = None,
+    skill_improvement: dict[str, Any] | None = None,
 ) -> "RememberResult":
     """Top-level dispatcher for typed MemoryEntry payloads.
 
@@ -244,9 +244,9 @@ async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user,
-    skill_improvement: Optional[dict[str, Any]] = None,
+    skill_improvement: dict[str, Any] | None = None,
 ) -> "RememberResult":
     """Route a typed memory entry to the right SessionManager method.
 
@@ -347,6 +347,7 @@ async def _dispatch_session_entry(
                 resolved_dataset = ds.id
         except Exception:
             # Fall through with None — we still create the session row.
+            logger.debug("Ignoring exception in _dispatch_session_entry", exc_info=True)
             resolved_dataset = None
 
         await ensure_and_touch_session(
@@ -355,7 +356,7 @@ async def _dispatch_session_entry(
             dataset_id=resolved_dataset,
         )
     except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
+        logger.debug("remember: pre-upsert session_record failed (%s)", exc, exc_info=True)
 
     result = RememberResult(
         status="session_stored",
@@ -462,32 +463,32 @@ class RememberResult:
         *,
         status: str,
         dataset_name: str,
-        dataset_id: Optional[str] = None,
-        session_ids: Optional[List[str]] = None,
-        pipeline_run_id: Optional[str] = None,
+        dataset_id: str | None = None,
+        session_ids: list[str] | None = None,
+        pipeline_run_id: str | None = None,
     ):
         self.status = status
         self.dataset_name = dataset_name
         self.dataset_id = dataset_id
-        self.session_ids: Optional[List[str]] = session_ids
+        self.session_ids: list[str] | None = session_ids
         self.pipeline_run_id = pipeline_run_id
-        self.error: Optional[str] = None
-        self.raw_result: Optional[dict] = None
-        self.elapsed_seconds: Optional[float] = None
-        self.content_hash: Optional[str] = None
+        self.error: str | None = None
+        self.raw_result: dict | None = None
+        self.elapsed_seconds: float | None = None
+        self.content_hash: str | None = None
         self.items_processed: int = 0
-        self.items: List[dict] = []
+        self.items: list[dict] = []
         # Populated when the call dispatched a typed MemoryEntry.
         # entry_type is one of "qa", "trace", "feedback", or
         # "skill_run"; entry_id is the qa_id / trace_id / run_id
         # returned by the storage backend.
-        self.entry_type: Optional[str] = None
-        self.entry_id: Optional[str] = None
-        self._task: Optional[asyncio.Task] = None
+        self.entry_type: str | None = None
+        self.entry_id: str | None = None
+        self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         """The session ID when exactly one session is involved, else None."""
         if self.session_ids and len(self.session_ids) == 1:
             return self.session_ids[0]
@@ -662,14 +663,14 @@ async def remember(
     ],
     dataset_name: str = "main_dataset",
     *,
-    dataset_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
-    chunk_size: Optional[int] = None,
-    chunker: Optional[Any] = None,
-    custom_prompt: Optional[str] = None,
+    dataset_id: UUID | None = None,
+    session_id: str | None = None,
+    chunk_size: int | None = None,
+    chunker: Any | None = None,
+    custom_prompt: str | None = None,
     run_in_background: bool = False,
     self_improvement: bool = True,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
     dry_run: bool = False,
     raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
@@ -1210,7 +1211,7 @@ async def _remember_inner(
         # _scoped_skill_id uuid5) stable across re-ingests, so re-ingesting an
         # edited SKILL.md upserts the existing Skill node instead of creating a
         # duplicate.
-        materialize_root: Optional[_Path] = None
+        materialize_root: _Path | None = None
         if normalized_uploads or skills_text:
             root = _skill_materialize_root(dataset.id)
             root.mkdir(parents=True, exist_ok=True)
@@ -1377,7 +1378,9 @@ async def _remember_inner(
                             )
                         logger.info("remember: session '%s' bridged to permanent graph", session_id)
                     except Exception as exc:
-                        logger.warning("remember: session improve failed (non-fatal): %s", exc)
+                        logger.warning(
+                            "remember: session improve failed (non-fatal): %s", exc, exc_info=True
+                        )
 
                 result._task = asyncio.create_task(_session_improve())
                 _BACKGROUND_REMEMBER_TASKS.add(result._task)

@@ -422,9 +422,9 @@ receives. Pass `context_format="prompt"` to get the full envelope instead:
 result = await cognee.recall(
     "why did the migration stall?",
     query_type=SearchType.GRAPH_COMPLETION,  # pin the graph lane — with a bare
-    session_id="s1",                         # session_id a session hit would
-    only_context=True,                       # short-circuit it (see recall vs search)
-    context_format="prompt",                 # default: "context"
+    session_id="s1",  # session_id a session hit would
+    only_context=True,  # short-circuit it (see recall vs search)
+    context_format="prompt",  # default: "context"
 )
 ```
 
@@ -464,7 +464,7 @@ Four flags trade memory features for speed. Know what each turns off before flip
 | `PERSONALIZATION_ENABLED=false` | Per-user preference personalization: one `UserPreference` node per user+dataset with weighted `prefers` edges, retrieval ranking multiplied by those weights, stated-preference text injected into LLM prompts, the per-turn 1-5 rating question, and the `improve()` stage that folds ratings into weights | Off by default, so nothing is lost until you opt in. When on, ranking strength comes from `PERSONALIZATION_INFLUENCE` (default 0.3, valid range [0, 1] — out-of-range values are rejected at startup); personalization also needs a user and a single resolved dataset in context, so multi-dataset searches never personalize |
 | `CACHING=true` | The entire session-memory layer: `remember(session_id=...)` raises, `recall()` loses session history and the session-cache short-circuit, `agent_memory` session options error, and `AUTO_FEEDBACK` becomes moot | You lose the fast session write path and self-improving memory — only the slower add+cognify path remains. Do not benchmark cognee with this off; that measures cognee with its memory layer removed |
 | `AUTO_FEEDBACK=true` | The automatic per-turn analysis: one structured-output LLM call after each answered query that detects implicit feedback, guides later retrievals, and feeds `improve()`'s agent-context lessons | Memory stops self-tuning from conversation signals. Session store/recall itself keeps working — this is the flag to disable for low-latency reads, since the per-turn LLM call dominates default read latency |
-| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
+| `DATASET_QUEUE_ENABLED=true` | The per-process cap on concurrent datasets (`DATASET_QUEUE_MAX_CONCURRENT`, default 6), subprocess-engine teardown on scope exit, and pinning of in-use engines against cache eviction. Only engages when `ENABLE_BACKEND_ACCESS_CONTROL` is on (its default) — with access control off the flag is a no-op either way | Saves minor per-operation overhead, but embedded engines become unbounded: file-lock leaks and mid-use engine eviction under parallel multi-dataset load. Safe only for single-dataset scripts |
 
 `AUTO_FEEDBACK` is only consulted when `CACHING=true`. If reads feel slow on defaults, set `AUTO_FEEDBACK=false` and keep `CACHING=true` — that keeps session memory while removing the per-turn LLM call.
 
@@ -714,10 +714,12 @@ For production deployments, review and tighten these settings.
 ```python
 from cognee.modules.pipelines.tasks.Task import Task
 
+
 async def my_custom_task(data):
     # Your logic here
     processed_data = process(data)
     return processed_data
+
 
 # Use in pipeline
 task = Task(my_custom_task)
@@ -738,9 +740,7 @@ from cognee.infrastructure.llm.get_llm_client import get_llm_client
 
 llm_client = get_llm_client()
 response = await llm_client.acreate_structured_output(
-    text_input="Your prompt",
-    system_prompt="System instructions",
-    response_model=YourPydanticModel
+    text_input="Your prompt", system_prompt="System instructions", response_model=YourPydanticModel
 )
 ```
 

@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, DateTime, ForeignKey, UUID
+
+from sqlalchemy import UUID, Column, DateTime, ForeignKey
+
 from cognee.infrastructure.databases.relational import Base
 
 

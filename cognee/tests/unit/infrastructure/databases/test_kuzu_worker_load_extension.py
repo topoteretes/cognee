@@ -9,13 +9,13 @@ connection and retry, instead of surfacing Ladybug's
 Pure tests: fake connection/registry, no ladybug, no subprocess.
 """
 
+import sys
+
 import pytest
 
 from cognee_db_workers.harness import Request
 from cognee_db_workers.kuzu_protocol import OP_LOAD_EXTENSION
 from cognee_db_workers.kuzu_worker import _load_extension
-
-import sys
 
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from

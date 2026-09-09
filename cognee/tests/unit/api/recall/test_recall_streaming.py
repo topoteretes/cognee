@@ -21,15 +21,14 @@ from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
-
 from cognee.api.sse import wants_event_stream
 from cognee.api.v1.recall import recall_stream
 from cognee.api.v1.recall.routers.get_recall_router import get_recall_router
 from cognee.exceptions import CogneeApiError
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.streaming.token_sink import (
-    get_active_token_sink,
     answer_scope,
+    get_active_token_sink,
 )
 from cognee.modules.recall.types.RecallResponse import ResponseGraphEntry
 from cognee.modules.recall.types.SearchResultItem import SearchResultKind
@@ -324,9 +323,8 @@ def test_a_cognee_error_before_output_is_left_to_the_global_handler(client, monk
         raise _Denied()
 
     monkeypatch.setattr(recall_pkg, "recall", _denied)
-    with _flag():
-        with pytest.raises(_Denied):
-            client.post("/recall", json={"query": "q"}, headers={"Accept": "text/event-stream"})
+    with _flag(), pytest.raises(_Denied):
+        client.post("/recall", json={"query": "q"}, headers={"Accept": "text/event-stream"})
 
 
 def test_a_failure_after_output_arrives_as_a_single_error_event(client, monkeypatch):
@@ -473,10 +471,13 @@ async def test_dropped_preview_frames_are_signalled_before_final():
                 sink.put_delta(f"token{index}")
         return PAYLOAD
 
-    with _flag(), patch.object(recall_stream, "KEEPALIVE_SECONDS", 5.0):
-        with patch("cognee.infrastructure.llm.streaming.token_sink.MAX_BUFFERED_EVENTS", 4):
-            started = await recall_stream.begin_recall_stream(_floods)
-            body = "".join([frame async for frame in started.frames()])
+    with (
+        _flag(),
+        patch.object(recall_stream, "KEEPALIVE_SECONDS", 5.0),
+        patch("cognee.infrastructure.llm.streaming.token_sink.MAX_BUFFERED_EVENTS", 4),
+    ):
+        started = await recall_stream.begin_recall_stream(_floods)
+        body = "".join([frame async for frame in started.frames()])
 
     kinds = [event for event, _ in _frames(body)]
     assert "reset" in kinds, "a truncated preview must be signalled"

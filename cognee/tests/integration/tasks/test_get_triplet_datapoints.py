@@ -1,12 +1,13 @@
 import os
 import pathlib
-import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
+import pytest
+import pytest_asyncio
+
 import cognee
-from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
 from cognee.modules.engine.models import Triplet
+from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
 
 
 @pytest_asyncio.fixture
@@ -52,7 +53,7 @@ async def test_get_triplet_datapoints_integration(setup_test_environment):
         async for triplet in get_triplet_datapoints([{}], triplets_batch_size=10):
             triplets.append(triplet)
 
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     if len(edges) > 0 and len(triplets) == 0:
         test_triplets = await graph_engine.get_triplets_batch(offset=0, limit=10)

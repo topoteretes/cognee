@@ -23,7 +23,6 @@ from __future__ import annotations
 import time
 
 import requests
-
 from compose_utils import recreate_service, service_logs, wait_for_http_ok
 from config import CONFIG
 from golden_flow import find_dataset, golden_flow, login

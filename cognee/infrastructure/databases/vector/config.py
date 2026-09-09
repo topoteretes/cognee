@@ -1,9 +1,9 @@
 import json
 import os
-import pydantic
-from pathlib import Path
 from functools import lru_cache
-from typing import Union
+from pathlib import Path
+
+import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.base_config import get_base_config
@@ -35,7 +35,7 @@ class VectorConfig(BaseSettings):
     vector_db_password: str = ""
     vector_db_host: str = ""
     vector_db_subprocess_enabled: bool = True
-    vector_pool_args: Union[str, None] = None
+    vector_pool_args: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 

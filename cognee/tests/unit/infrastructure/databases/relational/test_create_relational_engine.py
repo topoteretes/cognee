@@ -1,13 +1,12 @@
 import sys
 import types
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from cognee.infrastructure.databases.relational.create_relational_engine import (
     create_relational_engine,
 )
-
 
 POSTGRES_PARAMS = {
     "db_path": "/tmp",
@@ -111,6 +110,8 @@ class TestCreateRelationalEngineTurso:
     def test_turso_missing_driver_raises_actionable_import_error(self):
         """When the libSQL driver is missing, raise a clear cognee[turso] install error."""
         # Setting the module to None in sys.modules makes `import libsql_experimental` raise ImportError.
-        with patch.dict(sys.modules, {"libsql_experimental": None}):
-            with pytest.raises(ImportError, match="Turso/libSQL"):
-                create_relational_engine(**TURSO_PARAMS)
+        with (
+            patch.dict(sys.modules, {"libsql_experimental": None}),
+            pytest.raises(ImportError, match="Turso/libSQL"),
+        ):
+            create_relational_engine(**TURSO_PARAMS)

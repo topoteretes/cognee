@@ -17,7 +17,6 @@ import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
-
 _MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "alembic"

@@ -54,18 +54,18 @@ DEFAULT_PASSWORD = "serve-routing-e2e-password"
 
 def _client_env(root: Path) -> dict:
     """Isolation for the CLIENT half — its local store must stay empty."""
-    return dict(
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        DB_PROVIDER="sqlite",
-        DB_NAME="serve_routing_client.db",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="ladybug",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        COGNEE_SKIP_CONNECTION_TEST="true",
-        LLM_API_KEY="sk-mocked-never-called",
-    )
+    return {
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "DB_PROVIDER": "sqlite",
+        "DB_NAME": "serve_routing_client.db",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "ladybug",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "COGNEE_SKIP_CONNECTION_TEST": "true",
+        "LLM_API_KEY": "sk-mocked-never-called",
+    }
 
 
 def _reset_config_caches() -> None:
@@ -105,14 +105,14 @@ def api_key():
     # during that import. As a plain script the launcher runs first, as intended.
     launcher = Path(__file__).parent / "mock_instance.py"
     log_path = root / "instance.log"
-    log_file = open(log_path, "w")
+    log_file = open(log_path, "w")  # noqa: SIM115 - the subprocess writes to it for its whole lifetime
 
     process = subprocess.Popen(
         [sys.executable, str(launcher), str(root), str(PORT)],
         env=server_env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+        start_new_session=True,
     )
 
     deadline = time.time() + SERVER_BOOT_TIMEOUT
@@ -134,7 +134,7 @@ def api_key():
             f"{log_path.read_text()[-3000:]}"
         )
 
-    import cognee  # noqa: F401  (its import runs load_dotenv(override=True))
+    import cognee  # (its import runs load_dotenv(override=True))
 
     os.environ.update(_client_env(root / "client"))
     _reset_config_caches()
@@ -150,7 +150,7 @@ def api_key():
     shutil.rmtree(root, ignore_errors=True)
 
 
-def _status_of(path: str, api_key: str = None) -> int:
+def _status_of(path: str, api_key: str | None = None) -> int:
     """Status code of a GET against the instance, optionally authenticated."""
     request = urllib.request.Request(f"{BASE_URL}{path}")
     if api_key is not None:
@@ -256,7 +256,7 @@ def test_serve_routes_every_proxied_endpoint(api_key):
             "add() + cognify() are proxied", bool(cognify_result), f"{len(cognify_result)} run(s)"
         )
 
-        dataset_id = UUID(str(list(cognify_result.keys())[0]))
+        dataset_id = UUID(str(next(iter(cognify_result.keys()))))
 
         datasets_local, data_local = _local_row_counts()
         record(

@@ -11,7 +11,7 @@ Raw data (str / bytes / file-like / list of the above) continues to
 flow through the permanent add+cognify path unchanged.
 """
 
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -40,9 +40,9 @@ class QAEntry(SessionTaggedEntry):
     question: str = Field(examples=["What is the capital of France?"])
     answer: str = Field(examples=["The capital of France is Paris."])
     context: str = Field(default="", examples=["Retrieved from geography_notes.md"])
-    feedback_text: Optional[str] = None
-    feedback_score: Optional[int] = None
-    used_graph_element_ids: Optional[dict] = None
+    feedback_text: str | None = None
+    feedback_score: int | None = None
+    used_graph_element_ids: dict | None = None
 
 
 class TraceEntry(SessionTaggedEntry):
@@ -59,8 +59,8 @@ class TraceEntry(SessionTaggedEntry):
         description="Name of the tool/function whose execution this trace step records.",
     )
     status: Literal["success", "error"] = "success"
-    method_params: Optional[dict] = None
-    method_return_value: Optional[Any] = None
+    method_params: dict | None = None
+    method_return_value: Any | None = None
     memory_query: str = ""
     memory_context: str = ""
     error_message: str = ""
@@ -83,8 +83,8 @@ class FeedbackEntry(BaseModel):
             "feedback to that QA."
         ),
     )
-    feedback_text: Optional[str] = None
-    feedback_score: Optional[int] = None
+    feedback_text: str | None = None
+    feedback_score: int | None = None
 
 
 class SkillRunEntry(BaseModel):
@@ -100,7 +100,7 @@ class SkillRunEntry(BaseModel):
     selected_skill_id: str
     task_text: str = ""
     result_summary: str = ""
-    success_score: Optional[float] = None
+    success_score: float | None = None
     feedback: float = 0.0
     error_type: str = ""
     error_message: str = ""
@@ -114,7 +114,7 @@ class SkillRunEntry(BaseModel):
 
     @field_validator("success_score")
     @classmethod
-    def _validate_success_score(cls, value: Optional[float]) -> Optional[float]:
+    def _validate_success_score(cls, value: float | None) -> float | None:
         if value is not None and not 0.0 <= value <= 1.0:
             raise ValueError("success_score must be in range [0.0, 1.0]")
         return value
@@ -134,7 +134,7 @@ class SkillRunEntry(BaseModel):
         return value
 
 
-MemoryEntry = Union[QAEntry, TraceEntry, FeedbackEntry, SkillRunEntry]
+MemoryEntry = QAEntry | TraceEntry | FeedbackEntry | SkillRunEntry
 
 
 # Tuple used at runtime for isinstance checks; Union itself isn't
@@ -168,7 +168,7 @@ _VALID_SCOPES = {
 }
 
 
-def normalize_scope(scope: Optional[Union[str, list[str]]]) -> list[str]:
+def normalize_scope(scope: str | list[str] | None) -> list[str]:
     """Normalize the recall ``scope`` parameter to a concrete source list.
 
     Accepts ``None``, a single string, or a list of strings. Returns a

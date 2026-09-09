@@ -1,8 +1,8 @@
 # ruff: noqa: E402
 import asyncio
-from pathlib import Path
 import logging
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -13,10 +13,10 @@ load_dotenv()
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["GRAPH_DATABASE_PROVIDER"] = "ladybug"
 
-import cognee  # noqa: E402
-from cognee import SearchType  # noqa: E402
-from cognee.infrastructure.llm.LLMGateway import LLMGateway  # noqa: E402
-from cognee.shared.logging_utils import setup_logging  # noqa: E402
+import cognee
+from cognee import SearchType
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.shared.logging_utils import setup_logging
 
 
 class ProcurementMemorySystem:

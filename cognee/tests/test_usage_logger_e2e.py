@@ -1,14 +1,18 @@
+import asyncio
+import logging
 import os
+
 import pytest
 import pytest_asyncio
-import asyncio
 from fastapi.testclient import TestClient
 
 import cognee
 from cognee.api.client import app
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
-from cognee.modules.users.methods import get_default_user, get_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user, get_default_user
+
+logger = logging.getLogger(__name__)
 
 
 async def _reset_engines_and_prune():
@@ -20,7 +24,7 @@ async def _reset_engines_and_prune():
         if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
             await vector_engine.engine.dispose(close=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _reset_engines_and_prune", exc_info=True)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -183,8 +187,8 @@ async def test_api_endpoint_logging(e2e_config, authenticated_client, cache_engi
 @pytest.mark.asyncio
 async def test_mcp_tool_logging(e2e_config, cache_engine):
     """Test that MCP tools succeed and log to Redis."""
-    import sys
     import importlib.util
+    import sys
     from pathlib import Path
 
     await _reset_engines_and_prune()

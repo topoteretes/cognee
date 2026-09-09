@@ -63,7 +63,7 @@ async def recover_stale_cognify_runs_on_startup() -> None:
             if run.status == PipelineRunStatus.DATASET_PROCESSING_STARTED
         ]
     except Exception:
-        logger.error("Failed to recover latest cognify run which did not successfully finish.")
+        logger.exception("Failed to recover latest cognify run which did not successfully finish.")
         return
 
     for pipeline_run in recovery_candidates:
@@ -105,10 +105,8 @@ async def recover_stale_cognify_runs_on_startup() -> None:
                 pipeline_run.pipeline_run_id,
                 pipeline_run.dataset_id,
             )
-        except Exception as error:
-            logger.error(
-                "Startup recovery failed for cognify run %s: %s",
+        except Exception:
+            logger.exception(
+                "Startup recovery failed for cognify run %s",
                 pipeline_run.pipeline_run_id,
-                error,
-                exc_info=True,
             )

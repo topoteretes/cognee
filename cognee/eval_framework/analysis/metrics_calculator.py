@@ -1,7 +1,7 @@
 import json
 from collections import defaultdict
+
 import numpy as np
-from typing import Dict, List, Tuple
 
 
 def bootstrap_ci(scores, num_samples=10000, confidence_level=0.95):
@@ -17,7 +17,7 @@ def bootstrap_ci(scores, num_samples=10000, confidence_level=0.95):
     return np.mean(scores), lower_bound, upper_bound
 
 
-def load_metrics_data(json_file_path: str) -> List[Dict]:
+def load_metrics_data(json_file_path: str) -> list[dict]:
     """Load metrics data from JSON file."""
     try:
         with open(json_file_path, "r", encoding="utf-8") as f:
@@ -29,8 +29,8 @@ def load_metrics_data(json_file_path: str) -> List[Dict]:
 
 
 def extract_metrics_and_details(
-    data: List[Dict],
-) -> Tuple[Dict[str, List[float]], Dict[str, List[Dict]]]:
+    data: list[dict],
+) -> tuple[dict[str, list[float]], dict[str, list[dict]]]:
     """Extract metrics scores and details from evaluation data."""
     metrics_data = defaultdict(list)
     metric_details = defaultdict(list)
@@ -56,8 +56,8 @@ def extract_metrics_and_details(
 
 
 def save_aggregate_metrics(
-    metrics_data: Dict[str, List[float]],
-    ci_results: Dict[str, Tuple[float, float, float]],
+    metrics_data: dict[str, list[float]],
+    ci_results: dict[str, tuple[float, float, float]],
     output_path: str,
 ) -> None:
     """Save aggregated metrics and confidence intervals to file."""
@@ -77,7 +77,7 @@ def save_aggregate_metrics(
 
 def calculate_metrics_statistics(
     json_data: str, aggregate_output_path: str
-) -> Tuple[Dict[str, List[float]], Dict[str, List[Dict]], Dict[str, Tuple[float, float, float]]]:
+) -> tuple[dict[str, list[float]], dict[str, list[dict]], dict[str, tuple[float, float, float]]]:
     """Calculate metrics statistics and save aggregated results."""
     data = load_metrics_data(json_data)
     metrics_data, metric_details = extract_metrics_and_details(data)

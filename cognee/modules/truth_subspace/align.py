@@ -8,7 +8,7 @@ that pass nothing leave baseline scoring untouched.
 
 import hashlib
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:

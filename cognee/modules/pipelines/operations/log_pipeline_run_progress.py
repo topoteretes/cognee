@@ -1,6 +1,7 @@
 from uuid import UUID
-from typing import Optional
+
 from sqlalchemy import select
+
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
 
@@ -12,7 +13,7 @@ async def log_pipeline_run_progress(
     dataset_id: UUID,
     completed_items: int,
     total_items: int,
-    current_stage: Optional[str] = None,
+    current_stage: str | None = None,
 ):
     """Persist an in-flight progress snapshot for this run.
 
