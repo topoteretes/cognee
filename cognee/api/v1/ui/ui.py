@@ -478,13 +478,21 @@ def start_ui(
     """
     logger.info("Starting cognee UI...")
 
+    # The MCP server is optional: the UI and backend work fine without it, so a
+    # busy MCP port only disables the MCP server instead of aborting the whole
+    # launch — same graceful degradation as the Docker-unavailable path below.
     ports_to_check = [(port, "Frontend UI")]
 
     if start_backend:
         ports_to_check.append((backend_port, "Backend API"))
 
-    if start_mcp:
-        ports_to_check.append((mcp_port, "MCP Server"))
+    if start_mcp and not _is_port_available(mcp_port):
+        logger.warning(
+            f"Port {mcp_port} is already in use (possibly a leftover cognee MCP "
+            f"container), skipping the MCP server. The UI and backend will start "
+            f"without it. Stop whatever holds the port to get the MCP server back."
+        )
+        start_mcp = False
 
     logger.info("Checking port availability...")
     all_ports_available, unavailable_services = _check_required_ports(ports_to_check)
