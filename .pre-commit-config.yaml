@@ -19,3 +19,14 @@ repos:
       # Run the formatter.
       - id: ruff-format
         types_or: [python, pyi]
+  - repo: local
+    hooks:
+      # A revision id is stamped into every deployed database and can never be
+      # changed afterwards, so it must be GENERATED, never typed. See
+      # tools/check_alembic_revision_ids.py and cognee/alembic/README.
+      - id: alembic-revision-ids
+        name: Alembic revision ids are generated, unique, filename-matched
+        entry: python tools/check_alembic_revision_ids.py
+        language: system
+        files: ^cognee/alembic/versions/.*\.py$
+        pass_filenames: false
