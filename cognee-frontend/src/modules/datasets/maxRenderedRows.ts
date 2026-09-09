@@ -3,14 +3,18 @@
  *
  * The file tables are plain `.map()` over their input with no virtualization,
  * so the row count is DOM built synchronously on the main thread. A dataset
- * with 171,828 documents froze the tab. Capping keeps the render bounded no
- * matter how many rows a caller hands over — including a caller that asked the
- * API for a large page, or an older server that still answered unbounded.
+ * with 171,828 documents froze the tab.
  *
- * One constant, so raising it (or replacing all of this with real windowing) is
- * a single edit rather than a hunt through the table components.
+ * This is also the ceiling on infinite scroll: appending indefinitely would
+ * walk the page straight back into that freeze, just more slowly. 2,000 rows is
+ * roughly a dozen scroll steps — far enough to browse without hitting a wall,
+ * and around 12k DOM nodes, which stays responsive. Reaching six figures needs
+ * windowing or server-side search, not a bigger number here.
+ *
+ * One constant, so both the loader and the tables agree, and raising it (or
+ * replacing all of this with real windowing) is a single edit.
  */
-export const MAX_RENDERED_ROWS = 500;
+export const MAX_RENDERED_ROWS = 2000;
 
 /** Rows to render, plus how many were held back. */
 export function capRows<T>(rows: T[]): { visible: T[]; hidden: number } {

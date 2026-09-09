@@ -9,7 +9,8 @@ import { useCogniInstance } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import PageLoading from "@/ui/elements/PageLoading";
 import getDatasetData, { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
-import Pager from "../partials/Pager";
+import ScrollLoader from "../partials/ScrollLoader";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import { useBrainUpload } from "@/modules/ingestion/useBrainUpload";
@@ -57,7 +58,8 @@ interface FileEntry {
 
 
 // Default extraction prompt from cognee OSS (generate_graph_prompt.txt)
-// Documents fetched per page. Matches the API default, so a page is one request.
+// Documents fetched per scroll step. Matches the API default, so a step is
+// exactly one request.
 const FILES_PAGE_SIZE = 100;
 
 const DEFAULT_EXTRACTION_PROMPT = `You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph.
@@ -105,11 +107,13 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
   const [, setLastSynced] = useState<string | null>(null);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filesError, setFilesError] = useState(false);
-  // files is one page. filesTotal is the dataset — the header count and the
-  // "Empty" state must read the total, or a 171,828-document dataset reports
-  // whatever the page size happens to be.
-  const [filesPage, setFilesPage] = useState(0);
+  // files accumulates as the reader scrolls. filesTotal is the dataset — the
+  // header count and the "Empty" state must read the total, or a
+  // 171,828-document dataset reports however far someone happened to scroll.
   const [filesTotal, setFilesTotal] = useState(0);
+  const [filesLoadingMore, setFilesLoadingMore] = useState(false);
+  // Scroll fires faster than state settles, so the boolean alone would race.
+  const filesFetching = useRef(false);
   const [loading, setLoading] = useState(true);
   // data id → session id parsed from the memory blob ("Session ID: <id>"
   // header written by the session→graph bridge), or null when none found.
@@ -430,14 +434,13 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
     }
   }
 
-  const loadFiles = useCallback(async (page = 0) => {
+  const loadFiles = useCallback(async () => {
     if (!cogniInstance) return;
     try {
       const [data, total] = await Promise.all([
-        getDatasetData(datasetId, cogniInstance, { limit: FILES_PAGE_SIZE, offset: page * FILES_PAGE_SIZE }),
+        getDatasetData(datasetId, cogniInstance, { limit: FILES_PAGE_SIZE, offset: 0 }),
         getDatasetDataCount(datasetId, cogniInstance),
       ]);
-      setFilesPage(page);
       setFilesTotal(total);
       setFiles(Array.isArray(data) ? data.map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; size_bytes?: number; file_size?: number }) => ({
         id: d.id,
@@ -456,6 +459,50 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
       setLoading(false);
     }
   }, [cogniInstance, datasetId]);
+
+  /** Append the next scroll step. Bounded by MAX_RENDERED_ROWS, not by total. */
+  const loadMoreFiles = useCallback(async () => {
+    if (!cogniInstance || filesFetching.current) return;
+
+    const offset = files.length;
+    if (offset >= filesTotal || offset >= MAX_RENDERED_ROWS) return;
+
+    filesFetching.current = true;
+    setFilesLoadingMore(true);
+    try {
+      const next = await getDatasetData(datasetId, cogniInstance, {
+        // Never load past the render bound: appending indefinitely walks the
+        // page back into the freeze this paging exists to prevent.
+        limit: Math.min(FILES_PAGE_SIZE, MAX_RENDERED_ROWS - offset),
+        offset,
+      });
+      if (!Array.isArray(next) || next.length === 0) return;
+
+      setFiles((prev) => {
+        // Append by id: a delete or an ingest between steps shifts the offset
+        // window, and a blind append would duplicate rows already on screen.
+        const seen = new Set(prev.map((f) => f.id));
+        return [
+          ...prev,
+          ...next
+            .filter((d: { id: string }) => !seen.has(d.id))
+            .map((d: FileEntry & { rawDataLocation?: string; originalExtension?: string; original_extension?: string; originalMimeType?: string; original_mime_type?: string; dataSize?: number; size_bytes?: number; file_size?: number }) => ({
+              id: d.id,
+              name: d.name || d.rawDataLocation?.split("/").pop() || d.id,
+              extension: d.originalExtension || d.original_extension || d.extension,
+              mimeType: d.originalMimeType || d.original_mime_type || d.mimeType,
+              size: d.dataSize ?? d.size ?? d.size_bytes ?? d.file_size,
+              createdAt: d.createdAt,
+            })),
+        ];
+      });
+    } catch {
+      // A failed step must not blank rows already on screen.
+    } finally {
+      filesFetching.current = false;
+      setFilesLoadingMore(false);
+    }
+  }, [cogniInstance, datasetId, files.length, filesTotal]);
 
   // Resolves the dataset's display name from FilterContext's shared datasets
   // list, which loads asynchronously and may still be empty on the first
@@ -1022,7 +1069,7 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         loadError={filesError}
         onDelete={(id) => setDeleteFileTarget(filtered.find((f) => f.id === id) ?? null)}
         onUploadClick={() => fileInputRef.current?.click()}
-        onRetry={() => loadFiles(filesPage)}
+        onRetry={() => loadFiles()}
         deletingId={deletingFileId}
       />
 
@@ -1035,12 +1082,16 @@ export default function DatasetDetailPage({ datasetId }: { datasetId: string }) 
         </div>
       )}
 
+      {/* The page itself scrolls, so the observer's default viewport root is
+          the right one here — no rootRef. */}
       {!search && (
-        <Pager
-          page={filesPage}
-          pageSize={FILES_PAGE_SIZE}
+        <ScrollLoader
+          loaded={files.length}
           total={filesTotal}
-          onGoTo={(page) => loadFiles(page)}
+          maxLoaded={MAX_RENDERED_ROWS}
+          busy={filesLoadingMore}
+          onLoadMore={loadMoreFiles}
+          noun="files"
         />
       )}
 

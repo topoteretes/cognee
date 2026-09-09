@@ -9,7 +9,7 @@ import type { BrainUploadStage } from "@/modules/ingestion/useBrainUpload";
 import type { UploadProgress } from "@/modules/ingestion/uploadProgress";
 import UploadProgressBar from "./UploadProgressBar";
 import DocumentList, { type DocRow } from "./DocumentList";
-import Pager from "./Pager";
+import ScrollLoader from "./ScrollLoader";
 
 // The Documents column of the brains finder: hidden file input, drag-and-drop,
 // header with add/paste actions, upload progress/error banners, and the doc
@@ -33,10 +33,10 @@ export default function DocumentsPanel<T extends DocRow>({
   onClearUploadError,
   onRetryBuild,
   onRetryDocs,
-  docsPage,
   docsTotal,
-  docsPageSize,
-  onGoToDocsPage,
+  docsLoadingMore,
+  docsMaxLoaded,
+  onLoadMoreDocs,
 }: {
   selectedId: string | null;
   selectedName: string | null;
@@ -57,13 +57,14 @@ export default function DocumentsPanel<T extends DocRow>({
   onClearUploadError: () => void;
   onRetryBuild: () => void;
   onRetryDocs: () => void;
-  /** Paging over the dataset. docs is one page of docsTotal, not all of it. */
-  docsPage: number;
+  /** docs is what has been scrolled into so far, not the whole dataset. */
   docsTotal: number;
-  docsPageSize: number;
-  onGoToDocsPage: (page: number) => void;
+  docsLoadingMore: boolean;
+  docsMaxLoaded: number;
+  onLoadMoreDocs: () => void;
 }): ReactElement {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const dragCounter = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -133,8 +134,10 @@ export default function DocumentsPanel<T extends DocRow>({
           </div>
         )}
 
-        {/* Content */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        {/* Content. The ref is the scroll root for ScrollLoader's observer:
+            IntersectionObserver watches the viewport unless told otherwise,
+            and a sentinel inside this element never intersects it. */}
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto" }}>
           {!selectedId ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 8 }}>
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><path d="M4 8a2 2 0 012-2h6l2 3h12a2 2 0 012 2v13a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke="rgba(237,236,234,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -164,12 +167,13 @@ export default function DocumentsPanel<T extends DocRow>({
           ) : (
             <>
               <DocumentList docs={docs} onDelete={onDeleteDoc} />
-              <Pager
-                page={docsPage}
-                pageSize={docsPageSize}
+              <ScrollLoader
+                loaded={docs.length}
                 total={docsTotal}
-                busy={docsLoading}
-                onGoTo={onGoToDocsPage}
+                maxLoaded={docsMaxLoaded}
+                busy={docsLoadingMore}
+                onLoadMore={onLoadMoreDocs}
+                rootRef={scrollRef}
                 compact
               />
             </>

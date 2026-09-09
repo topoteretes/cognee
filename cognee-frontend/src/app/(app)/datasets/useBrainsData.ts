@@ -7,6 +7,7 @@ import { useCogniInstance, useTenant } from "@/modules/tenant/TenantProvider";
 import { useFilter } from "@/ui/layout/FilterContext";
 import getDatasets from "@/modules/datasets/getDatasets";
 import getDatasetData, { getDatasetDataCount } from "@/modules/datasets/getDatasetData";
+import { MAX_RENDERED_ROWS } from "@/modules/datasets/maxRenderedRows";
 import createDataset from "@/modules/datasets/createDataset";
 import deleteDataset from "@/modules/datasets/deleteDataset";
 import deleteDatasetData from "@/modules/datasets/deleteDatasetData";
@@ -28,8 +29,8 @@ import { mapProcessingStatus, type DatasetRaw, type FileEntry, type DisplayStatu
 
 export type { FileEntry, DisplayStatus, Dataset, UseBrainsDataResult } from "./brainsTypes";
 
-// Documents fetched per page. Matches the API's own default so a page is one
-// request, and stays well under the render cap so a page is never truncated.
+// Documents fetched per scroll step. Matches the API's own default so a step
+// is exactly one request.
 const DOCS_PAGE_SIZE = 100;
 
 // Owns all data and interaction state for the brains (datasets) finder:
@@ -56,11 +57,14 @@ export function useBrainsData(): UseBrainsDataResult {
   const [selectedDocs, setSelectedDocs] = useState<FileEntry[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docsError, setDocsError] = useState(false);
-  // The list is one page of the dataset, not the dataset. docsTotal comes from
-  // /data/count, so the header can say "1-100 of 171,828" instead of implying
-  // the page is everything there is.
-  const [docsPage, setDocsPage] = useState(0);
+  // selectedDocs accumulates as the reader scrolls; docsTotal comes from
+  // /data/count, so the UI can say "100 of 171,828" instead of implying the
+  // rows in hand are everything there is.
   const [docsTotal, setDocsTotal] = useState(0);
+  const [docsLoadingMore, setDocsLoadingMore] = useState(false);
+  // Guards a second fetch for a step already in flight: scroll fires faster
+  // than state settles, so docsLoadingMore alone would race.
+  const docsFetching = useRef(false);
 
   const { isUploading, stage: uploadStage, progress: uploadProgress, upload } = useBrainUpload(cogniInstance);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -180,8 +184,9 @@ export function useBrainsData(): UseBrainsDataResult {
         getDatasetDataCount(completedSelectedId, cogniInstance),
       ])
         .then(([docs, count]) => {
+          // Reset rather than append: the dataset just changed underneath us,
+          // so keeping scrolled rows would interleave stale and fresh ones.
           setSelectedDocs(Array.isArray(docs) ? docs : []);
-          setDocsPage(0);
           setDocsTotal(count);
           setDatasets((prev) => prev.map((d) => d.id === completedSelectedId ? { ...d, documents: count } : d));
         })
@@ -192,19 +197,19 @@ export function useBrainsData(): UseBrainsDataResult {
     }
   }, [statusDetails, cogniInstance, selectedId]);
 
-  async function refreshSelectedDocs(id: string, page = 0): Promise<void> {
+  async function refreshSelectedDocs(id: string): Promise<void> {
     if (!cogniInstance) return;
     setDocsLoading(true);
+    docsFetching.current = true;
     try {
-      // The count is what the header and the dataset badge display; the page is
-      // what renders. Asking for both costs one extra indexed count query and
-      // saves transferring every row in the dataset to measure it.
+      // The count is what the header and the dataset badge display; the rows
+      // are what renders. Asking for both costs one extra indexed count query
+      // and saves transferring every row in the dataset to measure it.
       const [data, count] = await Promise.all([
-        getDatasetData(id, cogniInstance, { limit: DOCS_PAGE_SIZE, offset: page * DOCS_PAGE_SIZE }),
+        getDatasetData(id, cogniInstance, { limit: DOCS_PAGE_SIZE, offset: 0 }),
         getDatasetDataCount(id, cogniInstance),
       ]);
       setSelectedDocs(Array.isArray(data) ? data : []);
-      setDocsPage(page);
       setDocsTotal(count);
       setDatasets((prev) => prev.map((d) => d.id === id ? { ...d, documents: count } : d));
       setDocsError(false);
@@ -213,15 +218,44 @@ export function useBrainsData(): UseBrainsDataResult {
       // empty state.
       setDocsError(true);
     } finally {
+      docsFetching.current = false;
       setDocsLoading(false);
     }
   }
 
-  async function goToDocsPage(page: number): Promise<void> {
-    const lastPage = Math.max(0, Math.ceil(docsTotal / DOCS_PAGE_SIZE) - 1);
-    const target = Math.min(Math.max(page, 0), lastPage);
-    if (!selectedId || target === docsPage) return;
-    await refreshSelectedDocs(selectedId, target);
+  /** Append the next scroll step. Bounded by MAX_RENDERED_ROWS, not by total. */
+  async function loadMoreDocs(): Promise<void> {
+    if (!cogniInstance || !selectedId || docsFetching.current) return;
+
+    const offset = selectedDocs.length;
+    if (offset >= docsTotal || offset >= MAX_RENDERED_ROWS) return;
+
+    docsFetching.current = true;
+    setDocsLoadingMore(true);
+    try {
+      const next = await getDatasetData(selectedId, cogniInstance, {
+        // Never load past the render bound. Rows are real DOM, and rendering
+        // all of them is the freeze this paging exists to prevent — scrolling
+        // must not walk the page back into it.
+        limit: Math.min(DOCS_PAGE_SIZE, MAX_RENDERED_ROWS - offset),
+        offset,
+      });
+      if (!Array.isArray(next) || next.length === 0) return;
+
+      setSelectedDocs((prev) => {
+        // Append by id, not by trusting the offset window: a delete or an
+        // ingest between steps shifts it, and a blind append would duplicate
+        // rows the reader already has.
+        const seen = new Set(prev.map((doc) => doc.id));
+        return [...prev, ...next.filter((doc: FileEntry) => !seen.has(doc.id))];
+      });
+    } catch {
+      // A failed step must not blank the rows already on screen. The reader can
+      // scroll again, or use the button the loader falls back to.
+    } finally {
+      docsFetching.current = false;
+      setDocsLoadingMore(false);
+    }
   }
 
   async function handleRefresh(): Promise<void> {
@@ -234,10 +268,9 @@ export function useBrainsData(): UseBrainsDataResult {
     if (selectedId === id) return;
     setSelectedId(id);
     setSelectedDocs([]);
-    setDocsPage(0);
     setDocsTotal(0);
     setDocsError(false);
-    await refreshSelectedDocs(id, 0);
+    await refreshSelectedDocs(id);
   }
 
   async function handleUploadFiles(files: File[]): Promise<void> {
@@ -484,11 +517,11 @@ export function useBrainsData(): UseBrainsDataResult {
     selectedDocs,
     docsLoading,
     docsError,
-    retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId, docsPage); },
-    docsPage,
+    retryDocs: () => { if (selectedId) refreshSelectedDocs(selectedId); },
     docsTotal,
-    docsPageSize: DOCS_PAGE_SIZE,
-    goToDocsPage,
+    docsLoadingMore,
+    docsMaxLoaded: MAX_RENDERED_ROWS,
+    loadMoreDocs,
     outdatedDatasets,
     refreshing,
     isUploading,

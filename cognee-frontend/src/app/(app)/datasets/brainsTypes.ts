@@ -58,12 +58,13 @@ export interface UseBrainsDataResult {
   docsLoading: boolean;
   docsError: boolean;
   retryDocs: () => void;
-  /** Zero-based index of the page currently in selectedDocs. */
-  docsPage: number;
   /** Documents in the dataset, from /data/count — not selectedDocs.length. */
   docsTotal: number;
-  docsPageSize: number;
-  goToDocsPage: (page: number) => Promise<void>;
+  /** A scroll step is in flight; distinct from docsLoading (first load). */
+  docsLoadingMore: boolean;
+  /** Upper bound on rows selectedDocs will ever hold. */
+  docsMaxLoaded: number;
+  loadMoreDocs: () => Promise<void>;
   outdatedDatasets: Set<string>;
   refreshing: boolean;
   isUploading: boolean;
