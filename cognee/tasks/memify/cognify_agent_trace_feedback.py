@@ -54,8 +54,12 @@ async def cognify_agent_trace_feedback(
             )
 
         for item in items:
-            window = item if isinstance(item, AgentTracePersistWindow) else None
-            trace_content = window.text if window is not None else item
+            if isinstance(item, AgentTracePersistWindow):
+                window = item
+                trace_content = item.text
+            else:
+                window = None
+                trace_content = item
 
             if not trace_content.strip():
                 if window is None:
