@@ -75,7 +75,9 @@ def _requested_extension_relpath(
     """
     try:
         execute(f"INSTALL JSON FROM '{_PROBE_REPO}';")
-    except Exception as error:  # noqa: BLE001 — the probe reads the answer out of any error text
+    # The probe reads its answer out of ANY error's text, so the catch is
+    # deliberately blind.
+    except Exception as error:  # noqa: BLE001
         match = _EXTENSION_RELPATH_PATTERN.search(str(error))
         if match:
             return match.group(1), match.group(2)
@@ -136,7 +138,9 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
             escaped = bundled.replace("\\", "/").replace("'", "''")
             execute(f"LOAD EXTENSION '{escaped}';")
             return
-        except Exception as error:  # noqa: BLE001 — any dlopen failure must fall through to remote install
+        # Deliberately blind: any dlopen failure must fall through to the
+        # remote install below.
+        except Exception as error:  # noqa: BLE001
             # A bundled binary that fails to dlopen (e.g. a glibc build on a
             # musl system) should not strand the user: fall through to the
             # remote install below, which serves the correct binary.
