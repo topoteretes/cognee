@@ -99,6 +99,10 @@ class CacheDBInterface(ABC):
     ) -> list[SessionQAEntry]:
         """
         Retrieve the most recent Q/A/context triplets for a session.
+
+        Implementations must return entries in chronological order, return an
+        empty list when no entries exist, and return an empty list when
+        last_n <= 0. They must never return None.
         """
 
     async def get_all_qas(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
@@ -108,7 +112,8 @@ class CacheDBInterface(ABC):
     @abstractmethod
     async def get_all_qa_entries(self, user_id: str, session_id: str) -> list[SessionQAEntry]:
         """
-        Retrieve all Q/A/context triplets for the given session.
+        Retrieve all Q/A/context triplets for the given session in chronological
+        order. Implementations must return an empty list when no entries exist.
         """
 
     @abstractmethod
@@ -219,7 +224,10 @@ class CacheDBInterface(ABC):
         self, user_id: str, session_id: str, last_n: int | None = None
     ) -> list[SessionAgentTraceEntry]:
         """
-        Retrieve agent trace steps for the given session.
+        Retrieve agent trace steps for the given session in chronological order.
+
+        Implementations must return an empty list when no entries exist and when
+        last_n <= 0. They must never return None.
         """
 
     @abstractmethod
@@ -227,7 +235,9 @@ class CacheDBInterface(ABC):
         self, user_id: str, session_id: str, last_n: int | None = None
     ) -> list[str]:
         """
-        Retrieve per-step feedback strings for the given trace session.
+        Retrieve per-step feedback strings for the given trace session in
+        chronological order. Implementations must return an empty list when no
+        entries exist and when last_n <= 0.
         """
 
     @abstractmethod
