@@ -21,7 +21,6 @@ import re
 import sys
 import tempfile
 from collections.abc import Callable
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +75,9 @@ def _requested_extension_relpath(
     try:
         execute(f"INSTALL JSON FROM '{_PROBE_REPO}';")
     # The probe reads its answer out of ANY error's text, so the catch is
-    # deliberately blind.
-    except Exception as error:  # noqa: BLE001
+    # deliberately blind — failing is the probe's expected outcome.
+    except Exception as error:
+        logger.debug("JSON extension probe failed as intended", exc_info=True)
         match = _EXTENSION_RELPATH_PATTERN.search(str(error))
         if match:
             return match.group(1), match.group(2)
@@ -138,15 +138,14 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
             escaped = bundled.replace("\\", "/").replace("'", "''")
             execute(f"LOAD EXTENSION '{escaped}';")
             return
-        # Deliberately blind: any dlopen failure must fall through to the
-        # remote install below.
-        except Exception as error:  # noqa: BLE001
-            # A bundled binary that fails to dlopen (e.g. a glibc build on a
-            # musl system) should not strand the user: fall through to the
-            # remote install below, which serves the correct binary.
-            print(
-                f"[ladybug worker] bundled JSON extension failed to load: {error!r}",
-                file=sys.stderr,
+        # Deliberately blind: a bundled binary that fails to dlopen for any
+        # reason (e.g. a glibc build on a musl system) should not strand the
+        # user — fall through to the remote install below, which serves the
+        # correct binary.
+        except Exception:
+            logger.warning(
+                "Bundled JSON extension failed to load; falling back to remote install",
+                exc_info=True,
             )
 
     execute("INSTALL JSON;")
