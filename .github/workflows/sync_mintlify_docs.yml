@@ -1,7 +1,6 @@
 name: automation | Sync Mintlify Docs
 
 on:
-  pull_request:
   release:
     types: [published]
   workflow_dispatch:
