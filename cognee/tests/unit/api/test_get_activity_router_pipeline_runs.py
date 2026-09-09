@@ -737,3 +737,48 @@ def test_huge_threshold_env_does_not_500_the_endpoint(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()[0]["status"] == "DATASET_PROCESSING_STARTED"
+
+
+@pytest.mark.parametrize("bad_value", ["-100", "0", "30m", "999999999999999999999999"])
+def test_rejected_threshold_env_is_logged_with_its_value(monkeypatch, bad_value):
+    """Falling back to the default silently leaves an operator who typo'd
+    the variable with default behaviour and no reason why, so each reject
+    branch has to name the value it refused."""
+    warnings = []
+    monkeypatch.setattr(
+        status_module.logger, "warning", lambda msg, *args: warnings.append(msg % args)
+    )
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", bad_value)
+    status_module._abandon_after_seconds_for.cache_clear()
+
+    assert status_module._pipeline_run_abandon_after_seconds() == 1800
+    assert len(warnings) == 1
+    assert bad_value in warnings[0]
+    assert "PIPELINE_RUN_ABANDON_AFTER_SECONDS" in warnings[0]
+
+
+def test_a_rejected_value_is_logged_once_not_once_per_request(monkeypatch):
+    """These endpoints are polled, and the value is read per request, so an
+    unconditional warning would repeat the same line for the life of the
+    process."""
+    warnings = []
+    monkeypatch.setattr(status_module.logger, "warning", lambda msg, *args: warnings.append(msg))
+    # A value no earlier test can have cached, so this measures the
+    # warn-once property itself rather than depending on cache internals:
+    # drop the memoization and this counts 5, it does not error out.
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", f"-{uuid4().int % 10**6}")
+
+    for _ in range(5):
+        assert status_module._pipeline_run_abandon_after_seconds() == 1800
+
+    assert len(warnings) == 1
+
+
+def test_a_valid_threshold_env_logs_nothing(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(status_module.logger, "warning", lambda msg, *args: warnings.append(msg))
+    monkeypatch.setenv("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "60")
+    status_module._abandon_after_seconds_for.cache_clear()
+
+    assert status_module._pipeline_run_abandon_after_seconds() == 60
+    assert warnings == []

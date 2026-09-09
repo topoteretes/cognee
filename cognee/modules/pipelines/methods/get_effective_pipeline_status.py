@@ -1,9 +1,12 @@
 import enum
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from functools import cache
 
 from cognee.modules.pipelines.models import PipelineRun, PipelineRunStatus
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class EffectivePipelineRunStatus(str, enum.Enum):
@@ -38,15 +41,59 @@ class EffectivePipelineRunStatus(str, enum.Enum):
 _MAX_ABANDON_AFTER_SECONDS = 10**9  # ~31 years; timedelta stays well inside range
 
 
-def _pipeline_run_abandon_after_seconds() -> int:
-    raw = os.environ.get("PIPELINE_RUN_ABANDON_AFTER_SECONDS", "")
+_DEFAULT_ABANDON_AFTER_SECONDS = 1800
+_ABANDON_AFTER_ENV = "PIPELINE_RUN_ABANDON_AFTER_SECONDS"
+
+
+@cache
+def _abandon_after_seconds_for(raw: str) -> int:
+    """Validate one raw env value, warning once per distinct bad value.
+
+    Cached on the raw string so a misconfigured deployment gets one warning
+    rather than one per request: the reporting endpoints are polled, and
+    this is read on every call, so warning unconditionally would repeat the
+    same line for as long as the process runs. Distinct values are distinct
+    cache keys, so changing the variable is still picked up.
+    """
+    if not raw:
+        return _DEFAULT_ABANDON_AFTER_SECONDS
+
     try:
-        value = int(raw) if raw else 1800
+        value = int(raw)
     except ValueError:
-        return 1800
-    if value <= 0 or value > _MAX_ABANDON_AFTER_SECONDS:
-        return 1800
+        logger.warning(
+            "Ignoring %s=%r: not an integer number of seconds. Using %ds.",
+            _ABANDON_AFTER_ENV,
+            raw,
+            _DEFAULT_ABANDON_AFTER_SECONDS,
+        )
+        return _DEFAULT_ABANDON_AFTER_SECONDS
+
+    if value <= 0:
+        logger.warning(
+            "Ignoring %s=%d: must be positive, a threshold at or after now would "
+            "mark every in-flight run abandoned. Using %ds.",
+            _ABANDON_AFTER_ENV,
+            value,
+            _DEFAULT_ABANDON_AFTER_SECONDS,
+        )
+        return _DEFAULT_ABANDON_AFTER_SECONDS
+
+    if value > _MAX_ABANDON_AFTER_SECONDS:
+        logger.warning(
+            "Ignoring %s=%d: above the %ds ceiling, timedelta() overflows past it. Using %ds.",
+            _ABANDON_AFTER_ENV,
+            value,
+            _MAX_ABANDON_AFTER_SECONDS,
+            _DEFAULT_ABANDON_AFTER_SECONDS,
+        )
+        return _DEFAULT_ABANDON_AFTER_SECONDS
+
     return value
+
+
+def _pipeline_run_abandon_after_seconds() -> int:
+    return _abandon_after_seconds_for(os.environ.get(_ABANDON_AFTER_ENV, ""))
 
 
 def get_abandon_cutoff() -> datetime:
@@ -64,7 +111,7 @@ def get_abandon_cutoff() -> datetime:
 
 def get_effective_pipeline_status(
     run: PipelineRun, *, run_has_terminal_row: bool, abandon_cutoff: datetime
-) -> Optional[EffectivePipelineRunStatus]:
+) -> EffectivePipelineRunStatus | None:
     """Stored status, with a stale STARTED row reported as ABANDONED.
 
     This is the read-time/reporting status (EffectivePipelineRunStatus) —
