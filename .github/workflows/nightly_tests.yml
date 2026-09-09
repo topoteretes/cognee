@@ -12,10 +12,10 @@ on:
   # branch's copy of this file, so a plain schedule could only ever test main's
   # stale copy of the job graph. `.github/workflows/nightly_scheduler.yml`
   # carries the cron on main and dispatches this workflow at the ref we want:
-  # main Mon-Sat 18:00 UTC = cadence daily (datasheets corpus only; peak US
-  # hours, so the cloud arm measures the platform under real load); main Sun
-  # 18:00 UTC = cadence weekly (the full set, still at peak); dev Sun 06:00
-  # UTC = cadence weekly. See nightly_scheduler.yml.
+  # main Mon-Sat 18:00 UTC = cadence daily (the datasheets corpus plus every
+  # mock arm; peak US hours, so the cloud arm measures the platform under real
+  # load); main Sun 18:00 UTC = cadence weekly (the full set, still at peak);
+  # dev Sun 06:00 UTC = cadence weekly. See nightly_scheduler.yml.
   # Deliberately NOT on pull_request. This workflow used to run on any PR that
   # touched the nightly/perf workflow files, to validate the edit before merge.
   # The cost of that was the whole nightly gating the PR: ~13 jobs including
@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       cadence:
-        description: 'Why this run happened: daily (main, datasheets only), weekly (full set), manual (full set).'
+        description: 'Why this run happened: daily (main, datasheets + all mock arms), weekly (full set), manual (full set).'
         required: false
         default: manual
         type: string
@@ -45,11 +45,11 @@ jobs:
   # ══ Performance: each caller runs BOTH file_based and postgres backends ════
   perf-wap-llm:
     name: Performance — War and Peace (real LLM)
-    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
-    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
-    # and the slowest job in the nightly -- is a much larger budget for the
-    # same signal, so it earns a slot once a week. `manual` and any unset
-    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    # Weekly only. The gate here is model spend, not the corpus: daily pays for
+    # the datasheets arms (real data, the shape most user datasets have), and
+    # War and Peace is a much larger bill for the same signal, so it earns a
+    # paid slot once a week. Its mock twin still runs nightly. `manual` and any
+    # unset cadence run EVERYTHING: a hand dispatch validates the whole graph.
     if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report.yml
     with:
@@ -59,14 +59,12 @@ jobs:
       memories_key: nightly_ci_artifacts/performance_test_artifacts/war_and_peace.json
     secrets: inherit
 
+  # Daily. Mock arms spend no model budget and their timings carry no API
+  # latency, which makes them the cleanest night-over-night regression signal
+  # we have -- exactly the series that wants a datapoint every night rather
+  # than 52 a year. At 4-8 min they are also among the cheapest arms to run.
   perf-wap-mock:
     name: Performance — War and Peace (mock LLM)
-    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
-    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
-    # and the slowest job in the nightly -- is a much larger budget for the
-    # same signal, so it earns a slot once a week. `manual` and any unset
-    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
-    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report.yml
     with:
       mode: mock_llm
@@ -109,10 +107,10 @@ jobs:
   # artifact; a "real LLM" variant would re-extract 27 identical copies.
   perf-wap-large-mock:
     name: Performance — Medium graph — Artificial 100k nodes/edges (mock LLM)
-    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
-    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
-    # and the slowest job in the nightly -- is a much larger budget for the
-    # same signal, so it earns a slot once a week. `manual` and any unset
+    # Weekly only -- the one mock arm that does NOT run daily. At ~70 min it is
+    # the slowest job in the nightly by a factor of nine over the other mock
+    # arms, and its corpus is a 27x-inflated replay rather than real data, so a
+    # nightly slot buys runtime instead of signal. `manual` and any unset
     # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
     if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report.yml
@@ -135,11 +133,11 @@ jobs:
   # server-side on the tenant, so there is nothing to mock client-side.
   perf-wap-cloud:
     name: Performance — War and Peace (cloud)
-    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
-    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
-    # and the slowest job in the nightly -- is a much larger budget for the
-    # same signal, so it earns a slot once a week. `manual` and any unset
-    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    # Weekly only. The gate here is model spend, not the corpus: daily pays for
+    # the datasheets arms (real data, the shape most user datasets have), and
+    # War and Peace is a much larger bill for the same signal, so it earns a
+    # paid slot once a week. Its mock twin still runs nightly. `manual` and any
+    # unset cadence run EVERYTHING: a hand dispatch validates the whole graph.
     if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report_cloud.yml
     with:
@@ -161,11 +159,11 @@ jobs:
   # ══ orchestrator via cognee-cli bench (file_based, mock LLM, offline). ══════
   perf-rust-wap-llm:
     name: Performance — Rust SDK — War and Peace (real LLM)
-    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
-    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
-    # and the slowest job in the nightly -- is a much larger budget for the
-    # same signal, so it earns a slot once a week. `manual` and any unset
-    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
+    # Weekly only. The gate here is model spend, not the corpus: daily pays for
+    # the datasheets arms (real data, the shape most user datasets have), and
+    # War and Peace is a much larger bill for the same signal, so it earns a
+    # paid slot once a week. Its mock twin still runs nightly. `manual` and any
+    # unset cadence run EVERYTHING: a hand dispatch validates the whole graph.
     if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report_rust.yml
     with:
@@ -174,14 +172,11 @@ jobs:
       label: war_and_peace
       memories: scripts/perf/fixtures/war_and_peace/memories.json
     secrets: inherit
+  # Daily, for the same reason as perf-wap-mock: no model budget, no API
+  # latency in the numbers, ~8 min. This is the arm that catches a Rust-side
+  # regression the night it lands.
   perf-rust-wap:
     name: Performance — Rust SDK — War and Peace (mock LLM)
-    # Weekly only. The daily cadence runs the datasheets corpus alone; War and
-    # Peace -- and perf-wap-large-mock, a 27x-inflated replay of the same book
-    # and the slowest job in the nightly -- is a much larger budget for the
-    # same signal, so it earns a slot once a week. `manual` and any unset
-    # cadence run EVERYTHING: a hand dispatch exists to validate the whole graph.
-    if: ${{ inputs.cadence != 'daily' }}
     uses: ./.github/workflows/performance_report_rust.yml
     with:
       runs: '3'
