@@ -574,6 +574,30 @@ async def test_the_summary_does_not_count_a_dataset_that_failed(recovery_db, cap
 
 
 @pytest.mark.asyncio
+async def test_the_closing_row_says_whether_anything_was_unwound(recovery_db):
+    """Two states share one error_class. A cognify run whose partial graph was
+    rolled back is back where it started; a pipeline with no rollback policy is
+    closed with whatever it wrote still in the dataset. The row has to say
+    which, or the record claims more than recovery did."""
+    dataset = _dataset()
+    unwound_run = _started_run(dataset.id, "cognify_pipeline", hours_ago=3)
+    left_behind_run = _started_run(dataset.id, "incremental_update_pipeline", hours_ago=2)
+    await _insert(recovery_db.engine, dataset, unwound_run, left_behind_run)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    closed = {row.pipeline_run_id: row for row in await _rows(recovery_db.engine, status=ERRORED)}
+    assert set(closed) == {unwound_run.pipeline_run_id, left_behind_run.pipeline_run_id}
+
+    # Same class either way: the run was killed, and that is what the class means.
+    assert {row.error_class for row in closed.values()} == {"AbandonedPipelineRunError"}
+
+    assert "rolled back" in closed[unwound_run.pipeline_run_id].error_message
+    assert "no rollback policy" in closed[left_behind_run.pipeline_run_id].error_message
+    assert "still in the dataset" in closed[left_behind_run.pipeline_run_id].error_message
+
+
+@pytest.mark.asyncio
 async def test_the_batch_read_covers_only_the_abandoned_runs(recovery_db, monkeypatch):
     """The runs genuinely in flight are the ones most likely to be unclosed at
     boot, and they are exactly what the staleness filter discards, so they must

@@ -37,12 +37,26 @@ class AbandonedPipelineRunError(CogneeSystemError):
     def __init__(
         self,
         pipeline_name: str | None = None,
+        rolled_back: bool = False,
         name: str = "AbandonedPipelineRunError",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
+        # Two different states share this class, and the message is what tells
+        # them apart: a cognify run whose partial graph was unwound is back
+        # where it started, while a run of a pipeline with no rollback policy
+        # is closed with whatever it wrote still in the dataset. A reader who
+        # only sees the class knows the run was killed; one who reads the
+        # message knows whether anything is left behind.
+        aftermath = (
+            "the data it wrote was rolled back, so the dataset is back to its previous state"
+            if rolled_back
+            else f"{pipeline_name or 'this pipeline'} has no rollback policy, so whatever it "
+            "wrote before it died is still in the dataset"
+        )
         super().__init__(
-            f"The {pipeline_name or 'pipeline'} run was abandoned: its process ended "
-            "before it could write a terminal status. Recovered on startup; run it again.",
+            f"The {pipeline_name or 'pipeline'} run was abandoned: its process ended before "
+            f"it could write a terminal status. Recovered after startup, {aftermath}. "
+            "Run it again.",
             name,
             status_code,
             log=False,

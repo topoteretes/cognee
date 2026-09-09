@@ -258,7 +258,12 @@ async def _recover_one_run(pipeline_run, dataset, run_user, rollback_handler) ->
                 # stringify the list of ids and re-truncate an already
                 # truncated preview with a wrong character count.
                 data_info=(pipeline_run.run_info or {}).get("data"),
-                e=AbandonedPipelineRunError(pipeline_name=pipeline_name),
+                e=AbandonedPipelineRunError(
+                    pipeline_name=pipeline_name,
+                    # It ran, and it did not raise, or this line is
+                    # unreachable: the rollback guard returns instead.
+                    rolled_back=rollback_handler is not None,
+                ),
                 user=run_user,
                 started_at=getattr(pipeline_run, "started_at", None),
             )
