@@ -1,11 +1,13 @@
+import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
 
 from cognee.infrastructure.session.project_tags import (
+    STATE_ID,
     TaggedTrace,
     bind_project_tags,
     get_project_tags,
@@ -16,8 +18,18 @@ from cognee.modules.data.methods.provision_session_companion import (
     CompanionConflict,
     provision_session_companion,
 )
+from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.users.models import User
 from cognee.tasks.memify.cognify_agent_trace_feedback import cognify_agent_trace_feedback
 from cognee.tasks.memify.cognify_session import cognify_session
+from cognee.tasks.memify.extract_agent_trace_feedbacks import extract_agent_trace_feedbacks
+
+# Module objects for patching: the memify package re-exports the task functions
+# under the same names, so a dotted patch target resolves to the function on
+# Python 3.10 and fails with "does not have the attribute".
+cognify_session_module = sys.modules["cognee.tasks.memify.cognify_session"]
+extract_traces_module = sys.modules["cognee.tasks.memify.extract_agent_trace_feedbacks"]
 
 
 @pytest.mark.asyncio
@@ -53,9 +65,7 @@ async def test_qa_and_trace_tags_reach_graph_ingestion():
     with (
         patch("cognee.add", new_callable=AsyncMock) as add,
         patch("cognee.cognify", new_callable=AsyncMock),
-        patch(
-            "cognee.tasks.memify.cognify_session.save_persisted_qa_count", new_callable=AsyncMock
-        ),
+        patch.object(cognify_session_module, "save_persisted_qa_count", new_callable=AsyncMock),
     ):
         await cognify_session(window, dataset_id="dataset")
         assert add.call_args.kwargs["node_set"] == ["user_sessions_from_cache", "project-a"]
@@ -63,6 +73,46 @@ async def test_qa_and_trace_tags_reach_graph_ingestion():
             TaggedTrace("trace", tuple(trace.node_set)), dataset_id="dataset"
         )
         assert add.call_args.kwargs["node_set"] == ["agent_trace_feedbacks", "project-a"]
+
+
+@pytest.mark.asyncio
+async def test_trace_tags_survive_pipeline_batching():
+    """Run extract -> cognify through the real pipeline runner.
+
+    The runner hands the cognify task the extractor's output as a list (a batch,
+    even of one). The tags must still reach ``cognee.add`` as a node set, with
+    the wrapper unwrapped to plain text.
+    """
+    user = MagicMock(spec=User)
+    user.id = "u"
+    user.tenant_id = None
+    manager = MagicMock()
+    manager.is_available = True
+    manager._cache.get_session_context_entries = AsyncMock(
+        return_value=[{"id": STATE_ID, "kind": "project_node_set_state", "node_set": ["project-a"]}]
+    )
+    manager.get_agent_trace_feedback = AsyncMock(return_value=["edit succeeded."])
+    manager.get_agent_trace_session = AsyncMock(return_value=[])
+    tasks = [
+        Task(extract_agent_trace_feedbacks, session_ids=["s"]),
+        Task(cognify_agent_trace_feedback, dataset_id="dataset"),
+    ]
+    with (
+        patch.object(extract_traces_module, "session_user") as session_user,
+        patch.object(extract_traces_module, "get_session_manager", return_value=manager),
+        patch("cognee.add", new_callable=AsyncMock) as add,
+        patch("cognee.cognify", new_callable=AsyncMock) as cognify,
+    ):
+        session_user.get.return_value = user
+        async for _ in run_tasks_base(tasks, data=[{}], user=user):
+            pass
+    add.assert_awaited_once_with(
+        "Session ID: s\n\nedit succeeded.",
+        dataset_id="dataset",
+        node_set=["agent_trace_feedbacks", "project-a"],
+        user=None,
+    )
+    cognify.assert_awaited_once()
 
 
 @pytest.mark.asyncio
