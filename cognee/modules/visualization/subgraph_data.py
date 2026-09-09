@@ -117,25 +117,18 @@ async def resolve_seeds_from_query(
 async def resolve_seeds_by_degree(graph_engine: Any, top_k: int) -> list[str]:
     """Highest-degree nodes as seeds — the default view when no seed is given.
 
-    Uses ``get_graph_data()`` (implemented by every adapter) and counts degree
-    in memory. This loads the whole graph, so it runs only as the no-seed
-    fallback; query/ids/recall seeds expand via ``get_neighborhood`` without a
-    full load.
+    Delegates the ranking to the adapter, which lets a store that can
+    aggregate do so. This used to read the whole graph via ``get_graph_data()``
+    and count degree in Python: on a 5.6M-node / 35.6M-edge graph that is tens
+    of gigabytes of Python objects built to keep ten ids, and the worker was
+    OOM-killed before it could answer. Since this is the seed source for the
+    *default* visualization — no query, no explicit seeds — that made the
+    graph view unopenable at scale rather than merely slow.
+
+    The in-memory count still exists as ``GraphDBInterface``'s inherited
+    default, so an adapter without a native ranking keeps working.
     """
-    nodes, edges = await graph_engine.get_graph_data()
-    if not nodes:
-        return []
-
-    degree: dict[str, int] = {str(node_id): 0 for node_id, _ in nodes}
-    for edge in edges:
-        source_key, target_key = str(edge[0]), str(edge[1])
-        if source_key in degree:
-            degree[source_key] += 1
-        if target_key in degree:
-            degree[target_key] += 1
-
-    ranked = sorted(degree.items(), key=lambda item: item[1], reverse=True)
-    return [node_id for node_id, _ in ranked[:top_k]]
+    return await graph_engine.get_top_degree_node_ids(top_k)
 
 
 async def resolve_seed_node_ids(

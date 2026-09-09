@@ -543,6 +543,49 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_top_degree_node_ids(self, top_k: int) -> list[str]:
+        """Ids of up to ``top_k`` well-connected nodes, to seed a graph view.
+
+        **Approximate by contract.** An adapter may sample rather than count
+        exactly, and the order of near-equal nodes may differ between calls, so
+        callers must not treat the result as a ranking — only as "some nodes
+        worth starting from". Ranking exactly is what made this unusable: see
+        below.
+
+        Deliberately NOT abstract: every adapter inherits this working
+        implementation, so a community adapter keeps loading. But the default
+        is the expensive one — it reads the whole graph and counts degree in
+        Python, which on a 5.59M-node / 35.6M-edge graph means tens of
+        gigabytes of Python objects to produce ten ids, and got the worker
+        OOM-killed at ~20.8 GB RSS instead of answering.
+
+        This is the seed source for the default (no query, no explicit seed)
+        graph visualization, so it is a hot path, not a corner — which is why
+        the exactness is what gives, not the feature. Note that an exact SQL
+        aggregate is not the answer either: measured on that graph it took 57 s
+        and spilled ~8.5 GB to temp, because it must group 71M endpoint rows
+        into 5.59M distinct ids. Overriding adapters should bound the work,
+        not just move it into the database.
+        """
+        logger.warning(
+            "%s has no native get_top_degree_node_ids; falling back to a full "
+            "graph read to rank %d seeds. This is O(graph) in memory.",
+            type(self).__name__,
+            top_k,
+        )
+        nodes, edges = await self.get_graph_data()
+        if not nodes:
+            return []
+
+        degree: dict[str, int] = {str(node_id): 0 for node_id, _ in nodes}
+        for edge in edges:
+            for endpoint in (str(edge[0]), str(edge[1])):
+                if endpoint in degree:
+                    degree[endpoint] += 1
+
+        ranked = sorted(degree.items(), key=lambda item: item[1], reverse=True)
+        return [node_id for node_id, _ in ranked[:top_k]]
+
     @abstractmethod
     async def get_graph_metrics(self, include_optional: bool = False) -> dict[str, Any]:
         """
