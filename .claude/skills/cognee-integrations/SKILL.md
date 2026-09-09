@@ -58,7 +58,7 @@ host services with `DB_HOST=host.docker.internal`.
 ## MCP server (IDE integration)
 
 `docker compose --profile mcp up` starts the MCP server on port 8001
-(SSE transport), built from `cognee-mcp/`. Point Cursor / Claude Desktop /
+(Streamable HTTP at `http://localhost:8001/mcp`), built from `cognee-mcp/`. Point Cursor / Claude Desktop /
 Claude Code at it to use cognee memory from the IDE. Configure its `DB_*` env
 to match the main service so both see the same data.
 

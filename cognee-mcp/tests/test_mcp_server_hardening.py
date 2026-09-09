@@ -308,9 +308,9 @@ class FakeCogneeModule:
         # client deletes it as soon as remember() returns.
         if isinstance(data, str) and os.path.isfile(data):
             self.seen_paths.append(data)
-            # ASYNC230: a blocking read is fine in a test double — there is no
-            # event loop to starve, and the file is a few bytes on tmpfs.
-            with open(data, "rb") as handle:  # noqa: ASYNC230
+            # A blocking read is fine in a test double: no event loop to
+            # starve, and the file is a few bytes on tmpfs.
+            with open(data, "rb") as handle:
                 self.seen_payloads.append(handle.read())
         if self._error is not None:
             raise self._error
@@ -990,6 +990,7 @@ _ACCEPTED = "accepted"
 
 def _probe(app, transport, path=None, **headers):
     """Return the status code, or _ACCEPTED if the request opened a stream."""
+    import logging
     import threading
 
     from starlette.testclient import TestClient
@@ -1002,7 +1003,12 @@ def _probe(app, transport, path=None, **headers):
         try:
             with TestClient(app, base_url="http://127.0.0.1:8000") as client:
                 result.append(client.request(method, target, headers=headers, json={}).status_code)
-        except Exception as exc:  # noqa: BLE001 - reported via the empty result
+        except Exception as exc:
+            # Broad on purpose. An empty result reads as _ACCEPTED, so a crash
+            # in this thread would satisfy the `!= 421` / `!= 404` assertions.
+            # Recording it keeps a failure from masquerading as "accepted";
+            # the log gives the traceback the assertion message cannot carry.
+            logging.getLogger(__name__).exception("probe request failed")
             result.append(repr(exc))
 
     t = threading.Thread(target=run, daemon=True)

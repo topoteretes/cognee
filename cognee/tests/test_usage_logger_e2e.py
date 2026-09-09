@@ -182,3 +182,47 @@ async def test_api_endpoint_logging(e2e_config, authenticated_client, cache_engi
     assert search_logs[0]["type"] == "api_endpoint"
     assert search_logs[0]["user_id"] == str(user.id)
     assert search_logs[0]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_logging(e2e_config, mcp_data_setup, cache_engine):
+    """Live MCP tools log to Redis when driven over the MCP protocol.
+
+    Goes through ``fastmcp.Client`` rather than reaching for module attributes:
+    only registered tools are reachable by a real client, and it is
+    ``@registry.tool`` -- not a hand-written decorator -- that folds in
+    ``@log_usage`` (cognee-mcp/src/tool_registry.py). Calling the functions
+    directly, as this test used to, exercised neither.
+    """
+    import sys
+    from pathlib import Path
+
+    mcp_root = Path(__file__).resolve().parents[2] / "cognee-mcp"
+    if not (mcp_root / "src" / "server.py").exists():
+        pytest.skip(f"MCP server not found at {mcp_root}")
+
+    fastmcp = pytest.importorskip("fastmcp")
+
+    if str(mcp_root) not in sys.path:
+        sys.path.insert(0, str(mcp_root))
+
+    from src import server as mcp_server
+    from src.cognee_client import CogneeClient
+
+    if mcp_server.cognee_client is None:
+        # No api_url => use_api False => the in-process SDK path.
+        mcp_server.cognee_client = CogneeClient()
+
+    async with fastmcp.Client(mcp_server.mcp) as client:
+        # `recall` takes `datasets` as a comma-separated string; `cognify_status`
+        # takes a single `dataset_name`.
+        await client.call_tool("recall", {"query": "Germany", "datasets": mcp_data_setup})
+        await client.call_tool("cognify_status", {"dataset_name": mcp_data_setup})
+
+    logs = await cache_engine.get_usage_logs("unknown", limit=50)
+    mcp_logs = {log.get("function_name"): log for log in logs if log.get("type") == "mcp_tool"}
+
+    for name in ("MCP recall", "MCP cognify_status"):
+        assert name in mcp_logs, f"Missing {name} usage log. Found: {sorted(mcp_logs)}"
+        assert mcp_logs[name]["type"] == "mcp_tool"
+        assert mcp_logs[name]["success"] is True
