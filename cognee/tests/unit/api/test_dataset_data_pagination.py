@@ -109,8 +109,16 @@ def test_limit_and_offset_page_through_without_gaps_or_repeats(client):
 
 @pytest.mark.parametrize("query", ["limit=0", "limit=1001", "limit=-1", "offset=-1"])
 def test_out_of_range_paging_is_rejected(client, query):
-    """Rejected loudly, not silently clamped."""
-    assert client.get(f"/api/v1/datasets/{DATASET_ID}/data?{query}").status_code == 422
+    """Rejected loudly, not silently clamped.
+
+    The code is 422 here and 400 in the real app: cognee registers its own
+    request_validation_exception_handler, which this bare test app does not
+    mount. What matters either way is that the request is refused rather than
+    quietly answered with a clamped page.
+    """
+    response = client.get(f"/api/v1/datasets/{DATASET_ID}/data?{query}")
+
+    assert response.status_code in (400, 422)
 
 
 def test_requested_dataset_id_wins_over_the_nullable_column(client):
