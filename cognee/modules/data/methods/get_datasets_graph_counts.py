@@ -170,6 +170,14 @@ async def get_datasets_graph_counts(
         [run.pipeline_run_id for run in latest_runs.values() if run.pipeline_run_id]
     )
 
+    # Not at module scope, and not inside the loop either: importing
+    # cognee.modules.pipelines from this package's own module body re-enters
+    # data.methods mid-initialisation and leaves its re-exports bound to
+    # submodules instead of functions, which is what
+    # test_methods_package_has_no_import_cycle pins (the same reason
+    # _get_latest_cognify_runs imports the way it does).
+    from cognee.modules.pipelines.models import PipelineRunStatus
+
     counts: dict[UUID, DatasetGraphCounts] = {}
     misses: list[UUID] = []
     miss_calls = []
@@ -186,8 +194,6 @@ async def get_datasets_graph_counts(
         # non-COMPLETED run also keeps a mid-run dataset reporting real counts
         # instead of zero. Same guard the other latest-run readers already
         # apply (live_updates, edge-evidence lookup).
-        from cognee.modules.pipelines.models import PipelineRunStatus
-
         cached = (
             cached_metrics.get(latest_run.pipeline_run_id)
             if latest_run.status == PipelineRunStatus.DATASET_PROCESSING_COMPLETED
