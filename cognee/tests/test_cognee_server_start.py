@@ -86,7 +86,7 @@ class TestCogneeServerStart(unittest.TestCase):
         file = {
             "data": (
                 file_path.name,
-                open(file_path, "rb"),
+                open(file_path, "rb"),  # noqa: SIM115 - requests closes the upload handle
             )
         }
 

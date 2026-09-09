@@ -13,10 +13,10 @@ async def delete_user(email: str):
         async with (
             relational_engine.get_async_session() as session,
             get_user_db_context(session) as user_db,
+            get_user_manager_context(user_db) as user_manager,
         ):
-            async with get_user_manager_context(user_db) as user_manager:
-                user = await user_manager.get_by_email(email)
-                await user_manager.delete(user)
+            user = await user_manager.get_by_email(email)
+            await user_manager.delete(user)
     except UserNotExists:
         print(f"User {email} doesn't exist")
         raise

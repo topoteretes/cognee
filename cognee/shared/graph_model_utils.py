@@ -57,7 +57,7 @@ def datapoint_model_to_basemodel(
             return dict[key_type, value_type]
 
         if origin in (Union, types.UnionType):
-            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]
+            return Union[tuple(_replace_datapoint_types(arg, cache) for arg in args)]  # noqa: UP007 - runtime tuple
 
         return annotation
 

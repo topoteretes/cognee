@@ -45,9 +45,9 @@ class TestResolveCliUser:
         with (
             patch("cognee.modules.users.methods.get_user", mock_get_user),
             patch("cognee.modules.users.methods.get_default_user", mock_get_default),
+            patch("cognee.cli.echo.warning") as mock_warn,
         ):
-            with patch("cognee.cli.echo.warning") as mock_warn:
-                result = asyncio.run(resolve_cli_user(uid))
-                assert result is default_user
-                mock_warn.assert_called_once()
-                assert "falling back" in mock_warn.call_args[0][0].lower()
+            result = asyncio.run(resolve_cli_user(uid))
+            assert result is default_user
+            mock_warn.assert_called_once()
+            assert "falling back" in mock_warn.call_args[0][0].lower()
