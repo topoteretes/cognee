@@ -80,6 +80,12 @@ def choose_best_bucket(
 
     for bucket_id, distances in distances_by_bucket.items():
         bucket = buckets_by_id[bucket_id]
+        # An empty bucket has no child distances to average, so it can't be scored
+        # (and mean distance would divide by zero). Skip it. This also covers the
+        # len(distances) == len(child_ids) == 0 case that slips past the mismatch
+        # guard below.
+        if not distances:
+            continue
         # Skip buckets whose children weren't all in the prefetched window:
         # a missing child is farther than top-K and cannot be scored fairly.
         if len(distances) != len(bucket.child_ids):
