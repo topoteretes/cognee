@@ -571,3 +571,48 @@ async def test_the_summary_does_not_count_a_dataset_that_failed(recovery_db, cap
         "Recovery finished: 1 of 2 abandoned run(s) closed across 2 dataset(s)." in record.message
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_the_batch_read_covers_only_the_abandoned_runs(recovery_db, monkeypatch):
+    """The runs genuinely in flight are the ones most likely to be unclosed at
+    boot, and they are exactly what the staleness filter discards, so they must
+    not cost a dataset and user read on their way out."""
+    dataset = _dataset()
+    abandoned = _started_run(dataset.id, "add_pipeline", hours_ago=2)
+    live = _started_run(dataset.id, "cognify_pipeline", hours_ago=0)
+    await _insert(recovery_db.engine, dataset, abandoned, live)
+
+    real_loader = recovery_module._load_datasets_and_users
+    read_for = []
+
+    async def _spying_loader(pipeline_runs):
+        read_for.append([run.pipeline_run_id for run in pipeline_runs])
+        return await real_loader(pipeline_runs)
+
+    monkeypatch.setattr(recovery_module, "_load_datasets_and_users", _spying_loader)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert read_for == [[abandoned.pipeline_run_id]]
+    closed = await _rows(recovery_db.engine, status=ERRORED)
+    assert [row.pipeline_run_id for row in closed] == [abandoned.pipeline_run_id]
+
+
+@pytest.mark.asyncio
+async def test_a_boot_with_nothing_abandoned_reads_no_datasets(recovery_db, monkeypatch):
+    """The ordinary boot: runs are unclosed because they are running. It costs
+    the one candidate query and nothing else."""
+    dataset = _dataset()
+    await _insert(
+        recovery_db.engine, dataset, _started_run(dataset.id, "add_pipeline", hours_ago=0)
+    )
+
+    async def _must_not_be_called(_pipeline_runs):
+        raise AssertionError("datasets were read for a boot with no abandoned runs")
+
+    monkeypatch.setattr(recovery_module, "_load_datasets_and_users", _must_not_be_called)
+
+    await recovery_module.recover_abandoned_pipeline_runs()
+
+    assert await _rows(recovery_db.engine, status=ERRORED) == []

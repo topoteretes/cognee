@@ -358,12 +358,14 @@ async def recover_abandoned_pipeline_runs() -> None:
     sweep itself, and if it fails there is no recovery to speak of, so it
     propagates to the caller that started this.
     """
-    recovery_candidates = await get_unclosed_pipeline_runs()
-    datasets_by_id, users_by_id = await _load_datasets_and_users(recovery_candidates)
+    # The staleness filter runs before the datasets and users are read, not
+    # after: on a busy instance the unclosed runs at boot are mostly runs that
+    # are genuinely in flight, and those are exactly the ones this discards, so
+    # reading rows for them first would be reading for the set about to be
+    # thrown away.
+    abandoned_candidates = []
 
-    runs_by_dataset: dict[UUID, list[Any]] = {}
-
-    for pipeline_run in recovery_candidates:
+    for pipeline_run in await get_unclosed_pipeline_runs():
         if not _is_older_than_threshold(getattr(pipeline_run, "created_at", None)):
             logger.info(
                 "Skipping recovery for run %s: started less than %ds ago, "
@@ -373,6 +375,16 @@ async def recover_abandoned_pipeline_runs() -> None:
             )
             continue
 
+        abandoned_candidates.append(pipeline_run)
+
+    if not abandoned_candidates:
+        return
+
+    datasets_by_id, users_by_id = await _load_datasets_and_users(abandoned_candidates)
+
+    runs_by_dataset: dict[UUID, list[Any]] = {}
+
+    for pipeline_run in abandoned_candidates:
         dataset = datasets_by_id.get(pipeline_run.dataset_id)
 
         if dataset is None:
