@@ -1,15 +1,16 @@
+import logging
 import os
 import pathlib
-import cognee
 from uuid import uuid4
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_default_user, create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
-from cognee.api.v1.exceptions import DocumentNotFoundError, DatasetNotFoundError
 
-logger = get_logger()
+import cognee
+from cognee.api.v1.exceptions import DatasetNotFoundError, DocumentNotFoundError
+from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_default_user
+from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+
+logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -92,7 +93,7 @@ async def main():
     # Extract dataset_ids from cognify results
     def extract_dataset_id_from_cognify(cognify_result):
         """Extract dataset_id from cognify output dictionary"""
-        for dataset_id, pipeline_result in cognify_result.items():
+        for dataset_id in cognify_result:
             return dataset_id  # Return the first (and likely only) dataset_id
         return None
 
@@ -156,6 +157,7 @@ async def main():
         delete_permission_error = True
         print("✅ Delete correctly denied for user without permission")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert delete_permission_error, "Delete should fail for user without permission"
@@ -173,6 +175,7 @@ async def main():
         data_not_found_error = True
         print("✅ Delete correctly failed for non-existent data_id")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert data_not_found_error, "Delete should fail for non-existent data_id"
@@ -192,6 +195,7 @@ async def main():
         dataset_not_found_error = True
         print("✅ Delete correctly failed for non-existent dataset_id")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert dataset_not_found_error, "Delete should fail for non-existent dataset_id"
@@ -218,6 +222,7 @@ async def main():
         data_not_in_dataset_error = True
         print("✅ Delete correctly failed for data not in specified dataset")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert data_not_in_dataset_error, "Delete should fail when data doesn't belong to dataset"

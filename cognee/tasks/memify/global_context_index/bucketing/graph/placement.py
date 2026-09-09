@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ...ids import create_bucket_id
+from ...models import BucketAssignment, SummaryNode
 from ..common import (
     create_bucket_node,
     mark_bucket_for_persistence,
     record_bucket_assignment,
 )
 from .scoring import entities_weight, weighted_jaccard
-from ...ids import create_bucket_id
-from ...models import BucketAssignment, SummaryNode
 
 
 def rebuild_graph_buckets_for_level(
@@ -284,7 +284,7 @@ def _choose_existing_graph_bucket(
     if not scored_candidates:
         return None
 
-    return sorted(scored_candidates, key=lambda item: (item[0], item[1], item[2]))[0][3]
+    return min(scored_candidates, key=lambda item: (item[0], item[1], item[2]))[3]
 
 
 def _place_misc_summary(

@@ -11,23 +11,25 @@ Uses a small async-capable worker so the worker-side concurrent dispatch
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 import pickle
+import sys
 import time
 
 import pytest
 
 from cognee_db_workers.harness import (
+    _TIMEOUT_BEFORE_RESPAWN,
     Request,
     Response,
     SubprocessSession,
     SubprocessTransportError,
-    _TIMEOUT_BEFORE_RESPAWN,
     run_worker_loop,
     spawn_without_main,
 )
 
-import sys
+logger = logging.getLogger(__name__)
 
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
@@ -249,6 +251,10 @@ def test_sync_and_async_calls_interleave_on_one_session():
                     r = session.call(Request(op=OP_ECHO_FAST, args=(f"s{i}",)))
                     sync_results.append(r.result)
             except Exception as e:
+                logger.debug(
+                    "Ignoring exception in test_sync_and_async_calls_interleave_on_one_session.do_sync",
+                    exc_info=True,
+                )
                 errors.append(e)
 
         async def do_async():

@@ -1,7 +1,7 @@
 """Schema definitions for the Postgres graph adapter (graph_node, graph_edge)."""
 
-from sqlalchemy import Table, Column, MetaData, String, DateTime, Index, ForeignKey, func, text
-from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+from sqlalchemy import Column, DateTime, ForeignKey, Index, MetaData, String, Table, func, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 
 _meta = MetaData()
 

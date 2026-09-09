@@ -5,7 +5,7 @@ not part of the contract.
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 import pytest
 
@@ -30,37 +30,37 @@ class Company(DataPoint):
 
 class Person(DataPoint):
     name: str
-    likes: Optional[List[Activity]] = None
-    works_for: Optional[Company] = None
+    likes: list[Activity] | None = None
+    works_for: Company | None = None
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class Directory(DataPoint):
-    people: List[Person]
-    companies: List[Company]
+    people: list[Person]
+    companies: list[Company]
     metadata: dict = {"index_fields": []}
 
 
 class TransparentDirectory(DataPoint):
-    people: List[Person]
-    companies: List[Company]
+    people: list[Person]
+    companies: list[Company]
     metadata: dict = TRANSPARENT
 
 
 class MemberGroup(DataPoint):
-    members: List[Person]
+    members: list[Person]
     metadata: dict = TRANSPARENT
 
 
 class NestedDirectory(DataPoint):
-    groups: List[MemberGroup]
-    companies: List[Company]
+    groups: list[MemberGroup]
+    companies: list[Company]
     metadata: dict = TRANSPARENT
 
 
 class Department(DataPoint):
     name: str
-    groups: List[Any]
+    groups: list[Any]
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
@@ -68,33 +68,33 @@ class NamedGroup(DataPoint):
     """A transparent wrapper that wrongly carries real data in ``name``."""
 
     name: str
-    members: List[Person]
+    members: list[Person]
     metadata: dict = {"index_fields": ["name"], "transparent": True}
 
 
 class EmptyGroup(DataPoint):
-    members: List[Person] = []
+    members: list[Person] = []
     metadata: dict = TRANSPARENT
 
 
 class HolderOfEmpty(DataPoint):
     name: str
-    groups: List[EmptyGroup]
+    groups: list[EmptyGroup]
     metadata: dict = {"index_fields": ["name"]}
 
 
 class DiamondHolder(DataPoint):
     name: str
-    left: List[Any]
-    right: List[Any]
+    left: list[Any]
+    right: list[Any]
     metadata: dict = {"index_fields": ["name"]}
 
 
 class OptionalGroup(DataPoint):
     """Relationship-only wrapper whose optional fields are legitimately empty."""
 
-    members: List[Person] = []
-    lead: Optional[Person] = None
+    members: list[Person] = []
+    lead: Person | None = None
     metadata: dict = TRANSPARENT
 
 
@@ -184,7 +184,7 @@ async def test_nested_transparent_wrappers_resolve_recursively():
 @pytest.mark.asyncio
 async def test_mid_graph_wrapper_keeps_parent_field_name():
     """Case 4 (A4): the ``groups`` edge lands on each child."""
-    alice, bob, acme = _people()
+    alice, bob, _acme = _people()
     department = Department(name="Engineering", groups=[MemberGroup(members=[alice, bob])])
 
     nodes, edges = await get_graph_from_model(department)
@@ -335,7 +335,7 @@ async def test_distinct_instances_sharing_a_node_id_both_resolve():
 
     class IdentityGroup(DataPoint):
         name: str
-        members: List[Person]
+        members: list[Person]
         metadata: dict = {
             "index_fields": ["name"],
             "identity_fields": ["name"],
@@ -388,7 +388,7 @@ async def test_transparent_only_cycle_terminates():
     """Case 15."""
 
     class CyclicGroup(DataPoint):
-        peers: List[Any] = []
+        peers: list[Any] = []
         metadata: dict = TRANSPARENT
 
     first = CyclicGroup()
@@ -404,11 +404,11 @@ async def test_mixed_cycle_terminates_with_a_self_edge():
 
     class Mixed(DataPoint):
         name: str
-        groups: List[Any] = []
+        groups: list[Any] = []
         metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
     class Wrapper(DataPoint):
-        members: List[Any] = []
+        members: list[Any] = []
         metadata: dict = TRANSPARENT
 
     person = Mixed(name="Alice")
@@ -442,7 +442,7 @@ def test_transparent_survives_every_metadata_form():
     alice, bob, acme = _people()
 
     class Flagged(DataPoint):
-        people: List[Person]
+        people: list[Person]
         metadata: dict = {"index_fields": [], "transparent": True}
 
     assert Flagged(people=[alice]).metadata.get("transparent") is True
@@ -470,7 +470,7 @@ class CyclicPerson(DataPoint):
 
 class CyclicCompany(DataPoint):
     name: str
-    employees: List[Any] = []
+    employees: list[Any] = []
     metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 

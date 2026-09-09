@@ -1,6 +1,7 @@
-import jwt
-import os
 import datetime
+import os
+
+import jwt
 
 SECRET_KEY = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
 

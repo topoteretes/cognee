@@ -16,9 +16,10 @@ Two execution shapes:
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_OID, uuid5
 
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.migration.loader import (
     data_item_from_record,
     store_imported_graph,
@@ -29,7 +30,6 @@ from cognee.modules.migration.loader import (
 from cognee.modules.migration.sources.base import IMPORT_MODES, MemorySource
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.ingestion.data_item import DataItem
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from cognee.api.v1.remember.remember import RememberResult
@@ -56,7 +56,7 @@ def _mode_label(source: MemorySource) -> str:
     return IMPORT_MODES[IMPORT_MODES.index(source.mode)]
 
 
-async def _ensure_user(user_payload: Dict[str, Any]):
+async def _ensure_user(user_payload: dict[str, Any]):
     """Create-or-match a user by email, transferring credentials on creation.
 
     An existing target user is returned untouched — their credentials are
@@ -189,10 +189,10 @@ async def _apply_social_grants(source: MemorySource, dataset_name: str, owner, i
 
 
 def _revision_to_stamp(
-    archive_revision: Optional[str],
-    stored_revision: Optional[str],
-    ordered_revisions: List[str],
-) -> Optional[str]:
+    archive_revision: str | None,
+    stored_revision: str | None,
+    ordered_revisions: list[str],
+) -> str | None:
     """The revision the imported store should be re-stamped at, or None.
 
     Stamps only BACKWARD — when the archive's revision is strictly behind the
@@ -291,7 +291,7 @@ async def _restamp_to_source_revision(source: MemorySource, dataset_name: str, u
     )
 
 
-def _pipeline_run_id(pipeline_result: Any) -> Optional[str]:
+def _pipeline_run_id(pipeline_result: Any) -> str | None:
     """Extract the pipeline run id from a run_custom_pipeline return value.
 
     Blocking runs return ``{dataset_id: PipelineRunCompleted}``; background
@@ -313,7 +313,7 @@ async def import_memory_source(
     dataset_name: str = DEFAULT_DATASET_NAME,
     user=None,
     run_in_background: bool = False,
-    node_set: Optional[list] = None,
+    node_set: list | None = None,
     graph_only: bool = False,
     **kwargs,
 ) -> "RememberResult":
@@ -392,8 +392,8 @@ async def _import_streaming(
 
     started_at = time.monotonic()
 
-    counts: Dict[str, int] = {}
-    pending: List[DataItem] = []
+    counts: dict[str, int] = {}
+    pending: list[DataItem] = []
     data_items_stored = 0
     async for record in source.records():
         counts[record.kind] = counts.get(record.kind, 0) + 1
@@ -410,7 +410,7 @@ async def _import_streaming(
 
     logger.info("Importing from %s (mode=preserve, streaming): %s", _source_label(source), counts)
 
-    stats: Dict[str, int] = {
+    stats: dict[str, int] = {
         "graph_nodes": 0,
         "graph_edges": 0,
         "skipped_facts": 0,

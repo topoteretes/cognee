@@ -1,11 +1,11 @@
-import pytest
-from typing import Optional
 import sys
-from unittest.mock import patch, MagicMock
 import unittest
-import numpy as np
-from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
+from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pytest
+
+from cognee.eval_framework.analysis.metrics_calculator import bootstrap_ci
 
 with patch.dict(
     sys.modules,
@@ -16,7 +16,7 @@ with patch.dict(
 
 
 class MockTestCase:
-    def __init__(self, actual_output: Optional[str], expected_output: Optional[str]):
+    def __init__(self, actual_output: str | None, expected_output: str | None):
         self.actual_output = actual_output
         self.expected_output = expected_output
 

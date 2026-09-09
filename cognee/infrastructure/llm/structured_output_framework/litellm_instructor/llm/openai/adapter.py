@@ -16,22 +16,21 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.retry_config import (
-    llm_retry_condition,
-    llm_retry_stop_condition,
-)
-
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
     is_budget_exhausted_error,
 )
+from cognee.infrastructure.llm.retry_config import (
+    llm_retry_condition,
+    llm_retry_stop_condition,
+)
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
     TranscriptionReturnType,
@@ -180,9 +179,9 @@ class OpenAIAdapter(GenericAPIAdapter):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as e:
+        ):
             if not (self.fallback_model and self.fallback_api_key):
-                raise e
+                raise
             try:
                 async with llm_rate_limiter_context_manager():
                     return await self.aclient.chat.completions.create(
@@ -212,7 +211,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.shared.logging_utils import get_logger
@@ -22,9 +22,9 @@ def _get_source_document(data_point: DataPoint):
 
 
 async def extract_dlt_source_edges(
-    data_points: List[DataPoint],
+    data_points: list[DataPoint],
     ctx: Optional["PipelineContext"] = None,
-) -> List[DataPoint]:
+) -> list[DataPoint]:
     """Create graph edges and schema nodes from a DLT source manifest.
 
     This task runs after add_data_points in the DLT cognify pipeline. The

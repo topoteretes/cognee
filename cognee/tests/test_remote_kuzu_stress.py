@@ -1,10 +1,11 @@
 import asyncio
 import random
 import time
+
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.graph.ladybug.remote_ladybug_adapter import (
     RemoteLadybugAdapter,
 )
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.shared.logging_utils import get_logger
 
 # Test configuration

@@ -12,7 +12,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-
 MCP_ROOT = Path(__file__).resolve().parents[1]  # cognee-mcp/
 if str(MCP_ROOT) not in sys.path:
     sys.path.insert(0, str(MCP_ROOT))
@@ -146,7 +145,7 @@ EXPECTED_TOOLS = MEMORY_API_TOOLS | STATUS_TOOLS
 
 @pytest.mark.asyncio
 async def test_mcp_exposes_only_memory_tools():
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
 
@@ -597,7 +596,7 @@ class RecordingRememberClient:
 @pytest.mark.asyncio
 async def test_mcp_remember_rejects_invalid_payloads(monkeypatch, kwargs, expected_error):
     """Bad argument combinations are refused before any ingestion is attempted."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -612,7 +611,7 @@ async def test_mcp_remember_rejects_invalid_payloads(monkeypatch, kwargs, expect
 @pytest.mark.asyncio
 async def test_mcp_remember_rejects_uploads_over_the_size_limit(monkeypatch):
     """Oversized uploads are rejected client-side rather than posted."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -634,7 +633,7 @@ async def test_mcp_remember_rejects_uploads_over_the_size_limit(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_forwards_file_uploads(monkeypatch):
     """The merged tool hands filename + content_base64 straight to the client."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -668,7 +667,7 @@ async def test_mcp_remember_forwards_file_uploads(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_still_stores_text_and_session_entries(monkeypatch):
     """Absorbing cognify_file left the pre-existing text paths intact."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -687,7 +686,7 @@ async def test_mcp_remember_still_stores_text_and_session_entries(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_defaults_dataset_when_caller_omits_it(monkeypatch):
     """Uploads inherit the agent-scoped default dataset, same as text writes."""
-    import src.server as server
+    from src import server
 
     fake_client = RecordingRememberClient()
     monkeypatch.setattr(server, "cognee_client", fake_client)
@@ -701,7 +700,7 @@ async def test_mcp_remember_defaults_dataset_when_caller_omits_it(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_remember_reports_client_failures(monkeypatch):
     """Ingestion errors surface as tool errors instead of propagating."""
-    import src.server as server
+    from src import server
 
     class ExplodingClient:
         async def remember(self, **kwargs):
@@ -720,7 +719,7 @@ async def test_mcp_remember_reports_client_failures(monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_no_longer_exposes_cognify_file():
     """cognify_file was absorbed into remember and must be gone from the surface."""
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
 
@@ -731,7 +730,7 @@ async def test_mcp_no_longer_exposes_cognify_file():
 @pytest.mark.asyncio
 async def test_mcp_remember_advertises_file_upload_parameters():
     """The merged tool's schema is what tells an LLM it can send files."""
-    import src.server as server
+    from src import server
 
     tools = await server.mcp.list_tools()
     remember_tool = next(tool for tool in tools if tool.name == "remember")
@@ -746,7 +745,7 @@ async def test_mcp_remember_advertises_file_upload_parameters():
 
 @pytest.mark.asyncio
 async def test_mcp_recall_forwards_system_prompt(monkeypatch):
-    import src.server as server
+    from src import server
 
     class FakeClient:
         def __init__(self):
@@ -809,7 +808,7 @@ async def test_cognee_client_api_delete_uses_mode_aware_endpoint():
 
 @pytest.mark.asyncio
 async def test_cognify_tool_batches_add_calls(monkeypatch, tmp_path):
-    import src.server as server
+    from src import server
 
     data_file = tmp_path / "memory.txt"
     data_file.write_text("memory", encoding="utf-8")
@@ -994,7 +993,7 @@ async def test_get_chunk_neighbors_from_graph_validates_inputs():
 
 @pytest.mark.asyncio
 async def test_document_retrieval_tools_format_json(monkeypatch):
-    import src.server as server
+    from src import server
 
     class FakeClient:
         async def get_document(self, document_id, include_metadata=True, max_chunks=0):

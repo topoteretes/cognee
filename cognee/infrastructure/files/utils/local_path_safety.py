@@ -3,7 +3,6 @@ from pathlib import Path
 
 from cognee.base_config import get_base_config
 
-
 ALLOWED_LOCAL_FILE_ROOTS_ENV = "COGNEE_ALLOWED_LOCAL_FILE_ROOTS"
 
 

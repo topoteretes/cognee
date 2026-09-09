@@ -1,8 +1,9 @@
 """SQL-free, per-data-item buffering for edge evidence."""
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.infrastructure.databases.provenance import data_item_id
@@ -10,7 +11,7 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.utils import generate_edge_object_id
 
 
-def _as_uuid(value: Any) -> Optional[UUID]:
+def _as_uuid(value: Any) -> UUID | None:
     if value is None:
         return None
     if isinstance(value, UUID):
@@ -21,7 +22,7 @@ def _as_uuid(value: Any) -> Optional[UUID]:
         return None
 
 
-def _edge_parts(edge: Any) -> Optional[tuple[UUID, UUID, str, dict]]:
+def _edge_parts(edge: Any) -> tuple[UUID, UUID, str, dict] | None:
     source = getattr(edge, "source_id", None)
     target = getattr(edge, "target_id", None)
     relationship = getattr(edge, "relationship_name", None)
@@ -41,11 +42,11 @@ def _edge_parts(edge: Any) -> Optional[tuple[UUID, UUID, str, dict]]:
 
 def _evidence_id(
     *,
-    tenant_id: Optional[UUID],
+    tenant_id: UUID | None,
     user_id: UUID,
     dataset_id: UUID,
     data_id: UUID,
-    pipeline_run_id: Optional[UUID],
+    pipeline_run_id: UUID | None,
     chunk_id: UUID,
     edge_id: UUID,
     evidence_kind: str,

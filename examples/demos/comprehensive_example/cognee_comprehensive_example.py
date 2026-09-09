@@ -1,6 +1,6 @@
 # ruff: noqa: E402
-import os
 import asyncio
+import os
 from pathlib import Path
 
 # provide your OpenAI key here
@@ -33,7 +33,7 @@ ontology_path = asset_paths["ontology"]
 # assigned later may not override defaults or `.env`. See https://docs.cognee.ai/setup-configuration/overview#using-os-environ
 os.environ["ONTOLOGY_FILE_PATH"] = ontology_path
 
-import cognee  # noqa: E402
+import cognee
 
 
 async def main():

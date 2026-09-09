@@ -1,28 +1,26 @@
 import asyncio
 from uuid import UUID
-from pydantic import Field
-from typing import Dict, List, Optional
+
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
-from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect, status
+from pydantic import Field
 from starlette.status import (
     WS_1000_NORMAL_CLOSURE,
     WS_1008_POLICY_VIOLATION,
     WS_1011_INTERNAL_ERROR,
 )
 
-from cognee.api.DTO import InDTO
-from cognee.modules.pipelines.methods import get_pipeline_run
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user, get_authenticated_websocket_user
+from cognee import __version__ as cognee_version
+from cognee.api.DTO import ErrorResponse, InDTO
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.graph.methods import get_formatted_graph_data
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.graph_model_utils import graph_schema_to_graph_model
+from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
-    PipelineRunInfo,
     PipelineRunErrored,
+    PipelineRunInfo,
     PipelineRunProgress,
 )
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
@@ -30,12 +28,13 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     initialize_queue,
     remove_queue,
 )
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError
+from cognee.modules.users.methods import get_authenticated_user, get_authenticated_websocket_user
+from cognee.modules.users.models import User
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.utils import send_telemetry
 from cognee.shared.usage_logger import log_usage
-from cognee import __version__ as cognee_version
-from cognee.api.DTO import ErrorResponse
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger("api.cognify")
 
@@ -44,14 +43,14 @@ class CognifyPayloadDTO(InDTO):
     # Examples double as the Swagger try-it-out prefill, which is SUBMITTED
     # as-is on Execute — keep them behavior-neutral (empty/None) for every
     # field where a value changes processing.
-    datasets: Optional[List[str]] = Field(
+    datasets: list[str] | None = Field(
         default=None,
         examples=[["default_dataset"]],
         description=(
             "Dataset names to process; resolved against datasets owned by the authenticated user."
         ),
     )
-    dataset_ids: Optional[List[UUID]] = Field(
+    dataset_ids: list[UUID] | None = Field(
         default=None,
         examples=[[]],
         description=(
@@ -59,7 +58,7 @@ class CognifyPayloadDTO(InDTO):
             "Takes precedence over the datasets name list when both are provided."
         ),
     )
-    run_in_background: Optional[bool] = Field(
+    run_in_background: bool | None = Field(
         default=False,
         description=(
             "If true, the request returns immediately with a pipeline_run_id while the "
@@ -68,7 +67,7 @@ class CognifyPayloadDTO(InDTO):
             "knowledge graph is fully built, which can take minutes for large datasets."
         ),
     )
-    graph_model: Optional[dict] = Field(
+    graph_model: dict | None = Field(
         default=None,
         examples=[{}],
         description=(
@@ -77,7 +76,7 @@ class CognifyPayloadDTO(InDTO):
             "used — a restrictive schema here can produce an empty graph."
         ),
     )
-    custom_prompt: Optional[str] = Field(
+    custom_prompt: str | None = Field(
         default="",
         examples=[""],
         description=(
@@ -86,7 +85,7 @@ class CognifyPayloadDTO(InDTO):
             "concepts and their relationships.'). Leave empty for the default prompt."
         ),
     )
-    chunk_size: Optional[int] = Field(
+    chunk_size: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -95,7 +94,7 @@ class CognifyPayloadDTO(InDTO):
             "chunks give finer-grained extraction at higher LLM cost."
         ),
     )
-    ontology_key: Optional[List[str]] = Field(
+    ontology_key: list[str] | None = Field(
         default=None,
         examples=[[]],
         description=(
@@ -103,7 +102,7 @@ class CognifyPayloadDTO(InDTO):
             "entity extraction. Leave empty to process without an ontology."
         ),
     )
-    chunks_per_batch: Optional[int] = Field(
+    chunks_per_batch: int | None = Field(
         default=None,
         examples=[None],
         description=(
@@ -111,7 +110,7 @@ class CognifyPayloadDTO(InDTO):
             "parallelism/throughput; leave null for the pipeline default. Higher the value higher the parallelism/throughput"
         ),
     )
-    data_per_batch: Optional[int] = Field(
+    data_per_batch: int | None = Field(
         default=20,
         examples=[20],
         description="Maximum number of data items to process concurrently within a dataset.",
@@ -123,7 +122,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Dict[UUID, PipelineRunInfo],
+        response_model=dict[UUID, PipelineRunInfo],
         responses={
             400: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
@@ -217,11 +216,12 @@ def get_cognify_router() -> APIRouter:
                     payload.ontology_key, user
                 )
 
+                from io import StringIO
+
                 from cognee.modules.ontology.ontology_config import Config
                 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
                     RDFLibOntologyResolver,
                 )
-                from io import StringIO
 
                 ontology_streams = [StringIO(content) for content in ontology_contents]
                 config_to_use: Config = {
@@ -307,7 +307,7 @@ def get_cognify_router() -> APIRouter:
     async def subscribe_to_cognify_info(
         websocket: WebSocket,
         pipeline_run_id: str,
-        user: Optional[User] = Depends(get_authenticated_websocket_user),
+        user: User | None = Depends(get_authenticated_websocket_user),
     ):
         """
         Stream one cognify run's progress, then its finished graph.

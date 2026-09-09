@@ -1,7 +1,7 @@
 import asyncio
-import cognee
-
 from os import path
+
+import cognee
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.memify_pipelines.consolidate_entities import consolidate_entities_pipeline
 

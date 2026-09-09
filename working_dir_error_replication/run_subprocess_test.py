@@ -2,9 +2,9 @@
 Run writer and reader in separate subprocesses to test Kuzu locks.
 """
 
+import os
 import subprocess
 import time
-import os
 
 
 def main():

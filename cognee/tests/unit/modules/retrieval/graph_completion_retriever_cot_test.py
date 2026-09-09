@@ -1,12 +1,16 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
 )
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +37,9 @@ def _no_real_llm_calls():
         try:
             return response_model.model_construct()
         except Exception:
+            logger.debug(
+                "Falling back after error in _no_real_llm_calls._structured", exc_info=True
+            )
             return "reasoning"
 
     with patch.object(
@@ -213,7 +220,7 @@ async def test_run_cot_completion_with_conversation_history(mock_edge):
         ) as mock_generate,
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
             conversation_history="Previous conversation",
         )
@@ -246,7 +253,7 @@ async def test_run_cot_completion_with_response_model(mock_edge):
         ),
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"]
         )
 
@@ -272,7 +279,7 @@ async def test_run_cot_completion_empty_conversation_history(mock_edge):
         ) as mock_generate,
         patch.object(retriever, "get_triplets", new_callable=AsyncMock, return_value=[[mock_edge]]),
     ):
-        completion, context_text, triplets = await retriever._run_cot_completion(
+        completion, _context_text, _triplets = await retriever._run_cot_completion(
             query_batch=["test query"],
             conversation_history="",
         )
@@ -647,7 +654,6 @@ async def test_get_completion_batch_queries(mock_edge):
     assert completion[0] == "Generated answer" and completion[1] == "Generated answer"
 
 
-#
 @pytest.mark.asyncio
 async def test_get_completion_batch_queries_with_response_model(mock_edge):
     """Test get_completion of batch queries with custom response model."""

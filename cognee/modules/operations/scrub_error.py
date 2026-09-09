@@ -11,7 +11,6 @@ This module must stay import-light (stdlib only).
 """
 
 import re
-from typing import Optional
 
 ERROR_MESSAGE_MAX_LENGTH = 512
 
@@ -40,7 +39,7 @@ _SCRUB_PATTERNS = [
 ]
 
 
-def scrub_error_message(message: Optional[object]) -> Optional[str]:
+def scrub_error_message(message: object | None) -> str | None:
     """Redact PII/secret-shaped substrings and truncate to the column bound."""
     if message is None:
         return None

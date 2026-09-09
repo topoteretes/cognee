@@ -2,14 +2,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.infrastructure.databases.provenance import EdgeIdentity
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.models import Entity
 from cognee.modules.graph.utils.expand_with_nodes_and_edges import (
     attach_new_edges_to_data_points,
     construct_data_points_and_edges,
 )
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge as KGEdge
+from cognee.shared.data_models import Edge as KGEdge
+from cognee.shared.data_models import KnowledgeGraph, Node
 
 
 def _make_chunk(importance_weight=0.5):

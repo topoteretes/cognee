@@ -31,7 +31,7 @@ every graph/vector adapter is covered without adapter-specific code):
 
 from collections import defaultdict
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -52,12 +52,12 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("validate")
 
 
-def _identity_fields_of(data_point_type: type[DataPoint]) -> List[str]:
+def _identity_fields_of(data_point_type: type[DataPoint]) -> list[str]:
     """Read the class's own declared ``identity_fields`` — never hand-copied."""
     return list(data_point_type.model_fields["metadata"].default.get("identity_fields") or [])
 
 
-def _index_field_of(data_point_type: type[DataPoint]) -> Optional[str]:
+def _index_field_of(data_point_type: type[DataPoint]) -> str | None:
     """Read the class's own declared embedding field — never hand-copied."""
     index_fields = data_point_type.model_fields["metadata"].default.get("index_fields") or []
     return index_fields[0] if index_fields else None
@@ -67,12 +67,12 @@ def _index_field_of(data_point_type: type[DataPoint]) -> Optional[str]:
 # dedup contract to, and the two it gives an embedding contract to. Reusing the
 # real classes means a future change to either contract is picked up here for
 # free instead of silently going stale.
-_IDENTITY_CHECKED_TYPES: Dict[str, tuple] = {
+_IDENTITY_CHECKED_TYPES: dict[str, tuple] = {
     cls.__name__: (cls, _identity_fields_of(cls))
     for cls in (Entity, EntityType)
     if _identity_fields_of(cls)
 }
-_VECTOR_CHECKED_TYPES: Dict[str, tuple] = {
+_VECTOR_CHECKED_TYPES: dict[str, tuple] = {
     cls.__name__: (cls, _index_field_of(cls))
     for cls in (Entity, DocumentChunk)
     if _index_field_of(cls)
@@ -104,11 +104,11 @@ class ValidationIssue(BaseModel):
 
 class ValidationReport(BaseModel):
     status: ValidationStatus
-    summary: Dict[str, Any]
-    issues: List[ValidationIssue]
+    summary: dict[str, Any]
+    issues: list[ValidationIssue]
 
 
-def _check_orphaned_edges(nodes: List[Node], edges: List[EdgeData]) -> List[ValidationIssue]:
+def _check_orphaned_edges(nodes: list[Node], edges: list[EdgeData]) -> list[ValidationIssue]:
     node_ids = {node_id for node_id, _ in nodes}
     issues = []
     for source_id, target_id, relationship_name, _properties in edges:
@@ -127,7 +127,7 @@ def _check_orphaned_edges(nodes: List[Node], edges: List[EdgeData]) -> List[Vali
     return issues
 
 
-def _check_identity_ids(nodes: List[Node]) -> List[ValidationIssue]:
+def _check_identity_ids(nodes: list[Node]) -> list[ValidationIssue]:
     issues = []
     for node_id, properties in nodes:
         checked = _IDENTITY_CHECKED_TYPES.get(properties.get("type"))
@@ -158,9 +158,9 @@ def _check_identity_ids(nodes: List[Node]) -> List[ValidationIssue]:
     return issues
 
 
-async def _check_vector_sync(nodes: List[Node], vector_engine) -> List[ValidationIssue]:
-    ids_by_collection: Dict[str, List[str]] = defaultdict(list)
-    type_by_id: Dict[str, str] = {}
+async def _check_vector_sync(nodes: list[Node], vector_engine) -> list[ValidationIssue]:
+    ids_by_collection: dict[str, list[str]] = defaultdict(list)
+    type_by_id: dict[str, str] = {}
 
     for node_id, properties in nodes:
         node_type = properties.get("type")
@@ -177,7 +177,7 @@ async def _check_vector_sync(nodes: List[Node], vector_engine) -> List[Validatio
     issues = []
     for collection_name, node_ids in ids_by_collection.items():
         found = await vector_engine.retrieve(collection_name, node_ids)
-        found_ids = {str(getattr(point, "id")) for point in found}
+        found_ids = {str(point.id) for point in found}
 
         for node_id_str in node_ids:
             if node_id_str not in found_ids:
@@ -196,8 +196,8 @@ async def _check_vector_sync(nodes: List[Node], vector_engine) -> List[Validatio
 
 
 async def validate(
-    dataset: Optional[Union[str, List[str]]] = DEFAULT_DATASET_NAME,
-    user: Optional[User] = None,
+    dataset: str | list[str] | None = DEFAULT_DATASET_NAME,
+    user: User | None = None,
 ) -> ValidationReport:
     """Cross-check the graph and vector stores of a dataset for consistency.
 
@@ -235,12 +235,12 @@ async def validate(
 
         nodes, edges = await graph_engine.get_graph_data()
 
-        issues: List[ValidationIssue] = []
+        issues: list[ValidationIssue] = []
         issues += _check_orphaned_edges(nodes, edges)
         issues += _check_identity_ids(nodes)
         issues += await _check_vector_sync(nodes, vector_engine)
 
-    node_type_distribution: Dict[str, int] = {}
+    node_type_distribution: dict[str, int] = {}
     for _node_id, properties in nodes:
         node_type = properties.get("type") or "unknown"
         node_type_distribution[node_type] = node_type_distribution.get(node_type, 0) + 1

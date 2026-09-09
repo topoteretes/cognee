@@ -1,15 +1,15 @@
 """Tests for ClosingLRUCache and the @closing_lru_cache decorator."""
 
 import gc
+import sys
+
+import pytest
 
 from cognee.infrastructure.databases.utils.closing_lru_cache import (
     ClosingLRUCache,
     _start_close,
     closing_lru_cache,
 )
-
-import sys
-import pytest
 
 # These tests construct subprocess workers explicitly, so the
 # *_SUBPROCESS_ENABLED=false the Windows CI jobs set cannot keep them from
@@ -1192,6 +1192,7 @@ def test_wait_for_pending_close_is_bounded(monkeypatch):
     creation proceeds with a warning instead of hanging."""
     import asyncio
     import concurrent.futures
+
     from cognee.infrastructure.databases.utils import closing_lru_cache as cache_module
 
     monkeypatch.setattr(cache_module, "PENDING_CLOSE_WAIT_SECONDS", 0.2)

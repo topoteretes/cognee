@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Configure cache/session behavior before importing cognee internals.
 # Set os.environ before importing Cognee: Cognee reads env-backed settings at import time, so values
@@ -11,6 +11,8 @@ os.environ.setdefault("CACHING", "true")
 os.environ.setdefault("CACHE_BACKEND", "fs")
 os.environ.setdefault("AUTO_FEEDBACK", "true")
 os.environ.setdefault("ENV", "dev")
+
+import logging
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -25,6 +27,8 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -44,7 +48,7 @@ REQUIRED_ENV_SETTINGS = {
 
 class SendPayload(BaseModel):
     question: str = Field(min_length=1)
-    session_id: Optional[str] = None
+    session_id: str | None = None
     top_k: int = Field(default=5, ge=1, le=10)
 
 
@@ -52,7 +56,7 @@ class FeedbackPayload(BaseModel):
     session_id: str = Field(min_length=1)
     qa_id: str = Field(min_length=1)
     feedback_score: int = Field(ge=1, le=5)
-    feedback_text: Optional[str] = None
+    feedback_text: str | None = None
 
 
 class MemifyPayload(BaseModel):
@@ -234,6 +238,7 @@ async def _safe_search(question: str, session_id: str, top_k: int = 5) -> str:
             if results:
                 break
         except Exception:
+            logger.debug("Skipping item after error in _safe_search", exc_info=True)
             continue
 
     if not results:
@@ -370,8 +375,8 @@ class DemoState:
     def __init__(self):
         self.session_id = DEFAULT_SESSION_ID
         self.dataset_name = DATASET_NAME
-        self.dataset_id: Optional[Any] = None
-        self.dataset_owner_id: Optional[Any] = None
+        self.dataset_id: Any | None = None
+        self.dataset_owner_id: Any | None = None
         self.initialized = False
         self.activity_log: list[dict[str, Any]] = []
 
@@ -451,7 +456,7 @@ async def get_graph():
 
 @app.get("/demo/session")
 async def get_session_content(
-    session_id: Optional[str] = None,
+    session_id: str | None = None,
     last_n: int = Query(default=5000, ge=1, le=5000),
 ):
     if not state.initialized:

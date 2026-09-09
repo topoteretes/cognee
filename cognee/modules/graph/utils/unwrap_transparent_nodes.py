@@ -42,6 +42,7 @@ def _warn_dropped_field(data_point: DataPoint, field_name: str, value: Any) -> N
     try:
         carries = bool(value)
     except Exception:
+        logger.debug("Ignoring exception in _warn_dropped_field", exc_info=True)
         carries = True
 
     if carries:

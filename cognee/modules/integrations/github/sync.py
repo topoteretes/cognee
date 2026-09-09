@@ -19,7 +19,7 @@ access control.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -57,7 +57,7 @@ def clone_url(full_name: str) -> str:
 async def list_installation_repositories(token: str) -> list[str]:
     """Full names (``org/repo``) of every repository the installation covers."""
     full_names: list[str] = []
-    url: Optional[str] = f"{API_BASE_URL}/installation/repositories?per_page=100"
+    url: str | None = f"{API_BASE_URL}/installation/repositories?per_page=100"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
         while url:
             async with session.get(url, headers=_api_headers(token)) as response:
@@ -76,7 +76,7 @@ async def list_installation_repositories(token: str) -> list[str]:
 
 async def sync_repositories(
     credential: IntegrationCredential,
-    repo_full_names: Optional[list[str]] = None,
+    repo_full_names: list[str] | None = None,
 ) -> None:
     """Index ``repo_full_names`` (default: every repo the installation covers).
 

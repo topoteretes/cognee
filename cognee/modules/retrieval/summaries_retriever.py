@@ -1,10 +1,10 @@
-from typing import Any, Optional, List, Union
+from typing import Any
 
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SummariesRetriever")
 
@@ -22,7 +22,7 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
-    def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
+    def __init__(self, top_k: int = 5, session_id: str | None = None):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
         self.session_id = session_id
@@ -89,7 +89,7 @@ class SummariesRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> Union[List[str], List[dict]]:
+    ) -> list[str] | list[dict]:
         """
         Generates a completion using text summaries.
         In case of the Summaries Retriever, we do not generate a completion, we just return

@@ -1,19 +1,20 @@
 import os
 import pathlib
-import pytest
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from contextlib import AsyncExitStack
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.locks import dataset_lock
-from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import create_user, get_default_user
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -139,10 +140,10 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
     )
 
     cognify_result: dict = await cognee.cognify()
-    johns_dataset_id = list(cognify_result.keys())[0]
+    johns_dataset_id = next(iter(cognify_result.keys()))
 
     cognify_result: dict = await cognee.cognify(user=new_user)
-    maries_dataset_id = list(cognify_result.keys())[0]
+    maries_dataset_id = next(iter(cognify_result.keys()))
 
     # Canonical lock order (SDK-483): hold the dataset lock before the legacy
     # context call below acquires its queue slot; nested add/cognify/delete
@@ -199,7 +200,7 @@ async def test_delete_dataset_ladybug(mock_create_structured_output: AsyncMock):
         query_node_ids = [
             node[0]
             for node in initial_nodes
-            if node[0] in set([node[0] for node in johns_initial_nodes])
+            if node[0] in {node[0] for node in johns_initial_nodes}
         ]
 
         if query_node_ids:

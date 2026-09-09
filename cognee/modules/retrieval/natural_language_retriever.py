@@ -1,13 +1,14 @@
 import json
-from typing import Any, Optional
-from cognee.shared.logging_utils import get_logger
+from typing import Any
+
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.infrastructure.engine import INTERNAL_PROPERTY, is_internal_node
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
-from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("NaturalLanguageRetriever")
 
@@ -73,7 +74,7 @@ class NaturalLanguageRetriever(BaseRetriever):
         self,
         system_prompt_path: str = "natural_language_retriever_system.txt",
         max_attempts: int = 3,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.system_prompt_path = system_prompt_path
@@ -153,7 +154,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
             except Exception as e:
                 previous_attempts += f"Query: {cypher_query if 'cypher_query' in locals() else 'Not generated'} -> Executed with error: {e}\n"
-                logger.error(f"Error executing query: {str(e)}")
+                logger.exception("Error executing query")
 
         logger.warning(
             f"Failed to get results after {self.max_attempts} attempts for query: '{query[:50]}...'"
@@ -183,7 +184,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         return await self._execute_cypher_query(query, graph_engine)
 
-    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Optional[Any]:
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any | None:
         """
         Retrieves relevant context using a natural language query converted to Cypher.
 
@@ -206,7 +207,7 @@ class NaturalLanguageRetriever(BaseRetriever):
         return retrieved_objects
 
     async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
+        self, query: str, retrieved_objects: Any, context: Any | None = None
     ) -> Any:
         """
         Returns a completion based on the query and context.

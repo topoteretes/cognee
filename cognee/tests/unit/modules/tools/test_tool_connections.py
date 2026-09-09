@@ -6,7 +6,6 @@ import pytest
 
 import cognee.modules.tools.connections as connections_mod
 from cognee.modules.tools.config import ToolsConfig
-from cognee.modules.tools.errors import ToolConnectionNotFoundError, ToolError
 from cognee.modules.tools.connections import (
     delete_tool_connection,
     get_tool_connection,
@@ -14,6 +13,7 @@ from cognee.modules.tools.connections import (
     list_tool_connections,
     register_tool_connection,
 )
+from cognee.modules.tools.errors import ToolConnectionNotFoundError, ToolError
 
 
 @pytest.fixture

@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+import pytest
+
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
 
 def _make_unified_mock(graph_engine=None):

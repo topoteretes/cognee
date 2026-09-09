@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 
-from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.cloud.operations import check_api_key
 from cognee.modules.cloud.exceptions import CloudApiKeyMissingError
+from cognee.modules.cloud.operations import check_api_key
+from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 
 
 def get_checks_router():

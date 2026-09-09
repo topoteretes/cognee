@@ -109,8 +109,9 @@ async def test_uncompleted_stable_id_item_processes(monkeypatch):
 async def test_duplicate_source_identity_is_rejected_loudly():
     dlt = pytest.importorskip("dlt")
 
-    import cognee.tasks.ingestion.resolve_dlt_sources  # noqa: F401
     import sys
+
+    import cognee.tasks.ingestion.resolve_dlt_sources
 
     # The package __init__ re-exports the FUNCTION under the module's name,
     # so attribute imports resolve to it; grab the real module for patching.
@@ -138,11 +139,11 @@ async def test_duplicate_source_identity_is_rejected_loudly():
             "_build_source_manifest_item",
             new=AsyncMock(return_value=duplicate_item),
         ),
+        pytest.raises(ValueError, match="same identity"),
     ):
-        with pytest.raises(ValueError, match="same identity"):
-            await resolve_module.resolve_dlt_sources(
-                [source_a(), source_b()], "ds", user=SimpleNamespace(id=uuid4())
-            )
+        await resolve_module.resolve_dlt_sources(
+            [source_a(), source_b()], "ds", user=SimpleNamespace(id=uuid4())
+        )
 
 
 @pytest.mark.asyncio
@@ -156,7 +157,7 @@ async def test_csv_paths_pass_through_resolve_untouched():
     pytest.importorskip("dlt")
     import sys
 
-    import cognee.tasks.ingestion.resolve_dlt_sources  # noqa: F401
+    import cognee.tasks.ingestion.resolve_dlt_sources
 
     resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
 

@@ -1,12 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
-from cognee.infrastructure.loaders.core.image_loader import ImageLoader, MAX_OCR_TEXT_LENGTH
+from cognee.infrastructure.loaders.core.image_loader import MAX_OCR_TEXT_LENGTH, ImageLoader
 
 TEST_DATA = Path(__file__).parent / "test_data"
 
