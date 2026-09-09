@@ -253,3 +253,32 @@ def test_resolver_matches_packaging_semantics():
             assert resolver.satisfies(version, requirement) == spec.contains(version), (
                 f"resolver disagrees with packaging for ladybug {version} vs {requirement!r}"
             )
+
+
+def test_extension_repo_digest_pinned_and_in_sync():
+    """Both consumers of the extension-repo image must pin the same digest.
+
+    Pinning by digest (not tag) is what keeps a compromised :latest from
+    injecting binaries into wheels or the Docker image; keeping the two pins
+    identical means the offline e2e validates the exact bytes both ship.
+    """
+    digest_pattern = re.compile(r"ghcr\.io/ladybugdb/extension-repo@(sha256:[0-9a-f]{64})")
+    script = (REPO_ROOT / "scripts" / "fetch_ladybug_json_extension.sh").read_text()
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text()
+
+    script_digests = digest_pattern.findall(script)
+    dockerfile_digests = digest_pattern.findall(dockerfile)
+    assert script_digests, "fetch script no longer pins the extension-repo image by digest"
+    assert dockerfile_digests, "Dockerfile no longer pins the extension-repo image by digest"
+    assert set(script_digests) == set(dockerfile_digests), (
+        "fetch script and Dockerfile pin different extension-repo digests — "
+        "refresh them together (see the comment in scripts/fetch_ladybug_json_extension.sh)"
+    )
+    # Only the executable references count — the fetch script's comment may
+    # (and does) mention :latest in the digest-refresh instructions.
+    assert not re.search(r"^IMAGE=.*extension-repo:latest", script, re.MULTILINE), (
+        "fetch script IMAGE= reverted to the unpinned :latest tag"
+    )
+    assert not re.search(
+        r"^FROM ghcr\.io/ladybugdb/extension-repo:latest", dockerfile, re.MULTILINE
+    ), "Dockerfile FROM reverted to the unpinned :latest tag"

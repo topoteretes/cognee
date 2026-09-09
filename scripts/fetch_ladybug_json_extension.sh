@@ -24,7 +24,16 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_BASE="$REPO_ROOT/cognee_db_workers/ladybug_extensions"
 ALL_PLATFORMS=(linux_amd64 linux_arm64 osx_amd64 osx_arm64 win_amd64)
 
-IMAGE="ghcr.io/ladybugdb/extension-repo:latest"
+# Pinned by digest, not tag: these binaries ship inside cognee's wheels and
+# Docker image, so a compromised :latest tag must not be able to inject
+# content into a release. The digest is the exact bytes the offline e2e
+# (cognee/tests/e2e/bundled_extension/) validated. When a ladybug bump needs
+# a version dir this digest predates, the resolver fails loudly ("no
+# candidate extension dir satisfies") — refresh with:
+#   docker pull ghcr.io/ladybugdb/extension-repo:latest \
+#     && docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/ladybugdb/extension-repo:latest
+# and keep Dockerfile's ladybug-extensions stage on the same digest.
+IMAGE="ghcr.io/ladybugdb/extension-repo@sha256:180c83fb190e9d6ef8d324850b192db26794ab7cb866a38813a45365f14bd46d"
 docker pull -q "$IMAGE"
 
 if [ $# -eq 0 ]; then
