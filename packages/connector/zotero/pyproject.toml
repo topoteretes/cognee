@@ -1,0 +1,9 @@
+[project]
+name = "cognee-community-connector-zotero"
+version = "0.1.0"
+description = "Zotero data-source connector for cognee"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
