@@ -1,6 +1,3 @@
-from typing import Dict, List, Tuple
-
-
 def transform_insights_to_graph(input_triplets: list[tuple[dict, dict, dict]]):
     nodes = {}
     edges = {}

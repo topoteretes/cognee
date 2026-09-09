@@ -15,7 +15,7 @@ import sys
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 import httpx

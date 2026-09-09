@@ -22,7 +22,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
 from uuid import UUID as UUIDType
 
 from sqlalchemy import and_, case, func, or_, select, update
@@ -57,6 +56,7 @@ def _dialect_name(bind) -> str:
     try:
         return bind.dialect.name
     except Exception:
+        logger.debug("Falling back to  after error in _dialect_name", exc_info=True)
         return ""
 
 
@@ -584,4 +584,4 @@ async def record_session_activity(
                 exc,
             )
         else:
-            logger.debug("session_records write failed (%s)", exc)
+            logger.debug("session_records write failed (%s)", exc, exc_info=True)

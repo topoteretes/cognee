@@ -13,7 +13,6 @@ Skipped unless `TEST_PGVECTOR_URL` is set, e.g.:
 from __future__ import annotations
 
 import os
-from typing import List
 from uuid import uuid4
 
 import pytest

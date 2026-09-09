@@ -93,12 +93,14 @@ def test_write_golden_answers_raises_for_undeliverable_package(tmp_path: Path):
         )
     ]
 
-    with patch(
-        "cognee.eval_framework.benchmark_adapters.logistics_system_utils.ontology.DeliveryRuleEngine.evaluate",
-        return_value=SimpleNamespace(selected_option=None),
-    ):
-        with pytest.raises(
+    with (
+        patch(
+            "cognee.eval_framework.benchmark_adapters.logistics_system_utils.ontology.DeliveryRuleEngine.evaluate",
+            return_value=SimpleNamespace(selected_option=None),
+        ),
+        pytest.raises(
             ValueError,
             match="pkg-undeliverable has no deliverable transport option",
-        ):
-            write_golden_answers(world, tmp_path)
+        ),
+    ):
+        write_golden_answers(world, tmp_path)

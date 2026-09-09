@@ -1,7 +1,7 @@
 import asyncio
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
 
 try:
@@ -342,6 +342,7 @@ async def _dispatch_session_entry(
                 resolved_dataset = ds.id
         except Exception:
             # Fall through with None — we still create the session row.
+            logger.debug("Ignoring exception in _dispatch_session_entry", exc_info=True)
             resolved_dataset = None
 
         await ensure_and_touch_session(
@@ -350,7 +351,7 @@ async def _dispatch_session_entry(
             dataset_id=resolved_dataset,
         )
     except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
+        logger.debug("remember: pre-upsert session_record failed (%s)", exc, exc_info=True)
 
     result = RememberResult(
         status="session_stored",
@@ -1372,7 +1373,9 @@ async def _remember_inner(
                             )
                         logger.info("remember: session '%s' bridged to permanent graph", session_id)
                     except Exception as exc:
-                        logger.warning("remember: session improve failed (non-fatal): %s", exc)
+                        logger.warning(
+                            "remember: session improve failed (non-fatal): %s", exc, exc_info=True
+                        )
 
                 result._task = asyncio.create_task(_session_improve())
                 _BACKGROUND_REMEMBER_TASKS.add(result._task)

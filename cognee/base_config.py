@@ -2,7 +2,6 @@ import base64
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict

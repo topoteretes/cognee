@@ -41,6 +41,7 @@ def _probe(source: str) -> str:
         capture_output=True,
         text=True,
         timeout=300,
+        check=False,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     return result.stdout.strip()

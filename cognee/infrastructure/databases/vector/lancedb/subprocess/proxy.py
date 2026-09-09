@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pyarrow as pa
 
+from cognee.shared.logging_utils import get_logger
 from cognee_db_workers.harness import (
     ReplayStep,
     Request,
@@ -36,6 +37,8 @@ from cognee_db_workers.lancedb_protocol import (
     OP_TABLE_VECTOR_SEARCH_EXECUTE,
 )
 from cognee_db_workers.lancedb_worker import worker_main
+
+logger = get_logger()
 
 
 class LanceDBSubprocessSession(SubprocessSession):
@@ -208,7 +211,9 @@ class RemoteLanceDBTable:
             try:
                 self._session.remove_replay_step(step)
             except Exception:
-                pass
+                logger.debug(
+                    "Ignoring exception in RemoteLanceDBTable._deregister_replay", exc_info=True
+                )
             self._replay_step = None
 
     async def release(self) -> None:
@@ -222,7 +227,7 @@ class RemoteLanceDBTable:
             await self._session.call_async(Request(op=OP_TABLE_RELEASE, handle_id=hid))
         except Exception:
             # Session already torn down; the handle dies with the worker.
-            pass
+            logger.debug("Ignoring exception in RemoteLanceDBTable.release", exc_info=True)
 
     def release_sync(self) -> None:
         """Sync variant for use in ``__del__`` / non-async contexts."""
@@ -234,7 +239,7 @@ class RemoteLanceDBTable:
         try:
             self._session.call(Request(op=OP_TABLE_RELEASE, handle_id=hid))
         except Exception:
-            pass
+            logger.debug("Ignoring exception in RemoteLanceDBTable.release_sync", exc_info=True)
 
     def __del__(self):
         # Best-effort; async release is preferred. Only try sync release if the
@@ -243,7 +248,7 @@ class RemoteLanceDBTable:
             if self._handle_id is not None and not self._session._closed_event.is_set():
                 self.release_sync()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in RemoteLanceDBTable.__del__", exc_info=True)
 
     async def count_rows(self) -> int:
         resp = await self._session.call_async(

@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 
@@ -10,6 +11,8 @@ from cognee.modules.engine.models import Triplet
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.tasks.storage import add_data_points
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -46,7 +49,7 @@ async def setup_test_environment_with_triplets():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_with_triplets", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -72,7 +75,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

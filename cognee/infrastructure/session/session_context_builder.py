@@ -11,7 +11,7 @@ helpers are deliberately strict so tests catch malformed stored data and scoring
 """
 
 from datetime import datetime, timezone
-from typing import List, Protocol, Tuple
+from typing import Protocol
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -27,6 +27,9 @@ from cognee.infrastructure.session.session_context_models import (
     normalize_content,
     valid_sections_for,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 _AGENT_CANDIDATE_ADAPTER = TypeAdapter(AgentCandidateContextUpdateVariant)
 
@@ -301,6 +304,7 @@ async def _stamp_served_entries(*, session_manager, user_id, session_id, entry_i
                 merge={"last_served_at": served_at},
             )
         except Exception:
+            logger.debug("Skipping item after error in _stamp_served_entries", exc_info=True)
             continue
 
 
@@ -396,6 +400,7 @@ async def build_active_context_block(
         return block, served_ids
     except Exception:
         # Fail-open: never block answer generation.
+        logger.debug("Falling back after error in build_active_context_block", exc_info=True)
         return "", []
 
 
@@ -539,7 +544,9 @@ async def apply_candidate_updates(
                     touched.append(entry_id)
             except Exception:
                 # Per-candidate fail-open: skip this candidate, keep going.
+                logger.debug("Skipping item after error in apply_candidate_updates", exc_info=True)
                 continue
         return touched
     except Exception:
+        logger.debug("Falling back after error in apply_candidate_updates", exc_info=True)
         return touched

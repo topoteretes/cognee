@@ -338,9 +338,11 @@ async def test_extract_audio_nonzero_exit_raises_and_cleans_up(mock_run, loader)
     """A non-zero ffmpeg exit raises with stderr and removes the temp WAV."""
     mock_run.return_value = MagicMock(returncode=1, stderr=b"Invalid data found")
 
-    with _RemoveSpy() as removed:
-        with pytest.raises(RuntimeError, match="ffmpeg failed to extract audio"):
-            await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
+    with (
+        _RemoveSpy() as removed,
+        pytest.raises(RuntimeError, match="ffmpeg failed to extract audio"),
+    ):
+        await loader._extract_audio("/usr/bin/ffmpeg", "/videos/clip.mkv")
 
     assert removed.paths and removed.paths[0].endswith(".wav")
     assert not os.path.exists(removed.paths[0])

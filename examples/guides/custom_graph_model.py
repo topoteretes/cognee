@@ -1,6 +1,5 @@
 import asyncio
 import os
-from typing import List
 
 from cognee import forget, remember, visualize_graph
 from cognee.low_level import DataPoint

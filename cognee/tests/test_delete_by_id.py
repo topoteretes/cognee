@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 from uuid import uuid4
@@ -8,9 +9,8 @@ from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.shared.logging_utils import get_logger
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -157,6 +157,7 @@ async def main():
         delete_permission_error = True
         print("✅ Delete correctly denied for user without permission")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert delete_permission_error, "Delete should fail for user without permission"
@@ -174,6 +175,7 @@ async def main():
         data_not_found_error = True
         print("✅ Delete correctly failed for non-existent data_id")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert data_not_found_error, "Delete should fail for non-existent data_id"
@@ -193,6 +195,7 @@ async def main():
         dataset_not_found_error = True
         print("✅ Delete correctly failed for non-existent dataset_id")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert dataset_not_found_error, "Delete should fail for non-existent dataset_id"
@@ -219,6 +222,7 @@ async def main():
         data_not_in_dataset_error = True
         print("✅ Delete correctly failed for data not in specified dataset")
     except Exception as e:
+        logger.debug("Ignoring exception in main", exc_info=True)
         print(f"❌ Unexpected error type: {e}")
 
     assert data_not_in_dataset_error, "Delete should fail when data doesn't belong to dataset"

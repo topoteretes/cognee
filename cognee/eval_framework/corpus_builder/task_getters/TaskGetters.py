@@ -1,6 +1,5 @@
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import List
 
 from cognee.api.v1.cognify.cognify import get_default_tasks
 from cognee.eval_framework.corpus_builder.task_getters.get_cascade_graph_tasks import (

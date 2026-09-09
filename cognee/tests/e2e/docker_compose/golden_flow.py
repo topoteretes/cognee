@@ -18,7 +18,6 @@ import io
 import time
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional
 
 import requests
 from config import CONFIG

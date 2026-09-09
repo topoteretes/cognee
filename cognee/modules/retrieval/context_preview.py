@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -152,7 +152,7 @@ async def load_read_only_session_prompt(
         )
         return prompt
     except Exception as error:
-        logger.warning("Only-context session prompt failed open: %s", error)
+        logger.warning("Only-context session prompt failed open: %s", error, exc_info=True)
         return ""
 
 

@@ -1,6 +1,5 @@
 """Delete chunk-owned output through the shared provenance planner."""
 
-from typing import List
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key

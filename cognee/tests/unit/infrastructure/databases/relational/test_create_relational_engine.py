@@ -110,6 +110,8 @@ class TestCreateRelationalEngineTurso:
     def test_turso_missing_driver_raises_actionable_import_error(self):
         """When the libSQL driver is missing, raise a clear cognee[turso] install error."""
         # Setting the module to None in sys.modules makes `import libsql_experimental` raise ImportError.
-        with patch.dict(sys.modules, {"libsql_experimental": None}):
-            with pytest.raises(ImportError, match="Turso/libSQL"):
-                create_relational_engine(**TURSO_PARAMS)
+        with (
+            patch.dict(sys.modules, {"libsql_experimental": None}),
+            pytest.raises(ImportError, match="Turso/libSQL"),
+        ):
+            create_relational_engine(**TURSO_PARAMS)

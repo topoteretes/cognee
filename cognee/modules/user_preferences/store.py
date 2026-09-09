@@ -14,7 +14,6 @@ caller's job, so exactly one place knows the formula.
 """
 
 from collections.abc import Iterable, Mapping
-from typing import Dict, Optional, Tuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability

@@ -5,7 +5,7 @@ that survived so it never references a dropped chunk. Keys the retriever carries
 module does not own are taken from the primary result unchanged.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.retrieval.hybrid.results import empty_hybrid_result, result_id
 from cognee.modules.retrieval.utils.merge_results import conversational_reserve, merge_ranked

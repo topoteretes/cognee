@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models import PipelineContext

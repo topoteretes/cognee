@@ -471,10 +471,13 @@ async def test_dropped_preview_frames_are_signalled_before_final():
                 sink.put_delta(f"token{index}")
         return PAYLOAD
 
-    with _flag(), patch.object(recall_stream, "KEEPALIVE_SECONDS", 5.0):
-        with patch("cognee.infrastructure.llm.streaming.token_sink.MAX_BUFFERED_EVENTS", 4):
-            started = await recall_stream.begin_recall_stream(_floods)
-            body = "".join([frame async for frame in started.frames()])
+    with (
+        _flag(),
+        patch.object(recall_stream, "KEEPALIVE_SECONDS", 5.0),
+        patch("cognee.infrastructure.llm.streaming.token_sink.MAX_BUFFERED_EVENTS", 4),
+    ):
+        started = await recall_stream.begin_recall_stream(_floods)
+        body = "".join([frame async for frame in started.frames()])
 
     kinds = [event for event, _ in _frames(body)]
     assert "reset" in kinds, "a truncated preview must be signalled"

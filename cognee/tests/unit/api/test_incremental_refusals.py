@@ -161,7 +161,7 @@ async def test_same_name_upload_uses_isolated_staging_path(monkeypatch, tmp_path
     async def _load_staged(path, _preferred_loaders):
         return path, SimpleNamespace(loader_name="text_loader")
 
-    upload_file = tempfile.SpooledTemporaryFile()
+    upload_file = tempfile.SpooledTemporaryFile()  # noqa: SIM115 - handed to UploadFile, which owns it
     upload_file.write(b"new content")
     upload_file.seek(0)
     upload = UploadFile(file=upload_file, filename="report.txt")

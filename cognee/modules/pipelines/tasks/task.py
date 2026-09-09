@@ -1,6 +1,6 @@
 import inspect
 from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
-from typing import Any, Union
+from typing import Any
 
 from cognee.pipelines.types import _Drop
 

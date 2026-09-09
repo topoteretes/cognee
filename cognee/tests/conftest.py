@@ -1,3 +1,6 @@
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 """Top-level test config.
 
 ``test_subprocess_rss.py`` is a standalone benchmark script, not a pytest
@@ -25,4 +28,4 @@ def pytest_sessionfinish(session, exitstatus):
             child.terminate()
             child.join(timeout=5)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in pytest_sessionfinish", exc_info=True)

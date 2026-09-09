@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 from cognee.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor

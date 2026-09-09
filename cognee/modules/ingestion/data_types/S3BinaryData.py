@@ -1,7 +1,6 @@
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from cognee.infrastructure.files import FileMetadata, get_file_metadata
 from cognee.infrastructure.utils import run_sync

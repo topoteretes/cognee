@@ -1,7 +1,7 @@
 import asyncio
 import os
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
@@ -223,8 +223,8 @@ class ImageLoader(LoaderInterface):
         try:
             # RapidOCR is blocking CPU work; offload it so the event loop stays free.
             ocr_result, _ = await asyncio.to_thread(engine, file_path)
-        except Exception as e:
-            logger.error(f"OCR failed for {file_path}: {e}")
+        except Exception:
+            logger.exception(f"OCR failed for {file_path}")
             return ""
         if not ocr_result:
             return ""
@@ -254,8 +254,15 @@ class ImageLoader(LoaderInterface):
 
         try:
             with Image.open(file_path) as img:
-                exif_data = img._getexif()  # ty:ignore[unresolved-attribute]
+                # _getexif exists only on the JPEG plugin; other formats fall through to None
+                # exactly as the AttributeError did before.
+                get_exif = getattr(img, "_getexif", None)
+                exif_data = get_exif() if callable(get_exif) else None
         except Exception:
+            logger.debug(
+                "Falling back to None after error in ImageLoader._extract_exif_metadata",
+                exc_info=True,
+            )
             return None
 
         if exif_data is None:
@@ -318,6 +325,10 @@ class ImageLoader(LoaderInterface):
             with Image.open(file_path) as img:
                 return _dhash(img)
         except Exception:
+            logger.debug(
+                "Falling back to None after error in ImageLoader._compute_perceptual_hash",
+                exc_info=True,
+            )
             return None
 
     @classmethod
@@ -348,7 +359,7 @@ def _dhash(image, hash_size: int = 8) -> str:
     """
     from PIL import Image  # ty: ignore[unresolved-import]
 
-    image = image.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)  # ty:ignore[unresolved-attribute]
+    image = image.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.LANCZOS)
     pixels = list(image.getdata())
     # pixels now has (hash_size+1) * hash_size entries, row-major
     bits: list[str] = []
@@ -390,6 +401,7 @@ def _format_gps_info(gps_dict: dict) -> str | None:
         lat = _to_decimal(gps_dict.get(2), gps_dict.get(1, "N"))  # GPSLatitude, GPSLatitudeRef
         lon = _to_decimal(gps_dict.get(4), gps_dict.get(3, "E"))  # GPSLongitude, GPSLongitudeRef
     except Exception:
+        logger.debug("Falling back to None after error in _format_gps_info", exc_info=True)
         return None
 
     parts = []

@@ -1,7 +1,6 @@
 import logging
 import os
 from datetime import datetime, timezone
-from typing import List
 
 from graphiti_core import Graphiti
 from graphiti_core.nodes import EpisodeType

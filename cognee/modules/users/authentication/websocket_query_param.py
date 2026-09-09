@@ -1,5 +1,3 @@
-from typing import Optional
-
 from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocket
 

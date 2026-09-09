@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple
 
 from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy, MatchingStrategy
 from cognee.modules.ontology.models import AttachedOntologyNode

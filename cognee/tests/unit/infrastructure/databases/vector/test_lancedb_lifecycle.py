@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 try:
-    import lancedb  # noqa: F401
+    import lancedb
 
     from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import (
         LanceDBAdapter,

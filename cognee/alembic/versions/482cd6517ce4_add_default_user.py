@@ -7,7 +7,6 @@ Create Date: 2024-10-16 22:17:18.634638
 """
 
 from collections.abc import Sequence
-from typing import Union
 
 from fastapi_users.exceptions import UserAlreadyExists
 from sqlalchemy.util import await_only

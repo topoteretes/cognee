@@ -10,7 +10,6 @@ setup_tracing() / setup_metrics().
 
 import logging
 import os
-from typing import Optional
 
 try:
     from opentelemetry._logs import set_logger_provider

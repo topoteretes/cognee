@@ -1,4 +1,4 @@
-from typing import List, Optional, cast
+from typing import cast
 from uuid import UUID
 
 from cognee.context_global_variables import session_user
@@ -102,7 +102,7 @@ async def get_session(
             try:
                 result.append(SessionQAEntry.model_validate(entry))
             except Exception as e:
-                logger.warning("get_session: skip invalid entry: %s", e)
+                logger.warning("get_session: skip invalid entry: %s", e, exc_info=True)
         elif isinstance(entry, SessionQAEntry):
             result.append(entry)
         else:

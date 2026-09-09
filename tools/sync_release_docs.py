@@ -231,40 +231,22 @@ def split_frontmatter(content: str) -> tuple[str, str]:
     return frontmatter, body
 
 
-UNRELEASED_HEADING_PATTERN = r"^##\s+Unreleased\s*$"
-
-
 def changelog_has_tag(content: str, tag: str) -> bool:
     pattern = rf"^##\s+{re.escape(tag)}\s*$"
     return re.search(pattern, content, flags=re.MULTILINE) is not None
 
 
 def insert_entry_into_changelog(existing: str, entry: str) -> str:
-    """Place a release entry directly below the "Unreleased" section.
-
-    Not at the very top: "Unreleased" is a standing section describing work that
-    has not shipped yet, so an entry above it claims the release is newer than
-    unshipped work and leaves the file reading v1.5.5 -> Unreleased -> v1.5.4.
-    This function originally prepended before the first `##`, which was correct
-    when the newest release was the first heading and silently became wrong once
-    the "Unreleased" section was added ahead of it.
-
-    A changelog with no such section (a fresh one built from
-    DEFAULT_CHANGELOG_TEXT) keeps the original behaviour: newest entry first.
-    """
+    """Insert below the standing "Unreleased" section, or at the top if absent."""
     frontmatter, body = split_frontmatter(existing)
 
-    unreleased = re.search(UNRELEASED_HEADING_PATTERN, body, flags=re.MULTILINE)
-    if unreleased:
-        next_heading = re.search(r"^##\s+", body[unreleased.end() :], flags=re.MULTILINE)
-        split_at = unreleased.end() + next_heading.start() if next_heading else len(body)
-    else:
-        first_heading = re.search(r"^##\s+", body, flags=re.MULTILINE)
-        split_at = first_heading.start() if first_heading else len(body)
+    unreleased = re.search(r"^##\s+Unreleased\s*$", body, flags=re.MULTILINE)
+    start = unreleased.end() if unreleased else 0
+    next_heading = re.search(r"^##\s+", body[start:], flags=re.MULTILINE)
+    split_at = start + next_heading.start() if next_heading else len(body)
 
     before = body[:split_at].rstrip()
     after = body[split_at:].strip("\n").rstrip()
-
     parts = [part for part in (before, entry.rstrip(), after) if part]
     return frontmatter + "\n\n".join(parts).rstrip() + "\n"
 
@@ -342,11 +324,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-changelog",
         action="store_true",
-        help=(
-            "Sync the OpenAPI spec only, leaving the changelog alone. For runs that "
-            "are not publishing a release: their tag is synthetic, so an entry for it "
-            "is a fabricated release section on a published page."
-        ),
+        help="Sync the OpenAPI spec only; a non-release run's tag is synthetic.",
     )
     return parser.parse_args()
 

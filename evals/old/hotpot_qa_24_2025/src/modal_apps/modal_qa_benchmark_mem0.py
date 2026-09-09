@@ -72,7 +72,7 @@ async def main(
     print(f"🚀 Launching {runs} Mem0 QA benchmark run(s) on Modal...")
 
     # Generate unique timestamp for this benchmark session
-    base_timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    base_timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     config_params_list = []
 
     for run_num in range(runs):

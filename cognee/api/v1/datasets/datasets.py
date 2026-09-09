@@ -1,5 +1,4 @@
 import asyncio
-from typing import Optional
 from uuid import UUID
 
 from cognee.api.v1.datasets.dto import DataDTO
@@ -72,7 +71,9 @@ async def _invalidate_sessions_for_dataset_nonfatal(dataset_id: UUID) -> None:
 
         await invalidate_sessions_for_dataset(dataset_id)
     except Exception as error:
-        logger.warning("Session invalidation after dataset delete failed (non-fatal): %s", error)
+        logger.warning(
+            "Session invalidation after dataset delete failed (non-fatal): %s", error, exc_info=True
+        )
 
 
 async def _invalidate_sessions_for_deleted_data_nonfatal(
@@ -95,7 +96,9 @@ async def _invalidate_sessions_for_deleted_data_nonfatal(
             user_id=user_id,
         )
     except Exception as error:
-        logger.warning("Session invalidation after data delete failed (non-fatal): %s", error)
+        logger.warning(
+            "Session invalidation after data delete failed (non-fatal): %s", error, exc_info=True
+        )
 
 
 class datasets:
@@ -190,21 +193,23 @@ class datasets:
 
         # Same per-dataset lock as pipeline runs: wait for any in-flight pipeline
         # on this dataset and exclude concurrent deletes.
-        async with dataset_lock(dataset.id):
-            async with set_database_global_context_variables(dataset.id, dataset.owner_id):
-                deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
+        async with (
+            dataset_lock(dataset.id),
+            set_database_global_context_variables(dataset.id, dataset.owner_id),
+        ):
+            deleted_elements = await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
-                # Session memory derived from this dataset would keep asserting
-                # the deleted content (stale QA replay / session-context leak),
-                # so drop the attributed sessions with the dataset.
-                await _invalidate_sessions_for_dataset_nonfatal(dataset.id)
-                await _invalidate_sessions_for_deleted_data_nonfatal(
-                    dataset.id, deleted_elements, user.id
-                )
+            # Session memory derived from this dataset would keep asserting
+            # the deleted content (stale QA replay / session-context leak),
+            # so drop the attributed sessions with the dataset.
+            await _invalidate_sessions_for_dataset_nonfatal(dataset.id)
+            await _invalidate_sessions_for_deleted_data_nonfatal(
+                dataset.id, deleted_elements, user.id
+            )
 
-                # delete_dataset removes the dataset's scoped Data rows
-                # (files refcounted by raw_data_location) with the record.
-                result = await delete_dataset(dataset)
+            # delete_dataset removes the dataset's scoped Data rows
+            # (files refcounted by raw_data_location) with the record.
+            result = await delete_dataset(dataset)
 
         return result
 

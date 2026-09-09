@@ -26,7 +26,6 @@ its FIRST owner (so its provenance stamp folds into the same atomic
 statement), and the remaining owners are attached afterwards.
 """
 
-from typing import Dict, List, Tuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key

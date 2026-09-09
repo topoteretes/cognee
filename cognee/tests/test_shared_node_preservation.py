@@ -466,7 +466,7 @@ async def test_dataset_deletion_removes_files():
         deleted_dataset = await get_dataset(dataset_id)
         assert deleted_dataset is None, "Dataset should be deleted"
     except Exception as e:
-        logger.info(f"✅ Dataset correctly deleted: {type(e).__name__}")
+        logger.info(f"✅ Dataset correctly deleted: {type(e).__name__}", exc_info=True)
 
     # Verify data records are deleted
     data_1_after = await get_data(data_1_id)

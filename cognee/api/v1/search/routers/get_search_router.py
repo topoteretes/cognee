@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, List, Optional, Union
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -14,8 +14,11 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.usage_logger import log_usage
 from cognee.shared.utils import send_telemetry
+
+logger = get_logger()
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -177,6 +180,7 @@ def get_search_router() -> APIRouter:
 
             return history
         except Exception as error:
+            logger.exception("get_search_router.get_search_history failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(
@@ -187,7 +191,7 @@ def get_search_router() -> APIRouter:
 
     @router.post(
         "",
-        response_model=Union[list[SearchResult], list],
+        response_model=list[SearchResult] | list,
         responses={
             403: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
@@ -295,6 +299,7 @@ def get_search_router() -> APIRouter:
             # returns them to the caller.
             raise
         except Exception as error:
+            logger.exception("get_search_router.search failed, returning HTTP 500")
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content=ErrorResponse(

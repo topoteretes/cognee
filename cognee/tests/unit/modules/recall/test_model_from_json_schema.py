@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 
 import pytest
 from pydantic import BaseModel, ValidationError

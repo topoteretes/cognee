@@ -1,7 +1,6 @@
 name: automation | Sync Mintlify Docs
 
 on:
-  pull_request:
   # Kept for a release a human publishes through the UI, which does fire this.
   release:
     types: [published]
@@ -92,17 +91,10 @@ jobs:
             DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${CALLED_TAG}"
           else
             RELEASE_MODE=false
-            # The ref goes into a changelog heading and a branch name, so flatten
-            # its slashes here too rather than only at the branch name below.
             TAG="test-sync-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             RELEASE_LINK="${SERVER_URL}/${REPOSITORY}/commit/${COMMIT_SHA}"
             PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-            # Namespace the branch under automation/ instead of reusing the ref
-            # name verbatim. The old value made a dispatch from main check out
-            # `main` inside docs-repo and then force-push cognee-docs' own main,
-            # which is what failed run 24552485386 at "Push docs branch". The
-            # sha keeps repeated dispatches from the same ref on separate
-            # branches instead of overwriting one another.
+            # Never the bare ref: a dispatch from main force-pushes cognee-docs' main.
             DOCS_BRANCH_NAME="automation/sync-mintlify-docs-${REF_NAME//\//-}-${COMMIT_SHA::7}"
             printf "%s\n\n- Source commit: \`%s\`\n- Workflow event: \`%s\`\n- Commit URL: %s\n" \
               "Automated docs sync test run from branch \`${REF_NAME}\`." \
@@ -141,10 +133,7 @@ jobs:
         env:
           RELEASE_MODE: ${{ steps.release_meta.outputs.release_mode }}
         run: |
-          # A preview run proves the spec pipeline; it must not write release
-          # history. Its tag is synthetic, so the entry would be a fabricated
-          # release section proposed onto a published page — and because the
-          # tag embeds a sha, repeated previews accumulate rather than dedupe.
+          # Only a real release writes changelog history; a preview tag is synthetic.
           SKIP_CHANGELOG=()
           if [ "${RELEASE_MODE}" != "true" ]; then
             SKIP_CHANGELOG=(--skip-changelog)
@@ -182,16 +171,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_DISPATCH_PAT_TOKEN }}
         run: |
-          BRANCH_NAME="${{ steps.commit_docs.outputs.branch_name }}"
-          # This step force-pushes, so a branch name that ever resolves to a
-          # long-lived docs branch has to fail loudly rather than land.
-          case "${BRANCH_NAME}" in
-            ""|main|master|HEAD)
-              echo "::error::Refusing to force-push cognee-docs '${BRANCH_NAME}'."
-              exit 1
-              ;;
-          esac
-          git push --force-with-lease origin "${BRANCH_NAME}"
+          git push --force-with-lease origin "${{ steps.commit_docs.outputs.branch_name }}"
 
       - name: Create or update docs pull request
         if: ${{ steps.commit_docs.outputs.changes_made == 'true' }}

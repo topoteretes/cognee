@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Any, List, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.vector import get_vector_engine_async
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError

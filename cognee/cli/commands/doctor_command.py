@@ -7,6 +7,9 @@ import cognee.cli.echo as fmt
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.reference import SupportsCliCommand
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 @contextmanager
@@ -120,6 +123,7 @@ Exits non-zero when any check fails, so it can gate CI and setup scripts.
                     await test_llm_connection()
                 fmt.echo("  ✓ LLM round-trip succeeded")
             except Exception as error:
+                logger.debug("Ignoring exception in DoctorCommand._run", exc_info=True)
                 fmt.error(f"  ✗ LLM round-trip failed: {error}")
                 failures += 1
 
@@ -128,6 +132,7 @@ Exits non-zero when any check fails, so it can gate CI and setup scripts.
                     dimensions = await test_embedding_connection()
                 fmt.echo(f"  ✓ Embedding round-trip succeeded (dimensions={dimensions})")
             except Exception as error:
+                logger.debug("Ignoring exception in DoctorCommand._run", exc_info=True)
                 fmt.error(f"  ✗ Embedding round-trip failed: {error}")
                 failures += 1
         else:

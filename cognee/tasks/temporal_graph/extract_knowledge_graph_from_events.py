@@ -1,5 +1,3 @@
-from typing import List
-
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Event
 from cognee.modules.pipelines.tasks.task import task_summary

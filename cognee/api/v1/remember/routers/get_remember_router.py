@@ -1,5 +1,5 @@
 import json
-from typing import Annotated, List, Literal, Optional, Union
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException
@@ -534,7 +534,7 @@ def get_remember_router() -> APIRouter:
                         "Expected the same dict format as the cognify endpoint, "
                         "including a top-level 'title' key."
                     ),
-                )
+                ) from parse_err
 
         try:
             config_to_use = None

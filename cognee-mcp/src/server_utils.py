@@ -5,7 +5,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 MAX_TOP_K = 100
 COMPLETION_SEARCH_TYPES = {
@@ -21,40 +21,6 @@ VALID_DELETE_MODES = {"soft", "hard"}
 class ParsedCognifyData:
     items: list[str]
     is_batch: bool
-
-
-def parse_cognify_data(data: str) -> ParsedCognifyData:
-    """Parse a cognify input string into one or more ingestion items.
-
-    Plain strings remain a single item. JSON arrays are treated as batch input
-    and must contain at least one non-empty string.
-    """
-    if not isinstance(data, str) or not data.strip():
-        raise ValueError("data must be a non-empty string.")
-
-    stripped = data.strip()
-    if not (stripped.startswith("[") and stripped.endswith("]")):
-        return ParsedCognifyData(items=[data], is_batch=False)
-
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"data looks like a JSON array but could not be parsed: {exc.msg}."
-        ) from exc
-
-    if not isinstance(parsed, list):
-        raise ValueError("batch cognify input must be a JSON array of strings.")
-    if not parsed:
-        raise ValueError("batch cognify input must contain at least one item.")
-
-    items: list[str] = []
-    for index, item in enumerate(parsed):
-        if not isinstance(item, str) or not item.strip():
-            raise ValueError(f"batch cognify item at index {index} must be a non-empty string.")
-        items.append(item)
-
-    return ParsedCognifyData(items=items, is_batch=True)
 
 
 def looks_like_file_path(data: str) -> bool:
@@ -92,38 +58,12 @@ def validate_file_path(
     return msg
 
 
-def validate_cognify_file_paths(
-    items: list[str],
-    *,
-    path_exists: Callable[[str], bool] = os.path.exists,
-    is_running_in_docker: Callable[[], bool] = lambda: False,
-) -> str | None:
-    """Validate every path-like item in a cognify input batch."""
-    for index, item in enumerate(items):
-        error = validate_file_path(
-            item,
-            path_exists=path_exists,
-            is_running_in_docker=is_running_in_docker,
-        )
-        if error:
-            if len(items) == 1:
-                return error
-            return f"Invalid batch item at index {index}: {error}"
-    return None
-
-
 def parse_csv_list(value: str | None) -> list[str] | None:
     """Parse an optional comma-separated string into a clean list."""
     if not value:
         return None
     items = [item.strip() for item in value.split(",") if item.strip()]
     return items or None
-
-
-def normalize_search_type(search_type: str) -> str:
-    if not isinstance(search_type, str) or not search_type.strip():
-        raise ValueError("search_type must be a non-empty string.")
-    return search_type.strip().upper()
 
 
 def validate_top_k(top_k: int, *, maximum: int = MAX_TOP_K) -> int:
@@ -243,27 +183,6 @@ def _format_completion_results(
     return (
         "\n\n".join(lines) if lines else _render_scalar_or_json(results, json_encoder=json_encoder)
     )
-
-
-def format_search_results(
-    search_results: Any,
-    search_type: str,
-    *,
-    json_encoder: type[json.JSONEncoder] | None = None,
-) -> str:
-    """Render Cognee search results into stable MCP text output."""
-    normalized_type = normalize_search_type(search_type)
-
-    if isinstance(search_results, str):
-        return search_results
-
-    if normalized_type in COMPLETION_SEARCH_TYPES:
-        return _format_completion_results(search_results, json_encoder=json_encoder)
-
-    unwrapped = _unwrap_results(search_results)
-    if isinstance(unwrapped, (dict, list, tuple)):
-        return _json_dumps(unwrapped, json_encoder=json_encoder)
-    return str(unwrapped)
 
 
 def format_recall_results(
