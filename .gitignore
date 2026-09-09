@@ -211,3 +211,9 @@ cognee/tests/performance/results
 # Bundled Ladybug extension binaries — populated by
 # scripts/build_ladybug_json_extension.sh, shipped in wheels via hatch artifacts
 cognee_db_workers/ladybug_extensions/**/*.lbug_extension
+
+# Local `helm template` output — generated, not checked in
+rendered.yaml
+
+# enola code-graph snapshots (written into any repository enola scans)
+.enola/

@@ -2,10 +2,10 @@ import asyncio
 from queue import Queue
 
 import cognee
+from cognee.infrastructure.databases.relational import create_db_and_tables
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
-from cognee.infrastructure.databases.relational import create_db_and_tables
 
 
 async def pipeline(data_queue):
@@ -50,7 +50,7 @@ async def run_queue():
     data_queue.is_closed = False
 
     async def queue_producer():
-        for i in range(0, 10):
+        for i in range(10):
             data_queue.put(i)
             await asyncio.sleep(0.1)
         data_queue.is_closed = True

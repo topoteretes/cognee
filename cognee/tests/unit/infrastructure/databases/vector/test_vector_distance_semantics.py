@@ -168,7 +168,7 @@ async def test_pgvector_search_returns_raw_distance(monkeypatch):
             )
         )
     )
-    adapter.get_async_session = lambda: _AsyncContextManager(  # noqa: E731
+    adapter.get_async_session = lambda: _AsyncContextManager(
         _FakeSession(
             [
                 SimpleNamespace(id=str(uuid4()), similarity=1.19),

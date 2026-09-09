@@ -1,5 +1,13 @@
 name: Reusable Vector DB Tests
 
+# Least-privilege GITHUB_TOKEN (OSSF Scorecard: Token-Permissions). A caller can
+# only narrow this further. packages: read is required: the jobs run inside the
+# private ghcr.io CI image (and pull ghcr.io service images), which the runner
+# fetches with this token before the first step. Nothing here writes.
+permissions:
+  contents: read
+  packages: read
+
 on:
   workflow_call:
     inputs:
@@ -45,7 +53,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -94,7 +102,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -128,7 +136,7 @@ jobs:
     container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -159,7 +167,7 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 
@@ -198,7 +206,7 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'turso') }}
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           fetch-depth: 0
 

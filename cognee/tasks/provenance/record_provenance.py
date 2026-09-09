@@ -29,8 +29,6 @@ break ingestion. Missing ctx, missing dataset/data ids, or raw items with no
 document degrade to entries with ``source_ref_key=None``, never a raise.
 """
 
-from typing import List, Optional
-
 from cognee.infrastructure.databases.provenance import data_item_id, make_source_ref_key
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
@@ -42,7 +40,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("record_provenance")
 
 
-def _agent_from_ctx(ctx: Optional[PipelineContext]) -> str:
+def _agent_from_ctx(ctx: PipelineContext | None) -> str:
     """user.email > str(user.id) > "cognee" (mirrors source_user stamping rules)."""
     user = getattr(ctx, "user", None)
     if user is not None:
@@ -55,7 +53,7 @@ def _agent_from_ctx(ctx: Optional[PipelineContext]) -> str:
     return "cognee"
 
 
-def _source_ref_key_from_ctx(ctx: Optional[PipelineContext]) -> Optional[str]:
+def _source_ref_key_from_ctx(ctx: PipelineContext | None) -> str | None:
     """Reuse the graph-provenance source-ref key; None when either id is missing."""
     if ctx is None:
         return None
@@ -67,14 +65,14 @@ def _source_ref_key_from_ctx(ctx: Optional[PipelineContext]) -> Optional[str]:
     return None
 
 
-def _scope_from_ctx(ctx: Optional[PipelineContext]) -> Optional[str]:
+def _scope_from_ctx(ctx: PipelineContext | None) -> str | None:
     """Dataset id as the ledger namespace (per-tenant/dataset isolation)."""
     dataset = getattr(ctx, "dataset", None) if ctx is not None else None
     dataset_id = getattr(dataset, "id", None) if dataset is not None else None
     return str(dataset_id) if dataset_id else None
 
 
-def _entity_type_name(entity) -> Optional[str]:
+def _entity_type_name(entity) -> str | None:
     is_a = getattr(entity, "is_a", None)
     name = getattr(is_a, "name", None) if is_a is not None else None
     return name or type(entity).__name__
@@ -95,8 +93,8 @@ def _has_default_shape(item, chunk) -> bool:
 
 @task_summary("Recorded provenance for {n} item(s)")
 async def record_provenance(
-    data_points: List[DataPoint], ctx: Optional[PipelineContext] = None
-) -> List[DataPoint]:
+    data_points: list[DataPoint], ctx: PipelineContext | None = None
+) -> list[DataPoint]:
     """Append ledger entries for everything this ingestion produced.
 
     Receives the batch ``add_data_points`` returns: ``TextSummary`` items
@@ -160,11 +158,16 @@ async def record_provenance(
                     visited_properties=generic_visited,
                 )
                 root_id = str(item.id)
+                # The walk may legitimately return a node set that does not include
+                # ``item``. Attribute to it only when it was actually stored.
+                root_source = (
+                    scoped(root_id) if any(str(node.id) == root_id for node in nodes) else ""
+                )
                 for node in nodes:
                     node_id = str(node.id)
                     batch.track_entity(
                         scoped(node_id),
-                        source="" if node_id == root_id else scoped(root_id),
+                        source="" if node_id == root_id else root_source,
                         entity_type="entity",
                         metadata={
                             "name": getattr(node, "name", None),
@@ -177,7 +180,7 @@ async def record_provenance(
                     target_id = scoped(str(edge_target_id))
                     batch.track_relationship(
                         f"rel:{source_id}:{relationship_name}:{target_id}",
-                        source=scoped(root_id),
+                        source=root_source,
                         used_entities=[source_id, target_id],
                         metadata={"relationship_name": relationship_name},
                         **common,
@@ -270,6 +273,8 @@ async def record_provenance(
 
         await batch.commit()
     except Exception as error:
-        logger.warning("Provenance recording failed; ingestion unaffected: %s", error)
+        logger.warning(
+            "Provenance recording failed; ingestion unaffected: %s", error, exc_info=True
+        )
 
     return data_points

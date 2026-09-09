@@ -198,19 +198,24 @@ GHCR_LISTING = [
 ]
 
 
-def _pyproject_requirement() -> str:
-    return resolver.ladybug_requirement((REPO_ROOT / "pyproject.toml").read_text())
+def _pyproject_requirements() -> list[str]:
+    return resolver.ladybug_requirements((REPO_ROOT / "pyproject.toml").read_text())
 
 
 def test_filter_selects_range_from_real_listing():
-    dirs = resolver.supported_extension_dirs(GHCR_LISTING, _pyproject_requirement())
-    assert dirs, "current pyproject constraint selects no extension dirs"
+    dirs = resolver.bundled_extension_dirs(GHCR_LISTING, _pyproject_requirements())
+    assert dirs, "current pyproject constraints select no extension dirs"
     assert "vdev" not in dirs and "dataset" not in dirs
     lock_text = (REPO_ROOT / "uv.lock").read_text()
-    locked = re.search(r'name = "ladybug"\nversion = "([^"]+)"', lock_text).group(1)
-    # The locked version's dir (which may trail it) must be present: the
-    # newest selected dir is <= the locked version and >= its true dir.
-    assert any(d == f"v{locked}" or d < f"v{locked}" for d in dirs)
+    # The lock pins one ladybug per platform-marker line; every pinned
+    # version's dir (which may trail it) must be present: some selected dir
+    # is <= the locked version and >= its true dir.
+    locked_versions = re.findall(r'name = "ladybug"\nversion = "([^"]+)"', lock_text)
+    assert locked_versions, "uv.lock pins no ladybug version"
+    for locked in locked_versions:
+        assert any(d == f"v{locked}" or d < f"v{locked}" for d in dirs), (
+            f"no bundled dir serves locked ladybug {locked}"
+        )
 
 
 def test_filter_includes_trailing_dir_below_floor():
@@ -229,12 +234,12 @@ def test_resolver_matches_packaging_semantics():
     """The stdlib-only comparator must agree with PEP 440 for plain versions."""
     from packaging.specifiers import SpecifierSet
 
-    requirement = _pyproject_requirement()
-    spec = SpecifierSet(requirement.removeprefix("ladybug").strip())
-    for candidate in GHCR_LISTING:
-        if not re.fullmatch(r"v\d+(\.\d+)*", candidate):
-            continue
-        version = candidate[1:]
-        assert resolver.satisfies(version, requirement) == spec.contains(version), (
-            f"resolver disagrees with packaging for ladybug {version}"
-        )
+    for requirement in _pyproject_requirements():
+        spec = SpecifierSet(requirement.removeprefix("ladybug").strip())
+        for candidate in GHCR_LISTING:
+            if not re.fullmatch(r"v\d+(\.\d+)*", candidate):
+                continue
+            version = candidate[1:]
+            assert resolver.satisfies(version, requirement) == spec.contains(version), (
+                f"resolver disagrees with packaging for ladybug {version} vs {requirement!r}"
+            )

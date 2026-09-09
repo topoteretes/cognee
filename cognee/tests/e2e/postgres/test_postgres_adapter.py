@@ -18,7 +18,6 @@ import pytest_asyncio
 from cognee.infrastructure.databases.graph.postgres_demo.adapter import PostgresDemoAdapter
 from cognee.infrastructure.databases.provenance import EdgeIdentity, make_source_ref_key
 
-
 # -- Session-scoped event loop so the async engine's connection pool
 #    stays on a single loop across all tests.
 
@@ -490,7 +489,7 @@ async def test_get_connections(adapter):
 
     connections = await adapter.get_connections("cn1")
     assert len(connections) == 1
-    src, edge, tgt = connections[0]
+    _src, edge, _tgt = connections[0]
     assert edge["relationship_name"] == "LINKED"
 
 

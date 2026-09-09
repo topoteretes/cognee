@@ -4,7 +4,6 @@ Exposes the skills SDK helpers over HTTP with explicit response schemas and
 caller-scoped authorization, mirroring the schema-inventory router.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -13,13 +12,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from cognee import __version__ as cognee_version
+from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.modules.data.constants import DEFAULT_DATASET_NAME
 
 logger = get_logger()
 
@@ -58,14 +57,14 @@ class SkillIngestRequest(BaseModel):
     """JSON body for ingesting a single skill from inline SKILL.md markdown."""
 
     skills_text: str = Field(description="Inline SKILL.md markdown to ingest as a Skill node.")
-    skill_name: Optional[str] = Field(
+    skill_name: str | None = Field(
         default=None, description="Name/slug for the skill (defaults to 'skill')."
     )
-    dataset_name: Optional[str] = Field(
+    dataset_name: str | None = Field(
         default=None,
         description="Target dataset name (created if needed). Required unless dataset_id is given.",
     )
-    dataset_id: Optional[UUID] = Field(
+    dataset_id: UUID | None = Field(
         default=None, description="Target dataset UUID (alternative to dataset_name)."
     )
 
@@ -99,6 +98,13 @@ def get_skills_router() -> APIRouter:
 
         JSON-native companion to ``POST /api/v1/remember`` (content_type=skills),
         for no-code clients. Reuses the same skills ingestion pipeline.
+
+        ## Request Parameters
+        - **dataset_id** (Optional[UUID]): Target dataset UUID (alternative to dataset_name).
+        - **dataset_name** (Optional[str]): Target dataset name (created if needed). Required unless
+          dataset_id is given.
+        - **skill_name** (Optional[str]): Name/slug for the skill (defaults to 'skill').
+        - **skills_text** (str): Inline SKILL.md markdown to ingest as a Skill node.
         """
         if not payload.dataset_name and payload.dataset_id is None:
             return JSONResponse(
@@ -128,8 +134,8 @@ def get_skills_router() -> APIRouter:
                 **({"dataset_id": payload.dataset_id} if payload.dataset_id else {}),
             )
             return jsonable_encoder(result.to_dict())
-        except Exception as exc:
-            logger.error("ingest skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("ingest skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to ingest skill"})
 
     @router.get(
@@ -153,7 +159,16 @@ def get_skills_router() -> APIRouter:
         offset: int = Query(default=0, ge=0, description="Number of skills to skip."),
         user: User = Depends(get_authenticated_user),
     ) -> list[dict]:
-        """Return the skills available in an authorized dataset, with publisher metadata."""
+        """Return the skills available in an authorized dataset, with publisher metadata.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID to scope the skills to. List your datasets via GET
+          /api/v1/datasets to find it.
+        - **include_inactive** (bool): Include skills whose is_active flag is false. Defaults to
+          False.
+        - **limit** (int): Max skills to return. Defaults to 200.
+        - **offset** (int): Number of skills to skip. Defaults to 0.
+        """
         send_telemetry(
             "Skills List API Endpoint Invoked",
             user,
@@ -178,8 +193,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("list skills failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("list skills failed")
             return JSONResponse(status_code=409, content={"error": "Failed to list skills"})
 
     @router.get(
@@ -196,7 +211,14 @@ def get_skills_router() -> APIRouter:
         dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
         user: User = Depends(get_authenticated_user),
     ):
-        """Return one skill, including its full procedure body."""
+        """Return one skill, including its full procedure body.
+
+        ## Path Parameters
+        - **skill_id** (str): ID of the skill (from GET /api/v1/skills/).
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the skill belongs to.
+        """
         from cognee.api.v1.skills.list_skills import get_skill
 
         try:
@@ -209,8 +231,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("get skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("get skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to fetch skill"})
 
     @router.delete(
@@ -227,7 +249,14 @@ def get_skills_router() -> APIRouter:
         dataset_id: UUID = Query(..., description="Dataset UUID the skill belongs to."),
         user: User = Depends(get_authenticated_user),
     ):
-        """Delete one skill (graph node + embeddings) from an authorized dataset."""
+        """Delete one skill (graph node + embeddings) from an authorized dataset.
+
+        ## Path Parameters
+        - **skill_id** (str): ID of the skill (from GET /api/v1/skills/).
+
+        ## Query Parameters
+        - **dataset_id** (UUID): Dataset UUID the skill belongs to.
+        """
         from cognee.api.v1.skills.list_skills import delete_skill
 
         try:
@@ -240,8 +269,8 @@ def get_skills_router() -> APIRouter:
             return JSONResponse(
                 status_code=403, content={"error": "Not authorized for this dataset"}
             )
-        except Exception as exc:
-            logger.error("delete skill failed: %s", exc, exc_info=True)
+        except Exception:
+            logger.exception("delete skill failed")
             return JSONResponse(status_code=409, content={"error": "Failed to delete skill"})
 
     return router

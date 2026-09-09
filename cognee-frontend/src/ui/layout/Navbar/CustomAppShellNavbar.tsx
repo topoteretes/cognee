@@ -7,6 +7,12 @@ import NavbarIconLink from "./NavbarIconLink";
 import { ReactNode, useState } from "react";
 import { useTenant } from "@/modules/tenant/TenantContext";
 import FeedbackModal from "@/ui/layout/FeedbackModal";
+import isCloudEnvironment from "@/utils/isCloudEnvironment";
+
+// Sidebar widths (px). The rail shows icons only; collapsing only applies on
+// desktop, matching the Tailwind `sm` breakpoint (640px) used below.
+const EXPANDED_WIDTH = 240;
+const COLLAPSED_WIDTH = 72;
 
 // -- Icon components for nav items --
 
@@ -68,14 +74,6 @@ function IntegrationsIcon({ active }: { active: boolean }) {
   );
 }
 
-function SchemaIcon({ active }: { active: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={active ? "#BC9BFF" : "rgba(255,255,255,0.5)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="8.5" y="14" width="7" height="7" rx="1.5" /><path d="M6.5 10v2.5a1.5 1.5 0 0 0 1.5 1.5h4a1.5 1.5 0 0 0 1.5-1.5V10" />
-    </svg>
-  );
-}
-
 function SkillsIcon({ active }: { active: boolean }) {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={active ? "#BC9BFF" : "rgba(255,255,255,0.5)"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -100,7 +98,6 @@ const POD_DEPENDENT_LINKS = new Set([
   "/datasets",
   "/search",
   "/skills",
-  "/schema",
   "/knowledge-graph",
 ]);
 
@@ -129,7 +126,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { text: "Search", link: "/search", icon: SearchIcon },
       { text: "Skills", link: "/skills", icon: SkillsIcon },
-      { text: "Memory Schema", link: "/schema", icon: SchemaIcon },
       { text: "Mindmap", link: "/knowledge-graph", icon: GraphIcon },
     ],
   },
@@ -144,9 +140,16 @@ const NAV_SECTIONS: NavSection[] = [
 
 export default function CustomAppShellNavbar() {
   const pathname = usePathname();
-  const { isOpen, close } = useNavbar();
+  const { isOpen, close, collapsed, toggleCollapsed } = useNavbar();
   const { tenantReady } = useTenant();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+
+  // Collapsing to an icon rail only applies on desktop. On mobile the sidebar
+  // is a full-width drawer toggled by the hamburger (isOpen), so whenever the
+  // drawer is open it shows full labels. Deriving `railed` from isOpen instead
+  // of a media query keeps it deterministic on the server, so the first paint
+  // already has the correct width (no flash on hard navigation).
+  const railed = collapsed && !isOpen;
 
   return (
     <>
@@ -160,15 +163,32 @@ export default function CustomAppShellNavbar() {
 
       <aside
         className={`
-          flex-shrink-0 flex flex-col
+          group flex-shrink-0 flex flex-col
           fixed sm:relative z-40 sm:z-auto h-full sm:h-auto
-          transition-transform sm:translate-x-0
+          transition-[transform,width] sm:translate-x-0
           ${isOpen ? "translate-x-0" : "-translate-x-full sm:translate-x-0"}
         `}
-        style={{ width: 240, maxHeight: "100vh", overflow: "hidden", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)", borderRight: "1px solid rgba(255,255,255,0.08)" }}
+        style={{ width: railed ? COLLAPSED_WIDTH : EXPANDED_WIDTH, maxHeight: "100vh", overflow: "hidden", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)", borderRight: "1px solid rgba(255,255,255,0.08)" }}
       >
-        {/* Close button on mobile */}
-        <div className="flex sm:hidden justify-end p-2">
+        {/* Desktop-only collapse handle: a thin control on the sidebar's right
+            edge that fades in on hover (Notion-style). No dedicated header row. */}
+        <button
+          onClick={toggleCollapsed}
+          aria-label={railed ? "Expand sidebar" : "Collapse sidebar"}
+          title={railed ? "Expand sidebar" : "Collapse sidebar"}
+          className="cursor-pointer hidden sm:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ position: "absolute", top: 8, right: 6, width: 18, height: 44, borderRadius: 6, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", zIndex: 10 }}
+          onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.12)")}
+          onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)")}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: railed ? "rotate(180deg)" : undefined }}>
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+
+        {/* Mobile-only close button (the desktop collapse control is the hover
+            handle above, so there is no desktop header row). */}
+        <div className="flex sm:hidden items-center justify-end flex-shrink-0 px-3" style={{ height: 40 }}>
           <button
             onClick={close}
             aria-label="Close navigation"
@@ -183,18 +203,22 @@ export default function CustomAppShellNavbar() {
         <nav className="flex-1 overflow-y-auto px-3 py-2">
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="mb-4">
-              <div
-                className="px-3 mb-1"
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: 0.5,
-                  color: "rgba(255,255,255,0.3)",
-                  textTransform: "uppercase",
-                }}
-              >
-                {section.label}
-              </div>
+              {railed ? (
+                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "0 8px 8px" }} />
+              ) : (
+                <div
+                  className="px-3 mb-1"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: 0.5,
+                    color: "rgba(255,255,255,0.3)",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {section.label}
+                </div>
+              )}
               {section.items.map((item) => {
                 const isActive = pathname === item.link || pathname.startsWith(item.link + "/");
                 const locked = !tenantReady && POD_DEPENDENT_LINKS.has(item.link);
@@ -202,13 +226,13 @@ export default function CustomAppShellNavbar() {
                   return (
                     <div
                       key={item.link}
-                      title="Available once your workspace is ready"
-                      className="flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px]"
+                      title={railed ? `${item.text} — available once your workspace is ready` : "Available once your workspace is ready"}
+                      className={`flex items-center gap-[10px] rounded-[6px] px-3 py-2 text-[14px] ${railed ? "justify-center" : ""}`}
                       style={{ color: "rgba(237,236,234,0.3)", cursor: "not-allowed", userSelect: "none" }}
                       aria-disabled="true"
                     >
                       {item.icon({ active: false })}
-                      {item.text}
+                      {!railed && item.text}
                     </div>
                   );
                 }
@@ -218,6 +242,7 @@ export default function CustomAppShellNavbar() {
                     text={item.text}
                     link={item.link}
                     isActive={isActive}
+                    collapsed={railed}
                     icon={item.icon({ active: isActive })}
                   />
                 );
@@ -230,6 +255,7 @@ export default function CustomAppShellNavbar() {
         <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", gap: 8 }}>
           <button
             onClick={() => setFeedbackOpen(true)}
+            title={railed ? "Give feedback" : undefined}
             className="cursor-pointer"
             style={{
               display: "flex",
@@ -253,12 +279,13 @@ export default function CustomAppShellNavbar() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-            Give feedback
+            {!railed && "Give feedback"}
           </button>
           <Link
             href="https://calendly.com/luca-topoteretes/new-meeting"
             target="_blank"
             rel="noopener noreferrer"
+            title={railed ? "Book a call" : undefined}
             className="cursor-pointer"
             style={{
               display: "flex",
@@ -287,8 +314,34 @@ export default function CustomAppShellNavbar() {
               <line x1="3" y1="10" x2="21" y2="10" />
               <path d="M10 14l2 2 4-4" />
             </svg>
-            Book a call
+            {!railed && "Book a call"}
           </Link>
+          {/* Paid plans and credits are a cloud-only concept, and app/(app)/billing/
+              is excluded from the public sync — without this gate the button 404s
+              for every self-hosted user. */}
+          {isCloudEnvironment() && (
+            <Link
+              href="/billing"
+              title={railed ? "Billing / Pricing" : undefined}
+              className="flex items-center justify-center rounded-[8px] w-full"
+              style={{
+                padding: "10px 12px",
+                background: "#BC9BFF",
+                color: "#1e1e1c",
+                fontSize: 14,
+                fontWeight: 500,
+                textDecoration: "none",
+              }}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = "#A988F0")}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = "#BC9BFF")}
+            >
+              {railed ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1e1e1c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" />
+                </svg>
+              ) : "Billing / Pricing"}
+            </Link>
+          )}
         </div>
       </aside>
 

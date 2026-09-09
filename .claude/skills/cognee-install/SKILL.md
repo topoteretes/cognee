@@ -45,10 +45,12 @@ is the primary surface. All SDK functions are async. Minimal end-to-end script:
 import asyncio
 import cognee
 
+
 async def main():
     await cognee.remember("Cognee turns documents into AI memory.")
     results = await cognee.recall("What does cognee do?")
     print(results)
+
 
 asyncio.run(main())
 ```

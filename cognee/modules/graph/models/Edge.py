@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
+
 from sqlalchemy import (
-    # event,
-    DateTime,
     JSON,
     UUID,
+    # event,
+    DateTime,
     Text,
 )
 

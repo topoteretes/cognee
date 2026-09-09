@@ -1,9 +1,11 @@
+from functools import lru_cache
+
 from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_context_config
 from cognee.infrastructure.llm.config import (
     get_llm_context_config,
 )
+
 from .EmbeddingEngine import EmbeddingEngine
-from functools import lru_cache
 
 
 def get_embedding_engine() -> EmbeddingEngine:

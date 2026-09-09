@@ -1,4 +1,3 @@
-from typing import List, Union
 from cognee.shared.logging_utils import setup_logging
 
 logger = setup_logging()
@@ -7,8 +6,8 @@ logger = setup_logging()
 def is_embeddable(s: str) -> bool:
     """
     Check if input string is embeddable, if not it will be replaced with a dummy value to prevent API errors.
-    Empty strings and a string with only a space character are not embeddable.
-    If input string contains at least one alphanumeric character, it is considered embeddable.
+    Empty strings and strings containing only whitespace are not embeddable.
+    If input string contains at least one non-whitespace character, it is considered embeddable.
     """
     if not isinstance(s, str):
         return False
@@ -22,7 +21,7 @@ def is_embeddable(s: str) -> bool:
     return False
 
 
-def sanitize_embedding_text_inputs(text: Union[str, List[str]]) -> List[str]:
+def sanitize_embedding_text_inputs(text: str | list[str]) -> list[str]:
     """
     Transform invalid/empty inputs into a safe dummy to prevent API 422 embedding errors while
     keeping list length consistent.
@@ -35,8 +34,8 @@ def sanitize_embedding_text_inputs(text: Union[str, List[str]]) -> List[str]:
 
 
 def handle_embedding_response(
-    original_texts: Union[List[str], str], embeddings: List[List[float]], dimensions: int
-) -> List[List[float]]:
+    original_texts: list[str] | str, embeddings: list[list[float]], dimensions: int
+) -> list[list[float]]:
     """
     Compare the original input strings against the results.
     If the original string was 'junk' that was not embeddable, overwrite its vector with zeros.

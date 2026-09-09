@@ -32,14 +32,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _VERSION_DIR = re.compile(r"v\d+(\.\d+)*$")
 
 
-def ladybug_requirement(pyproject_text: str) -> str:
-    """The ladybug dependency string, without quotes or environment marker."""
+def ladybug_requirements(pyproject_text: str) -> list[str]:
+    """Every ladybug dependency string, without quotes or environment markers.
+
+    pyproject splits the constraint across platform markers (an older range
+    for legacy macOS, a pin everywhere else — see
+    cognee/tests/unit/test_ladybug_requirement.py). The wheel is shared by all
+    platforms, so the bundle must serve the union of every line's range.
+    """
     matches = re.findall(r'"(ladybug[^"]*)"', pyproject_text)
-    if len(matches) != 1:
-        raise SystemExit(
-            f"expected exactly one ladybug dependency in pyproject.toml, found {len(matches)}"
-        )
-    return matches[0].split(";")[0].strip()
+    if not matches:
+        raise SystemExit("expected at least one ladybug dependency in pyproject.toml, found none")
+    return [match.split(";")[0].strip() for match in matches]
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -116,9 +120,17 @@ def supported_extension_dirs(candidates: list[str], requirement: str) -> list[st
     return in_range
 
 
+def bundled_extension_dirs(candidates: list[str], requirements: list[str]) -> list[str]:
+    """Union of the supported dirs across every requirement line, version-sorted."""
+    selected: set[str] = set()
+    for requirement in requirements:
+        selected.update(supported_extension_dirs(candidates, requirement))
+    return sorted(selected, key=lambda d: _version_tuple(d[1:]))
+
+
 if __name__ == "__main__":
     if sys.stdin.isatty():
         raise SystemExit(__doc__)
-    requirement = ladybug_requirement((REPO_ROOT / "pyproject.toml").read_text())
+    requirements = ladybug_requirements((REPO_ROOT / "pyproject.toml").read_text())
     candidates = [line.strip() for line in sys.stdin if line.strip()]
-    print("\n".join(supported_extension_dirs(candidates, requirement)))
+    print("\n".join(bundled_extension_dirs(candidates, requirements)))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, cast
+from typing import cast
 
 from cognee.infrastructure.databases.exceptions import UnsupportedProvenanceCapability
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -24,8 +24,8 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
     def __init__(
         self,
-        graph_engine: Optional[GraphDBInterface] = None,
-        vector_engine: Optional[VectorDBInterface] = None,
+        graph_engine: GraphDBInterface | None = None,
+        vector_engine: VectorDBInterface | None = None,
         capabilities: EngineCapability = EngineCapability.NONE,
     ):
         self._graph = graph_engine
@@ -82,7 +82,7 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
             and self._vector is not None
         )
 
-    async def delete_by_source_ref(self, source_ref_key: str) -> "SourceRefRemovalResult":
+    async def delete_by_source_ref(self, source_ref_key: str) -> SourceRefRemovalResult:
         """Delete artifacts owned only by the given source ref; detach the rest.
 
         Returns the hard-deleted node/edge identities so callers can invalidate
@@ -101,6 +101,91 @@ class UnifiedStoreEngine(GraphVectorStoreInterface):
 
         refs_by_node = {node_id: [source_ref_key] for node_id in node_data}
         refs_by_edge = {edge: [source_ref_key] for edge in edge_data}
+
+        return await execute_source_ref_removal(
+            graph,
+            vector,
+            node_data=node_data,
+            edge_data=edge_data,
+            refs_by_node=refs_by_node,
+            refs_by_edge=refs_by_edge,
+        )
+
+    async def delete_by_source_refs(self, source_ref_keys) -> SourceRefRemovalResult:
+        """Remove MANY source refs in one planner pass (chunk-level updates).
+
+        Reads the dataset-independent ref maps once through the per-ref finders
+        and hands the planner every retired key together, so an artifact owned
+        by several retired chunks is detached or deleted in a single decision
+        and the post-delete cleanup (orphaned EdgeTypes, NodeSet tags) runs
+        once per call instead of once per chunk.
+        """
+        if not self.supports_graph_provenance_delete():
+            raise UnsupportedProvenanceCapability()
+        graph = self.graph
+        vector = self.vector
+
+        keys = list(dict.fromkeys(source_ref_keys))
+        refs_by_node: dict = {}
+        refs_by_edge: dict = {}
+        for key in keys:
+            for node_id in await graph.find_nodes_by_source_ref(key):
+                refs_by_node.setdefault(node_id, []).append(key)
+            for edge in await graph.find_edges_by_source_ref(key):
+                refs_by_edge.setdefault(edge, []).append(key)
+
+        node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
+        edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
+
+        return await execute_source_ref_removal(
+            graph,
+            vector,
+            node_data=node_data,
+            edge_data=edge_data,
+            refs_by_node=refs_by_node,
+            refs_by_edge=refs_by_edge,
+        )
+
+    async def delete_by_document(self, dataset_id: str, data_id: str) -> SourceRefRemovalResult:
+        """Remove EVERY ref a document owns — v1 doc-scope AND v2 chunk-scope.
+
+        Chunk-scoped ownership (source_ref:v2) means a document's artifacts
+        may carry only their producing chunk's ref; deleting by the v1 key
+        alone would strand them. The dataset's ref maps are filtered to refs
+        whose data id is this document — any version — and the planner
+        deletes what is left unowned, detaching shared output.
+        """
+        if not self.supports_graph_provenance_delete():
+            raise UnsupportedProvenanceCapability()
+        from cognee.infrastructure.databases.provenance import parse_source_ref_key
+
+        graph = self.graph
+        vector = self.vector
+
+        def _document_refs(refs) -> list:
+            selected = []
+            for ref in refs:
+                try:
+                    parsed = parse_source_ref_key(ref)
+                except ValueError:
+                    continue
+                if str(parsed.data_id) == str(data_id):
+                    selected.append(ref)
+            return selected
+
+        refs_by_node = {
+            node_id: document_refs
+            for node_id, refs in (await graph.find_node_source_refs_by_dataset(dataset_id)).items()
+            if (document_refs := _document_refs(refs))
+        }
+        refs_by_edge = {
+            edge: document_refs
+            for edge, refs in (await graph.find_edge_source_refs_by_dataset(dataset_id)).items()
+            if (document_refs := _document_refs(refs))
+        }
+
+        node_data = await graph.get_node_delete_data(list(refs_by_node.keys()))
+        edge_data = await graph.get_edge_delete_data(list(refs_by_edge.keys()))
 
         return await execute_source_ref_removal(
             graph,

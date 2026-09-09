@@ -1,7 +1,7 @@
 import asyncio
 import importlib
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -439,13 +439,13 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="What is a paragraph?",
                 context="",
                 answer="A block of text.",
             ),
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="What is a graph?",
                 context="",
                 answer="Nodes and edges.",
@@ -478,13 +478,13 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="Tell me about cats",
                 context="",
                 answer="Cats are animals.",
             ),
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="Tell me about cats and dogs",
                 context="",
                 answer="Both are pets.",
@@ -518,7 +518,7 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="What is Einstein?",
                 context="",
                 answer="A physicist.",
@@ -573,7 +573,7 @@ class TestSearchSession:
 
         entries = [
             SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="I have a cat",
                 context="",
                 answer="Nice.",
@@ -631,7 +631,7 @@ class TestRecallSessionMode:
 
         session_entries = [
             ResponseQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="test",
                 context="",
                 answer="result",
@@ -804,7 +804,7 @@ class TestRecallSessionMode:
 
         session_entries = [
             ResponseQAEntry(
-                time=datetime.utcnow().isoformat(),
+                time=datetime.now(timezone.utc).isoformat(),
                 question="test",
                 context="",
                 answer="session result",

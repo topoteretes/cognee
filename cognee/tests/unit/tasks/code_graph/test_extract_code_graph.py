@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
-import cognee
 import pytest
 
+import cognee
 from cognee.modules.pipelines.models import PipelineContext
 from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
 from cognee.tasks.code_graph.enola import parse_enola_snapshot
@@ -21,12 +21,12 @@ from cognee.tasks.code_graph.extract_code_graph import (
 )
 from cognee.tasks.code_graph.models import (
     ApiEndpoint,
+    CodeFileReference,
     CodeModule,
     CodeRepository,
     CodeService,
     CodeSymbol,
     CodeTestReference,
-    CodeFileReference,
     ExternalDependency,
     StorageResource,
 )
@@ -641,7 +641,9 @@ async def test_public_code_graph_pipeline_accepts_repo_path_payload_with_access_
     stamped = graph_engine.add_nodes.await_args_list[-1].args[0]
     assert [type(node).__name__ for node in stamped] == ["CodeRepository"]
     assert stamped[0].last_snapshot_id is not None
-    assert graph_engine.add_edges.await_count == 2
+    # The bulk edge load only: the stamp pass has no edges and empty edge
+    # batches are no longer written.
+    assert graph_engine.add_edges.await_count == 1
     add_data_points_module.get_unified_engine.assert_not_awaited()
     add_data_points_module.index_data_points.assert_not_awaited()
     add_data_points_module.index_graph_edges.assert_not_awaited()

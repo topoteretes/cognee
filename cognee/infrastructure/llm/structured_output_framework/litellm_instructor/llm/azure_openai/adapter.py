@@ -96,6 +96,12 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             )
 
         self.use_managed_identity = use_managed_identity
+        # Instance-level, not a class attribute: the two auth modes reach
+        # different code. Key-based Azure delegates to OpenAIAdapter and so
+        # reaches the shared streaming path; the managed-identity branch below
+        # answers on the native OpenAI client, which has no plain-text
+        # streaming door. One class attribute could not say both.
+        self.supports_answer_streaming = not use_managed_identity
 
     def _init_managed_identity(
         self,
@@ -231,9 +237,9 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as e:
+        ):
             if not (self.fallback_model and self.fallback_api_key):
-                raise e
+                raise
             # Fall back to litellm for fallback model
             try:
                 fallback_aclient = instructor.from_litellm(litellm.acompletion)
@@ -264,7 +270,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

@@ -1,5 +1,6 @@
-from cognee.modules.chunking.Chunker import Chunker
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.modules.chunking.Chunker import Chunker
+
 from .Document import Document
 
 
@@ -12,7 +13,12 @@ class TextDocument(Document):
             async with open_data_file(self.raw_data_location, mode="r", encoding="utf-8") as file:
                 while True:
                     text = file.read(1000000)
-                    if not text.strip():
+                    if not text:
+                        # EOF only. Stopping on a whitespace-only block (the
+                        # old `not text.strip()` check) silently dropped
+                        # everything after it — a read block that happens to
+                        # land inside a long whitespace run is real content,
+                        # and downstream offset/tiling checks need it.
                         break
                     yield text
 

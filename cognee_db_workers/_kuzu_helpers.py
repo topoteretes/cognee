@@ -15,11 +15,15 @@ avoids surprising contributors.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sys
 import tempfile
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_close(obj) -> None:
@@ -28,7 +32,7 @@ def _safe_close(obj) -> None:
     try:
         obj.close()
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _safe_close", exc_info=True)
 
 
 # --- Bundled JSON extension -------------------------------------------------
@@ -63,7 +67,7 @@ _EXTENSION_RELPATH_PATTERN = re.compile(r"(v[\d.]+)[/\\]([A-Za-z0-9_]+)[/\\]json
 
 def _requested_extension_relpath(
     execute: Callable[[str], object],
-) -> Optional[tuple[str, str]]:
+) -> tuple[str, str] | None:
     """The ``(version_dir, platform)`` the installed ladybug requests, or None.
 
     Asks the engine itself via the failing-INSTALL probe, so there is nothing
@@ -71,14 +75,14 @@ def _requested_extension_relpath(
     """
     try:
         execute(f"INSTALL JSON FROM '{_PROBE_REPO}';")
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 — the probe reads the answer out of any error text
         match = _EXTENSION_RELPATH_PATTERN.search(str(error))
         if match:
             return match.group(1), match.group(2)
     return None
 
 
-def bundled_extensions_present(bundled_dir: Optional[str] = None) -> bool:
+def bundled_extensions_present(bundled_dir: str | None = None) -> bool:
     """True when any extension binary is bundled (cheap, connection-free)."""
     bundled_dir = bundled_dir or _BUNDLED_EXTENSIONS_DIR
     if not os.path.isdir(bundled_dir):
@@ -91,8 +95,8 @@ def bundled_extensions_present(bundled_dir: Optional[str] = None) -> bool:
 
 def bundled_json_extension_path(
     execute: Callable[[str], object],
-    bundled_dir: Optional[str] = None,
-) -> Optional[str]:
+    bundled_dir: str | None = None,
+) -> str | None:
     """Absolute path of the bundled JSON extension for this ladybug install.
 
     Returns None when the probe yields nothing or no binary is bundled for
@@ -132,7 +136,7 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
             escaped = bundled.replace("\\", "/").replace("'", "''")
             execute(f"LOAD EXTENSION '{escaped}';")
             return
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 — any dlopen failure must fall through to remote install
             # A bundled binary that fails to dlopen (e.g. a glibc build on a
             # musl system) should not strand the user: fall through to the
             # remote install below, which serves the correct binary.
@@ -147,7 +151,7 @@ def load_json_extension(execute: Callable[[str], object]) -> None:
 
 def install_json_extension_local(
     buffer_pool_size: int,
-    max_db_size: Optional[int] = None,
+    max_db_size: int | None = None,
 ) -> None:
     """Install Ladybug's JSON extension via a throwaway database.
 
@@ -193,6 +197,7 @@ def install_json_extension_local(
                 # the live connection), but say why it failed — a silent
                 # swallow here made "has not been installed" errors at LOAD
                 # time impossible to diagnose from CI logs.
+                logger.debug("Ignoring exception in install_json_extension_local", exc_info=True)
                 print(
                     f"[ladybug worker] warm-up INSTALL JSON failed: {error!r}",
                     file=sys.stderr,
@@ -200,6 +205,7 @@ def install_json_extension_local(
         except Exception as error:
             # Best-effort install: missing/incompatible JSON extension and
             # init failures all surface here. The cleanup below still runs.
+            logger.debug("Ignoring exception in install_json_extension_local", exc_info=True)
             print(
                 f"[ladybug worker] warm-up JSON install setup failed: {error!r}",
                 file=sys.stderr,

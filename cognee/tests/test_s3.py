@@ -1,10 +1,9 @@
 import logging
-
-import cognee
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from collections import Counter
 
+import cognee
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -25,8 +24,8 @@ async def main():
 
     edge_type_counts = Counter(edge_type[2] for edge_type in graph[1])
 
-    logging.info(type_counts)
-    logging.info(edge_type_counts)
+    logger.info(type_counts)
+    logger.info(edge_type_counts)
 
     # Assert there is exactly one TextDocument.
     assert type_counts.get("TextDocument", 0) == 2, (
@@ -95,7 +94,7 @@ async def dlt_csv_from_s3():
     """
     import uuid
 
-    import dlt  # noqa: F401 — hard requirement; the CI job installs the extra
+    import dlt  # hard requirement; the CI job installs the extra
     import s3fs
 
     from cognee.context_global_variables import set_database_global_context_variables
@@ -111,7 +110,7 @@ async def dlt_csv_from_s3():
 
     try:
         s3_csv_url = f"s3://{key}"
-        logging.info("Adding CSV from %s through the DLT loader path", s3_csv_url)
+        logger.info("Adding CSV from %s through the DLT loader path", s3_csv_url)
         await cognee.add([s3_csv_url], dataset_name=DLT_CSV_DATASET)
         await cognee.cognify(datasets=[DLT_CSV_DATASET])
     finally:
@@ -145,7 +144,7 @@ async def dlt_csv_from_s3():
     assert csv_census.get("SchemaTable", 0) == 1, (
         f"Expected 1 SchemaTable node, found {csv_census.get('SchemaTable', 0)}"
     )
-    logging.info("S3 CSV DLT ingestion verified: %s", dict(csv_census))
+    logger.info("S3 CSV DLT ingestion verified: %s", dict(csv_census))
 
 
 if __name__ == "__main__":

@@ -230,20 +230,20 @@ def _dispatch_datasets(client: CogneeApiClient, args: argparse.Namespace) -> Non
             fmt.echo(output)
 
     elif action == "delete":
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset {args.dataset_id}? This cannot be undone"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset {args.dataset_id}? This cannot be undone"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(args.dataset_id)
         fmt.success(f"Dataset {args.dataset_id} deleted.")
 
 
 def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
     if getattr(args, "all", False):
-        if not getattr(args, "force", False):
-            if not fmt.confirm("Delete ALL data?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm("Delete ALL data?"):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete_all()
         fmt.success("All data deleted.")
     elif getattr(args, "dataset_name", None):
@@ -253,10 +253,11 @@ def _dispatch_delete(client: CogneeApiClient, args: argparse.Namespace) -> None:
         if not match:
             fmt.error(f"No dataset found with name '{args.dataset_name}'.")
             return
-        if not getattr(args, "force", False):
-            if not fmt.confirm(f"Delete dataset '{args.dataset_name}'?"):
-                fmt.echo("Cancelled.")
-                return
+        if not getattr(args, "force", False) and not fmt.confirm(
+            f"Delete dataset '{args.dataset_name}'?"
+        ):
+            fmt.echo("Cancelled.")
+            return
         client.datasets_delete(match[0]["id"])
         fmt.success(f"Dataset '{args.dataset_name}' deleted.")
     else:
@@ -377,12 +378,27 @@ def _dispatch_improve(client: CogneeApiClient, args: argparse.Namespace) -> None
 
 def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
     everything = getattr(args, "everything", False)
-    dataset = getattr(args, "dataset_name", None)
+    # ForgetCommand's own flag is --dataset (-> args.dataset), not --dataset-name;
+    # reading dataset_name here always returned None, silently dropping --dataset
+    # in --api-url mode.
+    dataset = getattr(args, "dataset", None)
     dataset_id = getattr(args, "dataset_id", None)
     data_id = getattr(args, "data_id", None)
+    memory_only = getattr(args, "memory_only", False)
+    if dataset and dataset_id:
+        fmt.error("Provide either --dataset or --dataset-id, not both.")
+        return
     if not everything and not dataset and not dataset_id and not data_id:
+        fmt.error("Specify --dataset or --dataset-id, --data-id with dataset, or --everything.")
+        return
+    if data_id and not dataset and not dataset_id:
+        fmt.error("Specify --dataset or --dataset-id when using --data-id.")
+        return
+    if everything and memory_only:
         fmt.error(
-            "Specify --dataset-name or --dataset-id, --data-id with dataset, or --everything."
+            "--memory-only has no effect with --everything: everything deletes all "
+            "datasets and data outright. Specify --dataset or --dataset-id with "
+            "--memory-only instead."
         )
         return
     result = client.forget(
@@ -390,5 +406,6 @@ def _dispatch_forget(client: CogneeApiClient, args: argparse.Namespace) -> None:
         dataset_id=dataset_id,
         data_id=data_id,
         everything=everything,
+        memory_only=memory_only,
     )
     fmt.success(f"Done: {result}")

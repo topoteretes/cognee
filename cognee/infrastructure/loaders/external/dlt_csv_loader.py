@@ -17,15 +17,15 @@ routing keys on. Per-call dlt options (``primary_key``, ``write_disposition``,
 """
 
 import hashlib
-from typing import Any, Optional
+from typing import Any
 
-import dlt  # noqa: F401  # ty:ignore[unresolved-import] — hard gate: without the extra this loader must not register
+import dlt  # ty:ignore[unresolved-import] — hard gate: without the extra this loader must not register
 
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface, LoaderResult
-from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.loaders.store_derived_text import store_derived_text
+from cognee.modules.ingestion.exceptions import IngestionError
 
 
 class DltCsvLoader(LoaderInterface):
@@ -47,14 +47,14 @@ class DltCsvLoader(LoaderInterface):
     async def load(
         self,
         file_path: str,
-        dataset_name: Optional[str] = None,
-        dataset_id: Optional[Any] = None,
-        user: Optional[Any] = None,
-        original_file_name: Optional[str] = None,
-        primary_key: Optional[str] = None,
+        dataset_name: str | None = None,
+        dataset_id: Any | None = None,
+        user: Any | None = None,
+        original_file_name: str | None = None,
+        primary_key: str | None = None,
         write_disposition: str = "replace",
-        max_rows_per_table: Optional[int] = None,
-        column_value_columns: Optional[dict] = None,
+        max_rows_per_table: int | None = None,
+        column_value_columns: dict | None = None,
         **kwargs: Any,
     ) -> LoaderResult:
         # Task-layer imports are lazy: the loaders package must not depend on

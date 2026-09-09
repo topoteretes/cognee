@@ -15,9 +15,6 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
     LLMPaymentRequiredError,
@@ -29,6 +26,9 @@ from cognee.infrastructure.llm.retry_config import (
 )
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -51,6 +51,13 @@ class GeminiAdapter(GenericAPIAdapter):
     - create_transcript(input) -> BaseModel: Transcribe audio files to text
     - transcribe_image(input) -> BaseModel: Inherited from GenericAPIAdapter
     """
+
+    # Declared False even though GenericAPIAdapter declares True. This class
+    # overrides acreate_structured_output without a `response_model is str`
+    # branch and defines no acreate_str_output, so a plain-text answer never
+    # reaches the parent's streaming door. Inheriting True would promote a
+    # sink, announce `stage: generating`, and then emit nothing at all.
+    supports_answer_streaming = False
 
     default_instructor_mode = get_instructor_mode("gemini")
 
@@ -153,7 +160,7 @@ class GeminiAdapter(GenericAPIAdapter):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                raise
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
@@ -189,7 +196,7 @@ class GeminiAdapter(GenericAPIAdapter):
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
                 ):
-                    raise error
+                    raise
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"

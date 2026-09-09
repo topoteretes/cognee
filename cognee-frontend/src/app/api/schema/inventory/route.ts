@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8000";
+import { getServerBackendUrl } from "@/modules/config/serverRuntimeConfig";
 
 export async function GET(request: NextRequest) {
+  const localApiUrl = getServerBackendUrl();
   const { searchParams } = request.nextUrl;
   const datasetId = searchParams.get("dataset_id");
   console.log("[api/schema/inventory] request received, dataset_id:", datasetId);

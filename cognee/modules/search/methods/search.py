@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, List, Optional, Tuple, Type, Union
+from typing import Any
 from uuid import UUID
 
 from cognee import __version__ as cognee_version
@@ -22,10 +22,12 @@ from cognee.modules.observability import (
     COGNEE_SEARCH_TYPE,
     new_span,
 )
+from cognee.modules.retrieval.context_preview import SharedSessionHistory
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.operations import log_search_history
 from cognee.modules.search.types import (
+    ContextFormat,
     SearchResult,
     SearchType,
 )
@@ -36,7 +38,7 @@ from cognee.shared.utils import send_telemetry
 logger = get_logger()
 
 
-def _single_dataset_id(dataset_ids: Union[list[UUID], UUID, None]) -> Optional[UUID]:
+def _single_dataset_id(dataset_ids: list[UUID] | UUID | None) -> UUID | None:
     """Return the dataset a search is scoped to, when it is exactly one.
 
     Searches fan out across every dataset they are given, and ``None`` means
@@ -53,27 +55,28 @@ def _single_dataset_id(dataset_ids: Union[list[UUID], UUID, None]) -> Optional[U
 async def search(
     query_text: str,
     query_type: SearchType,
-    dataset_ids: Union[list[UUID], None],
+    dataset_ids: list[UUID] | None,
     user: User,
     system_prompt_path="answer_simple_question.txt",
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     top_k: int = 15,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
-    session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = None,
-    triplet_distance_penalty: Optional[float] = None,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
+    session_id: str | None = None,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
     verbose=False,
-    retriever_specific_config: Optional[dict] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = None,
+    retriever_specific_config: dict | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-) -> List[SearchResult]:
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+) -> list[SearchResult]:
     """
 
     Args:
@@ -120,6 +123,7 @@ async def search(
             node_name=node_name,
             node_name_filter_operator=node_name_filter_operator,
             only_context=only_context,
+            context_format=context_format,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -156,25 +160,26 @@ async def authorized_search(
     query_type: SearchType,
     query_text: str,
     user: User,
-    dataset_ids: Optional[list[UUID]] = None,
+    dataset_ids: list[UUID] | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     top_k: int = 15,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
-    session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = None,
-    triplet_distance_penalty: Optional[float] = None,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
+    session_id: str | None = None,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
-    retriever_specific_config: Optional[dict] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = None,
+    retriever_specific_config: dict | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-) -> List[SearchResultPayload]:
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+) -> list[SearchResultPayload]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
     Not to be used outside of active access control mode.
@@ -197,6 +202,7 @@ async def authorized_search(
         node_name=node_name,
         node_name_filter_operator=node_name_filter_operator,
         only_context=only_context,
+        context_format=context_format,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
@@ -218,23 +224,24 @@ async def search_in_datasets_context(
     query_text: str,
     user: User,
     system_prompt_path: str = "answer_simple_question.txt",
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     top_k: int = 15,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
+    node_type: type | None = NodeSet,
+    node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",
     only_context: bool = False,
-    session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = None,
-    triplet_distance_penalty: Optional[float] = None,
+    context_format: ContextFormat | str = ContextFormat.CONTEXT,
+    session_id: str | None = None,
+    wide_search_top_k: int | None = None,
+    triplet_distance_penalty: float | None = None,
     feedback_influence: float = get_base_config().default_feedback_influence,
-    retriever_specific_config: Optional[dict] = None,
-    neighborhood_depth: Optional[int] = None,
-    neighborhood_seed_top_k: Optional[int] = None,
+    retriever_specific_config: dict | None = None,
+    neighborhood_depth: int | None = None,
+    neighborhood_seed_top_k: int | None = None,
     include_references: bool = False,
-    llm_config: Optional[LLMConfig] = None,
-    embedding_config: Optional[EmbeddingConfig] = None,
-) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
+    llm_config: LLMConfig | None = None,
+    embedding_config: EmbeddingConfig | None = None,
+) -> list[tuple[Any, str | list[Edge], list[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
     Not to be used outside of active access control mode.
@@ -245,19 +252,20 @@ async def search_in_datasets_context(
         query_type: SearchType,
         query_text: str,
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         top_k: int = 15,
-        node_type: Optional[Type] = NodeSet,
-        node_name: Optional[List[str]] = None,
+        node_type: type | None = NodeSet,
+        node_name: list[str] | None = None,
         node_name_filter_operator: str = "OR",
         only_context: bool = False,
-        session_id: Optional[str] = None,
-        wide_search_top_k: Optional[int] = None,
-        triplet_distance_penalty: Optional[float] = None,
+        context_format: ContextFormat | str = ContextFormat.CONTEXT,
+        session_id: str | None = None,
+        wide_search_top_k: int | None = None,
+        triplet_distance_penalty: float | None = None,
         feedback_influence: float = get_base_config().default_feedback_influence,
-        retriever_specific_config: Optional[dict] = None,
-        neighborhood_depth: Optional[int] = None,
-        neighborhood_seed_top_k: Optional[int] = None,
+        retriever_specific_config: dict | None = None,
+        neighborhood_depth: int | None = None,
+        neighborhood_seed_top_k: int | None = None,
         include_references: bool = False,
     ) -> SearchResultPayload:
         with new_span("cognee.search.dataset") as span:
@@ -304,6 +312,8 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
+                    shared_history=shared_history,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -336,6 +346,13 @@ async def search_in_datasets_context(
                 dataset_tenant_id=dataset.tenant_id,
             )
 
+    # One conversation-history read — the only billed step of the session layer (it
+    # embeds the query for vector recall) — for the whole fan-out. The guidance block
+    # still renders per dataset because preferences are dataset-scoped.
+    shared_history = None
+    if only_context and ContextFormat.parse(context_format) is ContextFormat.PROMPT:
+        shared_history = SharedSessionHistory(query=query_text, session_id=session_id)
+
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
     soften_code_seed_misses = query_type is SearchType.CODE and len(search_datasets) > 1
@@ -353,6 +370,7 @@ async def search_in_datasets_context(
                     node_name=node_name,
                     node_name_filter_operator=node_name_filter_operator,
                     only_context=only_context,
+                    context_format=context_format,
                     session_id=session_id,
                     wide_search_top_k=wide_search_top_k,
                     triplet_distance_penalty=triplet_distance_penalty,
@@ -369,27 +387,29 @@ async def search_in_datasets_context(
         # Run search without setting database context in case access control is disabled
         # Needed for low level pipelines that need to run search without dataset context.
         dataset = search_datasets[0] if len(search_datasets) == 1 else None
-        retriever_kwargs = dict(
-            query_type=query_type,
-            query_text=query_text,
-            user=user,
-            dataset=dataset,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            feedback_influence=feedback_influence,
-            retriever_specific_config=retriever_specific_config,
-            neighborhood_depth=neighborhood_depth,
-            neighborhood_seed_top_k=neighborhood_seed_top_k,
-            include_references=include_references,
-        )
+        retriever_kwargs = {
+            "query_type": query_type,
+            "query_text": query_text,
+            "user": user,
+            "dataset": dataset,
+            "system_prompt_path": system_prompt_path,
+            "system_prompt": system_prompt,
+            "top_k": top_k,
+            "node_type": node_type,
+            "node_name": node_name,
+            "node_name_filter_operator": node_name_filter_operator,
+            "only_context": only_context,
+            "context_format": context_format,
+            "shared_history": shared_history,
+            "session_id": session_id,
+            "wide_search_top_k": wide_search_top_k,
+            "triplet_distance_penalty": triplet_distance_penalty,
+            "feedback_influence": feedback_influence,
+            "retriever_specific_config": retriever_specific_config,
+            "neighborhood_depth": neighborhood_depth,
+            "neighborhood_seed_top_k": neighborhood_seed_top_k,
+            "include_references": include_references,
+        }
 
         async def _search_without_context() -> SearchResultPayload:
             # No dataset DB context to set when access control is disabled, but
@@ -407,6 +427,23 @@ async def search_in_datasets_context(
         tasks.append(_search_without_context())
 
     return await asyncio.gather(*tasks)
+
+
+def _prompt_preview_fields(search_result) -> dict:
+    """Prompt-preview keys for verbose output, present exactly when the prompt shape was asked for.
+
+    Gated on ``context_format``, not on whether the values happen to be set: a verbose
+    caller that requested the prompt always gets the three keys (possibly ``None``), and an
+    ordinary search never sees them — the key set depends on the request, not on session
+    state.
+    """
+    if search_result.context_format != ContextFormat.PROMPT:
+        return {}
+    return {
+        "session_context_result": search_result.session_context,
+        "user_prompt_result": search_result.user_prompt,
+        "system_prompt_result": search_result.system_prompt,
+    }
 
 
 def _backwards_compatible_search_results(search_results, verbose: bool):
@@ -432,6 +469,10 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                 search_result_dict["text_result"] = search_result.completion
                 search_result_dict["context_result"] = search_result.context
                 search_result_dict["objects_result"] = search_result.result_object
+                search_result_dict.update(_prompt_preview_fields(search_result))
+                search_result_dict["evidence"] = [
+                    reference.model_dump(mode="json") for reference in search_result.evidence
+                ]
             else:
                 # Result attribute handles returning appropriate result based on set flags and outputs
                 search_result_dict["search_result"] = search_result.result
@@ -447,6 +488,10 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
                     "text_result": search_result.completion,
                     "context_result": search_result.context,
                     "objects_result": search_result.result_object,
+                    **_prompt_preview_fields(search_result),
+                    "evidence": [
+                        reference.model_dump(mode="json") for reference in search_result.evidence
+                    ],
                 }
                 return_value.append(search_result_dict)
             return return_value

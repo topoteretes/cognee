@@ -11,18 +11,17 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
     llm_retry_stop_condition,
 )
-
-from cognee.infrastructure.llm.config import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
-    get_instructor_mode,
-)
-from cognee.infrastructure.llm.exceptions import LLMPaymentRequiredError, is_budget_exhausted_error
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
     GenericAPIAdapter,
+)
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.instructor_modes import (
+    get_instructor_mode,
 )
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -37,6 +36,13 @@ class AnthropicAdapter(GenericAPIAdapter):
     Adapter for interfacing with the Anthropic API, enabling structured output generation
     and prompt display.
     """
+
+    # Declared False even though GenericAPIAdapter declares True. This class
+    # overrides acreate_structured_output without a `response_model is str`
+    # branch and defines no acreate_str_output, so a plain-text answer never
+    # reaches the parent's streaming door. Inheriting True would promote a
+    # sink, announce `stage: generating`, and then emit nothing at all.
+    supports_answer_streaming = False
 
     default_instructor_mode = get_instructor_mode("anthropic")
 

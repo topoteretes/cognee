@@ -36,7 +36,6 @@ provider name.
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 from urllib.parse import quote
 from uuid import UUID
 
@@ -102,7 +101,7 @@ def _spawn_background(coro, *, description: str) -> None:
     async def _guarded():
         try:
             await coro
-        except Exception:  # noqa: BLE001 - detached work must log, not crash the loop
+        except Exception:  # detached work must log, not crash the loop
             logger.exception("%s failed", description)
 
     task = asyncio.create_task(_guarded())
@@ -126,9 +125,9 @@ class AuthorizeUrlDTO(OutDTO):
 
 class ConnectionStatusDTO(OutDTO):
     connected: bool
-    account_label: Optional[str] = None
-    provider_account_id: Optional[str] = None
-    connected_at: Optional[datetime] = None
+    account_label: str | None = None
+    provider_account_id: str | None = None
+    connected_at: datetime | None = None
 
 
 class DisconnectResultDTO(OutDTO):
@@ -145,19 +144,19 @@ class PluginProvisionDTO(OutDTO):
 class IntegrationStatusItemDTO(OutDTO):
     provider: str
     connected: bool
-    account_label: Optional[str] = None
-    provider_account_id: Optional[str] = None
-    connected_at: Optional[datetime] = None
+    account_label: str | None = None
+    provider_account_id: str | None = None
+    connected_at: datetime | None = None
 
 
 class PluginStatusItemDTO(OutDTO):
     key: str
     connected: bool
-    agent_id: Optional[UUID] = None
-    provisioned_at: Optional[datetime] = None
-    last_active_at: Optional[datetime] = None
+    agent_id: UUID | None = None
+    provisioned_at: datetime | None = None
+    last_active_at: datetime | None = None
     session_count: int = 0
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class IntegrationsStatusDTO(OutDTO):
@@ -183,7 +182,7 @@ def _plugin_session_name(plugin_key: str) -> str:
     return f"plugin:{plugin_key}"
 
 
-async def _find_plugin_agent(user: User, plugin_key: str) -> Optional[User]:
+async def _find_plugin_agent(user: User, plugin_key: str) -> User | None:
     """Resolve the agent sub-user provisioned for ``(user, plugin_key)``.
 
     ``create_agent`` derives the agent's internal email deterministically
@@ -376,6 +375,9 @@ def get_integrations_router():
         returns the same agent but rotates the key (old keys are revoked —
         re-provision *is* the rotation flow). The returned key is shown once
         and never retrievable again.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.provision") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
@@ -439,6 +441,9 @@ def get_integrations_router():
         disconnect would be surprising; full removal stays on
         ``DELETE /api/v1/agents/{agent_id}``. Re-provisioning later revives
         the same identity with a fresh key.
+
+        ## Path Parameters
+        - **plugin_key** (str): Key of a known plugin (see GET /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.plugins.disconnect") as span:
             span.set_attribute("cognee.integrations.plugin", plugin_key)
@@ -462,7 +467,12 @@ def get_integrations_router():
     async def authorize(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> AuthorizeUrlDTO:
-        """Mint the provider's authorize URL for the requesting user."""
+        """Mint the provider's authorize URL for the requesting user.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         with new_span("cognee.integrations.authorize") as span:
             span.set_attribute("cognee.integrations.provider", provider)
             integration = _integration_or_404(provider)
@@ -518,7 +528,7 @@ def get_integrations_router():
                 logger.warning("%s account already connected elsewhere; user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_already_connected")
                 return _frontend_redirect(integration, "error_already_connected")
-            except Exception:  # noqa: BLE001 - any exchange/parse failure must redirect, not 500
+            except Exception:  # any exchange/parse failure must redirect, not 500
                 # Full trace server-side; the browser only learns that it failed.
                 logger.exception("%s OAuth exchange failed for user %s", provider, user_id)
                 span.set_attribute("cognee.integrations.outcome", "error_exchange_failed")
@@ -576,7 +586,12 @@ def get_integrations_router():
     async def connection_status(
         provider: str, user: User = Depends(get_authenticated_user)
     ) -> ConnectionStatusDTO:
-        """Connection state for the Integrations page."""
+        """Connection state for the Integrations page.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
+        """
         integration = _integration_or_404(provider)
         credential = await get_active_credential_for_user(user.id, integration.provider)
         if credential is None:
@@ -602,6 +617,10 @@ def get_integrations_router():
         of each adapter's own best-effort handling — a third-party
         integration that doesn't honor the "never raise" contract on
         ``revoke_remote`` still must not block the local disconnect.
+
+        ## Path Parameters
+        - **provider** (str): Key of a registered OAuth provider (see GET
+          /api/v1/integrations/status).
         """
         with new_span("cognee.integrations.disconnect") as span:
             span.set_attribute("cognee.integrations.provider", provider)
@@ -612,7 +631,7 @@ def get_integrations_router():
 
             try:
                 await integration.revoke_remote(credential)
-            except Exception:  # noqa: BLE001 - a remote-revoke failure must never block disconnect
+            except Exception:  # a remote-revoke failure must never block disconnect
                 logger.exception(
                     "%s revoke_remote raised for account %s",
                     provider,

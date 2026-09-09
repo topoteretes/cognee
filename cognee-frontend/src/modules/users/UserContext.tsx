@@ -15,6 +15,15 @@ export interface UserMe {
   // UserProvider detect a different account logging in on the same tab and
   // wipe the previous account's cached tenant/workspace state.
   userId: string | null;
+  // Feature announcement keys this user hasn't dismissed yet (CLO-358).
+  // Server-computed — already filtered to only features launched after this
+  // user's account was created, so a brand-new signup never sees one.
+  pendingFeatureAnnouncements: string[];
+  // ISO timestamp, inherited from the backend's Principal row (CLO-363) —
+  // lets time-based triggers (e.g. the NPS survey's "15 days old" condition)
+  // gate off account age without a separate call. Null for the rare
+  // legacy/backfilled row whose Principal.created_at was never set.
+  accountCreatedAt: string | null;
 }
 
 // A workspace the current user belongs to. Owned by the User domain (it answers
@@ -37,6 +46,7 @@ interface UserContextValue {
   isUserMeError: boolean;
   markWelcomeSeen: () => Promise<void>;
   markOnboardingComplete: () => Promise<void>;
+  dismissFeatureAnnouncement: (featureKey: string) => Promise<void>;
   availableTenants: AvailableTenant[];
   isLoadingTenants: boolean;
   // True when the tenants fetch itself failed (network error, non-2xx) rather
@@ -58,6 +68,7 @@ const DEFAULT: UserContextValue = {
   isUserMeError: false,
   markWelcomeSeen: async () => {},
   markOnboardingComplete: async () => {},
+  dismissFeatureAnnouncement: async () => {},
   availableTenants: [],
   isLoadingTenants: true,
   isTenantsError: false,

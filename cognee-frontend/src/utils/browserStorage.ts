@@ -18,6 +18,7 @@ const KEYS = {
   creditsBannerDismissed:"cognee-credits-banner-dismissed",
   // localStorage
   connectedIntegrations: (tenantId: string) => `cognee-connected-integrations-${tenantId}`,
+  insufficientCreditsFailure: (tenantId: string) => `cognee-insufficient-credits-failure-${tenantId}`,
 } as const;
 
 // ── Low-level safe I/O ────────────────────────────────────────────────────
@@ -110,4 +111,37 @@ export function setConnectedIntegrations(tenantId: string, value: Record<string,
 /** Clears integration state for a tenant (called on workspace switch). */
 export function clearConnectedIntegrations(tenantId: string): void {
   localRemove(KEYS.connectedIntegrations(tenantId));
+}
+
+// cognee-insufficient-credits-failure-{tenantId} (localStorage) ----------
+
+export interface InsufficientCreditsFailureRecord {
+  operation: string | null;
+  at: number;
+}
+
+/**
+ * Returns the last unacknowledged credit failure for a tenant, or null if
+ * none was recorded (or the stored value is corrupt). Persisted in
+ * localStorage rather than sessionStorage so it survives a closed tab —
+ * the failure can arrive after the request that caused it is long gone.
+ */
+export function getInsufficientCreditsFailure(tenantId: string): InsufficientCreditsFailureRecord | null {
+  const raw = localGet(KEYS.insufficientCreditsFailure(tenantId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as InsufficientCreditsFailureRecord;
+  } catch {
+    return null;
+  }
+}
+
+/** Records a credit failure so the next page load can surface it even if the live modal was missed. */
+export function setInsufficientCreditsFailure(tenantId: string, record: InsufficientCreditsFailureRecord): void {
+  localSet(KEYS.insufficientCreditsFailure(tenantId), JSON.stringify(record));
+}
+
+/** Clears the record once the user has acknowledged it (dismissed it, or gone to billing). */
+export function clearInsufficientCreditsFailure(tenantId: string): void {
+  localRemove(KEYS.insufficientCreditsFailure(tenantId));
 }

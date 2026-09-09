@@ -9,7 +9,6 @@ from cognee.eval_framework.benchmark_adapters.logistics_system_utils.entities.en
     ShippingRange,
 )
 
-
 package_possible_values = {
     "weight_kg": [1.0, 5.0, 25.0, 150.0, 900.0],
     "shipping_range": [shipping_range.label for shipping_range in ShippingRange],
@@ -110,7 +109,7 @@ class Package:
         route_post_office_ids: tuple[str, ...] = (),
         route_post_office_names: tuple[str, ...] = (),
         status_history: tuple[str, ...] = (),
-    ) -> "Package":
+    ) -> Package:
         return cls(
             package_id=package_id,
             description=description,

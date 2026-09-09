@@ -89,15 +89,30 @@ def _use_config(monkeypatch, recall_config_mod, **overrides):
 
 
 def _stub_count(monkeypatch, graph_warmup_mod, value):
+    """Stub the build-status probe with count semantics: 0 = cold, >0 = warm."""
     calls = []
 
     async def counting_stub(user, dataset_ids):
         calls.append((user, dataset_ids))
         if isinstance(value, Exception):
             raise value
-        return value
+        if value and value > 0:
+            return graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_WARM, value)
+        return graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_NEVER_BUILT, 0)
 
-    monkeypatch.setattr(graph_warmup_mod, "get_graph_datapoint_count", counting_stub)
+    monkeypatch.setattr(graph_warmup_mod, "get_graph_build_status", counting_stub)
+    return calls
+
+
+def _stub_probe(monkeypatch, graph_warmup_mod, probe):
+    """Stub the build-status probe with an explicit WarmupProbe."""
+    calls = []
+
+    async def probe_stub(user, dataset_ids):
+        calls.append((user, dataset_ids))
+        return probe
+
+    monkeypatch.setattr(graph_warmup_mod, "get_graph_build_status", probe_stub)
     return calls
 
 
@@ -265,14 +280,19 @@ async def test_cold_verdicts_are_never_cached(monkeypatch, graph_warmup_mod, rec
     # A cold verdict must not stick: a graph populated right after a cold
     # probe has to be searchable on the very next recall.
     _use_config(monkeypatch, recall_config_mod)
-    counts = iter([0, 5])
+    probes = iter(
+        [
+            graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_NEVER_BUILT, 0),
+            graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_WARM, 5),
+        ]
+    )
     probe_calls = []
 
     async def counting_stub(user, dataset_ids):
         probe_calls.append((user, dataset_ids))
-        return next(counts)
+        return next(probes)
 
-    monkeypatch.setattr(graph_warmup_mod, "get_graph_datapoint_count", counting_stub)
+    monkeypatch.setattr(graph_warmup_mod, "get_graph_build_status", counting_stub)
     graph_warmup_mod.clear_warmup_cache()
     user = _make_user()
     dataset_ids = [uuid4()]
@@ -529,3 +549,81 @@ class TestGlobalConfigWiring:
             assert get_recall_config().to_dict() == original
         finally:
             global_config.set_recall_config(original)
+
+
+@pytest.mark.asyncio
+async def test_build_failed_returns_diagnostic_marker(
+    monkeypatch,
+    api_recall_mod,
+    graph_warmup_mod,
+    recall_config_mod,
+    no_remote_client,
+    stub_dataset_auth,
+    stubbed_graph_lane,
+):
+    """A failed build yields a build_failed marker carrying the classified cause.
+
+    Previously an ERRORED run read as 'warm' and recall returned empty results
+    with no explanation — the exact dead end that turns a failed first cognify
+    into churn.
+    """
+    _use_config(monkeypatch, recall_config_mod)
+    _stub_probe(
+        monkeypatch,
+        graph_warmup_mod,
+        graph_warmup_mod.WarmupProbe(
+            graph_warmup_mod.STATE_BUILD_FAILED,
+            0,
+            error_class="AuthenticationError",
+            error_message="invalid api key",
+        ),
+    )
+    graph_warmup_mod.clear_warmup_cache()
+
+    out = await api_recall_mod.recall(
+        query_text="q",
+        query_type=SearchType.GRAPH_COMPLETION,
+        dataset_ids=[uuid4()],
+        auto_route=False,
+        user=_make_user(),
+    )
+
+    assert len(out) == 1
+    marker = out[0]
+    assert marker.status == "build_failed"
+    assert marker.error_class == "AuthenticationError"
+    assert "AuthenticationError: invalid api key" in marker.text
+    assert stubbed_graph_lane == []
+
+
+@pytest.mark.asyncio
+async def test_cold_states_are_not_cached_but_warm_is(
+    monkeypatch, graph_warmup_mod, recall_config_mod
+):
+    _use_config(monkeypatch, recall_config_mod)
+    probes = iter(
+        [
+            graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_BUILD_FAILED, 0, error_class="X"),
+            graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_WARM, 9),
+            # Would be returned on a third probe call — must never be reached,
+            # because the warm verdict above is cached.
+            graph_warmup_mod.WarmupProbe(graph_warmup_mod.STATE_NEVER_BUILT, 0),
+        ]
+    )
+    calls = []
+
+    async def probe_stub(user, dataset_ids):
+        calls.append(1)
+        return next(probes)
+
+    monkeypatch.setattr(graph_warmup_mod, "get_graph_build_status", probe_stub)
+    graph_warmup_mod.clear_warmup_cache()
+    user = _make_user()
+
+    first = await graph_warmup_mod.assess_memory_readiness(user, None)
+    assert first.state == graph_warmup_mod.STATE_BUILD_FAILED
+    second = await graph_warmup_mod.assess_memory_readiness(user, None)
+    assert second.state == graph_warmup_mod.STATE_WARM
+    third = await graph_warmup_mod.assess_memory_readiness(user, None)
+    assert third.state == graph_warmup_mod.STATE_WARM
+    assert len(calls) == 2

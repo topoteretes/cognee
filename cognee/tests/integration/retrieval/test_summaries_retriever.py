@@ -1,17 +1,21 @@
+import logging
 import os
-import pytest
 import pathlib
-import pytest_asyncio
-import cognee
 
-from cognee.low_level import setup
-from cognee.tasks.storage import add_data_points
+import pytest
+import pytest_asyncio
+
+import cognee
 from cognee.infrastructure.databases.vector import get_vector_engine_async
+from cognee.low_level import setup
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.tasks.summarization.models import TextSummary
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
+from cognee.tasks.storage import add_data_points
+from cognee.tasks.summarization.models import TextSummary
+
+logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture
@@ -144,7 +148,7 @@ async def setup_test_environment_with_summaries():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_with_summaries", exc_info=True)
 
 
 @pytest_asyncio.fixture
@@ -166,7 +170,7 @@ async def setup_test_environment_empty():
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
     except Exception:
-        pass
+        logger.debug("Ignoring exception in setup_test_environment_empty", exc_info=True)
 
 
 @pytest.mark.asyncio

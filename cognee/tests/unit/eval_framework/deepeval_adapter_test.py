@@ -1,7 +1,9 @@
-import pytest
-from unittest.mock import patch, MagicMock
-from cognee.eval_framework.eval_config import EvalConfig
 import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from cognee.eval_framework.eval_config import EvalConfig
 
 with patch.dict(
     sys.modules,

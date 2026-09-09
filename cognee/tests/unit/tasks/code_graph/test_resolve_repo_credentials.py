@@ -48,7 +48,9 @@ async def test_clone_slug_and_remote_never_carry_the_token(monkeypatch, tmp_path
     assert resolved == tmp_path / "github.com-org-repo"
 
     clone_args, _ = git_calls[0]
-    assert clone_args[:3] == ["clone", "--depth", "1"]
+    # core.symlinks=false is a security requirement, not incidental: without it a
+    # symlink committed in the remote is materialized and later written through.
+    assert clone_args[:5] == ["clone", "-c", "core.symlinks=false", "--depth", "1"]
     assert _TOKEN_URL in clone_args
 
     # The persisted remote is rewritten to the credential-free URL.
@@ -114,7 +116,15 @@ async def test_out_of_band_credentials_ride_the_environment(monkeypatch, tmp_pat
     assert resolved == tmp_path / "github.com-org-repo"
     ((clone_args, _cwd, clone_env),) = git_calls
     # argv carries only the clean URL; the token is nowhere in it.
-    assert clone_args == ["clone", "--depth", "1", _CLEAN_URL, str(resolved)]
+    assert clone_args == [
+        "clone",
+        "-c",
+        "core.symlinks=false",
+        "--depth",
+        "1",
+        _CLEAN_URL,
+        str(resolved),
+    ]
     assert "tok-SECRET" not in " ".join(clone_args)
     # ...and rides GIT_CONFIG_* as a basic-auth header instead.
     assert clone_env["GIT_CONFIG_KEY_0"] == "http.extraHeader"

@@ -2,8 +2,11 @@
 
 Used by ``remember(..., content_type="code")`` so callers can pass a GitHub
 URL (or a list of them) and get the enola code-graph pipeline run on a local
-shallow clone. Clones live under ``~/.cognee/repos`` and are reused across
-calls; an existing clone is refreshed with a best-effort ``git pull``.
+shallow clone, and by ``add()`` to recognise a GitHub/GitLab repository URL
+(:func:`code_repo_clone_url`) and clone it the same way. Clones live under
+``BaseConfig.repos_root_directory`` (``~/.cognee/repos`` by default) and are
+reused across calls; an existing clone is refreshed with a best-effort
+``git pull``.
 """
 
 import asyncio
@@ -12,11 +15,11 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Optional, Union
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import status
 
+from cognee.base_config import get_base_config
 from cognee.exceptions import CogneeSystemError
 from cognee.shared.logging_utils import get_logger
 
@@ -28,7 +31,58 @@ _FALSEY = {"false", "0", "no", "off"}
 
 _GIT_TIMEOUT_SECONDS = 600
 
-DEFAULT_CLONES_DIR = Path.home() / ".cognee" / "repos"
+# github.com / gitlab.com repository roots are detected by shape; any other
+# host is a repository only when the URL ends in ".git". These are the
+# two-segment forge paths that are site pages, not <owner>/<repo>.
+_GITHUB_RESERVED_OWNERS = frozenset(
+    {
+        "about",
+        "apps",
+        "collections",
+        "enterprise",
+        "explore",
+        "features",
+        "login",
+        "marketplace",
+        "notifications",
+        "organizations",
+        "orgs",
+        "pricing",
+        "search",
+        "security",
+        "settings",
+        "site",
+        "sponsors",
+        "topics",
+        "trending",
+        "users",
+    }
+)
+_GITLAB_RESERVED_GROUPS = frozenset(
+    {
+        "admin",
+        "api",
+        "dashboard",
+        "explore",
+        "groups",
+        "help",
+        "oauth",
+        "profile",
+        "projects",
+        "search",
+        "users",
+    }
+)
+
+
+def default_clones_dir() -> Path:
+    """Where remote repositories are cloned: ``BaseConfig.repos_root_directory``.
+
+    ``COGNEE_REPOS_DIR``, default ``~/.cognee/repos``. Read at call time. The
+    same directory is one of ingestion's always-allowed local roots, so the
+    document files of a clone can be added by path.
+    """
+    return Path(get_base_config().repos_root_directory)
 
 
 class CodeRepositoryError(CogneeSystemError):
@@ -46,7 +100,49 @@ def is_remote_repo(spec) -> bool:
     return isinstance(spec, str) and spec.startswith(_REMOTE_PREFIXES)
 
 
-def redact_repo_spec(spec: Union[str, Path]) -> str:
+def code_repo_clone_url(spec) -> str | None:
+    """The clone URL when an http(s) string names a whole git repository, else None.
+
+    This is what lets ``add()`` treat ``https://github.com/<owner>/<repo>`` as a
+    code project instead of a web page to scrape. Detected: repository roots on
+    github.com (``<owner>/<repo>``) and gitlab.com (``<group>/<repo>``, nested
+    groups included), with an optional ``.git`` suffix, trailing slash, ``www.``
+    prefix, query or fragment -- and any http(s) URL ending in ``.git`` on any
+    host. Deeper forge URLs (``/blob/``, ``/tree/``, ``/issues``, ``/pull/``,
+    GitLab's ``/-/`` pages) and forge site pages (``/topics/x``, ``/explore``)
+    name pages, not repositories, and are left to the web-page path. ``git@``
+    and ``ssh://`` specs are not detected: they have no web-page reading to
+    disambiguate from and stay explicit via ``remember(content_type="code")``.
+
+    The returned URL is normalised for ``git clone``: query and fragment
+    dropped, trailing slash removed, userinfo (a token) kept -- redact it with
+    :func:`redact_repo_spec` before persisting or logging.
+    """
+    if not isinstance(spec, str):
+        return None
+    parts = urlsplit(spec.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    host = parts.hostname.lower()
+    host = host.removeprefix("www.")
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if len(segments) < 2:
+        return None
+
+    if segments[-1].endswith(".git"):
+        is_repo = True
+    elif host == "github.com":
+        is_repo = len(segments) == 2 and segments[0] not in _GITHUB_RESERVED_OWNERS
+    elif host == "gitlab.com":
+        is_repo = "-" not in segments and segments[0] not in _GITLAB_RESERVED_GROUPS
+    else:
+        is_repo = False
+    if not is_repo:
+        return None
+    return urlunsplit((parts.scheme, parts.netloc, "/" + "/".join(segments), "", ""))
+
+
+def redact_repo_spec(spec: str | Path) -> str:
     """The spec with any URL-embedded credentials removed.
 
     Connectors pass short-lived tokens in the URL userinfo
@@ -67,8 +163,7 @@ def redact_repo_spec(spec: Union[str, Path]) -> str:
 def _clone_slug(url: str) -> str:
     """A stable directory name for a remote URL, e.g. 'github.com-org-repo'."""
     tail = url.split("://")[-1].replace(":", "/").rstrip("/")
-    if tail.endswith(".git"):
-        tail = tail[: -len(".git")]
+    tail = tail.removesuffix(".git")
     return re.sub(r"[^A-Za-z0-9._-]+", "-", tail).strip("-.")
 
 
@@ -88,7 +183,7 @@ def _credential_env(token: str) -> dict:
     }
 
 
-async def _run_git(args, cwd: Optional[Path] = None, env: Optional[dict] = None) -> tuple:
+async def _run_git(args, cwd: Path | None = None, env: dict | None = None) -> tuple:
     git_binary = shutil.which("git")
     if git_binary is None:
         raise CodeRepositoryError(
@@ -114,14 +209,14 @@ async def _run_git(args, cwd: Optional[Path] = None, env: Optional[dict] = None)
 
 
 async def resolve_repo_source(
-    spec: Union[str, Path],
-    clones_dir: Optional[Path] = None,
-    credentials: Optional[str] = None,
+    spec: str | Path,
+    clones_dir: Path | None = None,
+    credentials: str | None = None,
 ) -> Path:
     """Return a local directory for the repo spec, shallow-cloning remote URLs.
 
     Local paths are validated and returned as-is. Remote URLs are cloned with
-    ``--depth 1`` into ``clones_dir`` (default ``~/.cognee/repos``); an
+    ``--depth 1`` into ``clones_dir`` (default :func:`default_clones_dir`); an
     existing clone is reused after a best-effort ``git pull --ff-only``.
     Remote resolution honors ``ALLOW_HTTP_REQUESTS=false``.
 
@@ -133,7 +228,19 @@ async def resolve_repo_source(
     works but is the legacy path.
     """
     if not is_remote_repo(spec):
-        path = Path(spec).expanduser()
+        from cognee.infrastructure.files.utils.local_path_safety import resolve_local_path
+
+        # Repo specs can arrive from outside the SDK (CLI arguments, API
+        # callers), so local paths take the same containment check as
+        # ingestion's local-file reads (enforced only when
+        # COGNEE_ALLOWED_LOCAL_FILE_ROOTS is set).
+        try:
+            path = resolve_local_path(spec)
+        except ValueError:
+            raise CodeRepositoryError(
+                message=f"Repository path '{spec}' is outside the allowed local roots. "
+                "Add its root to COGNEE_ALLOWED_LOCAL_FILE_ROOTS to index it."
+            )
         if not path.is_dir():
             raise CodeRepositoryError(
                 message=f"Repository path '{spec}' is not a directory. "
@@ -148,6 +255,32 @@ async def resolve_repo_source(
         )
 
     url = str(spec)
+
+    # SSRF: the URL is caller-supplied and git runs server-side, so an http(s)
+    # remote must clear the same outbound check add()'s http items already clear --
+    # resolve the host and refuse internal/reserved addresses. Without it,
+    # repositories=['http://169.254.169.254/...'] issues the request from inside the
+    # VPC and git's stderr (returned to the caller below) distinguishes open ports,
+    # live hosts and auth failures: an authenticated internal port scanner.
+    #
+    # ssh:// and git@host: are deliberately not routed through it: that helper only
+    # understands http/https, and internal git servers over SSH are a legitimate and
+    # common setup. Non-http, non-ssh transports (file://, ext::, which git would
+    # execute) never reach here -- they do not match _REMOTE_PREFIXES and are handled
+    # as local paths above.
+    if url.lower().startswith(("http://", "https://")):
+        from cognee.tasks.web_scraper.ssrf_protection import (
+            SSRFProtectionError,
+            validate_outbound_url,
+        )
+
+        try:
+            await validate_outbound_url(url)
+        except SSRFProtectionError as error:
+            raise CodeRepositoryError(
+                message=f"Refusing to clone '{redact_repo_spec(url)}': {error}"
+            ) from error
+
     # Slug, remote, logs, and errors all use the credential-free URL: tokens
     # in the userinfo are short-lived, so persisting one anywhere would both
     # leak it and (via the slug) mint a new clone dir per sync.
@@ -155,13 +288,23 @@ async def resolve_repo_source(
     has_credentials = clean_url != url
 
     def _scrub(text: str) -> str:
-        # git error output often echoes the URL, token included.
-        return text.replace(url, clean_url) if has_credentials else text
+        # git error output often echoes the URL, token included. Strip the
+        # exact spec first, then any other URL userinfo git may print (e.g.
+        # a redirect target or a credential-helper rewrite of the URL).
+        if has_credentials:
+            text = text.replace(url, clean_url)
+        return re.sub(r"://[^/\s@]+@", "://", text)
 
     auth_env = _credential_env(credentials) if credentials else None
 
-    target = Path(clones_dir) if clones_dir else DEFAULT_CLONES_DIR
-    target = target / _clone_slug(clean_url)
+    base = Path(clones_dir) if clones_dir else default_clones_dir()
+    target = base / _clone_slug(clean_url)
+    # The slug regex already forbids separators and dot-runs; keep an
+    # explicit containment check so a clone can never land outside the
+    # clones directory regardless of what the URL decomposed into.
+    base_real = os.path.realpath(base)
+    if not os.path.realpath(target).startswith(base_real.rstrip(os.sep) + os.sep):
+        raise CodeRepositoryError(message=f"Could not derive a safe clone name for {clean_url}.")
 
     if (target / ".git").is_dir():
         # Legacy URL-embedded credentials: fetch from the explicit URL
@@ -179,7 +322,16 @@ async def resolve_repo_source(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Cloning %s into %s", clean_url, target)
-    returncode, stderr = await _run_git(["clone", "--depth", "1", url, str(target)], env=auth_env)
+    # core.symlinks=false: git otherwise materializes symlinks committed in the
+    # remote, and nothing re-validates paths under the clone afterwards -- a repo
+    # containing '.enola -> ~/.ssh' would have the enola snapshot written through it,
+    # and 'mod.py -> /proc/self/environ' would be read into the code graph. With this
+    # set, git writes each symlink as a regular file containing its target path.
+    # Passed via -c on clone so it is persisted into the new repo's config and the
+    # later 'git pull --ff-only' honours it too.
+    returncode, stderr = await _run_git(
+        ["clone", "-c", "core.symlinks=false", "--depth", "1", url, str(target)], env=auth_env
+    )
     if returncode != 0:
         raise CodeRepositoryError(
             message=f"Failed to clone '{clean_url}': {_scrub(stderr[-1000:])}"

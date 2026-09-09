@@ -42,51 +42,59 @@ def add_env():
     source_dir = root / "sources"
     source_dir.mkdir()
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
-    os.environ.update(
-        DB_PROVIDER="sqlite",
-        VECTOR_DB_PROVIDER="lancedb",
-        GRAPH_DATABASE_PROVIDER="kuzu",
-        CACHE_BACKEND="sqlite",
-        MOCK_EMBEDDING="true",
-        TELEMETRY_DISABLED="1",
-        STORAGE_BACKEND="local",
-        DATA_ROOT_DIRECTORY=str(root / "data"),
-        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
-        ENABLE_BACKEND_ACCESS_CONTROL="false",
+    def clear_config_caches():
+        import importlib
+
+        for module_name, factory_name in [
+            ("cognee.base_config", "get_base_config"),
+            ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
+            (
+                "cognee.infrastructure.databases.relational.get_relational_engine",
+                "get_relational_engine",
+            ),
+            ("cognee.infrastructure.databases.graph.config", "get_graph_config"),
+            ("cognee.infrastructure.databases.vector.config", "get_vectordb_config"),
+            ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
+            ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
+            ("cognee.infrastructure.databases.vector.embeddings.config", "get_embedding_config"),
+            (
+                "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
+                "create_embedding_engine",
+            ),
+            ("cognee.infrastructure.llm.config", "get_llm_config"),
+        ]:
+            try:
+                getattr(importlib.import_module(module_name), factory_name).cache_clear()
+            except (ImportError, AttributeError):
+                pass
+
+    mp = pytest.MonkeyPatch()
+    for key, value in {
+        "DB_PROVIDER": "sqlite",
+        "VECTOR_DB_PROVIDER": "lancedb",
+        "GRAPH_DATABASE_PROVIDER": "kuzu",
+        "CACHE_BACKEND": "sqlite",
+        "MOCK_EMBEDDING": "true",
+        "TELEMETRY_DISABLED": "1",
+        "STORAGE_BACKEND": "local",
+        "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
+        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
         # add-by-path tests read from source_dir; mkdtemp lives under the
         # default-allowed tempdir, this just makes the intent explicit.
-        COGNEE_ALLOWED_LOCAL_FILE_ROOTS=os.pathsep.join([str(source_dir), tempfile.gettempdir()]),
-    )
-
-    import importlib
-
-    for module_name, factory_name in [
-        ("cognee.base_config", "get_base_config"),
-        ("cognee.infrastructure.databases.relational.config", "get_relational_config"),
-        (
-            "cognee.infrastructure.databases.relational.get_relational_engine",
-            "get_relational_engine",
+        "COGNEE_ALLOWED_LOCAL_FILE_ROOTS": os.pathsep.join(
+            [str(source_dir), tempfile.gettempdir()]
         ),
-        ("cognee.infrastructure.databases.graph.config", "get_graph_config"),
-        ("cognee.infrastructure.databases.vector.config", "get_vectordb_config"),
-        ("cognee.infrastructure.databases.cache.config", "get_cache_config"),
-        ("cognee.infrastructure.databases.cache.get_cache_engine", "create_cache_engine"),
-        ("cognee.infrastructure.databases.vector.embeddings.config", "get_embedding_config"),
-        (
-            "cognee.infrastructure.databases.vector.embeddings.get_embedding_engine",
-            "create_embedding_engine",
-        ),
-        ("cognee.infrastructure.llm.config", "get_llm_config"),
-    ]:
-        try:
-            getattr(importlib.import_module(module_name), factory_name).cache_clear()
-        except (ImportError, AttributeError):
-            pass
+    }.items():
+        mp.setenv(key, value)
+    clear_config_caches()
 
     yield source_dir
 
+    mp.undo()
+    clear_config_caches()
     shutil.rmtree(root, ignore_errors=True)
 
 

@@ -1,20 +1,19 @@
 from uuid import UUID
-from typing import Union, Tuple, List, Optional
 
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.models import User
-from cognee.modules.data.models import Dataset
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import (
+    check_dataset_name,
     get_authorized_existing_datasets,
     load_or_create_datasets,
-    check_dataset_name,
 )
+from cognee.modules.data.models import Dataset
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 
 
 async def resolve_authorized_user_datasets(
-    datasets: Union[str, UUID, list[str], list[UUID]], user: Optional[User] = None
-) -> Tuple[User, List[Dataset]]:
+    datasets: str | UUID | list[str] | list[UUID], user: User | None = None
+) -> tuple[User, list[Dataset]]:
     """
     Function handles creation and dataset authorization if datasets already exist for Cognee.
     Verifies that provided user has necessary permission for provided Dataset.
@@ -32,7 +31,7 @@ async def resolve_authorized_user_datasets(
         user = await get_default_user()
 
     # Convert datasets to list
-    if isinstance(datasets, str) or isinstance(datasets, UUID):
+    if isinstance(datasets, (str, UUID)):
         datasets = [datasets]
 
     # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)

@@ -1,7 +1,7 @@
 ## The Objective of these tests is to cover the search - prepare search results behavior (later to be removed)
 
 import types
-from uuid import uuid4, uuid5, UUID, NAMESPACE_OID
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 import pytest
 from pydantic import BaseModel
@@ -17,7 +17,10 @@ class DummyDataset(BaseModel):
     owner_id: object
 
 
-def _ds(name="ds1", tenant_id=uuid5(NAMESPACE_OID, "t1")):
+_TENANT_1 = uuid5(NAMESPACE_OID, "t1")
+
+
+def _ds(name="ds1", tenant_id=_TENANT_1):
     return DummyDataset(
         id=uuid5(NAMESPACE_OID, name), name=name, tenant_id=tenant_id, owner_id=uuid4()
     )

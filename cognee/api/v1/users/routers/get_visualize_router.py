@@ -1,28 +1,27 @@
 from datetime import datetime
-from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.status import WS_1008_POLICY_VIOLATION, WS_1011_INTERNAL_ERROR
-from uuid import UUID
+
+from cognee import __version__ as cognee_version
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.visualization.subgraph_data import (
-    DEFAULT_MAX_NODES,
-    DEFAULT_NEIGHBORHOOD_DEPTH,
-    DEFAULT_SEED_TOP_K,
-)
 from cognee.modules.users.methods import (
     get_authenticated_user,
     get_authenticated_websocket_user,
     get_user,
 )
-from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
-
+from cognee.modules.visualization.subgraph_data import (
+    DEFAULT_MAX_NODES,
+    DEFAULT_NEIGHBORHOOD_DEPTH,
+    DEFAULT_SEED_TOP_K,
+)
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
 
 logger = get_logger()
 
@@ -61,11 +60,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Render the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -166,11 +165,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Include the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -271,11 +270,11 @@ def get_visualize_router() -> APIRouter:
             False,
             description="Include the entire graph instead of a bounded subgraph.",
         ),
-        query: Optional[str] = Query(
+        query: str | None = Query(
             None,
             description="Query string whose nearest vector hits seed the subgraph.",
         ),
-        seed_node_ids: Optional[List[str]] = Query(
+        seed_node_ids: list[str] | None = Query(
             None,
             description="Explicit seed node ids for subgraph neighborhood expansion.",
         ),
@@ -309,6 +308,17 @@ def get_visualize_router() -> APIRouter:
 
         ## Query Parameters
         Same as `GET /visualize/json`.
+        - **dataset_id** (UUID): UUID of the dataset to visualize. List your datasets via GET
+          /api/v1/datasets to find it.
+        - **full** (bool): Include the entire graph instead of a bounded subgraph. Defaults to
+          False.
+        - **max_nodes** (int): Hard cap on rendered nodes after expansion. Defaults to 500.
+        - **neighborhood_depth** (int): k-hop neighborhood depth for subgraph expansion. Defaults to
+          2.
+        - **neighborhood_seed_top_k** (int): Maximum number of seed nodes. Defaults to 10.
+        - **query** (Optional[str]): Query string whose nearest vector hits seed the subgraph.
+        - **seed_node_ids** (Optional[List[str]]): Explicit seed node ids for subgraph neighborhood
+          expansion.
 
         ## Response
         A JSON object with `semantic_positions` and `semantic_clusters`,
@@ -473,14 +483,14 @@ def get_visualize_router() -> APIRouter:
         dataset_id: UUID = Query(
             ...,
             description=(
-                "UUID of the dataset this poll is for. Gates who may call this "
-                "endpoint (same read-permission check as every other visualize "
-                "route) — the events themselves are the caller's own, not "
-                "filtered to this dataset's graph."
+                "UUID of the dataset this poll is for. Gates who may call "
+                "this endpoint (same read-permission check as every other "
+                "visualize route) and scopes the events returned: only the "
+                "caller's own sessions attributed to this dataset contribute."
             ),
             examples=[""],
         ),
-        since: Optional[datetime] = Query(
+        since: datetime | None = Query(
             None,
             description=(
                 "Cursor from a previous call's response. Omit on the first "
@@ -498,7 +508,7 @@ def get_visualize_router() -> APIRouter:
         come back. The filter is strict, so nothing is ever delivered twice.
 
         ## Query Parameters
-        - **dataset_id** (UUID): authorization only, see above
+        - **dataset_id** (UUID): authorization and event scope, see above
         - **since** (datetime, optional): cursor from a previous call
 
         ## Response
@@ -513,6 +523,11 @@ def get_visualize_router() -> APIRouter:
 
         ## Notes
         - User must have read permissions on the dataset
+        - Events come only from the caller's own sessions attributed to this
+          dataset. Sessions carrying no dataset attribution are not included.
+        - Attribution is per session, not per answered turn: a session id
+          reused across datasets stays with the first dataset it touched, so
+          its later turns appear on that dataset's timeline.
         """
         send_telemetry(
             "Visualize Live Events API Endpoint Invoked",
@@ -546,14 +561,14 @@ def get_visualize_router() -> APIRouter:
     async def subscribe_to_dataset_updates(
         websocket: WebSocket,
         dataset_id: UUID,
-        since: Optional[datetime] = Query(
+        since: datetime | None = Query(
             None,
             description=(
                 "Cursor from the last live_events frame of a previous "
                 "connection. Omit to start from every available event."
             ),
         ),
-        user: Optional[User] = Depends(get_authenticated_websocket_user),
+        user: User | None = Depends(get_authenticated_websocket_user),
     ):
         """
         Stream one dataset's live events and graph growth over a WebSocket.
@@ -579,8 +594,8 @@ def get_visualize_router() -> APIRouter:
 
         ## Path Parameters
         - **dataset_id** (UUID): the dataset to follow. Gates the connection
-          with the same read-permission check the other visualize routes use;
-          the events themselves are the caller's own, as on `/live-events`.
+          with the same read-permission check the other visualize routes use,
+          and scopes the events to this dataset, as on `/live-events`.
 
         ## Query Parameters
         - **since** (datetime, optional): reconnect cursor
@@ -639,7 +654,7 @@ def get_visualize_router() -> APIRouter:
 
     @router.post("/multi", response_model=None)
     async def visualize_multi(
-        pairs: List[UserDatasetPair],
+        pairs: list[UserDatasetPair],
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -696,8 +711,8 @@ def get_visualize_router() -> APIRouter:
             html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
             return HTMLResponse(html_visualization)
 
-        except Exception as error:
-            logger.error("Multi-user visualization request failed: %s", error)
+        except Exception:
+            logger.exception("Multi-user visualization request failed")
             return JSONResponse(
                 status_code=409, content={"error": "Unable to render visualization."}
             )

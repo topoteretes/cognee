@@ -5,7 +5,7 @@ import SkeletonBar from "@/ui/elements/SkeletonBar";
 
 const cardStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.1)",
-  borderRadius: 12,
+  borderRadius: 0,
   background: "rgba(255,255,255,0.03)",
   padding: 16,
   display: "flex",
@@ -19,7 +19,7 @@ function StatCard() {
     <div
       style={{
         border: "1px solid rgba(255,255,255,0.1)",
-        borderRadius: 10,
+        borderRadius: 0,
         background: "rgba(255,255,255,0.03)",
         padding: "14px 16px",
         display: "flex",
@@ -100,7 +100,7 @@ export default function DashboardSkeleton() {
           <div
             style={{
               border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 12,
+              borderRadius: 0,
               background: "rgba(255,255,255,0.03)",
               height: 220,
               padding: 16,

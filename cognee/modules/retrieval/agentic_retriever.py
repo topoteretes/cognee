@@ -12,8 +12,9 @@ load_skill tool to fetch a body on demand (progressive disclosure).
 """
 
 import time
+from collections.abc import Sequence
 from types import SimpleNamespace
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field
@@ -35,7 +36,6 @@ from cognee.modules.tools.resolve_skills import resolve_skills
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger("AgenticRetriever")
 MAX_TOOL_OUTPUT_CHARS = 8_000
 
@@ -55,11 +55,11 @@ class AgentStep(BaseModel):
         default="",
         description="Short reasoning for the chosen action.",
     )
-    tool_call: Optional[ToolCall] = Field(
+    tool_call: ToolCall | None = Field(
         default=None,
         description="Populate when another tool call is needed; else leave null.",
     )
-    final_answer: Optional[str] = Field(
+    final_answer: str | None = Field(
         default=None,
         description="Populate when you have enough to answer; else leave null.",
     )
@@ -79,13 +79,18 @@ class AgenticRetriever(GraphCompletionRetriever):
       used inside the loop (distinct from the parent's graph-completion prompts).
     """
 
+    # Answers through a multi-step loop on the agentic templates; the inherited
+    # (user_prompt_path, system_prompt_path) pair is only the budget-exhausted fallback,
+    # so a single rendered prompt would misrepresent what this retriever sends.
+    supports_prompt_preview = False
+
     def __init__(
         self,
-        skills: Optional[Sequence[Union[str, Skill]]] = None,
-        tools: Optional[List[str]] = None,
-        user: Optional[User] = None,
+        skills: Sequence[str | Skill] | None = None,
+        tools: list[str] | None = None,
+        user: User | None = None,
         dataset=None,
-        dataset_id: Optional[UUID] = None,
+        dataset_id: UUID | None = None,
         max_iter: int = 6,
         agentic_system_prompt_path: str = "agentic_system.txt",
         agentic_user_prompt_path: str = "agentic_user.txt",
@@ -104,7 +109,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         self.max_iter = max_iter
         self.agentic_system_prompt_path = agentic_system_prompt_path
         self.agentic_user_prompt_path = agentic_user_prompt_path
-        self._cached_context: Optional[str] = None
+        self._cached_context: str | None = None
 
     def _use_session_cache(self) -> bool:
         """Use the explicit retriever user instead of relying only on ContextVar state."""
@@ -113,7 +118,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         return bool(getattr(self.user, "id", None) and CacheConfig().caching)
 
     async def get_retrieved_objects(  # type: ignore[override]
-        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+        self, query: str | None = None, query_batch: list[str] | None = None
     ) -> Any:
         """Return a dict with memory triplets, active skills, and permitted tools.
 
@@ -143,11 +148,13 @@ class AgenticRetriever(GraphCompletionRetriever):
             graph_engine = await get_graph_engine()
             _, edges = await graph_engine.get_graph_data()
         except Exception as exc:
-            logger.warning("Unable to inspect graph edges before agentic retrieval: %s", exc)
+            logger.warning(
+                "Unable to inspect graph edges before agentic retrieval: %s", exc, exc_info=True
+            )
             return True
         return bool(edges)
 
-    async def _resolve_active_tools(self, skills: List[Skill]) -> List[Tool]:
+    async def _resolve_active_tools(self, skills: list[Skill]) -> list[Tool]:
         """Ambient tools intersected with skill-declared tools (union across skills)."""
         all_tools = await list_tools_for_dataset(dataset_id=self.dataset_id)
 
@@ -166,10 +173,10 @@ class AgenticRetriever(GraphCompletionRetriever):
 
     async def get_context_from_objects(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects=None,
-    ) -> Union[str, List[str]]:
+    ) -> str | list[str]:
         if not isinstance(retrieved_objects, dict):
             return await super().get_context_from_objects(
                 query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
@@ -199,13 +206,13 @@ class AgenticRetriever(GraphCompletionRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
+        query: str | None = None,
+        query_batch: list[str] | None = None,
         retrieved_objects=None,
         context: Any = None,
-        effective_query: Optional[str] = None,
+        effective_query: str | None = None,
         turn_preparation=None,
-    ) -> List[Any]:
+    ) -> list[Any]:
         if not isinstance(retrieved_objects, dict):
             return await super().get_completion_from_context(
                 query=query,
@@ -216,14 +223,14 @@ class AgenticRetriever(GraphCompletionRetriever):
                 turn_preparation=turn_preparation,
             )
 
-        skills: List[Skill] = retrieved_objects.get("skills") or []
-        tools: List[Tool] = retrieved_objects.get("tools") or []
+        skills: list[Skill] = retrieved_objects.get("skills") or []
+        tools: list[Tool] = retrieved_objects.get("tools") or []
         tool_names = [t.name for t in tools]
 
         started_at_ms = int(time.time() * 1000)
         opened_skills: set[str] = set()
         opened_token = opened_skills_var.set(opened_skills)
-        tool_trace: List[SkillRunToolCall] = []
+        tool_trace: list[SkillRunToolCall] = []
         token = active_skills_var.set({s.name: s for s in skills})
         try:
             try:
@@ -294,20 +301,20 @@ class AgenticRetriever(GraphCompletionRetriever):
         *,
         started_at_ms: int = 0,
         latency_ms: int = 0,
-        success_score: Optional[float] = None,
+        success_score: float | None = None,
         error_type: str = "",
         error_message: str = "",
-        tool_trace: Optional[List[SkillRunToolCall]] = None,
+        tool_trace: list[SkillRunToolCall] | None = None,
         user=None,
         dataset=None,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ) -> None:
         """Persist one SkillRun node per active skill after a retrieval call."""
         from cognee.modules.engine.models import NodeSet
         from cognee.modules.engine.models.SkillRun import (
+            UNSCORED_SKILL_RUN_SCORE,
             CandidateSkill,
             SkillRun,
-            UNSCORED_SKILL_RUN_SCORE,
         )
         from cognee.modules.engine.utils.generate_node_id import generate_node_id
         from cognee.modules.pipelines.models import PipelineContext
@@ -358,7 +365,9 @@ class AgenticRetriever(GraphCompletionRetriever):
         try:
             await add_data_points(runs, ctx=ctx)
         except Exception as exc:
-            logger.warning("Failed to record SkillRun(s) after agentic retrieval: %s", exc)
+            logger.warning(
+                "Failed to record SkillRun(s) after agentic retrieval: %s", exc, exc_info=True
+            )
 
     async def _get_session_history(self) -> str:
         """Return formatted session history for the active user, if caching is available."""
@@ -384,10 +393,10 @@ class AgenticRetriever(GraphCompletionRetriever):
             )
             return history if isinstance(history, str) else ""
         except Exception as exc:
-            logger.warning("Failed to load agentic session history: %s", exc)
+            logger.warning("Failed to load agentic session history: %s", exc, exc_info=True)
             return ""
 
-    async def _maybe_active_context_block(self, query: Optional[str]) -> tuple[str, list]:
+    async def _maybe_active_context_block(self, query: str | None) -> tuple[str, list]:
         """Render the active session-context guidance block for the agentic loop.
 
         Gated on caching + auto_feedback. Fully fail-open: returns ("", []) on any error
@@ -422,7 +431,7 @@ class AgenticRetriever(GraphCompletionRetriever):
                 query=query or "",
             )
         except Exception as exc:
-            logger.warning("Agentic active session-context block failed: %s", exc)
+            logger.warning("Agentic active session-context block failed: %s", exc, exc_info=True)
             return "", []
 
     async def _store_session_qa(
@@ -459,14 +468,14 @@ class AgenticRetriever(GraphCompletionRetriever):
                 used_session_context_ids=served_ids,
             )
         except Exception as exc:
-            logger.warning("Failed to store agentic session QA: %s", exc)
+            logger.warning("Failed to store agentic session QA: %s", exc, exc_info=True)
 
     async def _run_tool_loop(
         self,
-        query: Optional[str],
+        query: str | None,
         initial_context: str,
-        tool_names: List[str],
-        tool_trace: Optional[List[SkillRunToolCall]] = None,
+        tool_names: list[str],
+        tool_trace: list[SkillRunToolCall] | None = None,
     ) -> str:
         loop_context = initial_context
         conversation_history = await self._get_session_history()
@@ -531,7 +540,7 @@ class AgenticRetriever(GraphCompletionRetriever):
         )
         return forced
 
-    async def _run_tool_safely(self, call: ToolCall, tool_names: List[str]) -> str:
+    async def _run_tool_safely(self, call: ToolCall, tool_names: list[str]) -> str:
         try:
             result = await execute_tool(
                 user=self.user,
@@ -545,16 +554,16 @@ class AgenticRetriever(GraphCompletionRetriever):
             return f"ERROR: {exc}"
 
 
-def _format_skill_catalog(skills: List[Skill]) -> str:
+def _format_skill_catalog(skills: list[Skill]) -> str:
     if not skills:
         return "(no skills loaded for this turn)"
     return "\n".join(f"- `{s.name}`: {s.description}" for s in skills)
 
 
-def _format_tool_manifest(tools: List[Tool]) -> str:
+def _format_tool_manifest(tools: list[Tool]) -> str:
     if not tools:
         return "(no tools available for this turn)"
-    lines: List[str] = []
+    lines: list[str] = []
     for tool in tools:
         schema_props = tool.input_schema.get("properties", {}) if tool.input_schema else {}
         arg_list = ", ".join(schema_props.keys()) if schema_props else "no args"

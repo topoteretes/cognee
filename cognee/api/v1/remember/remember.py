@@ -1,8 +1,8 @@
 import asyncio
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, Union
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any, Literal, TYPE_CHECKING
 
 try:
     from typing import Unpack
@@ -14,30 +14,30 @@ from typing_extensions import TypedDict
 if TYPE_CHECKING:
     from cognee.modules.cognify.estimator import DryRunEstimate
 
-from cognee.shared.logging_utils import get_logger
-from cognee.tasks.ingestion.data_item import DataItem
 from cognee.memory import (
+    FeedbackEntry,
     MemoryEntry,
     QAEntry,
-    TraceEntry,
-    FeedbackEntry,
     SkillRunEntry,
+    TraceEntry,
 )
 from cognee.memory.entries import MEMORY_ENTRY_TYPES
 from cognee.modules.migration.sources.base import MemorySource
+from cognee.modules.observability import (
+    COGNEE_DATA_ITEM_COUNT,
+    COGNEE_DATA_SIZE_BYTES,
+    COGNEE_DATASET_NAME,
+    COGNEE_OPERATION_MODE,
+    COGNEE_SESSION_ID,
+    OtelStatusCode,
+    new_span,
+)
 from cognee.modules.operations import record_operation
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.observability import (
-    new_span,
-    COGNEE_DATASET_NAME,
-    COGNEE_SESSION_ID,
-    COGNEE_DATA_SIZE_BYTES,
-    COGNEE_OPERATION_MODE,
-    COGNEE_DATA_ITEM_COUNT,
-    OtelStatusCode,
-)
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.data_item import DataItem
 
 logger = get_logger("remember")
 
@@ -54,7 +54,7 @@ class RememberKwargs(TypedDict, total=False):
     """Power-user overrides for remember(). Most users never need these."""
 
     graph_model: Any
-    node_set: List[str]
+    node_set: list[str]
     preferred_loaders: list
     incremental_loading: bool
     data_cache: bool
@@ -168,10 +168,14 @@ async def _add_to_session(session_id: str, data, user):
     stripped = text.strip()
     if not stripped:
         return
-    if any(stripped.startswith(prefix) for prefix in _SESSION_PLACEHOLDER_PREFIXES):
+    matched_prefix = next(
+        (prefix for prefix in _SESSION_PLACEHOLDER_PREFIXES if stripped.startswith(prefix)), None
+    )
+    if matched_prefix is not None:
+        # Log only the constant prefix — the payload itself must never reach the logs.
         logger.debug(
-            "remember: skipping session write for placeholder-only payload (%.40s…)",
-            stripped,
+            "remember: skipping session write for placeholder-only payload (%s…)",
+            matched_prefix,
         )
         return
 
@@ -189,9 +193,9 @@ async def _remember_entry(
     entry,
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user,
-    skill_improvement: Optional[dict[str, Any]] = None,
+    skill_improvement: dict[str, Any] | None = None,
 ) -> "RememberResult":
     """Top-level dispatcher for typed MemoryEntry payloads.
 
@@ -240,9 +244,9 @@ async def _dispatch_session_entry(
     entry: "MemoryEntry",
     *,
     dataset_name: str,
-    session_id: Optional[str],
+    session_id: str | None,
     user,
-    skill_improvement: Optional[dict[str, Any]] = None,
+    skill_improvement: dict[str, Any] | None = None,
 ) -> "RememberResult":
     """Route a typed memory entry to the right SessionManager method.
 
@@ -338,6 +342,7 @@ async def _dispatch_session_entry(
                 resolved_dataset = ds.id
         except Exception:
             # Fall through with None — we still create the session row.
+            logger.debug("Ignoring exception in _dispatch_session_entry", exc_info=True)
             resolved_dataset = None
 
         await ensure_and_touch_session(
@@ -346,7 +351,7 @@ async def _dispatch_session_entry(
             dataset_id=resolved_dataset,
         )
     except Exception as exc:
-        logger.debug("remember: pre-upsert session_record failed (%s)", exc)
+        logger.debug("remember: pre-upsert session_record failed (%s)", exc, exc_info=True)
 
     result = RememberResult(
         status="session_stored",
@@ -453,32 +458,32 @@ class RememberResult:
         *,
         status: str,
         dataset_name: str,
-        dataset_id: Optional[str] = None,
-        session_ids: Optional[List[str]] = None,
-        pipeline_run_id: Optional[str] = None,
+        dataset_id: str | None = None,
+        session_ids: list[str] | None = None,
+        pipeline_run_id: str | None = None,
     ):
         self.status = status
         self.dataset_name = dataset_name
         self.dataset_id = dataset_id
-        self.session_ids: Optional[List[str]] = session_ids
+        self.session_ids: list[str] | None = session_ids
         self.pipeline_run_id = pipeline_run_id
-        self.error: Optional[str] = None
-        self.raw_result: Optional[dict] = None
-        self.elapsed_seconds: Optional[float] = None
-        self.content_hash: Optional[str] = None
+        self.error: str | None = None
+        self.raw_result: dict | None = None
+        self.elapsed_seconds: float | None = None
+        self.content_hash: str | None = None
         self.items_processed: int = 0
-        self.items: List[dict] = []
+        self.items: list[dict] = []
         # Populated when the call dispatched a typed MemoryEntry.
         # entry_type is one of "qa", "trace", "feedback", or
         # "skill_run"; entry_id is the qa_id / trace_id / run_id
         # returned by the storage backend.
-        self.entry_type: Optional[str] = None
-        self.entry_id: Optional[str] = None
-        self._task: Optional[asyncio.Task] = None
+        self.entry_type: str | None = None
+        self.entry_id: str | None = None
+        self._task: asyncio.Task | None = None
         self._started_at: float = time.monotonic()
 
     @property
-    def session_id(self) -> Optional[str]:
+    def session_id(self) -> str | None:
         """The session ID when exactly one session is involved, else None."""
         if self.session_ids and len(self.session_ids) == 1:
             return self.session_ids[0]
@@ -653,15 +658,16 @@ async def remember(
     ],
     dataset_name: str = "main_dataset",
     *,
-    dataset_id: Optional[UUID] = None,
-    session_id: Optional[str] = None,
-    chunk_size: Optional[int] = None,
-    chunker: Optional[Any] = None,
-    custom_prompt: Optional[str] = None,
+    dataset_id: UUID | None = None,
+    session_id: str | None = None,
+    chunk_size: int | None = None,
+    chunker: Any | None = None,
+    custom_prompt: str | None = None,
     run_in_background: bool = False,
     self_improvement: bool = True,
-    session_ids: Optional[List[str]] = None,
+    session_ids: list[str] | None = None,
     dry_run: bool = False,
+    raise_on_error: bool = True,
     **kwargs: Unpack[RememberKwargs],
 ) -> Union["RememberResult", "DryRunEstimate"]:
     """Store data in memory.
@@ -743,8 +749,8 @@ async def remember(
         # Access raw pipeline result:
         result.raw_result    # {dataset_id: PipelineRunInfo}
     """
-    from cognee.shared.utils import send_telemetry
     from cognee import __version__ as cognee_version
+    from cognee.shared.utils import send_telemetry
 
     # Migration dispatch: a MemorySource streams COGX records from an external
     # memory system (Mem0, Zep/Graphiti, Letta, a COGX archive, ...). The
@@ -790,6 +796,11 @@ async def remember(
                     "cognee_version": cognee_version,
                 },
             )
+            # index_vectors=False imports the archive's graph without touching
+            # the vector/embedding stack (same kwarg the code route uses), so a
+            # bundled archive restores with no API key. Vector-independent
+            # search (CHUNKS_LEXICAL) still works over such an import.
+            graph_only = not kwargs.pop("index_vectors", True)
             return await import_memory_source(
                 data,
                 dataset_name=dataset_name,
@@ -798,6 +809,7 @@ async def remember(
                 chunker=chunker,
                 custom_prompt=custom_prompt,
                 self_improvement=self_improvement,
+                graph_only=graph_only,
                 **kwargs,
             )
 
@@ -885,6 +897,7 @@ async def remember(
             self_improvement=self_improvement,
             session_ids=session_ids,
             span=span,
+            raise_on_error=raise_on_error,
             **kwargs,
         )
 
@@ -940,6 +953,7 @@ async def _remember_inner(
     self_improvement,
     session_ids,
     span,
+    raise_on_error: bool = True,
     **kwargs,
 ) -> "RememberResult":
     from cognee.api.v1.serve.state import get_remote_client
@@ -1112,12 +1126,17 @@ async def _remember_inner(
                 # One failing repo must not abort the rest of the batch — record
                 # the failure per item and keep going.
                 errors: list = []
-                for spec in repo_specs:
+                for position, spec in enumerate(repo_specs, start=1):
                     try:
                         item = await _run_one_repo(spec)
                     except Exception as exc:
                         source = redact_repo_spec(spec)
-                        logger.exception("Background code-graph run failed for '%s'", source)
+                        # Specs can embed URL credentials — never log spec-derived values.
+                        logger.exception(
+                            "Background code-graph run failed for repo %d of %d",
+                            position,
+                            len(repo_specs),
+                        )
                         item = {
                             "kind": "code_repository",
                             "source": source,
@@ -1187,7 +1206,7 @@ async def _remember_inner(
         # _scoped_skill_id uuid5) stable across re-ingests, so re-ingesting an
         # edited SKILL.md upserts the existing Skill node instead of creating a
         # duplicate.
-        materialize_root: Optional[_Path] = None
+        materialize_root: _Path | None = None
         if normalized_uploads or skills_text:
             root = _skill_materialize_root(dataset.id)
             root.mkdir(parents=True, exist_ok=True)
@@ -1354,7 +1373,9 @@ async def _remember_inner(
                             )
                         logger.info("remember: session '%s' bridged to permanent graph", session_id)
                     except Exception as exc:
-                        logger.warning("remember: session improve failed (non-fatal): %s", exc)
+                        logger.warning(
+                            "remember: session improve failed (non-fatal): %s", exc, exc_info=True
+                        )
 
                 result._task = asyncio.create_task(_session_improve())
                 _BACKGROUND_REMEMBER_TASKS.add(result._task)
@@ -1387,6 +1408,14 @@ async def _remember_inner(
                 chunk_size=chunk_size,
                 custom_prompt=custom_prompt,
                 run_in_background=False,
+                # Loud-by-default: a failed build raises CognifyFailedError
+                # (typed, classified, with a remedy) out of blocking remember()
+                # instead of returning a silently "errored" result nobody
+                # inspects. In background remember() a raise has nowhere to go
+                # and would skip _resolve(), losing pipeline_run_id/dataset_id/
+                # raw_result — so take the errored-run-info path there and let
+                # _resolve() record the failure on the result.
+                raise_on_error=raise_on_error and not run_in_background,
                 **shared_kwargs,
                 **cognify_kwargs,
             )

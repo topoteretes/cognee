@@ -107,19 +107,44 @@ services:
           cpus: "2.0"
           memory: 4GB
 
-  # NOTE: Frontend is a work in progress and supports minimum amount of features required to be functional.
-  # If you want to use Cognee with a UI environment you can integrate the Cognee MCP Server into Cursor / Claude Desktop / Visual Studio Code (through Cline/Roo)
+  # cognee UI. `--profile ui` runs the published image, so a user without the
+  # repo gets the same thing CI publishes; `--profile ui-dev` builds the
+  # hot-reloading stage from source for frontend work.
+  #
+  # NOTE: the UI is a work in progress and covers the minimum set of features
+  # needed to be functional. For a richer experience you can also integrate the
+  # cognee MCP server into Cursor / Claude Desktop / VS Code (through Cline/Roo).
   frontend:
     container_name: frontend
     restart: always
-    environment:
-      - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8000}
-      - NEXT_PUBLIC_IS_CLOUD_ENVIRONMENT=false
+    image: cognee/cognee-ui:${COGNEE_UI_TAG:-latest}
     profiles:
-        - ui
+      - ui
+    environment:
+      # Empty means "derive it from the address the browser used", which is
+      # correct for the default localhost setup. The browser talks to the
+      # backend directly, so when you do set this it must be the address as
+      # seen from the browser, not the `cognee` service name.
+      - COGNEE_BACKEND_URL=${COGNEE_BACKEND_URL:-}
+    depends_on:
+      cognee:
+        condition: service_healthy
+    ports:
+      - 3000:3000
+    networks:
+      - cognee-network
+
+  frontend-dev:
+    container_name: frontend-dev
+    restart: always
+    profiles:
+      - ui-dev
     build:
       context: ./cognee-frontend
       dockerfile: Dockerfile
+      target: dev
+    environment:
+      - COGNEE_BACKEND_URL=${COGNEE_BACKEND_URL:-}
     volumes:
       - ./cognee-frontend/src:/app/src
       - ./cognee-frontend/public:/app/public

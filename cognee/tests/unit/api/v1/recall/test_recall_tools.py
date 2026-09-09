@@ -5,7 +5,7 @@ import types
 from uuid import uuid4
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from cognee.exceptions import CogneeValidationError
 from cognee.memory.entries import normalize_scope
@@ -72,7 +72,7 @@ class TestResponseUnion:
 
     def test_unknown_source_rejected(self):
         adapter = TypeAdapter(list[RecallResponse])
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             adapter.validate_python([{"source": "nonsense", "text": "x"}])
 
 
@@ -251,6 +251,12 @@ async def test_tools_trigger_on_empty_skips_tools_when_other_sources_hit(
 async def test_invalid_tools_trigger_rejected(api_recall_mod):
     with pytest.raises(CogneeValidationError, match="tools_trigger"):
         await api_recall_mod.recall(query_text="q", scope=["tools"], tools_trigger="bogus")
+
+
+@pytest.mark.asyncio
+async def test_invalid_context_format_rejected(api_recall_mod):
+    with pytest.raises(CogneeValidationError, match="context_format"):
+        await api_recall_mod.recall(query_text="q", only_context=True, context_format="bogus")
 
 
 @pytest.mark.asyncio

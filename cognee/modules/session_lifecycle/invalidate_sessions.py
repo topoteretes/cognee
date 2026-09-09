@@ -20,7 +20,9 @@ lookups fail open.
 Known limits (documented, deliberate): agent-trace entries carry context text
 without element ids and are not matched; the tapes cache backend is
 append-only and never sees deletes; sessions predating dataset attribution are
-only found through the ``{default_session_id}_{dataset_id}`` naming.
+only found through the ``{default_session_id}_{dataset_id}`` naming. Data-level
+deletes also scan every dataset-unattributed session (``dataset_id IS NULL``);
+element-id matching keeps that scan precise (COG-6292).
 """
 
 from uuid import UUID
@@ -33,7 +35,7 @@ from cognee.infrastructure.session.session_persist_watermark import (
 )
 from cognee.shared.logging_utils import get_logger
 
-from .metrics import list_sessions_for_dataset
+from .metrics import list_sessions_for_dataset, list_unattributed_sessions
 
 logger = get_logger("invalidate_sessions")
 
@@ -60,6 +62,7 @@ async def invalidate_sessions_for_dataset(dataset_id: UUID) -> dict:
                 session_id,
                 user_id,
                 error,
+                exc_info=True,
             )
 
     if sessions:
@@ -76,6 +79,7 @@ async def invalidate_sessions_for_deleted_data(
     dataset_id: UUID,
     deleted_node_ids: set[str],
     deleted_edge_ids: set[str],
+    user_id: UUID | None = None,
 ) -> dict:
     """Remove session entries contaminated by a deleted data item.
 
@@ -85,6 +89,12 @@ async def invalidate_sessions_for_deleted_data(
     turn, context lessons distilled from contaminated feedback, and later
     turns that consumed a contaminated lesson (``used_session_context_ids``),
     iterated to a fixpoint.
+
+    Dataset-attributed sessions are unioned with every dataset-unattributed
+    session (``dataset_id IS NULL``). An unscoped search runs in the plain
+    default session, which carries no dataset attribution. Element-id matching
+    keeps the wider scan precise (COG-6292). ``user_id`` is accepted for
+    callers and does not filter the unattributed query.
     """
     totals = {"sessions_considered": 0, "qa_entries_deleted": 0, "context_entries_deleted": 0}
     if not deleted_node_ids and not deleted_edge_ids:
@@ -94,14 +104,18 @@ async def invalidate_sessions_for_deleted_data(
     if not session_manager.is_available:
         return totals
 
-    sessions = await list_sessions_for_dataset(dataset_id)
+    sessions = list(await list_sessions_for_dataset(dataset_id))
+    seen = {(str(session_user_id), session_id) for session_user_id, session_id in sessions}
+    for candidate in await list_unattributed_sessions():
+        if (str(candidate[0]), candidate[1]) not in seen:
+            sessions.append(candidate)
     totals["sessions_considered"] = len(sessions)
 
-    for user_id, session_id in sessions:
+    for session_user_id, session_id in sessions:
         try:
             counts = await _invalidate_session_entries(
                 session_manager,
-                user_id=str(user_id),
+                user_id=str(session_user_id),
                 session_id=session_id,
                 deleted_node_ids=deleted_node_ids,
                 deleted_edge_ids=deleted_edge_ids,
@@ -113,8 +127,9 @@ async def invalidate_sessions_for_deleted_data(
                 "Session invalidation: targeted cleanup failed for session %s, user %s "
                 "(non-fatal): %s",
                 session_id,
-                user_id,
+                session_user_id,
                 error,
+                exc_info=True,
             )
 
     if totals["qa_entries_deleted"] or totals["context_entries_deleted"]:
@@ -146,9 +161,8 @@ async def _invalidate_session_entries(
         used = entry.used_graph_element_ids or {}
         used_nodes = set(used.get("node_ids") or [])
         used_edges = set(used.get("edge_ids") or [])
-        if (used_nodes & deleted_node_ids) or (used_edges & deleted_edge_ids):
-            if entry.qa_id:
-                contaminated_qa_ids.add(entry.qa_id)
+        if ((used_nodes & deleted_node_ids) or (used_edges & deleted_edge_ids)) and entry.qa_id:
+            contaminated_qa_ids.add(entry.qa_id)
 
     if not contaminated_qa_ids:
         return (0, 0)
@@ -174,10 +188,13 @@ async def _invalidate_session_entries(
                 if set(context_entry.get("referenced_qa_ids") or []) & contaminated_qa_ids:
                     contaminated_feedback_ids.add(entry_id)
                     changed = True
-            elif kind == "context" and entry_id not in contaminated_context_ids:
-                if set(context_entry.get("source_feedback_ids") or []) & contaminated_feedback_ids:
-                    contaminated_context_ids.add(entry_id)
-                    changed = True
+            elif (
+                kind == "context"
+                and entry_id not in contaminated_context_ids
+                and set(context_entry.get("source_feedback_ids") or []) & contaminated_feedback_ids
+            ):
+                contaminated_context_ids.add(entry_id)
+                changed = True
         for entry in entries:
             if not entry.qa_id or entry.qa_id in contaminated_qa_ids:
                 continue

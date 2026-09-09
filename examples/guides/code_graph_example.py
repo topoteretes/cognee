@@ -69,11 +69,48 @@ async def main():
 
     print(json.dumps(search_results, indent=2, default=str))
 
-    # Other deterministic operations use the same API shape:
+    print("Module-level architecture overview, drawn as a Mermaid diagram")
+    architecture = await cognee.search(
+        query_type=SearchType.CODE,
+        query_text="",
+        datasets=["code_graph_demo"],
+        # Symbol-to-symbol edges are rolled up to the modules that declare
+        # them; routes/storage/services hang off their modules. The result
+        # includes deterministic Mermaid source (paste it into any Markdown
+        # renderer that supports ```mermaid fences); "diagram": "dot" gives
+        # Graphviz, and any other operation accepts the same option.
+        code_query={"operation": "architecture", "max_nodes": 40},
+    )
+    # search() returns one {dataset_id, dataset_name, search_result} entry per
+    # dataset; the CODE operation's result is the (single) search_result item.
+    for entry in architecture:
+        payload = entry.get("search_result") if isinstance(entry, dict) else None
+        if isinstance(payload, list) and payload:
+            payload = payload[0]
+        diagram = payload.get("diagram") if isinstance(payload, dict) else None
+        if diagram and diagram.get("source"):
+            print(diagram["source"])
+
+    print("Architecture findings enola's explainers produced (with their evidence facts)")
+    insights = await cognee.search(
+        query_type=SearchType.CODE,
+        query_text="",
+        datasets=["code_graph_demo"],
+        # Structural findings (cycles, declared-layer violations) score 1.0;
+        # heuristic ones (hotspots, god-class, complexity outliers) score below.
+        code_query={"operation": "insights", "min_confidence": 0.5, "limit": 10},
+    )
+    print(json.dumps(insights, indent=2, default=str))
+
+    # Other deterministic operations use the same API shape. Ids may be
+    # cognee node ids or enola's own 32-hex fact ids (from facts.jsonl):
     # code_query={"operation": "explore", "id": "<fact id>", "max_depth": 2}
     # code_query={"operation": "traverse", "node_ids": ["<fact id>"], "direction": "reverse"}
     # code_query={"operation": "find_path", "source_id": "<id>", "target_id": "<id>"}
     # code_query={"operation": "impact_analysis", "id": "<fact id>", "max_depth": 3}
+    # code_query={"operation": "query_facts", "kind": "dependency", "prop": "type",
+    #             "prop_value": "package"}   # declared packages from manifests (purl names)
+    # code_query={"operation": "delta"}    # last ingestion's changes + the snapshot receipt
 
 
 if __name__ == "__main__":

@@ -1,21 +1,25 @@
 import os
-import pytest
 import pathlib
-from uuid import NAMESPACE_OID, uuid5
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock, patch
+from uuid import NAMESPACE_OID, uuid5
+
+import pytest
 
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.data.methods import create_authorized_dataset
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.locks import dataset_lock
+from cognee.modules.chunking.chunk_id import chunk_content_hash, content_chunk_id
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.models import Data
-from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.legacy.record_data_in_legacy_ledger import record_data_in_legacy_ledger
@@ -23,7 +27,7 @@ from cognee.modules.graph.utils.deduplicate_nodes_and_edges import deduplicate_n
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
 from cognee.modules.pipelines.models import DataItemStatus
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
+from cognee.shared.data_models import Edge, KnowledgeGraph, Node, SummarizedContent
 from cognee.tasks.storage import index_data_points, index_graph_edges
 from cognee.tests.utils.assert_edges_vector_index_not_present import (
     assert_edges_vector_index_not_present,
@@ -135,9 +139,13 @@ async def main(mock_create_structured_output: AsyncMock):
     await setup()
 
     user = await get_default_user()
-    await set_database_global_context_variables(
-        (await create_authorized_dataset("main_dataset", user)).id, user.id
-    )
+    authorized_dataset = await create_authorized_dataset("main_dataset", user)
+    # Canonical lock order (SDK-483): hold the dataset lock before the legacy
+    # context call below acquires its queue slot; nested add/cognify/delete
+    # re-enter via held_datasets instead of re-acquiring the lock.
+    _lock_stack = AsyncExitStack()
+    await _lock_stack.enter_async_context(dataset_lock(authorized_dataset.id))
+    await set_database_global_context_variables(authorized_dataset.id, user.id)
 
     vector_engine = await get_vector_engine_async()
 
@@ -235,7 +243,7 @@ async def main(mock_create_structured_output: AsyncMock):
     maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     cognify_result: dict = await cognee.cognify()
-    dataset_id = list(cognify_result.keys())[0]
+    dataset_id = next(iter(cognify_result.keys()))
 
     johns_document = TextDocument(
         id=johns_data_id,
@@ -244,7 +252,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     johns_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(johns_data_id)}-0"),
+        id=content_chunk_id(str(johns_data_id), chunk_content_hash(johns_text), 0),
         text=johns_text,
         chunk_size=14,
         chunk_index=0,
@@ -260,7 +268,7 @@ async def main(mock_create_structured_output: AsyncMock):
         external_metadata="",
     )
     maries_chunk = DocumentChunk(
-        id=uuid5(NAMESPACE_OID, f"{str(maries_data_id)}-0"),
+        id=content_chunk_id(str(maries_data_id), chunk_content_hash(maries_text), 0),
         text=maries_text,
         chunk_size=14,
         chunk_index=0,

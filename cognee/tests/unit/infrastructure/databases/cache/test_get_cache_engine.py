@@ -103,17 +103,21 @@ def test_explicitly_chosen_sqlite_backend_on_s3_still_raises():
         db_path="s3://bucket/cognee/system/databases", db_provider="sqlite"
     )
 
-    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
-        with pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"):
-            _create_engine("sqlite", explicit=True)
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="cannot store cache.db on S3"),
+    ):
+        _create_engine("sqlite", explicit=True)
 
 
 def test_postgres_backend_without_url_or_postgres_relational_raises():
     fake_relational = types.SimpleNamespace(db_provider="sqlite")
 
-    with patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational):
-        with pytest.raises(CacheConnectionError, match="CACHE_DB_URL or DB_PROVIDER=postgres"):
-            _create_engine("postgres")
+    with (
+        patch(f"{RELATIONAL_CONFIG_MOD}.get_relational_config", return_value=fake_relational),
+        pytest.raises(CacheConnectionError, match="CACHE_DB_URL or DB_PROVIDER=postgres"),
+    ):
+        _create_engine("postgres")
 
 
 def test_postgres_backend_falls_back_to_relational_postgres_settings():

@@ -128,6 +128,18 @@ describe("error handling", () => {
     await expect(client.get("/api/test")).rejects.toThrow("Request timed out.");
   });
 
+  it("surfaces 'Request timed out' even when the browser throws a generic AbortError for our own timeout (Safari pre-17.4, CLO-333)", async () => {
+    global.fetch = jest.fn().mockImplementation((_url: string, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+    });
+    const client = createHttpClient();
+    await expect(client.get("/api/test", { timeoutMs: 10 })).rejects.toThrow("Request timed out.");
+  });
+
   it("AbortError (caller cancel) propagates as-is for React Query suppression", async () => {
     const err = new DOMException("Aborted", "AbortError");
     mockFetchError(err);
@@ -151,7 +163,7 @@ describe("getJson / postJson", () => {
     mockFetch([{ status: 200, body: { id: "bad" } }]);
     const client = createHttpClient();
     const validate = jest.fn((d: unknown) => {
-      if (typeof (d as any).id !== "number") throw new Error("Invalid");
+      if (typeof (d as { id?: unknown }).id !== "number") throw new Error("Invalid");
       return d as { id: number };
     });
     await expect(client.getJson("/api/users/1", { validate })).rejects.toThrow("Invalid");
@@ -246,7 +258,7 @@ describe("response interceptors", () => {
   it("can transform response", async () => {
     mockFetch([{ status: 200, body: {} }]);
     const client = createHttpClient();
-    client.interceptors.response.use((res) => new Response("{}", { status: 202 }));
+    client.interceptors.response.use(() => new Response("{}", { status: 202 }));
     const res = await client.get("/api/test");
     expect(res.status).toBe(202);
   });

@@ -24,7 +24,7 @@ render must never break because the semantic tab couldn't fetch vectors.
 import inspect
 import random
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -33,7 +33,7 @@ logger = get_logger("embedding_join")
 # type_name -> indexed field. The vector collection is ``f"{type_name}_{field}"``.
 # Mirrors each DataPoint subclass's ``metadata["index_fields"]``; this fallback
 # covers the node types the graph visualization actually surfaces.
-DEFAULT_INDEX_FIELDS: Dict[str, str] = {
+DEFAULT_INDEX_FIELDS: dict[str, str] = {
     "Entity": "name",
     "EntityType": "name",
     "TextSummary": "text",
@@ -50,7 +50,7 @@ SEMANTIC_NODE_CAP = 2000
 SAMPLE_SEED = 42
 
 
-def select_nodes(nodes: List[Dict[str, Any]], cap: int = SEMANTIC_NODE_CAP) -> List[Dict[str, Any]]:
+def select_nodes(nodes: list[dict[str, Any]], cap: int = SEMANTIC_NODE_CAP) -> list[dict[str, Any]]:
     """Sort nodes by id and, if over ``cap``, take a deterministic seeded sample.
 
     The single bounding step for the semantic map: the embedding fetch and every
@@ -70,11 +70,11 @@ def select_nodes(nodes: List[Dict[str, Any]], cap: int = SEMANTIC_NODE_CAP) -> L
 
 
 async def _reembed(
-    vector_engine, type_nodes: List[Dict[str, Any]], field: str
-) -> Dict[str, List[float]]:
+    vector_engine, type_nodes: list[dict[str, Any]], field: str
+) -> dict[str, list[float]]:
     """Fallback: re-embed each node's indexed field in one batch."""
-    texts: List[str] = []
-    ids: List[str] = []
+    texts: list[str] = []
+    ids: list[str] = []
     for node in type_nodes:
         value = node.get(field)
         if value is None:
@@ -90,8 +90,8 @@ async def _reembed(
 
 
 async def _fetch_for_collection(
-    vector_engine, collection: str, type_nodes: List[Dict[str, Any]], field: str
-) -> Dict[str, List[float]]:
+    vector_engine, collection: str, type_nodes: list[dict[str, Any]], field: str
+) -> dict[str, list[float]]:
     """One batched retrieve for a collection, with re-embed fallback."""
     ids = [str(node["id"]) for node in type_nodes]
     # Capability detection (not error handling): only LanceDB's retrieve() declares
@@ -108,7 +108,7 @@ async def _fetch_for_collection(
 
     results = await vector_engine.retrieve(collection, ids, include_vector=True)
 
-    found: Dict[str, List[float]] = {}
+    found: dict[str, list[float]] = {}
     for result in results:
         payload = result.payload if isinstance(result.payload, dict) else None
         vector = payload.get("vector") if payload else None
@@ -122,10 +122,10 @@ async def _fetch_for_collection(
 
 
 async def fetch_node_embeddings(
-    nodes: List[Dict[str, Any]],
+    nodes: list[dict[str, Any]],
     vector_engine=None,
-    index_fields: Optional[Dict[str, str]] = None,
-) -> Dict[str, List[float]]:
+    index_fields: dict[str, str] | None = None,
+) -> dict[str, list[float]]:
     """Return ``{node_id: vector}`` for as many nodes as the vector store can supply.
 
     Args:
@@ -145,14 +145,14 @@ async def fetch_node_embeddings(
 
         vector_engine = await get_vector_engine_async()
 
-    by_type: Dict[Optional[str], List[Dict[str, Any]]] = defaultdict(list)
+    by_type: dict[str | None, list[dict[str, Any]]] = defaultdict(list)
     for node in nodes:
         by_type[node.get("type")].append(node)
 
-    embeddings: Dict[str, List[float]] = {}
+    embeddings: dict[str, list[float]] = {}
     hit_collections = 0
-    missing_collections: List[str] = []
-    unmapped_types: List[str] = []
+    missing_collections: list[str] = []
+    unmapped_types: list[str] = []
     for type_name, type_nodes in by_type.items():
         field = fields.get(type_name)
         if not field:
@@ -166,7 +166,9 @@ async def fetch_node_embeddings(
                 continue
             found = await _fetch_for_collection(vector_engine, collection, type_nodes, field)
         except Exception as exc:  # never let a vector-store failure break the render
-            logger.warning("fetch_node_embeddings: fetch failed for %s: %s", collection, exc)
+            logger.warning(
+                "fetch_node_embeddings: fetch failed for %s: %s", collection, exc, exc_info=True
+            )
             continue
         if found:
             hit_collections += 1

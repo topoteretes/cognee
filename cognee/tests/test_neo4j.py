@@ -1,19 +1,28 @@
 import os
 import pathlib
+
 import cognee
 from cognee.infrastructure.files.storage import get_storage_config
+from cognee.modules.engine.models import NodeSet
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.search.operations import get_history
+from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.engine.models import NodeSet
 
 logger = get_logger()
 
 
 async def main():
-    cognee.config.set_graph_database_provider("neo4j")
+    # The dataset database handler is derived from the provider only when the
+    # provider comes from the environment, so a config dict has to name both.
+    # The URL and credentials still come from GRAPH_DATABASE_* in the environment.
+    cognee.config.set_graph_db_config(
+        {
+            "graph_database_provider": "neo4j",
+            "graph_dataset_database_handler": "neo4j",
+        }
+    )
     data_directory_path = str(
         pathlib.Path(
             os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_neo4j")
@@ -179,6 +188,22 @@ async def main():
     )
 
     assert "Alice" not in context
+
+    # remember() / recall() reach this store the way an SDK caller does;
+    # everything above drives add() / cognify() / search() instead. Kept after
+    # the search-history assert, since recall() adds to that history too.
+    remember_dataset = "store_remember_check"
+    await cognee.remember(
+        ["Cognee keeps entities in the graph store and embeddings in the vector store."],
+        dataset_name=remember_dataset,
+        self_improvement=False,
+    )
+    recall_results = await cognee.recall(
+        query_text="Where does cognee keep entities?",
+        query_type=SearchType.CHUNKS,
+        datasets=[remember_dataset],
+    )
+    assert recall_results, "recall() returned nothing after remember() on Neo4j"
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]
