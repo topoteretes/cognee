@@ -24,7 +24,7 @@ this integration: only the invoking member should ever see their own link.
 """
 
 import time
-from typing import Any, Optional, Tuple
+from typing import Any
 from urllib.parse import parse_qs
 
 from cognee.modules.integrations.credentials import upsert_credential

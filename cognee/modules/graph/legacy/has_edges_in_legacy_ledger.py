@@ -1,5 +1,3 @@
-from typing import List
-
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

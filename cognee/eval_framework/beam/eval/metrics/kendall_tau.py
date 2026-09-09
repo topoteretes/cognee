@@ -12,7 +12,6 @@ Reference: https://github.com/mohammadtavakoli78/BEAM/blob/main/src/evaluation/c
 import json
 import re
 from itertools import combinations
-from typing import Any, Dict, List, Optional, Tuple
 
 from cognee.shared.logging_utils import get_logger
 
@@ -242,14 +241,12 @@ class KendallTauMetric:
 
             # System ranks: based on alignment
             sys_rank_map = {}
-            sys_pos = 0
             for i in range(len(system_events)):
                 ref_idx = alignment.get(i, -1)
                 if ref_idx >= 0 and ref_idx < len(reference_events):
-                    sys_rank_map[ref_idx] = sys_pos
+                    sys_rank_map[ref_idx] = i
                 else:
-                    sys_rank_map[len(reference_events) + i] = sys_pos
-                sys_pos += 1
+                    sys_rank_map[len(reference_events) + i] = i
 
             sys_ranks = [sys_rank_map.get(u, tie_rank) for u in union]
 
@@ -266,7 +263,7 @@ class KendallTauMetric:
             return self.score
 
         except Exception as e:
-            logger.error(f"KendallTauMetric failed: {e}")
+            logger.exception("KendallTauMetric failed")
             self.score = 0.0
             self.reason = f"ERROR: {e}"
             return self.score

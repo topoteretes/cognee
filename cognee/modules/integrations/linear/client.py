@@ -14,7 +14,7 @@ contain secret or user content that must not reach logs.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 

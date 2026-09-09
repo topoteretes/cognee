@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Type
 
 from cognee.eval_framework.benchmark_adapters.beam_adapter import BEAMAdapter
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter

@@ -13,7 +13,7 @@ code graph pipeline on it — no LLM or embedding calls.
 import os
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from cognee.modules.pipelines.tasks.task import Task, task_summary
 from cognee.shared.logging_utils import get_logger

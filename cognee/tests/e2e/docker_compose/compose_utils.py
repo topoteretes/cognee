@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import subprocess
 import time
-from typing import List, Optional
 
 import requests
 from config import CONFIG

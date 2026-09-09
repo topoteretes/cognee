@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,7 +42,7 @@ def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> in
                     if dim:
                         return int(dim)
         except Exception:
-            pass
+            logger.debug("Ignoring exception in _resolve_embedding_dimensions", exc_info=True)
         # Fall through to litellm in case the model is dual-registered
         # (rare, but cheap to try).
 
@@ -55,7 +54,7 @@ def _resolve_embedding_dimensions(provider: str | None, model: str | None) -> in
             if info and "output_vector_size" in info:
                 return int(info["output_vector_size"])
     except Exception:
-        pass
+        logger.debug("Ignoring exception in _resolve_embedding_dimensions", exc_info=True)
 
     return None
 
@@ -107,7 +106,7 @@ class EmbeddingConfig(BaseSettings):
     embedding_rate_limit_tokens: int = 0  # max tokens per interval (0 = disabled)
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, context, /) -> None:
         if self.embedding_dimensions is None:
             derived = _resolve_embedding_dimensions(self.embedding_provider, self.embedding_model)
             if derived is not None:

@@ -2,7 +2,6 @@ import base64
 import hashlib
 import os
 import secrets
-from typing import Optional
 from uuid import UUID
 
 from cryptography.fernet import Fernet

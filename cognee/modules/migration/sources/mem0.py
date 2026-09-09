@@ -15,7 +15,7 @@ Each memory becomes a :class:`COGXMemory` with scope taken from
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any
 
 from cognee.modules.migration.cogx import COGXMemory, COGXRecord, COGXScope, parse_timestamp
 from cognee.modules.migration.sources.base import MemorySource, read_export_file

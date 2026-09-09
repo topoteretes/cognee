@@ -20,7 +20,7 @@ import pytest
 # rebinds `visualize` on the v1 package to the visualize_graph *function*, so a
 # dotted-string patch target has to go through sys.modules instead.
 from cognee.api.v1.visualize.visualize import (
-    build_brains_payload as _build_brains_payload,  # noqa: F401,E501
+    build_brains_payload as _build_brains_payload,
 )
 
 visualize_module = sys.modules["cognee.api.v1.visualize.visualize"]

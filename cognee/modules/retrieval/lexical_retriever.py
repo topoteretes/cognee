@@ -2,7 +2,7 @@ import asyncio
 import re
 from collections.abc import Callable
 from heapq import nlargest
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -63,7 +63,7 @@ class LexicalRetriever(BaseRetriever):
                 try:
                     chunk_id, document = node
                 except Exception:
-                    logger.warning("Skipping node with unexpected shape: %r", node)
+                    logger.warning("Skipping node with unexpected shape: %r", node, exc_info=True)
                     continue
 
                 if document.get("type") == "DocumentChunk" and document.get("text"):
@@ -78,8 +78,8 @@ class LexicalRetriever(BaseRetriever):
                         self.chunks[document_id] = tokens
                         self.payloads[document_id] = document
                         chunk_count += 1
-                    except Exception as e:
-                        logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
+                    except Exception:
+                        logger.exception("Tokenizer failed for chunk %s", chunk_id)
 
             if chunk_count == 0:
                 logger.error("Initialization completed but no valid chunks were loaded.")
@@ -99,8 +99,8 @@ class LexicalRetriever(BaseRetriever):
 
         try:
             query_tokens = self.tokenizer(query)
-        except Exception as e:
-            logger.error("Failed to tokenize query: %s", str(e))
+        except Exception:
+            logger.exception("Failed to tokenize query")
             return []
 
         if not query_tokens:
@@ -114,8 +114,8 @@ class LexicalRetriever(BaseRetriever):
                 if not isinstance(score, (int, float)):
                     logger.warning("Non-numeric score for chunk %s → treated as 0.0", chunk_id)
                     score = 0.0
-            except Exception as e:
-                logger.error("Scorer failed for chunk %s: %s", chunk_id, str(e))
+            except Exception:
+                logger.exception("Scorer failed for chunk %s", chunk_id)
                 score = 0.0
             results.append((chunk_id, score))
 

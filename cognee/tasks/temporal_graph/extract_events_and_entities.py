@@ -1,5 +1,4 @@
 import asyncio
-from typing import List, Type
 
 from cognee.infrastructure.llm.extraction import extract_event_graph
 from cognee.modules.chunking.models import DocumentChunk

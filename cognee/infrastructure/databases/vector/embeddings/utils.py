@@ -1,5 +1,3 @@
-from typing import List, Union
-
 from cognee.shared.logging_utils import setup_logging
 
 logger = setup_logging()

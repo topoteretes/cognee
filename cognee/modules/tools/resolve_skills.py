@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import List, Optional, Union
 from uuid import UUID
 
 from cognee.modules.engine.models import Skill
@@ -77,11 +76,13 @@ async def _load_skill_nodes(name: str | None = None):
     try:
         from cognee.infrastructure.databases.graph import get_graph_engine
     except Exception:
+        logger.debug("Optional import unavailable, continuing without it", exc_info=True)
         return []
 
     try:
         graph_engine = await get_graph_engine()
     except Exception:
+        logger.debug("Falling back to [] after error in _load_skill_nodes", exc_info=True)
         return []
 
     get_by_type = getattr(graph_engine, "get_nodes_by_type", None)
@@ -89,7 +90,7 @@ async def _load_skill_nodes(name: str | None = None):
         try:
             return await get_by_type(node_type=Skill)
         except Exception as exc:
-            logger.warning("Skill lookup by type failed: %s", exc)
+            logger.warning("Skill lookup by type failed: %s", exc, exc_info=True)
             return []
 
     get_nodeset = getattr(graph_engine, "get_nodeset_subgraph", None)
@@ -99,7 +100,7 @@ async def _load_skill_nodes(name: str | None = None):
             if nodes:
                 return nodes
         except Exception as exc:
-            logger.warning("Skill lookup by nodeset failed: %s", exc)
+            logger.warning("Skill lookup by nodeset failed: %s", exc, exc_info=True)
 
     get_graph_data = getattr(graph_engine, "get_graph_data", None)
     if get_graph_data is None:
@@ -108,7 +109,7 @@ async def _load_skill_nodes(name: str | None = None):
         nodes, _ = await get_graph_data()
         return nodes
     except Exception as exc:
-        logger.warning("Skill lookup by full graph scan failed: %s", exc)
+        logger.warning("Skill lookup by full graph scan failed: %s", exc, exc_info=True)
         return []
 
 
@@ -128,4 +129,5 @@ def _coerce_skill(raw) -> Skill | None:
     try:
         return Skill.model_validate(data)
     except Exception:
+        logger.debug("Falling back to None after error in _coerce_skill", exc_info=True)
         return None

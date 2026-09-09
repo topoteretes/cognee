@@ -10,7 +10,7 @@ Reference: https://github.com/mohammadtavakoli78/BEAM/blob/main/src/evaluation/c
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from cognee.shared.logging_utils import get_logger
 
@@ -159,7 +159,7 @@ async def _judge_criterion(
             )
             score, reason = _parse_verdict(str(raw))
         except Exception as e:
-            logger.warning(f"BEAM judge failed for criterion '{criterion}': {e}")
+            logger.warning(f"BEAM judge failed for criterion '{criterion}': {e}", exc_info=True)
             score, reason = 0.0, f"ERROR: {e}"
 
     return {"criterion": criterion, "score": score, "reason": reason}

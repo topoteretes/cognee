@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine_async
@@ -148,7 +147,7 @@ if __name__ == "__main__":
         user = None
         try:
             results = await code_description_to_code_part_search(query, user)
-            logger.debug("Retrieved Code Parts:", results)
+            logger.debug("Retrieved Code Parts: %s", results)
         except Exception as e:
             logger.error(f"An error occurred: {e}")
             raise

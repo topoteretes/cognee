@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Optional
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from cognee.context_global_variables import set_database_global_context_variables

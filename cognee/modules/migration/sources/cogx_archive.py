@@ -6,7 +6,6 @@ Cognee-to-Cognee instance migration.
 
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Union
 
 from cognee.modules.migration.cogx import (
     COGXRecord,

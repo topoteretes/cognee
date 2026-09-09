@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from cognee import memify
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.exceptions import CogneeValidationError

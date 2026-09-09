@@ -8,7 +8,6 @@ Create Date: 2025-11-04 18:11:09.325158
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import Union
 from uuid import uuid4
 
 import sqlalchemy as sa

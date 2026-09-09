@@ -21,7 +21,6 @@ caller of ``cognee_network_visualization`` or
 import json
 import os
 from dataclasses import asdict
-from typing import Optional
 
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 from cognee.modules.visualization.embedding_join import fetch_node_embeddings, select_nodes
@@ -62,7 +61,11 @@ async def _semantic_payload(pre) -> tuple[dict | None, dict | None]:
         clusters = compute_clusters(nodes, embeddings)
         return positions, clusters
     except Exception as exc:
-        logger.warning("Semantic map: payload computation failed (%s); tab shows empty state.", exc)
+        logger.warning(
+            "Semantic map: payload computation failed (%s); tab shows empty state.",
+            exc,
+            exc_info=True,
+        )
         return None, None
 
 

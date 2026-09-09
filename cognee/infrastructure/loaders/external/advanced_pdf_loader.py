@@ -108,7 +108,7 @@ class AdvancedPdfLoader(LoaderInterface):
             return await store_derived_text(storage, storage_file_name, full_content)
 
         except Exception as exc:
-            logger.warning("Failed to process PDF with AdvancedPdfLoader: %s", exc)
+            logger.warning("Failed to process PDF with AdvancedPdfLoader: %s", exc, exc_info=True)
             return await self._fallback(file_path, **kwargs)
 
     async def _fallback(self, file_path: str, **kwargs: Any) -> str | LoaderResult:
@@ -213,7 +213,7 @@ class AdvancedPdfLoader(LoaderInterface):
             if hasattr(element, "to_dict"):
                 return element.to_dict()
         except Exception:
-            pass
+            logger.debug("Ignoring exception in AdvancedPdfLoader._safe_to_dict", exc_info=True)
         fallback_type = getattr(element, "category", None)
         if not fallback_type:
             fallback_type = getattr(element, "__class__", type("", (), {})).__name__

@@ -1,6 +1,5 @@
 from enum import Enum
 from importlib import import_module
-from typing import Optional, Type
 
 
 class EvaluatorAdapter(Enum):

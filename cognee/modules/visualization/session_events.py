@@ -15,7 +15,7 @@ Two event kinds are emitted per the renderer's contract:
   ``apply_feedback_weights`` (reinforcement overlay).
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -176,8 +176,10 @@ async def collect_session_events(
                 session_ids = await _list_recent_session_ids(
                     user.id, max_sessions, dataset_id=dataset_id
                 )
-            except Exception as error:  # noqa: BLE001 — lifecycle table may not exist
-                logger.debug("Session listing unavailable (%s); no events collected.", error)
+            except Exception as error:  # — lifecycle table may not exist
+                logger.debug(
+                    "Session listing unavailable (%s); no events collected.", error, exc_info=True
+                )
                 return []
 
         events: list[dict[str, Any]] = []
@@ -190,6 +192,8 @@ async def collect_session_events(
         if events:
             logger.info("Collected %d session operation events for the Memory tab.", len(events))
         return events
-    except Exception as error:  # noqa: BLE001 — visualization must never fail on this
-        logger.warning("Session event collection failed; rendering without them: %s", error)
+    except Exception as error:  # — visualization must never fail on this
+        logger.warning(
+            "Session event collection failed; rendering without them: %s", error, exc_info=True
+        )
         return []

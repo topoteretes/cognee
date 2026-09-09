@@ -1,6 +1,5 @@
 import re
 from collections.abc import Iterator
-from typing import Tuple
 
 SENTENCE_ENDINGS = r"[.;!?…。！？]"
 PARAGRAPH_ENDINGS = r"[\n\r]"

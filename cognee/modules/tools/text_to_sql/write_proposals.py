@@ -14,7 +14,7 @@ review → apply.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -158,7 +158,7 @@ async def _draft_update(
             estimated_rows = await _dry_run_update(write_engine, sql)
         except Exception as error:
             previous_attempts += f"Query: {sql} -> Executed with error: {error}\n"
-            logger.warning("Write dry-run failed on attempt %d: %s", attempt, error)
+            logger.warning("Write dry-run failed on attempt %d: %s", attempt, error, exc_info=True)
             last_error = error
             continue
 
@@ -365,6 +365,7 @@ async def apply_write_proposal(user_id: UUID, proposal_id: UUID) -> dict[str, An
                 else:
                     await db_connection.commit()
         except Exception as error:
+            logger.debug("Ignoring exception in apply_write_proposal", exc_info=True)
             error_message = f"Rolled back: execution failed: {error}"
 
         row.applied_rows = affected if error_message is None else None

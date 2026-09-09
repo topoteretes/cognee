@@ -4,7 +4,7 @@ Get router for the OpenAI-compatible responses API.
 
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import openai
 from fastapi import APIRouter, Depends

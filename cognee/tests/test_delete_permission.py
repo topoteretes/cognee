@@ -1,7 +1,6 @@
 import os
 import pathlib
 from contextlib import AsyncExitStack
-from typing import List
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel

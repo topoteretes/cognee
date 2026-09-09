@@ -30,7 +30,6 @@ import importlib.resources as pkg_resources
 import logging
 import os
 import threading
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

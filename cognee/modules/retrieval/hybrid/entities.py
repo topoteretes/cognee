@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from cognee.modules.retrieval.hybrid.chunks import search_collection
 from cognee.modules.retrieval.hybrid.facts import connection_edge_type_id
@@ -34,7 +34,9 @@ async def search_entities(
             query_vector=query_vector,
         )
     except Exception as error:
-        logger.warning("Entity_name search failed; continuing without entities: %s", error)
+        logger.warning(
+            "Entity_name search failed; continuing without entities: %s", error, exc_info=True
+        )
         return []
 
 
@@ -58,7 +60,9 @@ async def build_entities(
         nodes, edges = await graph_engine.get_neighborhood(entity_ids, depth=1)
     except Exception as error:
         logger.warning(
-            "Graph neighborhood retrieval failed; returning entities without edges: %s", error
+            "Graph neighborhood retrieval failed; returning entities without edges: %s",
+            error,
+            exc_info=True,
         )
         return entities, set()
 

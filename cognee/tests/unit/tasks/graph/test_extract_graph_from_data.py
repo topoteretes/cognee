@@ -378,7 +378,7 @@ async def test_stub_resolver_reaches_graph_construction_via_task(mock_find_exist
 
 # --- chunk_attachment (SDK-163) -------------------------------------------------
 
-from typing import Any, List, Optional  # noqa: E402
+from typing import Any  # noqa: E402
 
 from cognee.infrastructure.engine import DataPoint  # noqa: E402
 from cognee.modules.graph.utils import (  # noqa: E402

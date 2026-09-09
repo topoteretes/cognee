@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from cognee.infrastructure.databases.provenance.markers import stores_provenance_in_graph

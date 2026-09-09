@@ -133,7 +133,7 @@ class DoNotUseDirectlyCallManager:
             resolved_options.abort_controller is not None
             and resolved_options.abort_controller.aborted
         ):
-            raise Exception("BamlAbortError: Operation was aborted")
+            raise RuntimeError("BamlAbortError: Operation was aborted")
 
         return await __runtime__.call_function(
             function_name,
@@ -162,7 +162,7 @@ class DoNotUseDirectlyCallManager:
             resolved_options.abort_controller is not None
             and resolved_options.abort_controller.aborted
         ):
-            raise Exception("BamlAbortError: Operation was aborted")
+            raise RuntimeError("BamlAbortError: Operation was aborted")
 
         ctx = __ctx__manager__.get()
         return __runtime__.call_function_sync(

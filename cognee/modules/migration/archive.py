@@ -10,7 +10,7 @@ receiving side.
 import shutil
 import tarfile
 from pathlib import Path
-from typing import IO, List, Union
+from typing import IO
 
 from cognee.modules.migration.cogx import MANIFEST_FILE
 

@@ -176,10 +176,9 @@ Subcommands:
 
     def _delete(self, args: argparse.Namespace) -> None:
         agent_id = args.agent_id
-        if not args.force:
-            if not fmt.confirm(f"Delete agent {agent_id}? This cannot be undone"):
-                fmt.echo("Cancelled.")
-                return
+        if not args.force and not fmt.confirm(f"Delete agent {agent_id}? This cannot be undone"):
+            fmt.echo("Cancelled.")
+            return
 
         async def run():
             import cognee

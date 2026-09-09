@@ -7,7 +7,6 @@ local and remote mode.
 """
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from cognee.api.DTO import OutDTO

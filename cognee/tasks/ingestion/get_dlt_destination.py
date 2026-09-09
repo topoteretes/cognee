@@ -5,7 +5,7 @@ try:
     import dlt
 except ImportError:
     dlt = None
-from typing import Any, Optional
+from typing import Any
 
 from cognee.infrastructure.databases.relational import get_relational_config
 

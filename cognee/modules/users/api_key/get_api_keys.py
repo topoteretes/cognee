@@ -22,7 +22,7 @@ async def get_api_keys(user: User):
             )
 
             return user_api_keys
-        except Exception as error:
-            logger.error(f"Failed to get API keys for user {user.id}: {error!s}")
+        except Exception:
+            logger.exception(f"Failed to get API keys for user {user.id}")
 
             raise ApiKeyQueryError(f"Failed to get API keys for user {user.id}.")

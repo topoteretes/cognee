@@ -112,7 +112,7 @@ def api_key():
         env=server_env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+        start_new_session=True,
     )
 
     deadline = time.time() + SERVER_BOOT_TIMEOUT
@@ -134,7 +134,7 @@ def api_key():
             f"{log_path.read_text()[-3000:]}"
         )
 
-    import cognee  # noqa: F401  (its import runs load_dotenv(override=True))
+    import cognee  # (its import runs load_dotenv(override=True))
 
     os.environ.update(_client_env(root / "client"))
     _reset_config_caches()

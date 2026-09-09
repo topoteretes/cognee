@@ -1,6 +1,5 @@
 import difflib
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 
 class MatchingStrategy(ABC):

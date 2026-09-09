@@ -100,7 +100,7 @@ def _setup_environment() -> None:
 
     root = Path(tempfile.mkdtemp(prefix="cognee_stress_"))
 
-    import cognee  # noqa: F401  (cognee's import runs load_dotenv(override=True))
+    import cognee  # (cognee's import runs load_dotenv(override=True))
 
     os.environ.update(
         **incremental_test_backend_env(),
