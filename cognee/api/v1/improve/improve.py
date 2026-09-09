@@ -10,6 +10,7 @@ except ImportError:
 
 from typing_extensions import TypedDict
 
+from cognee.infrastructure.locks import ImproveLockRelease
 from cognee.modules.observability import (
     COGNEE_DATASET_NAME,
     COGNEE_IMPROVE_STAGES,
@@ -314,7 +315,7 @@ async def improve(
                 # Let go only if no busy caller asked for a pass in the meantime;
                 # otherwise its newer tail is ours to cover and we fall through
                 # into a real run.
-                if await _release_plan_lock(plan):
+                if await _release_plan_lock(plan) is not ImproveLockRelease.RERUN:
                     logger.info(
                         "improve: nothing above the watermarks for session(s) %s, no-op",
                         ",".join(plan.session_ids),
@@ -325,7 +326,7 @@ async def improve(
                         session_ids=plan.session_ids,
                         reason=_no_op_reason(),
                     )
-                pending = await _consume_rerun_and_probe(plan)
+                pending = await _probe_pending(plan)
 
             if run_in_background:
                 task = asyncio.create_task(_run_session_improve_in_background(plan, pending))
@@ -385,32 +386,27 @@ async def _probe_pending(plan: _SessionImprovePlan) -> dict[str, SessionPendingW
     )
 
 
-async def _release_plan_lock(plan: _SessionImprovePlan, *, force: bool = False) -> bool:
-    """Release this run's lock; True once it is no longer held by us.
+async def _release_plan_lock(
+    plan: _SessionImprovePlan, *, force: bool = False
+) -> ImproveLockRelease:
+    """Release this run's lock.
 
-    Without ``force`` the release is refused (False) while a rerun request is
-    pending, so the caller runs another pass. Idempotent: a released plan
-    forgets its token, and a later call is a no-op.
+    ``RERUN`` means a busy caller's request was pending: it is now consumed and
+    we still hold the lock, so the caller must run another pass. ``RELEASED``
+    and ``LOST`` both mean the lock is no longer ours; the plan forgets its
+    token so a later call is a no-op.
     """
     if not plan.lock_token:
-        return True
+        return ImproveLockRelease.RELEASED
 
     from cognee.infrastructure.locks import release_improve_lock
 
-    released = await release_improve_lock(
+    outcome = await release_improve_lock(
         plan.lock_session_id, plan.user.id, plan.lock_token, force=force
     )
-    if released:
+    if outcome is not ImproveLockRelease.RERUN:
         plan.lock_token = None
-    return released
-
-
-async def _consume_rerun_and_probe(plan: _SessionImprovePlan) -> dict[str, SessionPendingWork]:
-    """Clear a pending rerun request and re-read the watermarks for the next pass."""
-    from cognee.infrastructure.locks import consume_improve_rerun
-
-    await consume_improve_rerun(plan.lock_session_id, plan.user.id, plan.lock_token)
-    return await _probe_pending(plan)
+    return outcome
 
 
 async def _run_session_improve_in_background(
@@ -450,12 +446,13 @@ async def _run_session_improve(
 
     Runs every stage that has pending work (or all of them when forced). While
     this run holds the session lock, a caller that found it busy may have
-    requested one more pass. The release itself is what checks for that: it is
-    refused while a request is pending, so no request can land between "checked"
-    and "released" and be lost. Each extra pass re-reads the watermarks and
-    processes only the newer tail. Bounded by ``IMPROVE_MAX_RERUN_PASSES``;
-    after that the lock is force-released and the pending flag is left for the
-    next acquirer, which starts with a full pass anyway.
+    requested one more pass. The release itself is what checks for that: it
+    consumes a pending request instead of letting go (one atomic UPDATE each),
+    so no request can land between "checked" and "released" and be lost. Each
+    extra pass re-reads the watermarks and processes only the newer tail.
+    Bounded by ``IMPROVE_MAX_RERUN_PASSES``; after that the lock is
+    force-released and a pending flag is left for the next acquirer, which
+    starts with a full pass anyway.
     """
     stages_run: list[str] = []
     result: Any = {}
@@ -476,18 +473,19 @@ async def _run_session_improve(
             if not plan.lock_token:
                 break
             if passes >= IMPROVE_MAX_RERUN_PASSES:
-                if not await _release_plan_lock(plan):
-                    logger.warning(
-                        "improve: session '%s' still had a rerun request after %d passes; "
-                        "leaving the rest to the next trigger",
-                        plan.lock_session_id,
-                        passes,
-                    )
-                    await _release_plan_lock(plan, force=True)
+                # Force-release without consuming: a still-pending request stays
+                # on the row for the next acquirer, whose full pass covers it.
+                logger.info(
+                    "improve: session '%s' reached the %d-pass bound; any further "
+                    "rerun request is left to the next trigger",
+                    plan.lock_session_id,
+                    passes,
+                )
+                await _release_plan_lock(plan, force=True)
                 break
-            if await _release_plan_lock(plan):
+            if await _release_plan_lock(plan) is not ImproveLockRelease.RERUN:
                 break
-            pending = await _consume_rerun_and_probe(plan)
+            pending = await _probe_pending(plan)
             logger.info(
                 "improve: rerun requested for session '%s'; running pass %d over %s",
                 plan.lock_session_id,

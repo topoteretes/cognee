@@ -18,7 +18,7 @@ from cognee.infrastructure.databases.relational.create_relational_engine import 
     create_relational_engine,
 )
 from cognee.infrastructure.locks import (
-    consume_improve_rerun,
+    ImproveLockRelease,
     release_improve_lock,
     request_improve_rerun,
     try_acquire_improve_lock,
@@ -91,7 +91,7 @@ async def test_acquire_then_second_claim_is_busy_then_release_frees(lock_engine)
     assert row.improve_lock_token == token
     assert row.improve_lock_acquired_at is not None
 
-    assert await release_improve_lock("s1", user_id, token) is True
+    assert await release_improve_lock("s1", user_id, token) is ImproveLockRelease.RELEASED
     row = await _row(lock_engine, "s1", user_id)
     assert row.improve_lock_token is None
     assert row.improve_lock_acquired_at is None
@@ -105,8 +105,7 @@ async def test_release_with_a_foreign_token_is_a_noop(lock_engine):
     await _seed(lock_engine, "s1", user_id)
     token = await try_acquire_improve_lock("s1", user_id)
 
-    # "Not ours" counts as released for the caller: nothing left to do.
-    assert await release_improve_lock("s1", user_id, "not-the-holder") is True
+    assert await release_improve_lock("s1", user_id, "not-the-holder") is ImproveLockRelease.LOST
 
     assert (await _row(lock_engine, "s1", user_id)).improve_lock_token == token
 
@@ -189,9 +188,13 @@ async def test_rerun_request_reaches_the_holder_exactly_once(lock_engine):
     # A second busy caller only re-asserts the same flag.
     assert (await request_improve_rerun("s1", user_id)).busy is True
 
-    assert await consume_improve_rerun("s1", user_id, token) is True
-    assert await consume_improve_rerun("s1", user_id, token) is False
-    assert (await _row(lock_engine, "s1", user_id)).improve_rerun_requested is False
+    # The holder's release consumes the request exactly once and keeps the lock...
+    assert await release_improve_lock("s1", user_id, token) is ImproveLockRelease.RERUN
+    row = await _row(lock_engine, "s1", user_id)
+    assert row.improve_lock_token == token
+    assert row.improve_rerun_requested is False
+    # ...and the next release lets go.
+    assert await release_improve_lock("s1", user_id, token) is ImproveLockRelease.RELEASED
 
 
 @pytest.mark.asyncio
@@ -207,14 +210,15 @@ async def test_rerun_request_on_a_free_session_is_not_recorded(lock_engine):
 
 
 @pytest.mark.asyncio
-async def test_consume_requires_the_holder_token(lock_engine):
+async def test_only_the_holder_can_consume_a_pending_rerun(lock_engine):
     user_id = uuid4()
     await _seed(lock_engine, "s1", user_id)
     token = await try_acquire_improve_lock("s1", user_id)
     await request_improve_rerun("s1", user_id)
 
-    assert await consume_improve_rerun("s1", user_id, "someone-else") is False
-    assert await consume_improve_rerun("s1", user_id, token) is True
+    assert await release_improve_lock("s1", user_id, "someone-else") is ImproveLockRelease.LOST
+    assert (await _row(lock_engine, "s1", user_id)).improve_rerun_requested is True
+    assert await release_improve_lock("s1", user_id, token) is ImproveLockRelease.RERUN
 
 
 @pytest.mark.asyncio
@@ -222,7 +226,7 @@ async def test_empty_identity_is_a_noop_lock(lock_engine):
     assert await try_acquire_improve_lock("", uuid4())
     assert await try_acquire_improve_lock("s1", None)
     assert (await request_improve_rerun("", uuid4())).busy is False
-    assert await consume_improve_rerun("", uuid4(), "t") is False
+    assert await release_improve_lock("", uuid4(), "t") is ImproveLockRelease.RELEASED
 
 
 @pytest.mark.asyncio
@@ -233,14 +237,13 @@ async def test_release_is_refused_while_a_rerun_is_pending(lock_engine):
     token = await try_acquire_improve_lock("s1", user_id)
     await request_improve_rerun("s1", user_id)
 
-    assert await release_improve_lock("s1", user_id, token) is False
+    assert await release_improve_lock("s1", user_id, token) is ImproveLockRelease.RERUN
     row = await _row(lock_engine, "s1", user_id)
     assert row.improve_lock_token == token  # still ours
-    assert row.improve_rerun_requested is True
+    assert row.improve_rerun_requested is False  # the request is now ours to fulfil
 
-    # The holder consumes the request, runs its pass, and can then let go.
-    assert await consume_improve_rerun("s1", user_id, token) is True
-    assert await release_improve_lock("s1", user_id, token) is True
+    # The holder runs its pass and can then let go.
+    assert await release_improve_lock("s1", user_id, token) is ImproveLockRelease.RELEASED
     assert (await _row(lock_engine, "s1", user_id)).improve_lock_token is None
 
 
@@ -253,7 +256,9 @@ async def test_forced_release_lets_go_but_keeps_the_pending_flag_for_the_next_ho
     token = await try_acquire_improve_lock("s1", user_id)
     await request_improve_rerun("s1", user_id)
 
-    assert await release_improve_lock("s1", user_id, token, force=True) is True
+    assert (
+        await release_improve_lock("s1", user_id, token, force=True) is ImproveLockRelease.RELEASED
+    )
     row = await _row(lock_engine, "s1", user_id)
     assert row.improve_lock_token is None
     assert row.improve_rerun_requested is True  # left for the next acquirer
@@ -279,7 +284,7 @@ async def test_release_after_a_ttl_takeover_reports_released_without_touching_th
     new_token = await try_acquire_improve_lock("s1", user_id)
     await request_improve_rerun("s1", user_id)  # pending against the NEW holder
 
-    assert await release_improve_lock("s1", user_id, "old-holder") is True
+    assert await release_improve_lock("s1", user_id, "old-holder") is ImproveLockRelease.LOST
     row = await _row(lock_engine, "s1", user_id)
     assert row.improve_lock_token == new_token
-    assert row.improve_rerun_requested is True
+    assert row.improve_rerun_requested is True  # the new holder's request, untouched

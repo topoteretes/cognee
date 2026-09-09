@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import pytest
 
-from cognee.infrastructure.locks import ImproveLockStatus
+from cognee.infrastructure.locks import ImproveLockRelease, ImproveLockStatus
 from cognee.modules.session_bridge import SessionPendingWork
 
 improve_mod = importlib.import_module("cognee.api.v1.improve.improve")
@@ -96,14 +96,19 @@ def harness(monkeypatch):
         return "tok"
 
     async def fake_release(session_id, user_id, token, *, force=False):
-        # Refused while a rerun request is pending (the real UPDATE checks the
-        # flag in the same statement); force lets go regardless.
-        if not force and h.rerun_flags and h.rerun_flags[0]:
-            h.lock_calls.append(("release_refused", session_id))
-            return False
-        h.lock_calls.append(("release", session_id, token) + (("force",) if force else ()))
+        # Mirrors the real three-step release: a pending rerun request is
+        # consumed instead of letting go; force lets go regardless.
+        if force:
+            h.lock_calls.append(("release", session_id, token, "force"))
+            h.lock_free = True
+            return ImproveLockRelease.RELEASED
+        if h.rerun_flags and h.rerun_flags[0]:
+            h.rerun_flags.pop(0)
+            h.lock_calls.append(("release_rerun", session_id))
+            return ImproveLockRelease.RERUN
+        h.lock_calls.append(("release", session_id, token))
         h.lock_free = True
-        return True
+        return ImproveLockRelease.RELEASED
 
     async def fake_request_rerun(session_id, user_id):
         h.lock_calls.append(("request_rerun", session_id))
@@ -111,14 +116,9 @@ def harness(monkeypatch):
             busy=not h.lock_free, holder_age_seconds=h.holder_age, rerun_requested=True
         )
 
-    async def fake_consume(session_id, user_id, token):
-        h.lock_calls.append(("consume", session_id, token))
-        return h.rerun_flags.pop(0) if h.rerun_flags else False
-
     monkeypatch.setattr(locks_pkg, "try_acquire_improve_lock", fake_acquire)
     monkeypatch.setattr(locks_pkg, "release_improve_lock", fake_release)
     monkeypatch.setattr(locks_pkg, "request_improve_rerun", fake_request_rerun)
-    monkeypatch.setattr(locks_pkg, "consume_improve_rerun", fake_consume)
 
     # Stages.
     async def fake_bridge(**kwargs):
@@ -305,8 +305,7 @@ async def test_rerun_request_makes_the_holder_run_one_more_pass_over_the_new_tai
     ]
     assert [c[0] for c in harness.lock_calls] == [
         "acquire",
-        "release_refused",  # a request was pending: the holder may not let go yet
-        "consume",
+        "release_rerun",  # a request was pending: consumed, lock kept, one more pass
         "release",
     ]
     assert harness.operations == ["improve"]  # still ONE operation record
@@ -456,12 +455,7 @@ async def test_rerun_request_landing_during_a_no_op_probe_turns_into_a_run(harne
 
     assert result == {"run": "ok"}  # a real run, not a no_op answer
     assert harness.stages == ["persist:s1", "preferences", "memify"]
-    assert [c[0] for c in harness.lock_calls] == [
-        "acquire",
-        "release_refused",
-        "consume",
-        "release",
-    ]
+    assert [c[0] for c in harness.lock_calls] == ["acquire", "release_rerun", "release"]
     assert harness.operations == ["improve"]
 
 

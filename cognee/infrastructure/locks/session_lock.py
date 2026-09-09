@@ -19,8 +19,8 @@ Three primitives:
   "free" and both think they won. A claim older than
   ``IMPROVE_LOCK_TTL_SECONDS`` counts as expired and may be taken
   over, so a hung or killed holder can never wedge a session for good.
-  ``request_improve_rerun`` / ``consume_improve_rerun`` carry the
-  busy caller's "there is a newer tail" signal to the holder.
+  ``request_improve_rerun`` carries the busy caller's "there is a newer
+  tail" signal to the holder, whose release consumes it.
 
 The first two primitives are process-local (asyncio); only the improve
 lock crosses workers.
@@ -33,6 +33,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any
 from uuid import UUID as UUIDType
 
@@ -135,6 +136,14 @@ class ImproveLockStatus:
     busy: bool
     holder_age_seconds: float | None = None
     rerun_requested: bool = False
+
+
+class ImproveLockRelease(str, Enum):
+    """Outcome of ``release_improve_lock``."""
+
+    RELEASED = "released"  # we let go; the lock is free
+    RERUN = "rerun"  # a rerun request was pending: consumed, and we STILL hold the lock
+    LOST = "lost"  # the lock is no longer ours (TTL takeover); nothing to release
 
 
 def _coerce_user_id(user_id: Any) -> UUIDType:
@@ -263,60 +272,66 @@ async def try_acquire_improve_lock(session_id: str, user_id: Any) -> str | None:
 
 async def release_improve_lock(
     session_id: str | None, user_id: Any, token: str | None, *, force: bool = False
-) -> bool:
-    """Release the improve-lock if ``token`` still holds it.
+) -> ImproveLockRelease:
+    """Release the improve-lock if ``token`` still holds it and no rerun is pending.
 
-    Returns True when the lock is no longer ours (released now, or already lost
-    to a TTL takeover). Returns False — and keeps the lock — when a rerun request
-    is pending: a busy caller was promised that its newer tail would be covered,
-    so the holder must run one more pass before it can let go. Checking the flag
-    and releasing in one conditional UPDATE closes the window in which a request
-    could land between the two and be lost.
+    Three conditional UPDATEs, each atomic on its own, no read of a snapshot:
 
-    ``force=True`` releases regardless (error paths, pass-count bound). A pending
-    flag is deliberately left in place: the next acquirer clears it by starting a
-    full watermark pass, which is exactly what the request asked for.
+    1. clear the token where it is ours AND no rerun is pending -> ``RELEASED``;
+    2. otherwise clear the rerun flag where the token is ours AND the flag is
+       set -> ``RERUN``: a busy caller was promised its newer tail would be
+       covered, so the request is consumed and the caller must run one more pass
+       while still holding the lock;
+    3. otherwise the lock is not ours (taken over after the TTL) -> ``LOST``.
+
+    Because the flag is checked and the token cleared in the same statement, a
+    request cannot land between "checked" and "released" and be dropped. And
+    because step 2 also names our token, a takeover between steps 1 and 2 makes
+    it match nothing, so we never consume another holder's request.
+
+    ``force=True`` clears the token regardless of the flag (error paths, the
+    pass-count bound). A pending flag is deliberately left in place: the next
+    acquirer clears it by starting a full watermark pass, which is exactly what
+    the request asked for.
     """
     if not session_id or not user_id or not token:
-        return True
+        return ImproveLockRelease.RELEASED
 
-    from sqlalchemy import and_, select, update
+    from sqlalchemy import and_, update
 
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.session_lifecycle.models import SessionRecord
 
-    user_uuid = _coerce_user_id(user_id)
+    ours = and_(
+        SessionRecord.session_id == session_id,
+        SessionRecord.user_id == _coerce_user_id(user_id),
+        SessionRecord.improve_lock_token == token,
+    )
     engine = get_relational_engine()
     async with engine.get_async_session() as session:
-        conditions = [
-            SessionRecord.session_id == session_id,
-            SessionRecord.user_id == user_uuid,
-            SessionRecord.improve_lock_token == token,
-        ]
-        if not force:
-            conditions.append(SessionRecord.improve_rerun_requested.is_(False))
-        result = await session.execute(
+        release_where = (
+            ours if force else and_(ours, SessionRecord.improve_rerun_requested.is_(False))
+        )
+        released = await session.execute(
             update(SessionRecord)
-            .where(and_(*conditions))
+            .where(release_where)
             .values(improve_lock_token=None, improve_lock_acquired_at=None)
         )
         await session.commit()
-        if force or _rowcount(result) == 1:
-            return True
+        if _rowcount(released) == 1:
+            return ImproveLockRelease.RELEASED
+        if force:
+            return ImproveLockRelease.LOST
 
-        # Nothing matched: either a rerun is pending (lock kept) or the lock is
-        # no longer ours (taken over after the TTL). Only the former is ours to act on.
-        still_ours = (
-            await session.execute(
-                select(SessionRecord.improve_lock_token).where(
-                    and_(
-                        SessionRecord.session_id == session_id,
-                        SessionRecord.user_id == user_uuid,
-                    )
-                )
-            )
-        ).scalar_one_or_none()
-        return still_ours != token
+        consumed = await session.execute(
+            update(SessionRecord)
+            .where(and_(ours, SessionRecord.improve_rerun_requested.is_(True)))
+            .values(improve_rerun_requested=False)
+        )
+        await session.commit()
+        if _rowcount(consumed) == 1:
+            return ImproveLockRelease.RERUN
+        return ImproveLockRelease.LOST
 
 
 async def request_improve_rerun(session_id: str, user_id: Any) -> ImproveLockStatus:
@@ -369,31 +384,3 @@ async def request_improve_rerun(session_id: str, user_id: Any) -> ImproveLockSta
         holder_age_seconds=_lock_age_seconds(acquired_at, datetime.now(timezone.utc)),
         rerun_requested=True,
     )
-
-
-async def consume_improve_rerun(session_id: str | None, user_id: Any, token: str | None) -> bool:
-    """Clear a pending rerun request; True iff one was pending and we still hold the lock."""
-    if not session_id or not user_id or not token:
-        return False
-
-    from sqlalchemy import and_, update
-
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.session_lifecycle.models import SessionRecord
-
-    engine = get_relational_engine()
-    async with engine.get_async_session() as session:
-        result = await session.execute(
-            update(SessionRecord)
-            .where(
-                and_(
-                    SessionRecord.session_id == session_id,
-                    SessionRecord.user_id == _coerce_user_id(user_id),
-                    SessionRecord.improve_lock_token == token,
-                    SessionRecord.improve_rerun_requested.is_(True),
-                )
-            )
-            .values(improve_rerun_requested=False)
-        )
-        await session.commit()
-        return _rowcount(result) == 1
