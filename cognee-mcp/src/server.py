@@ -14,7 +14,9 @@ import uvicorn
 from fastmcp import FastMCP
 from fastmcp.server.transforms.search import BM25SearchTransform
 from fastmcp.server.transforms.search.base import BaseSearchTransform
+from fastmcp.server.http import HostOriginGuardMiddleware
 from mcp import types
+from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
@@ -125,9 +127,12 @@ def _transport_security_kwargs(host: str) -> dict:
             "allowed_origins": allowed_origins,
         }
 
-    # Loopback-only with no extra hosts — let FastMCP use its own defaults.
-    logger.info("MCP transport security: using FastMCP defaults (localhost only)")
-    return {}
+    # Loopback-only with no extra hosts. Ask for "auto" explicitly rather than
+    # falling through to FastMCP's own default, which is False — i.e. no guard
+    # at all. DNS rebinding is precisely an attack on loopback services, so the
+    # default bind is the one case that must not be left unguarded.
+    logger.info("MCP transport security: Host/Origin guard in auto mode (loopback bind)")
+    return {"host_origin_protection": "auto"}
 
 
 TOOL_MODES = ("default", "minimal", "all")
@@ -210,37 +215,55 @@ def _get_cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-async def _serve_with_cors(
-    transport: str, host: str, port: int, log_level: str, path: str | None = None
-):
-    """Serve one of FastMCP's HTTP transports under uvicorn with CORS added.
+def _build_http_app(transport: str, host: str, path: str | None = None):
+    """Build the ASGI app for an HTTP-family transport, guard and CORS included.
 
-    FastMCP's own run_http_async() would bind the socket for us but gives no
-    seam for the CORS middleware, so we keep building the ASGI app ourselves.
+    Split out from _serve_with_cors so the transport security wiring can be
+    asserted in-process, without binding a socket.
 
     `path` is forwarded to http_app() so --path actually moves the endpoint;
     without it the app always mounted at the FastMCP default while the startup
     banner advertised the requested path, so the logged URL 404'd.
     """
     security_kwargs = _transport_security_kwargs(host)
+    extra_middleware: list[Middleware] = []
 
-    # FastMCP's http_app() forwards the Host/Origin guard only on its
-    # streamable-http branch; the "sse" branch calls create_sse_app() without
-    # those kwargs, so they are accepted and silently dropped. Passing them on
-    # would let the startup log imply a protection the app does not have, so
-    # drop them here and say so out loud instead. Note DNS rebinding targets
-    # loopback services specifically — binding 127.0.0.1 is not a mitigation.
+    # FastMCP installs its Host/Origin (DNS-rebinding) guard only on the
+    # streamable-http app. create_sse_app() takes no such option in any released
+    # version, so http_app() accepts these kwargs for transport="sse" and drops
+    # them — the guard silently never runs while the startup log reports it as
+    # applied. Mount the same middleware, with the same allow-lists, ourselves.
+    #
+    # DNS rebinding targets loopback services specifically, so binding 127.0.0.1
+    # is not a mitigation and this must apply to the default bind too.
     if transport == "sse":
-        if security_kwargs.get("host_origin_protection") is not False:
-            logger.warning(
-                "SSE transport has no Host/Origin (DNS-rebinding) protection: FastMCP "
-                "applies it to streamable-http only, so this endpoint is unguarded on "
-                "%s. Prefer --transport http (TRANSPORT_MODE=http), which is guarded.",
-                host,
-            )
+        protection = security_kwargs.pop("host_origin_protection", "auto")
+        allowed_hosts = security_kwargs.pop("allowed_hosts", None)
+        allowed_origins = security_kwargs.pop("allowed_origins", None)
         security_kwargs = {}
 
-    app = mcp.http_app(transport=transport, path=path, **security_kwargs)
+        if protection is not False:
+            extra_middleware.append(
+                Middleware(
+                    HostOriginGuardMiddleware,
+                    allowed_hosts=allowed_hosts,
+                    allowed_origins=allowed_origins,
+                    mode="strict" if protection is True else "auto",
+                )
+            )
+        else:
+            logger.warning(
+                "Host/Origin (DNS-rebinding) protection is disabled on the SSE "
+                "transport bound to %s.",
+                host,
+            )
+
+    app = mcp.http_app(
+        transport=transport,
+        path=path,
+        middleware=extra_middleware or None,
+        **security_kwargs,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_get_cors_origins(),
@@ -248,6 +271,18 @@ async def _serve_with_cors(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    return app
+
+
+async def _serve_with_cors(
+    transport: str, host: str, port: int, log_level: str, path: str | None = None
+):
+    """Serve one of FastMCP's HTTP transports under uvicorn.
+
+    FastMCP's own run_http_async() would bind the socket for us but gives no
+    seam for the CORS middleware, so we build the ASGI app ourselves.
+    """
+    app = _build_http_app(transport, host, path)
 
     config = uvicorn.Config(
         app,

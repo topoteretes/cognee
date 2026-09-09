@@ -260,13 +260,19 @@ docker run \
 
 After starting your Cognee MCP server with Docker, you need to configure your MCP client to connect to it.
 
-> ### ⚠️ Host/Origin protection (why you might get HTTP 421)
+> ### ⚠️ Host/Origin protection (why you might get HTTP 421 or 403)
 >
-> On the **http** transport the server enables FastMCP's Host/Origin guard, which
-> blocks DNS-rebinding attacks. When you bind a non-loopback address (`--host 0.0.0.0`,
-> which is what the Docker entrypoint does), only `localhost` / `127.0.0.1` / `[::1]`
-> Host headers are accepted. Reaching the server by **LAN IP or a custom hostname
-> returns `HTTP 421 Misdirected Request`** — this is the guard working, not a bug.
+> Both the **http** and **sse** transports validate the `Host` and `Origin` headers to
+> block DNS-rebinding attacks, on every bind address including loopback — rebinding
+> targets loopback services specifically, so `127.0.0.1` is not a mitigation.
+>
+> * A `Host` the server does not recognise returns **`421 Misdirected Request`**
+> * An `Origin` it does not recognise returns **`403 Forbidden`**
+>
+> When you bind a non-loopback address (`--host 0.0.0.0`, which is what the Docker
+> entrypoint does), only `localhost` / `127.0.0.1` / `[::1]` are accepted by default, so
+> reaching the server by **LAN IP or a custom hostname returns 421** — the guard working,
+> not a bug.
 >
 > Allow specific hosts (the `:*` port glob is required):
 > ```bash
@@ -277,12 +283,12 @@ After starting your Cognee MCP server with Docker, you need to configure your MC
 > -e MCP_DISABLE_DNS_REBINDING_PROTECTION=true
 > ```
 >
-> **The `sse` transport has no such guard.** FastMCP applies Host/Origin validation to
-> the streamable-http transport only, so an SSE endpoint is unprotected regardless of
-> these variables. The server logs a warning at startup when you choose it. Prefer
-> `http` unless a client you cannot change only speaks SSE.
+> **Implementation note.** FastMCP installs this guard on its streamable-http app only —
+> `create_sse_app()` accepts no such option, so the allow-lists were silently dropped for
+> SSE. cognee-mcp mounts the same middleware on the SSE app itself, with the same
+> allow-lists, so both transports behave identically.
 
-### **SSE Transport Configuration** (Legacy — prefer HTTP below)
+### **SSE Transport Configuration** (Legacy — prefer HTTP below; both are guarded)
 
 **Start the server with SSE transport:**
 ```bash

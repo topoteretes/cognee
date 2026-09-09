@@ -77,11 +77,10 @@ services:
       - LOG_LEVEL=INFO
       - SYSTEM_ROOT_DIRECTORY=/cognee-storage/system
       - DATA_ROOT_DIRECTORY=/cognee-storage/data
-      # Streamable HTTP, not sse: the container binds 0.0.0.0, and FastMCP
-      # applies its Host/Origin (DNS-rebinding) guard to the http transport
-      # only — on sse the guard is silently dropped. Endpoint: /mcp.
-      # Connecting by LAN IP or a custom hostname is rejected with HTTP 421
-      # by design; allow it explicitly with
+      # Streamable HTTP rather than the legacy sse transport. Endpoint: /mcp.
+      # The container binds 0.0.0.0, so the Host/Origin (DNS-rebinding) guard
+      # rejects requests arriving by LAN IP or a custom hostname with HTTP 421
+      # by design; allow them explicitly with
       # MCP_ALLOWED_HOSTS=192.168.1.50:*,myhost.local:* (the ":*" port glob is
       # required), or MCP_DISABLE_DNS_REBINDING_PROTECTION=true to turn it off.
       - TRANSPORT_MODE=http

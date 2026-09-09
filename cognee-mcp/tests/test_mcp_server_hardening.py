@@ -968,3 +968,112 @@ async def test_recall_without_env_default_omits_system_prompt(monkeypatch):
 
     payload = _recall_payload(requests)
     assert "system_prompt" not in payload
+
+
+# ---------------------------------------------------------------------------
+# Transport security: Host/Origin (DNS-rebinding) guard
+#
+# FastMCP installs its guard on the streamable-http app only; create_sse_app()
+# accepts no such option, so http_app() silently drops the allow-lists when
+# transport="sse" and the guard never runs. The server mounts the middleware
+# itself to close that gap. These exercise it over a real ASGI round trip.
+#
+# A permitted SSE request opens an event stream and never completes, so
+# "accepted" is observed as a timeout rather than a status code.
+# ---------------------------------------------------------------------------
+
+TRANSPORT_PATHS = {"http": ("/mcp", "POST"), "sse": ("/sse", "GET")}
+_ACCEPTED = "accepted"
+
+
+def _probe(app, transport, path=None, **headers):
+    """Return the status code, or _ACCEPTED if the request opened a stream."""
+    import threading
+
+    from starlette.testclient import TestClient
+
+    default_path, method = TRANSPORT_PATHS[transport]
+    target = path or default_path
+    result = []
+
+    def run():
+        try:
+            with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+                result.append(client.request(method, target, headers=headers, json={}).status_code)
+        except Exception as exc:  # noqa: BLE001 - reported via the empty result
+            result.append(repr(exc))
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout=10)
+    return result[0] if result else _ACCEPTED
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+@pytest.mark.parametrize("bind", ["0.0.0.0", "127.0.0.1"])
+def test_transport_rejects_foreign_host_and_origin(monkeypatch, transport, bind):
+    """Both transports reject rebinding attempts, on any bind address.
+
+    DNS rebinding targets loopback services, so 127.0.0.1 must be guarded too.
+    """
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+
+    from src import server
+
+    app = server._build_http_app(transport, bind)
+
+    assert _probe(app, transport, Host="attacker.example") == 421, (
+        f"{transport} on {bind} accepted a foreign Host header"
+    )
+    assert _probe(app, transport, Origin="http://attacker.example") == 403, (
+        f"{transport} on {bind} accepted a foreign Origin header"
+    )
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+def test_mcp_allowed_hosts_admits_named_host(monkeypatch, transport):
+    """The documented escape hatch works on both transports."""
+    monkeypatch.delenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", raising=False)
+    monkeypatch.setenv("MCP_ALLOWED_HOSTS", "10.0.0.5:*")
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="10.0.0.5:8000") != 421
+    assert _probe(app, transport, Host="attacker.example") == 421
+
+
+@pytest.mark.parametrize("transport", ["http", "sse"])
+def test_dns_rebinding_protection_can_be_disabled(monkeypatch, transport):
+    monkeypatch.setenv("MCP_DISABLE_DNS_REBINDING_PROTECTION", "true")
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+
+    from src import server
+
+    app = server._build_http_app(transport, "0.0.0.0")
+
+    assert _probe(app, transport, Host="attacker.example") != 421
+
+
+@pytest.mark.parametrize(
+    "transport,explicit,expected",
+    [
+        ("http", None, "/mcp"),
+        ("http", "/custom", "/custom"),
+        ("sse", None, "/sse"),
+        ("sse", "/events", "/events"),
+    ],
+)
+def test_path_flag_moves_endpoint_without_clobbering_defaults(transport, explicit, expected):
+    """--path applies, and omitting it leaves each transport's own default.
+
+    The transports have different defaults (/mcp, /sse). Forwarding a single
+    "/mcp" default to both silently relocated the SSE endpoint.
+    """
+    from src import server
+
+    app = server._build_http_app(transport, "127.0.0.1", explicit)
+
+    assert _probe(app, transport, path=expected) != 404
