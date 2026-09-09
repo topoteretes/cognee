@@ -86,7 +86,7 @@ def _default_instance(model):
     import typing
     from uuid import NAMESPACE_OID, uuid5
 
-    from pydantic import BaseModel
+    from pydantic import BaseModel, ValidationError
 
     def default_for(ann):
         if ann is None or ann is type(None):
@@ -121,7 +121,12 @@ def _default_instance(model):
     if isinstance(model, type) and issubclass(model, BaseModel):
         try:
             return model()
-        except Exception:  # noqa: BLE001 - any construction failure routes to synthesis
+        # Missing required fields raise ValidationError; a model with a custom
+        # __init__ that wants positional args raises TypeError. Both mean "the
+        # no-arg constructor is not usable here", which is what synthesis is
+        # for. Anything else is a real defect and should surface, not be mocked
+        # over.
+        except (ValidationError, TypeError):
             required = {
                 name: default_for(field.annotation)
                 for name, field in model.model_fields.items()
@@ -133,7 +138,11 @@ def _default_instance(model):
         return value
     try:
         return model()
-    except Exception:  # noqa: BLE001 - a mock must never raise; None is the last resort
+    # Not a pydantic model and no synthesized default: the last resort is the
+    # no-arg constructor. TypeError means it needs arguments, ValueError that
+    # it rejects the empty one -- for either, None is the honest answer. Other
+    # exceptions belong to the caller.
+    except (TypeError, ValueError):
         return None
 
 
