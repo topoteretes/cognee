@@ -1,12 +1,14 @@
 # Project-scoped session memory
 
 Send `node_set: ["project-<canonical-path-hash>"]` inside a typed QA or trace entry
-to `POST /api/v1/remember/entry`. The session keeps that tag set; changing it for
-the same authenticated user/session is rejected. `improve(session_ids=[...])`
-retains project tags alongside the usual QA and trace node sets during graph
-ingestion. The scope uses the existing session-turn lock (single worker); multiple
-workers require the same distributed-lock deployment configuration as other
-session read/modify/write operations.
+to `POST /api/v1/remember/entry`. The session keeps that tag set; a different set
+for the same authenticated user/session is rejected with HTTP 409
+(`ProjectTagConflictError` in the SDK). An empty list means "no tags" and pins
+nothing. `improve(session_ids=[...])` retains project tags alongside the usual QA and
+trace node sets during graph ingestion. The scope uses the
+existing session-turn lock (single worker); multiple workers require the same
+distributed-lock deployment configuration as other session read/modify/write
+operations.
 
 For a separate agent-session graph, an authenticated primary dataset owner can
 POST `{}` to `/api/v1/datasets/{primary_uuid}/session-companion`. The server creates

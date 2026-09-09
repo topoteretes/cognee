@@ -8,6 +8,8 @@ from sqlalchemy import select
 
 from cognee.infrastructure.session.project_tags import (
     STATE_ID,
+    STATE_KIND,
+    ProjectTagConflictError,
     TaggedTrace,
     bind_project_tags,
     get_project_tags,
@@ -45,11 +47,15 @@ async def test_tags_are_immutable_and_cache_errors_propagate():
             create_session_context_entry=AsyncMock(side_effect=append),
         )
     )
+    await bind_project_tags(manager, "u", "s", [])
+    assert rows == [], "an empty tag list must not pin anything"
     await bind_project_tags(manager, "u", "s", ["project-a"])
     await bind_project_tags(manager, "u", "s", ["project-a"])
     assert await get_project_tags(manager, "u", "s") == ("project-a",)
-    with pytest.raises(ValueError):
+    with pytest.raises(ProjectTagConflictError) as conflict:
         await bind_project_tags(manager, "u", "s", ["project-b"])
+    assert conflict.value.status_code == 409
+    assert "project-a" in conflict.value.message and "project-b" in conflict.value.message
     assert len(rows) == 1
     manager._cache.get_session_context_entries.side_effect = OSError("unavailable")
     with pytest.raises(OSError):
@@ -89,7 +95,7 @@ async def test_trace_tags_survive_pipeline_batching():
     manager = MagicMock()
     manager.is_available = True
     manager._cache.get_session_context_entries = AsyncMock(
-        return_value=[{"id": STATE_ID, "kind": "project_node_set_state", "node_set": ["project-a"]}]
+        return_value=[{"id": STATE_ID, "kind": STATE_KIND, "node_set": ["project-a"]}]
     )
     manager.get_agent_trace_feedback = AsyncMock(return_value=["edit succeeded."])
     manager.get_agent_trace_session = AsyncMock(return_value=[])
