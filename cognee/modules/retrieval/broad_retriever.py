@@ -89,6 +89,9 @@ class ExtractedItem(BaseModel):
     group: str | None = None
     # The item's value of the plan's measure, when the plan sums one.
     amount: float | None = None
+    # The text says this item was later undone (removed, cancelled, returned, revoked):
+    # code drops the item with the same group and key instead of counting this entry.
+    undone: bool = False
     evidence: str
 
 
@@ -384,15 +387,10 @@ class BroadRetriever(CompletionRetriever):
         canonical = await self.merge_name_variants(plan, items, aliases)
 
         if plan.dedup_key:
-            keyed: dict[str, ExtractedItem] = {}
-            unkeyed: list[ExtractedItem] = []
-            for item in items:
-                key = _normalize_key(item.key) if item.key else ""
-                if not key:
-                    unkeyed.append(item)
-                elif key not in keyed:
-                    keyed[key] = item
-            items = [*keyed.values(), *unkeyed]
+            items = self.dedup(items)
+        else:
+            # Without an identity an undone entry cannot name what it undoes.
+            items = [item for item in items if not item.undone]
 
         # Each item counts 1, or its stated amount when the plan sums a measure.
         def weight(item: ExtractedItem) -> float:
@@ -436,6 +434,39 @@ class BroadRetriever(CompletionRetriever):
         )
 
     # --- reading helpers ------------------------------------------------------------
+
+    @staticmethod
+    def dedup(items: list[ExtractedItem]) -> list[ExtractedItem]:
+        """One item per (group, key), in first-seen order, minus the items undone later.
+
+        The same key under two groups is two items (a connection is listed once per
+        member, keyed by the other). A recap that names the key but not the group
+        is the item already counted. An entry marked undone removes the item it
+        names instead of counting.
+        """
+        by_identity: dict[tuple[str, str], ExtractedItem] = {}
+        keys_seen: set[str] = set()
+        unkeyed: list[ExtractedItem] = []
+        # Grouped entries first, so an ungrouped recap can find its item.
+        for item in sorted(items, key=lambda item: item.group is None):
+            key = _normalize_key(item.key) if item.key else ""
+            if not key:
+                if not item.undone:
+                    unkeyed.append(item)
+                continue
+            identity = (item.group or "", key)
+            if item.undone:
+                if item.group is None:
+                    for existing in [i for i in by_identity if i[1] == key]:
+                        del by_identity[existing]
+                else:
+                    by_identity.pop(identity, None)
+                continue
+            if identity in by_identity or (item.group is None and key in keys_seen):
+                continue
+            by_identity[identity] = item
+            keys_seen.add(key)
+        return [*by_identity.values(), *unkeyed]
 
     def split_oversized(self, units: list[Unit]) -> list[Unit]:
         """Cut a unit longer than a shard into paragraph-aligned pieces.

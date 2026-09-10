@@ -311,6 +311,48 @@ async def test_repeated_mentions_of_one_item_are_counted_once(monkeypatch):
     assert dict(result.groups) == {"ann": 1, "bob": 1}
 
 
+def _item(group, key, undone=False):
+    return ExtractedItem(unit=0, group=group, key=key, undone=undone, evidence=f"{group}-{key}")
+
+
+def test_a_relation_is_one_item_per_participant_and_a_removal_subtracts_it():
+    """Arthur–Priya is Arthur's connection and Priya's; "Arthur removed Priya" ends both
+    entries the removal names, and a request that was only declined was never listed."""
+    items = [
+        _item("Arthur", "Priya"),
+        _item("Priya", "Arthur"),
+        _item("Arthur", "Mei"),
+        _item("Mei", "Arthur"),
+        _item("Arthur", "Priya"),  # the same connection told again from Arthur's side
+        _item("Arthur", "Mei", undone=True),
+        _item("Mei", "Arthur", undone=True),
+    ]
+
+    kept = BroadRetriever.dedup(items)
+
+    assert sorted((i.group, i.key) for i in kept) == [("Arthur", "Priya"), ("Priya", "Arthur")]
+
+
+def test_a_recap_without_a_group_is_the_item_already_counted():
+    items = [_item("Ann", "#7"), _item(None, "#7"), _item(None, "#9")]
+
+    kept = BroadRetriever.dedup(items)
+
+    assert [(i.group, i.key) for i in kept] == [("Ann", "#7"), (None, "#9")]
+
+
+@pytest.mark.asyncio
+async def test_an_undone_entry_without_a_dedup_key_is_not_counted(monkeypatch):
+    shard = ShardItems(items=[_item("Ann", None), _item("Bob", None, undone=True)])
+    _stub_llm(monkeypatch, lambda model, _: shard if model is ShardItems else NameGroups(groups=[]))
+
+    result = await BroadRetriever().count_by_reading(
+        CountPlan(source="text", item="a sale", group_by="seller"), _units(1)
+    )
+
+    assert result.total == 1
+
+
 @pytest.mark.asyncio
 async def test_every_occurrence_counts_without_a_dedup_key(monkeypatch):
     shard = ShardItems(
