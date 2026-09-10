@@ -1086,3 +1086,69 @@ def test_path_flag_moves_endpoint_without_clobbering_defaults(transport, explici
     app = server._build_http_app(transport, "127.0.0.1", explicit)
 
     assert _probe(app, transport, path=expected) != 404
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_sends_the_requested_pipeline_name():
+    """The requested pipeline name has to reach the server.
+
+    `GET /api/v1/datasets/status` defaults to cognify_pipeline when `pipeline`
+    is omitted, so dropping the name does not fail loudly — it returns
+    cognify_pipeline's status labelled as whatever the caller asked for.
+    """
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "add_pipeline")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    assert len(status_calls) == 1
+    params = status_calls[0].url.params
+    assert params.get_list("dataset") == [dataset_id]
+    assert params.get_list("pipeline") == ["add_pipeline"], (
+        f"pipeline name was dropped; query was {status_calls[0].url.query!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_distinguishes_pipelines():
+    """Two different names must produce two different queries.
+
+    The multi-pipeline branch in cognify_status calls this once per name and
+    labels each result with the name it asked for, so identical queries would
+    report one pipeline's status under every name.
+    """
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "add_pipeline")
+        await client.get_pipeline_status([dataset_id], "code_graph_pipeline")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    requested = [name for r in status_calls for name in r.url.params.get_list("pipeline")]
+    assert requested == ["add_pipeline", "code_graph_pipeline"]
+
+
+@pytest.mark.asyncio
+async def test_api_pipeline_status_omits_an_empty_pipeline_name():
+    """No name means the server applies its own default, as before."""
+    requests: list[httpx.Request] = []
+    client = await _mock_api_client(requests)
+    dataset_id = "11111111-1111-1111-1111-111111111111"
+
+    try:
+        await client.get_pipeline_status([dataset_id], "")
+    finally:
+        await client.close()
+
+    status_calls = [r for r in requests if r.url.path == "/api/v1/datasets/status"]
+    assert status_calls[0].url.params.get_list("pipeline") == []
+    assert status_calls[0].url.params.get_list("dataset") == [dataset_id]
