@@ -40,8 +40,9 @@ logger = get_logger("BroadRetriever")
 
 # Tokens of source text per reading call. Small enough that the model lists every
 # match in its shard; the corpus size only changes how many shards run. Measured:
-# 2,000 CSV rows as text gave the top assignee 84/91 at 12k-token shards, 91/91 at 4k.
-BROAD_SHARD_TOKENS = 4_000
+# 2,000 CSV rows as text gave the top assignee 84/91 at 12k-token shards, 91/91 at
+# 4k; a dense 18-page prose report gave 99/102 shipments at 4k and 102/102 at 2k.
+BROAD_SHARD_TOKENS = 2_000
 BROAD_MAX_PARALLEL_CALLS = 16
 # Graph node types whose text is read: document chunks and table rows.
 BROAD_TEXT_NODE_TYPES = ("DocumentChunk", "DltRow")
