@@ -15,14 +15,19 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.data.processing.document_types.AudioDocument import AudioDocument
 from cognee.modules.data.processing.document_types.Document import Document
+from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_configured_ontology_resolver,
+)
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.pipelines.tasks.task import Task, task_summary
 from cognee.shared.data_models import KnowledgeGraph
@@ -68,7 +73,7 @@ class GlinerRunStats:
     nodes: int = 0
     candidate_edges: int = 0
     kept_edges: int = 0
-    schema: GlinerSchema | None = None
+    schemas_by_document: dict[str, GlinerSchema] = field(default_factory=dict)
 
     @property
     def dropped_edges(self) -> int:
@@ -104,23 +109,23 @@ async def prepare_gliner_schema(
     """Attach one closed schema to each document before it is chunked."""
     extractor = None
     for document in documents:
+        if isinstance(document, (ImageDocument, AudioDocument)):
+            raise ValueError(
+                "GLiNER cognify requires stored text, not raw image or audio documents"
+            )
         document_schema = schema
         if document_schema.is_empty:
             if extractor is None:
                 extractor = await get_extractor(model_name)
-            text_parts = [
-                chunk.text
-                async for chunk in document.read(
-                    max_chunk_size=max_chunk_size,
-                    chunker_cls=chunker,
-                )
-            ]
             model_max_words = getattr(getattr(extractor, "config", None), "max_len", None)
             sketch_max_words = min(MAX_SKETCH_WORDS, model_max_words or MAX_SKETCH_WORDS)
-            sketch = make_document_sketch(
-                "".join(text_parts),
-                max_words=sketch_max_words,
-            )
+            sketch = ""
+            async for chunk in document.read(
+                max_chunk_size=max_chunk_size,
+                chunker_cls=chunker,
+            ):
+                text = f"{sketch}\n{chunk.text}" if sketch else chunk.text
+                sketch = make_document_sketch(text, max_words=sketch_max_words)
             document_schema = await asyncio.to_thread(
                 schema_from_label_bank,
                 extractor,
@@ -188,7 +193,7 @@ async def extract_graph_and_summarize_with_gliner(
     mapped = [map_gliner_result(result) for result in results]
     graphs = [item.graph for item in mapped]
 
-    stats.schema = schema
+    stats.schemas_by_document[str(data_chunks[0].is_part_of.id)] = schema
     stats.chunks += len(data_chunks)
     stats.nodes += sum(len(graph.nodes) for graph in graphs)
     stats.candidate_edges += sum(item.candidate_edges for item in mapped)
@@ -252,6 +257,7 @@ def build_gliner_schema_task(
     relation_types: LabelSpec | None = None,
     *,
     ontology_file_path: str | None = None,
+    ontology_resolver=None,
     model_name: str = DEFAULT_MODEL,
     threshold: float = DEFAULT_THRESHOLD,
     max_chunk_size: int,
@@ -263,6 +269,7 @@ def build_gliner_schema_task(
         entity_types,
         relation_types,
         ontology_file_path=ontology_file_path,
+        ontology_resolver=ontology_resolver,
     )
     return Task(
         prepare_gliner_schema,
@@ -313,11 +320,20 @@ async def get_gliner_tasks(
         configured = get_cognify_config().chunks_per_batch
         chunks_per_batch = configured if configured is not None else 2000
 
+    ontology_resolver = None
+    if not entity_types and not relation_types:
+        ontology_resolver = get_configured_ontology_resolver(
+            config, ontology_file_path=ontology_file_path
+        )
+        ontology_config = dict((config or {}).get("ontology_config") or {})
+        ontology_config["ontology_resolver"] = ontology_resolver
+        config = {**(config or {}), "ontology_config": ontology_config}
+
     max_chunk_size = chunk_size or await get_max_chunk_tokens()
     schema_task = build_gliner_schema_task(
         entity_types,
         relation_types,
-        ontology_file_path=ontology_file_path,
+        ontology_resolver=ontology_resolver,
         model_name=model_name,
         threshold=threshold,
         max_chunk_size=max_chunk_size,

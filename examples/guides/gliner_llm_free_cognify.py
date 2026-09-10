@@ -69,10 +69,11 @@ async def main():
         pipeline_name="cognify_pipeline",
     )
 
-    schema = stats.schema
-    print(f"\nschema source: {schema.source}")
-    print(f"entity types:   {sorted(schema.entity_types)}")
-    print(f"relation types: {sorted(schema.relation_types)}")
+    print("\nschemas by document:")
+    for document_id, schema in stats.schemas_by_document.items():
+        print(f"  {document_id} ({schema.source})")
+        print(f"    entity types:   {sorted(schema.entity_types)}")
+        print(f"    relation types: {sorted(schema.relation_types)}")
     print(f"\nchunks processed: {stats.chunks}")
     print(f"nodes mapped:     {stats.nodes}")
     print(

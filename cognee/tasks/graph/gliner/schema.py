@@ -165,6 +165,13 @@ def cap_types(types: Mapping[str, str], hit_counts: Mapping[str, int] | None = N
     return {name: types[name] for name in ordered[:MAX_TYPES]}
 
 
+def _validate_schema_types(
+    entity_types: Mapping[str, str], relation_types: Mapping[str, str], source: str
+) -> None:
+    if relation_types and not entity_types:
+        raise ValueError(f"GLiNER {source} schema defines relation types but no entity types")
+
+
 # --------------------------------------------------------------------------- #
 # Step 2: ontology
 # --------------------------------------------------------------------------- #
@@ -196,6 +203,17 @@ def _collect_ontology_terms(graph: Any, rdf_type: Any) -> dict[str, str]:
     return collected
 
 
+def _schema_from_ontology_graph(graph: Any) -> GlinerSchema:
+    from rdflib import OWL
+
+    entity_types = _collect_ontology_terms(graph, OWL.Class)
+    relation_types = _collect_ontology_terms(graph, OWL.ObjectProperty)
+    if not entity_types and not relation_types:
+        return EMPTY_SCHEMA
+    _validate_schema_types(entity_types, relation_types, "ontology")
+    return GlinerSchema(cap_types(entity_types), cap_types(relation_types), source="ontology")
+
+
 def schema_from_ontology(ontology_file_path: str | None = None) -> GlinerSchema:
     """Derive entity and relation type names from an OWL ontology.
 
@@ -213,7 +231,7 @@ def schema_from_ontology(ontology_file_path: str | None = None) -> GlinerSchema:
     if not path or not os.path.isfile(path):
         return EMPTY_SCHEMA
 
-    from rdflib import OWL, Graph
+    from rdflib import Graph
 
     graph = Graph()
     parsed = False
@@ -228,11 +246,18 @@ def schema_from_ontology(ontology_file_path: str | None = None) -> GlinerSchema:
         logger.warning("Could not parse ontology file %s; GLiNER schema falls through", path)
         return EMPTY_SCHEMA
 
-    entity_types = _collect_ontology_terms(graph, OWL.Class)
-    relation_types = _collect_ontology_terms(graph, OWL.ObjectProperty)
-    if not entity_types and not relation_types:
+    return _schema_from_ontology_graph(graph)
+
+
+def schema_from_ontology_resolver(ontology_resolver: Any) -> GlinerSchema:
+    """Derive GLiNER labels from an ontology resolver's already-loaded RDF graph."""
+    if not hasattr(ontology_resolver, "graph"):
+        raise ValueError("GLiNER schema planning requires an ontology resolver with an RDF graph")
+    graph = ontology_resolver.graph
+    if graph is None:
         return EMPTY_SCHEMA
-    return GlinerSchema(cap_types(entity_types), cap_types(relation_types), source="ontology")
+
+    return _schema_from_ontology_graph(graph)
 
 
 # --------------------------------------------------------------------------- #
@@ -276,7 +301,7 @@ def schema_from_label_bank(
         for n, c in _count_hits(results, "relation_extraction").items()
         if c and n in RELATION_BANK
     }
-    if not entity_hits and not relation_hits:
+    if not entity_hits:
         return EMPTY_SCHEMA
 
     entity_types = cap_types({n: LABEL_BANK[n] for n in entity_hits}, entity_hits)
@@ -304,6 +329,7 @@ def resolve_schema(
     extractor: Any = None,
     probe_text: str = "",
     ontology_file_path: str | None = None,
+    ontology_resolver: Any = None,
     threshold: float = 0.5,
 ) -> GlinerSchema:
     """Resolve caller labels, an ontology, or one document sketch in that order.
@@ -317,9 +343,14 @@ def resolve_schema(
     if caller_entities or caller_relations:
         _validate_caller_labels("entity types", caller_entities)
         _validate_caller_labels("relation types", caller_relations)
+        _validate_schema_types(caller_entities, caller_relations, "caller")
         return GlinerSchema(caller_entities, caller_relations, source="caller")
 
-    from_ontology = schema_from_ontology(ontology_file_path)
+    from_ontology = (
+        schema_from_ontology_resolver(ontology_resolver)
+        if ontology_resolver is not None
+        else schema_from_ontology(ontology_file_path)
+    )
     if not from_ontology.is_empty:
         return from_ontology
 

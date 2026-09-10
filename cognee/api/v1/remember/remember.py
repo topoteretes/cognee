@@ -838,6 +838,14 @@ async def remember(
         if kwargs.get("content_type"):
             raise ValueError("dry_run is supported for standard add+cognify remember inputs only.")
 
+        from cognee.modules.cognify.config import get_cognify_config, resolve_extractor
+
+        if resolve_extractor(kwargs.get("extractor"), get_cognify_config()) == "gliner":
+            raise ValueError(
+                "dry_run estimates the LLM extraction pipeline only; it has no cost model "
+                "for the gliner extractor."
+            )
+
         from cognee.api.v1.serve.state import get_remote_client
 
         if get_remote_client() is not None:
@@ -858,6 +866,9 @@ async def remember(
             graph_model=kwargs.get("graph_model") or KnowledgeGraph,
             custom_prompt=custom_prompt,
         )
+
+    if session_id is not None and kwargs.get("extractor") is not None:
+        raise ValueError("extractor is not supported when session_id is provided.")
 
     data_size = _estimate_data_size(data)
     item_count = len(data) if isinstance(data, list) else 1

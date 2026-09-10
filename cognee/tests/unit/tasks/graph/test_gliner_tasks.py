@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.data.processing.document_types import TextDocument
+from cognee.modules.data.processing.document_types import AudioDocument, ImageDocument, TextDocument
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.graph import gliner as gliner_pkg
@@ -305,6 +305,38 @@ def test_ontology_with_nothing_mapped_is_empty(tmp_path):
     assert schema_from_ontology(str(path)).is_empty
 
 
+def test_ontology_relation_types_require_entity_types(tmp_path):
+    path = tmp_path / "relations.ttl"
+    path.write_text(
+        "@prefix : <http://example.org/#> .\n"
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+        ":worksAt a owl:ObjectProperty .\n"
+    )
+
+    with pytest.raises(ValueError, match="ontology schema.*no entity types"):
+        schema_from_ontology(str(path))
+
+
+@pytest.mark.asyncio
+async def test_gliner_tasks_reuse_configured_ontology_resolver():
+    from rdflib import Graph
+
+    graph = Graph()
+    graph.parse(data=ONTOLOGY_TTL, format="turtle")
+    resolver = SimpleNamespace(graph=graph)
+
+    with patch.object(tasks_module, "require_gliner2"):
+        tasks = await get_gliner_tasks(
+            config={"ontology_config": {"ontology_resolver": resolver}},
+            chunk_size=512,
+        )
+    schema = tasks[1].default_params["kwargs"]["schema"]
+    extraction_config = tasks[3].default_params["kwargs"]["config"]
+
+    assert set(schema.entity_types) == {"person", "software_company"}
+    assert extraction_config["ontology_config"]["ontology_resolver"] is resolver
+
+
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -380,6 +412,11 @@ def test_bank_probe_with_nothing_firing_is_empty():
     assert schema.is_empty
 
 
+def test_bank_probe_with_only_relation_hits_is_empty():
+    _, schema = _probe({"relation_extraction": {"works_for": [["Alice", "Acme"]]}})
+    assert schema.is_empty
+
+
 # --------------------------------------------------------------------------- #
 # Fallback chain
 # --------------------------------------------------------------------------- #
@@ -421,6 +458,11 @@ def test_bank_is_last_resort(tmp_path):
 def test_caller_labels_over_cap_raise():
     with pytest.raises(ValueError, match="at most"):
         resolve_schema([f"type_{i}" for i in range(MAX_TYPES + 1)])
+
+
+def test_caller_relation_types_require_entity_types():
+    with pytest.raises(ValueError, match="caller schema.*no entity types"):
+        resolve_schema(relation_types=["works_for"])
 
 
 # --------------------------------------------------------------------------- #
@@ -475,7 +517,25 @@ async def test_task_returns_text_summaries_and_hands_graphs_to_extract_graph_fro
     assert call["chunk_size"] == 384 and call["chunk_overlap"] == 64
 
     assert (stats.chunks, stats.nodes, stats.candidate_edges, stats.kept_edges) == (2, 10, 4, 4)
-    assert stats.schema.source == "caller"
+    assert stats.schemas_by_document[str(chunks[0].is_part_of.id)] is schema
+
+
+@pytest.mark.asyncio
+async def test_stats_keep_each_document_schema():
+    extractor = FakeExtractor()
+    stats = GlinerRunStats()
+    chunks = [_chunk("Alice works at Acme."), _chunk("Aspirin treats flu.")]
+    schemas = [
+        GlinerSchema({"person": "", "organization": ""}, source="caller"),
+        GlinerSchema({"drug": "", "disease": ""}, source="caller"),
+    ]
+
+    for chunk, schema in zip(chunks, schemas):
+        await _run_task(extractor, [chunk], schema, stats, AsyncMock())
+
+    assert stats.schemas_by_document == {
+        str(chunk.is_part_of.id): schema for chunk, schema in zip(chunks, schemas)
+    }
 
 
 @pytest.mark.asyncio
@@ -526,6 +586,37 @@ async def test_schema_is_prepared_once_per_document():
 
 
 @pytest.mark.asyncio
+async def test_schema_sketch_is_bounded_while_reading_document():
+    extractor = FakeExtractor()
+    document = TextDocument(name="large.txt", raw_data_location="large.txt", external_metadata=None)
+    parts = [f"Section {index}. " * 1000 for index in range(3)]
+
+    async def read(_document, **_kwargs):
+        for part in parts:
+            yield SimpleNamespace(text=part)
+
+    with (
+        patch.object(TextDocument, "read", read),
+        patch.object(tasks_module, "get_extractor", AsyncMock(return_value=extractor)),
+        patch.object(
+            tasks_module,
+            "make_document_sketch",
+            wraps=tasks_module.make_document_sketch,
+        ) as make_sketch,
+    ):
+        await tasks_module.prepare_gliner_schema(
+            [document], schema=GlinerSchema(), max_chunk_size=512
+        )
+
+    assert make_sketch.call_count == len(parts)
+    assert all(
+        len(call.args[0]) <= schema_module.MAX_SKETCH_CHARS + len(part) + 1
+        for call, part in zip(make_sketch.call_args_list, parts)
+    )
+    assert len(extractor.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_explicit_schema_is_attached_without_reading_or_probing():
     schema = GlinerSchema({"person": ""}, source="caller")
     document = TextDocument(
@@ -535,6 +626,22 @@ async def test_explicit_schema_is_attached_without_reading_or_probing():
         await tasks_module.prepare_gliner_schema([document], schema=schema, max_chunk_size=512)
     assert document._gliner_schema is schema
     assert "_gliner_schema" not in document.model_dump()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("document_class", "mime_type"),
+    [(ImageDocument, "image/png"), (AudioDocument, "audio/mpeg")],
+)
+async def test_schema_preparation_rejects_raw_media(document_class, mime_type):
+    document = document_class(
+        name="media", raw_data_location="media", external_metadata=None, mime_type=mime_type
+    )
+
+    with pytest.raises(ValueError, match="requires stored text"):
+        await tasks_module.prepare_gliner_schema(
+            [document], schema=GlinerSchema({"person": ""}), max_chunk_size=512
+        )
 
 
 @pytest.mark.asyncio
@@ -764,6 +871,15 @@ async def test_cognify_extractor_conflicts_raise_before_any_work(monkeypatch):
         await cognify_module.cognify(extractor="spacy")
     with pytest.raises(ValueError, match="temporal"):
         await cognify_module.cognify(temporal_cognify=True, extractor="gliner")
+    with (
+        patch.object(
+            cognify_module,
+            "get_cognify_config",
+            return_value=_config_with_extractor("gliner"),
+        ),
+        pytest.raises(ValueError, match="temporal"),
+    ):
+        await cognify_module.cognify(temporal_cognify=True)
     with pytest.raises(ValueError, match="dry_run"):
         await cognify_module.cognify(dry_run=True, extractor="gliner")
 
@@ -777,6 +893,22 @@ def test_remember_routes_the_extractor_kwarg_to_cognify():
     remember_module = importlib.import_module("cognee.api.v1.remember.remember")
     assert "extractor" in remember_module._COGNIFY_ONLY
     assert "extractor" in remember_module.RememberKwargs.__annotations__
+
+
+@pytest.mark.asyncio
+async def test_remember_rejects_gliner_dry_run():
+    remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+
+    with pytest.raises(ValueError, match="dry_run"):
+        await remember_module.remember("text", dry_run=True, extractor="gliner")
+
+
+@pytest.mark.asyncio
+async def test_session_remember_rejects_an_explicit_extractor():
+    remember_module = importlib.import_module("cognee.api.v1.remember.remember")
+
+    with pytest.raises(ValueError, match="session_id"):
+        await remember_module.remember("text", session_id="session", extractor="gliner")
 
 
 # --------------------------------------------------------------------------- #
@@ -931,15 +1063,20 @@ def _patch_recall(monkeypatch, available: bool):
 
     async def fake_authorized_search(**kwargs):
         captured["query_type"] = kwargs.get("query_type")
+        captured["search_llm_config"] = kwargs.get("llm_config")
         return []
 
     async def noop(*_args, **_kwargs):
         return None
 
+    def fake_llm_available(llm_config=None):
+        captured["availability_llm_config"] = llm_config
+        return available
+
     monkeypatch.setattr(recall_module, "set_session_user_context_variable", noop)
     monkeypatch.setattr(serve_state, "get_remote_client", lambda: None)
     monkeypatch.setattr(search_methods, "authorized_search", fake_authorized_search)
-    monkeypatch.setattr(recall_module, "llm_available", lambda: available)
+    monkeypatch.setattr(recall_module, "llm_available", fake_llm_available)
     user = SimpleNamespace(id=uuid4(), tenant_id=None)
     return recall_module, captured, user
 
@@ -970,6 +1107,24 @@ async def test_recall_default_query_type_is_chunks_without_a_usable_llm(
         user=user,
     )
     assert captured["query_type"] == expected
+
+
+@pytest.mark.asyncio
+async def test_recall_checks_the_call_scoped_llm_config(monkeypatch):
+    from uuid import uuid4
+
+    recall_module, captured, user = _patch_recall(monkeypatch, available=True)
+    call_config = object()
+
+    await recall_module.recall(
+        query_text="Where was Marie Curie born?",
+        dataset_ids=[uuid4()],
+        llm_config=call_config,
+        user=user,
+    )
+
+    assert captured["availability_llm_config"] is call_config
+    assert captured["search_llm_config"] is call_config
 
 
 @pytest.mark.asyncio
