@@ -476,9 +476,14 @@ class CogneeClient:
         """
         if self.use_api:
             # API mode: query the server's dataset-status endpoint, which
-            # reports the pipeline run state keyed by dataset id.
+            # reports the pipeline run state keyed by dataset id. The endpoint
+            # defaults to cognify_pipeline when `pipeline` is omitted, so the
+            # requested name has to be sent or the caller silently receives
+            # cognify_pipeline's status under whatever name it asked for.
             endpoint = f"{self.api_url}/api/v1/datasets/status"
             params = [("dataset", str(d)) for d in dataset_ids]
+            if pipeline_name:
+                params.append(("pipeline", pipeline_name))
             response = await self.client.get(
                 endpoint, params=params, headers=self._get_headers(), timeout=READ_TIMEOUT_SECONDS
             )
