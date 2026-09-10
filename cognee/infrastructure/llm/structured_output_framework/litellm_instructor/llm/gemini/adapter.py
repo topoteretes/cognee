@@ -17,8 +17,7 @@ from tenacity import (
 
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    LLMPaymentRequiredError,
-    is_budget_exhausted_error,
+    raise_if_budget_exhausted,
 )
 from cognee.infrastructure.llm.retry_config import (
     llm_retry_condition,
@@ -156,6 +155,16 @@ class GeminiAdapter(GenericAPIAdapter):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
+            # Classified here because the handler further down is unreachable once
+            # this clause matches, and ahead of the content-policy check because
+            # the model's partial completion is rendered into str(error): a budget
+            # rejection whose completion mentions a content policy would otherwise
+            # be misclassified. Unlike openai/azure, a non-policy-worded
+            # InstructorRetryException never reaches the fallback attempt below
+            # (see the isinstance check right after this), so classifying here
+            # does not skip any failover that would otherwise have been tried.
+            raise_if_budget_exhausted(error)
+
             if (
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
@@ -192,6 +201,10 @@ class GeminiAdapter(GenericAPIAdapter):
                 ContentPolicyViolationError,
                 InstructorRetryException,
             ) as error:
+                # The fallback capped out too. Checked before the content-policy
+                # branch for the same reason as above.
+                raise_if_budget_exhausted(error)
+
                 if (
                     isinstance(error, InstructorRetryException)
                     and "content management policy" not in str(error).lower()
@@ -202,6 +215,6 @@ class GeminiAdapter(GenericAPIAdapter):
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
                     )
         except Exception as e:
-            if is_budget_exhausted_error(e):
-                raise LLMPaymentRequiredError() from e
+            # Same detail-carrying message as the wrapped-error paths above.
+            raise_if_budget_exhausted(e)
             raise
