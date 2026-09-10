@@ -67,6 +67,7 @@ from cognee.modules.chunking.chunk_policy import (
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.cognify.config import get_cognify_config
+from cognee.modules.cognify.routing import CognifyRoute, cognify_route_for
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.data.methods import (
     StagedContent,
@@ -572,6 +573,18 @@ async def incremental_update(
     if old_data is None or not old_data.raw_data_location:
         raise IncrementalUpdateNotPossible(
             "no stored processed text for this data item", RefusalReason.NO_BASELINE
+        )
+    # Code files and DLT source manifests are built by their own cognify
+    # routes, which write typed nodes and never a document chunk, so there is
+    # nothing to diff: the full rebuild re-runs that route over the new
+    # content. Say so, instead of reporting the missing chunks as "not
+    # cognified yet".
+    route = cognify_route_for(old_data)
+    if route is not CognifyRoute.STANDARD:
+        raise IncrementalUpdateNotPossible(
+            f"document is on the {route.value} cognify route, which keeps no chunks to "
+            "diff; the whole document is rebuilt",
+            RefusalReason.NO_BASELINE,
         )
 
     # Same per-dataset lock as pipeline runs and delete_data: serialize against

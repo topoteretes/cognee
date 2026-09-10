@@ -265,7 +265,16 @@ async def test_unmarked_graph_refuses_before_incremental_work(monkeypatch):
     monkeypatch.setattr(
         incremental,
         "get_data",
-        AsyncMock(return_value=SimpleNamespace(id=data_id, raw_data_location="old.txt")),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=data_id,
+                raw_data_location="old.txt",
+                system_metadata=None,
+                extension="txt",
+                mime_type="text/plain",
+                name="doc",
+            )
+        ),
     )
     monkeypatch.setattr(incremental, "dataset_lock", lambda _dataset_id: _Context())
     monkeypatch.setattr(
@@ -513,7 +522,15 @@ async def test_a_dataset_collaborator_may_update_a_row_they_do_not_own(monkeypat
     )
     # The row belongs to the dataset owner, not the caller.
     get_data = AsyncMock(
-        return_value=SimpleNamespace(id=data_id, owner_id=owner_id, raw_data_location="old.txt")
+        return_value=SimpleNamespace(
+            id=data_id,
+            owner_id=owner_id,
+            raw_data_location="old.txt",
+            system_metadata=None,
+            extension="txt",
+            mime_type="text/plain",
+            name="doc",
+        )
     )
     monkeypatch.setattr(incremental, "get_data", get_data)
     monkeypatch.setattr(incremental, "dataset_lock", lambda _dataset_id: _Context())
@@ -666,3 +683,61 @@ async def test_undecodable_stored_text_is_a_refusal_not_a_crash(tmp_path):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("system_metadata", "route"),
+    [({"source": "code"}, "code"), ({"source": "dlt_source"}, "dlt_source")],
+)
+async def test_chunkless_routes_refuse_before_reading_the_graph(
+    monkeypatch, system_metadata, route
+):
+    """Code files and DLT manifests are built by routes that keep no chunks.
+    The refusal must name the route, not report the document as uncognified,
+    and must come before the stored chunks are read."""
+    from cognee.api.v1.update import incremental
+
+    data_id, dataset_id = uuid4(), uuid4()
+
+    async def _authorize(_user, _dataset_id, _permission):
+        return SimpleNamespace(id=dataset_id, owner_id=uuid4())
+
+    monkeypatch.setattr(incremental, "get_authorized_dataset", _authorize)
+    monkeypatch.setattr(
+        incremental, "get_dataset_data", AsyncMock(return_value=[SimpleNamespace(id=data_id)])
+    )
+    monkeypatch.setattr(
+        incremental,
+        "get_data",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=data_id,
+                raw_data_location="old.txt",
+                system_metadata=system_metadata,
+                extension="py" if route == "code" else "json",
+                mime_type="text/plain",
+                name="doc",
+            )
+        ),
+    )
+
+    class _Adapter:
+        supports_incremental_chunk_updates = True
+
+    monkeypatch.setattr(incremental, "get_graph_engine", AsyncMock(return_value=_Adapter()))
+    stored_chunks = AsyncMock()
+    monkeypatch.setattr(incremental, "_get_stored_chunks", stored_chunks)
+    run_incremental = AsyncMock()
+    monkeypatch.setattr(incremental, "_run_incremental_update", run_incremental)
+
+    with pytest.raises(IncrementalUpdateNotPossible) as raised:
+        await incremental_update(
+            data_id, "replacement", dataset_id, user=SimpleNamespace(id=uuid4())
+        )
+
+    assert raised.value.reason is RefusalReason.NO_BASELINE
+    assert f"{route} cognify route" in str(raised.value)
+    assert "rebuilt" in str(raised.value)
+    stored_chunks.assert_not_awaited()
+    run_incremental.assert_not_awaited()
