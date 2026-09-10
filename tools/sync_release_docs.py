@@ -98,6 +98,58 @@ def _cookie_scheme() -> dict:
     return {"type": "apiKey", "in": "cookie", "name": default_transport.cookie_name}
 
 
+# Mintlify compiles every `description` in the spec as MDX, not as the CommonMark
+# the OpenAPI spec says the field holds. MDX gives `{` and `<` JSX meaning, so a
+# docstring that mentions `{"source": "crm"}` or `<int>` is a *syntax error* there.
+# Mintlify does not fail the build on one: it drops the whole description to raw
+# text, so the page still renders but the headings, bullets and bold markup show up
+# as literal `##`, `-` and `**`. Twelve description fields shipped that way.
+#
+# Escaping with a backslash is the fix that costs nothing elsewhere: `\{` and `\<`
+# are valid CommonMark escapes too, so the published spec stays correct for Swagger
+# UI, client generators and anything else that reads it — rendered output is
+# byte-identical. Code spans and fences are left alone; MDX does not interpret
+# their contents, and escaping inside them would show the backslashes.
+#
+# A run of backticks opens a span that a matching run closes, which covers ``` fences,
+# ordinary spans, and the ``inline literals`` these reStructuredText-flavoured
+# docstrings use.
+_CODE_SPAN = re.compile(r"(`+)[\s\S]*?\1")
+
+
+def _escape_mdx(text: str) -> str:
+    """Escape MDX-significant characters in prose, leaving code spans intact."""
+
+    def escape(prose: str) -> str:
+        # The lookbehind keeps a second pass from turning `\{` into `\\{`.
+        prose = re.sub(r"(?<!\\)<(?=[A-Za-z/])", r"\\<", prose)
+        prose = re.sub(r"(?<!\\)\{", r"\\{", prose)
+        return re.sub(r"(?<!\\)\}", r"\\}", prose)
+
+    out: list[str] = []
+    position = 0
+    for span in _CODE_SPAN.finditer(text):
+        out.append(escape(text[position : span.start()]))
+        out.append(span.group(0))
+        position = span.end()
+    out.append(escape(text[position:]))
+    return "".join(out)
+
+
+def escape_descriptions(node):
+    """Recursively MDX-escape every ``description`` string in the spec."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "description" and isinstance(value, str):
+                node[key] = _escape_mdx(value)
+            else:
+                escape_descriptions(value)
+    elif isinstance(node, list):
+        for value in node:
+            escape_descriptions(value)
+    return node
+
+
 def enhance_spec(spec: dict) -> dict:
     """Add the docs-facing extras FastAPI does not generate. Mutates and returns spec.
 
@@ -167,6 +219,9 @@ def enhance_spec(spec: dict) -> dict:
         content = by_route[route].get("requestBody", {}).get("content", {})
         for media in content.values():
             media.setdefault("example", example)
+
+    # Last, so the extras added above are escaped along with what FastAPI emitted.
+    escape_descriptions(spec)
 
     return spec
 
