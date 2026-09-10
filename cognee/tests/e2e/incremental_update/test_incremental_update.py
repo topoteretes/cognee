@@ -312,18 +312,17 @@ async def test_incremental_update_full_flow(incremental_env):
         return UploadFile(file=spooled, filename=filename)
 
     text_v6 = healed_text.replace("Paragraph 3", "Paragraph 3 ENTV6", 1)
-    # Keep the existing user-visible metadata. A rename intentionally takes
-    # the full path; this case exercises safe same-name staging instead.
-    upload = _upload(
-        text_v6.encode("utf-8"),
-        f"{healed_data.name}.{healed_data.original_extension}",
-    )
+    # The upload carries another filename: data_id names the document, so the
+    # replacement still updates it chunk-level, and the new name lands on the row.
+    upload = _upload(text_v6.encode("utf-8"), "renamed_by_the_client.txt")
     result6 = await update_like_an_api_request(data_id, [upload], dataset.id, user=user)
     assert result6["status"] == "incremental", (
         f"single-UploadFile update must run chunk-level: {result6}"
     )
     healed_text = await _stored_text(user, data_id)
     assert healed_text == text_v6, "UploadFile content must land as the stored text"
+    renamed_row = next(row for row in await get_dataset_data(dataset.id) if row.id == data_id)
+    assert renamed_row.name == "renamed_by_the_client", "the replacement's name lands on the row"
 
     # --- Permissions: non-permitted user is rejected, nothing changes -------- #
     from uuid import uuid4

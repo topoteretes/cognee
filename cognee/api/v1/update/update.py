@@ -104,7 +104,8 @@ async def update(
 
     Args:
         data_id: UUID of existing data to update (current or pre-fork)
-        data: The latest version of the data. Can be:
+        data: The latest version of the data. ``data_id`` names the document, so the
+            replacement may carry any filename; the new name lands on the row. Can be:
             - Single text string: "Your text content here"
             - DLT resource or source: replaces a DLT source manifest under the same
               source name (the whole source is re-ingested and re-cognified)

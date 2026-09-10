@@ -54,50 +54,43 @@ def test_refusal_defaults_to_no_baseline():
     assert IncrementalUpdateNotPossible("nope").reason is RefusalReason.NO_BASELINE
 
 
+def _stored_row(**overrides):
+    row = SimpleNamespace(
+        name="old.txt",
+        extension="txt",
+        mime_type="text/plain",
+        original_extension="txt",
+        original_mime_type="text/plain",
+        loader_engine="text_loader",
+    )
+    for key, value in overrides.items():
+        setattr(row, key, value)
+    return row
+
+
+def test_a_replacement_under_another_name_is_not_a_metadata_change():
+    """data_id names the document; the file it is updated with may carry any
+    name. The publish step writes the new name onto the row."""
+    old = _stored_row()
+    staged = _stored_row(name="new.txt")
+
+    assert _changed_staged_metadata(old, staged) == []
+
+
 def test_direct_text_ignores_its_content_derived_internal_name():
-    old = SimpleNamespace(
-        name="text_old.txt",
-        extension="txt",
-        mime_type="text/plain",
-        original_extension="txt",
-        original_mime_type="text/plain",
-        loader_engine="text_loader",
-    )
-    staged = SimpleNamespace(**vars(old))
-    staged.name = "text_new.txt"
+    old = _stored_row(name="text_old.txt")
+    staged = _stored_row(name="text_new.txt")
 
-    assert _changed_staged_metadata("new text", old, staged) == []
+    assert _changed_staged_metadata(old, staged) == []
 
 
-def test_user_named_upload_requires_full_update_when_renamed():
-    old = SimpleNamespace(
-        name="old.txt",
-        extension="txt",
-        mime_type="text/plain",
-        original_extension="txt",
-        original_mime_type="text/plain",
-        loader_engine="text_loader",
-    )
-    staged = SimpleNamespace(**vars(old))
-    staged.name = "new.txt"
+def test_a_content_type_change_requires_the_full_update():
+    """A .txt replaced by a .md picks another document class and chunker, so the
+    stored chunks are no baseline for it."""
+    old = _stored_row()
+    staged = _stored_row(name="old.md", extension="md", original_extension="md")
 
-    assert _changed_staged_metadata(SimpleNamespace(filename="new.txt"), old, staged) == ["name"]
-
-
-def test_wrapped_user_named_upload_requires_full_update_when_renamed():
-    old = SimpleNamespace(
-        name="old.txt",
-        extension="txt",
-        mime_type="text/plain",
-        original_extension="txt",
-        original_mime_type="text/plain",
-        loader_engine="text_loader",
-    )
-    staged = SimpleNamespace(**vars(old))
-    staged.name = "new.txt"
-
-    wrapped_upload = DataItem(data=SimpleNamespace(filename="new.txt"))
-    assert _changed_staged_metadata(wrapped_upload, old, staged) == ["name"]
+    assert _changed_staged_metadata(old, staged) == ["extension", "original_extension"]
 
 
 @pytest.mark.asyncio

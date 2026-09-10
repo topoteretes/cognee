@@ -138,7 +138,9 @@ class RefusalReason(str, Enum):
     PER_CALL_DB_CONFIG = "per_call_db_config"  # vector_db_config / graph_db_config
     UNSUPPORTED_BACKEND = "unsupported_backend"
     UNSUPPORTED_CHUNKER = "unsupported_chunker"
-    UNSUPPORTED_METADATA = "unsupported_metadata"  # node_set, label, external metadata, rename
+    UNSUPPORTED_METADATA = (
+        "unsupported_metadata"  # node_set, label, external metadata, content type
+    )
     NO_BASELINE = "no_baseline"
     CHUNKS_NOT_TILING = "chunks_not_tiling"
     UNREADABLE_TEXT = "unreadable_text"
@@ -451,8 +453,15 @@ async def _stage_new_content(data, preferred_loaders) -> StagedContent:
     )
 
 
-def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> list[str]:
-    """Return metadata changes that need document-wide full-update handling."""
+def _changed_staged_metadata(old_data: Data, staged: StagedContent) -> list[str]:
+    """Return metadata changes that need document-wide full-update handling.
+
+    The replacement's filename is not one of them: ``data_id`` names the
+    document, so a file sent under another name is still that document, and
+    the publish step writes the new name onto the row. What does need the full
+    path is a change of content type — extension, mime type or loader — since
+    those pick the document class and the chunker that built the baseline.
+    """
     fields = [
         "extension",
         "mime_type",
@@ -460,11 +469,6 @@ def _changed_staged_metadata(data, old_data: Data, staged: StagedContent) -> lis
         "original_mime_type",
         "loader_engine",
     ]
-    # Direct text gets an internal content-derived filename, so its name is
-    # expected to change with its text. User-named uploads and streams are not.
-    source_data = data.data if isinstance(data, DataItem) else data
-    if hasattr(source_data, "filename") or hasattr(source_data, "name"):
-        fields.append("name")
     return [
         field for field in fields if getattr(old_data, field, None) != getattr(staged, field, None)
     ]
@@ -751,7 +755,7 @@ async def _stage_and_plan(
     new_text = await _read_processed_text(staged.raw_data_location)
     content_unchanged = staged.content_hash == old_data.content_hash and new_text == old_text
 
-    changed_metadata = _changed_staged_metadata(data, old_data, staged)
+    changed_metadata = _changed_staged_metadata(old_data, staged)
     if changed_metadata:
         raise IncrementalUpdateNotPossible(
             f"replacement metadata changed ({', '.join(changed_metadata)})",
