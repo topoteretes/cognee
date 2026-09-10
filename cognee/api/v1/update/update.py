@@ -106,6 +106,8 @@ async def update(
         data_id: UUID of existing data to update (current or pre-fork)
         data: The latest version of the data. Can be:
             - Single text string: "Your text content here"
+            - DLT resource or source: replaces a DLT source manifest under the same
+              source name (the whole source is re-ingested and re-cognified)
             - Absolute file path: "/path/to/document.pdf"
             - File URL: "file:///absolute/path/to/document.pdf" or "file://relative/path.txt"
             - S3 path: "s3://my-bucket/documents/file.pdf"
@@ -128,7 +130,8 @@ async def update(
                  processed text and replace only the chunks the edit touched — unaffected
                  chunks keep their nodes, entities, and summaries. Falls back to the full
                  delete + pinned re-add + cognify flow when chunk-level preconditions are
-                 not met (first ingestion, non-text content, unverified graph adapter).
+                 not met (first ingestion, non-text content, unverified graph adapter,
+                 a code file or a DLT source manifest — those routes keep no chunks).
                  Permission errors always propagate and never trigger the fallback.
         chunker: Chunking strategy. Must match the one that built the document's stored
                  chunks — a mismatch is refused (and falls back) rather than surfacing
@@ -195,6 +198,7 @@ async def update(
     from cognee.modules.data.models import Data
     from cognee.modules.ingestion.exceptions import IngestionError
     from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.resolve_dlt_sources import check_dlt_replacement, is_dlt_input
 
     if isinstance(data, list):
         if len(data) != 1:
@@ -297,6 +301,17 @@ async def update(
                 ),
                 pipeline_run_id=summary["pipeline_run_id"],
             )
+
+    # The rebuild deletes first and re-adds second, so anything that would
+    # make the re-add refuse the replacement must be found now, while the
+    # document still exists. A dlt source is the one input whose identity is
+    # decided by the resolver rather than by the pinned id.
+    replacement = data.data if isinstance(data, DataItem) else data
+    if is_dlt_input(replacement):
+        from cognee.modules.data.methods import get_authorized_dataset
+
+        dataset = await get_authorized_dataset(user, dataset_id, "write")
+        await check_dlt_replacement(replacement, pinned_id, dataset.name, user)
 
     await datasets.delete_data(
         dataset_id=dataset_id,

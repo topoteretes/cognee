@@ -241,3 +241,35 @@ def test_result_serializes_to_plain_json():
     assert body["error"] is None
     assert body["chunks"] is None
     assert UpdateResult.model_validate(body) == result
+
+
+async def test_dlt_replacement_under_another_name_is_refused_before_the_delete():
+    """The rebuild deletes first, so a replacement the re-add would refuse
+    must be refused while the manifest still exists."""
+    dlt = pytest.importorskip("dlt")
+    from cognee.exceptions import CogneeValidationError
+
+    resolve_module = sys.modules["cognee.tasks.ingestion.resolve_dlt_sources"]
+    data_id, dataset_id = uuid4(), uuid4()
+    stack = _Stack(data_id, dataset_id, AsyncMock(), _run(dataset_id))
+
+    with (
+        stack,
+        patch.object(
+            data_methods_module,
+            "get_authorized_dataset",
+            AsyncMock(return_value=SimpleNamespace(id=dataset_id, name="ds")),
+        ),
+        patch.object(resolve_module, "get_unique_data_id", AsyncMock(return_value=uuid4())),
+        pytest.raises(CogneeValidationError, match="same source name"),
+    ):
+        await update_module.update(
+            data_id=data_id,
+            data=dlt.resource([{"id": 1}], name="renamed", primary_key="id"),
+            dataset_id=dataset_id,
+            user=SimpleNamespace(id=uuid4()),
+            chunk_level_diff=False,
+        )
+
+    stack.delete_data.assert_not_awaited()
+    stack.add.assert_not_awaited()

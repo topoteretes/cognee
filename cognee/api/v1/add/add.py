@@ -274,9 +274,13 @@ async def add(
     # not None) deletes dlt rows no longer present in the source; it is
     # deferred until after the fresh rows are committed to avoid a data-loss
     # window on a mid-ingest failure.
+    # The dataset's stored name, not the caller's argument: a DLT manifest's
+    # identity is seeded from (dataset name, source name), and update()'s
+    # rebuild re-adds by dataset_id alone. Passing None there would mint a
+    # second manifest for the same source.
     data, orphan_cleanup = await resolve_dlt_sources(
         data,
-        dataset_name=dataset_name,
+        dataset_name=authorized_dataset.name,
         user=user,
         dataset_id=authorized_dataset.id,
         **kwargs,
