@@ -9,7 +9,7 @@ import importlib
 import json
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -101,22 +101,19 @@ async def test_update_remote_is_silent_when_only_routable_parameters_are_given(
 def _result_payload(**overrides):
     """A PATCH /update body as the server sends it."""
     payload = {
+        "status": "incremental",
+        "regions": 1,
+        "deleted_chunks": 1,
+        "added_chunks": 1,
+        "reused_chunks": 0,
+        "kept_chunks": 3,
+        "reindexed_chunks": 0,
+        "total_chunks": 4,
         "data_id": str(uuid4()),
         "dataset_id": str(uuid4()),
-        "status": "updated",
-        "mode": "incremental",
         "duration_seconds": 0.8,
-        "chunks": {
-            "regions": 1,
-            "deleted": 1,
-            "added": 1,
-            "reused": 0,
-            "kept": 3,
-            "reindexed": 0,
-            "total": 4,
-        },
-        "fallback": None,
         "pipeline_run_id": str(uuid4()),
+        "fallback": None,
         "error": None,
     }
     payload.update(overrides)
@@ -173,8 +170,9 @@ async def test_cloud_client_update_matches_the_route_contract(monkeypatch):
         chunk_level_diff=False,
     )
 
-    assert result == UpdateResult.model_validate(payload)
-    assert (result.mode, result.status, result.chunks.kept) == ("incremental", "updated", 3)
+    assert result == UpdateResult.model_validate(payload).model_dump()
+    assert (result["status"], result["kept_chunks"]) == ("incremental", 3)
+    assert result["data_id"] == UUID(payload["data_id"]), "remote ids are UUIDs, as locally"
     assert captured["url"] == "http://remote.invalid/api/v1/update"
     assert captured["params"] == {
         "data_id": str(data_id),
@@ -219,8 +217,17 @@ async def test_cloud_client_update_returns_a_failed_result_instead_of_raising(mo
     client hands that result back so the caller can read the error and retry."""
     failed = _result_payload(
         status="failed",
-        mode="full_rebuild",
-        chunks=None,
+        **dict.fromkeys(
+            (
+                "regions",
+                "deleted_chunks",
+                "added_chunks",
+                "reused_chunks",
+                "kept_chunks",
+                "reindexed_chunks",
+                "total_chunks",
+            ),
+        ),
         fallback={"reason": "disabled", "detail": "chunk_level_diff=False was requested"},
         error={"error_class": "RuntimeError", "message": "cognify failed"},
     )
@@ -230,5 +237,5 @@ async def test_cloud_client_update_returns_a_failed_result_instead_of_raising(mo
 
     result = await client.update(data_id=uuid4(), data="new text", dataset_id=uuid4())
 
-    assert result == UpdateResult.model_validate(failed)
-    assert (result.status, result.error.message) == ("failed", "cognify failed")
+    assert result == UpdateResult.model_validate(failed).model_dump()
+    assert (result["status"], result["error"]["message"]) == ("failed", "cognify failed")

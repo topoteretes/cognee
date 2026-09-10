@@ -13,7 +13,7 @@ from cognee.api.v1.update.incremental import (
     incremental_update,
     recorded_chunk_budget,
 )
-from cognee.api.v1.update.result import ChunkChanges, Fallback, UpdateError, UpdateResult
+from cognee.api.v1.update.result import Fallback, UpdateError, UpdateResult
 from cognee.modules.chunking.chunk_policy import DEFAULT_CHUNK_POLICY, ChunkPolicy
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.models.PipelineRunInfo import get_errored_run_info
@@ -72,7 +72,7 @@ async def update(
     custom_prompt: str | None = None,
     chunker: type = TextChunker,
     policy: ChunkPolicy = DEFAULT_CHUNK_POLICY,
-) -> UpdateResult:
+) -> dict:
     """
     Update existing data in Cognee.
 
@@ -141,18 +141,22 @@ async def update(
                  Chunk-level path only; not exposed on the HTTP route.
 
     Returns:
-        UpdateResult, the same shape on every path:
-            - ``status``: "updated", "unchanged" (chunk-level path found no content
-              change) or "failed" (the rebuild's cognify run errored; ``error`` says
-              why, and the call can be retried).
-            - ``mode``: "incremental" or "full_rebuild".
+        One dict on every path (schema: ``UpdateResult``), a superset of the
+        chunk-level summary returned before:
+            - ``status``: "incremental" (chunks replaced), "unchanged" (no content
+              change), "full_rebuild" (delete + re-add + cognify ran) or "failed"
+              (the rebuild's cognify run errored; ``error`` says why, and the call
+              can be retried).
+            - ``regions``, ``deleted_chunks``, ``added_chunks``, ``reused_chunks``,
+              ``kept_chunks``, ``reindexed_chunks``, ``total_chunks``: the chunk-level
+              counters; None on a rebuild, which has no diff.
+            - ``data_id``, ``dataset_id``: the document, the handle to retry with.
             - ``duration_seconds``: wall-clock time of the update.
-            - ``chunks``: the chunk-level counters (regions, deleted, added, reused,
-              kept, reindexed, total); None on a full rebuild, which has no diff.
-            - ``fallback``: set on every full rebuild, its ``reason`` and ``detail``
-              naming why the chunk-level path did not run — the caller switched it
-              off, an unsupported parameter, or one of the engine's refusals.
             - ``pipeline_run_id``: the run to inspect; None for a no-op.
+            - ``fallback``: set on every rebuild, its ``reason`` and ``detail`` naming
+              why the chunk-level path did not run — the caller switched it off, an
+              unsupported parameter, or one of the engine's refusals.
+            - ``error``: ``error_class`` and ``message`` when ``status`` is "failed".
     """
     # Route to the remote instance when connected via serve(). This must come
     # before any local work: the paths below resolve the LOCAL default user and
@@ -285,22 +289,19 @@ async def update(
             fallback_chunk_size = await recorded_chunk_budget(pinned_id, dataset_id, user)
         else:
             return UpdateResult(
+                status=summary["status"],
+                regions=summary["regions"],
+                deleted_chunks=summary["deleted_chunks"],
+                added_chunks=summary["added_chunks"],
+                reused_chunks=summary["reused_chunks"],
+                kept_chunks=summary["kept_chunks"],
+                reindexed_chunks=summary["reindexed_chunks"],
+                total_chunks=summary["total_chunks"],
                 data_id=pinned_id,
                 dataset_id=dataset_id,
-                status="unchanged" if summary["status"] == "unchanged" else "updated",
-                mode="incremental",
                 duration_seconds=round(perf_counter() - started, 3),
-                chunks=ChunkChanges(
-                    regions=summary["regions"],
-                    deleted=summary["deleted_chunks"],
-                    added=summary["added_chunks"],
-                    reused=summary["reused_chunks"],
-                    kept=summary["kept_chunks"],
-                    reindexed=summary["reindexed_chunks"],
-                    total=summary["total_chunks"],
-                ),
                 pipeline_run_id=summary["pipeline_run_id"],
-            )
+            ).model_dump()
 
     # The rebuild deletes first and re-adds second, so anything that would
     # make the re-add refuse the replacement must be found now, while the
@@ -360,17 +361,16 @@ async def update(
     errored = get_errored_run_info(cognify_runs)
     run = errored or next(iter(cognify_runs.values()))
     return UpdateResult(
+        status="failed" if errored else "full_rebuild",
         data_id=pinned_id,
         dataset_id=dataset_id,
-        status="failed" if errored else "updated",
-        mode="full_rebuild",
         duration_seconds=round(perf_counter() - started, 3),
-        fallback=Fallback(reason=fallback[0], detail=fallback[1]),
         pipeline_run_id=run.pipeline_run_id,
+        fallback=Fallback(reason=fallback[0], detail=fallback[1]),
         error=UpdateError(error_class=errored.error_class, message=errored.error_message)
         if errored
         else None,
-    )
+    ).model_dump()
 
 
 def _full_rebuild_reason(

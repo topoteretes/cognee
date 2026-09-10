@@ -4,7 +4,12 @@
 chunk-level path and a pipeline-run mapping from the full rebuild — so a caller
 could not tell from the value alone whether the document was refreshed cheaply,
 rebuilt from scratch, or left as it was, and the reason for a rebuild lived only
-in the server log. This model answers those questions in the value itself.
+in the server log.
+
+The result is a dict on every path, and a superset of the chunk-level summary
+that shipped before: the same keys with the same values, plus the fields below.
+This model is its schema — the HTTP route validates and documents the body
+with it, and the remote client normalizes what it receives through it.
 """
 
 from typing import Literal
@@ -13,24 +18,6 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from cognee.api.v1.update.incremental import RefusalReason
-
-
-class ChunkChanges(BaseModel):
-    """What the chunk-level path did to the document's chunks.
-
-    ``regions`` is the number of disjoint edited spans the diff found and
-    ``total`` the chunk count after the update, so "kept 29 of 30" reads off
-    directly. The counts are work done: ``added`` can exceed the net change
-    when a re-cut chunk with unchanged content is re-extracted in place.
-    """
-
-    regions: int = 0
-    deleted: int = 0
-    added: int = 0
-    reused: int = 0
-    kept: int = 0
-    reindexed: int = 0
-    total: int = 0
 
 
 class Fallback(BaseModel):
@@ -50,23 +37,32 @@ class UpdateError(BaseModel):
 class UpdateResult(BaseModel):
     """Per-document outcome of ``update()``.
 
-    ``status`` says what happened to the document; ``mode`` says how. A
-    ``full_rebuild`` always carries ``fallback``, naming why the chunk-level
-    path did not run (or that the caller switched it off), so an update that
-    took far longer than usual explains itself; ``duration_seconds`` makes the
-    "longer" visible. ``chunks`` is set only for the incremental mode: a
-    rebuild re-extracts the whole document and has no diff to report.
+    ``status`` says what happened: the chunk-level path replaced chunks
+    (``incremental``) or found nothing to change (``unchanged``), the whole
+    document was rebuilt (``full_rebuild``), or the rebuild's cognify run
+    errored (``failed``, with ``error`` naming the cause so the call can be
+    retried). A rebuild always carries ``fallback``, naming why the chunk-level
+    path did not run or that the caller switched it off, and
+    ``duration_seconds`` makes a slow update visible next to its reason.
 
-    A ``failed`` status carries ``error`` so the caller can retry this one
-    document; the document keeps its ``data_id`` on every path.
+    The chunk counters are work done by the chunk-level path — ``added`` can
+    exceed the net change when a re-cut chunk with unchanged content is
+    re-extracted in place — and ``total_chunks`` is the count after the
+    update. They are ``None`` on a rebuild, which has no diff. The document
+    keeps its ``data_id`` on every path.
     """
 
+    status: Literal["incremental", "unchanged", "full_rebuild", "failed"]
+    regions: int | None = None
+    deleted_chunks: int | None = None
+    added_chunks: int | None = None
+    reused_chunks: int | None = None
+    kept_chunks: int | None = None
+    reindexed_chunks: int | None = None
+    total_chunks: int | None = None
     data_id: UUID
     dataset_id: UUID
-    status: Literal["updated", "unchanged", "failed"]
-    mode: Literal["incremental", "full_rebuild"]
     duration_seconds: float
-    chunks: ChunkChanges | None = None
-    fallback: Fallback | None = None
     pipeline_run_id: UUID | None = None
+    fallback: Fallback | None = None
     error: UpdateError | None = None

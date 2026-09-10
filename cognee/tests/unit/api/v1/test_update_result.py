@@ -2,8 +2,8 @@
 
 The chunk-level engine and the full rebuild used to return different values
 (a summary dict versus a pipeline-run mapping), and the reason for a rebuild
-lived only in the server log. Every path now returns an ``UpdateResult`` with
-the same fields, and every rebuild carries its ``fallback`` reason (SDK-587).
+lived only in the server log. Every path now returns one dict, a superset of
+the old summary, and every rebuild carries its ``fallback`` reason (SDK-587).
 """
 
 import sys
@@ -16,7 +16,6 @@ import pytest
 import cognee.api.v1.update.update  # bind the real submodule
 from cognee.api.v1.update import UpdateResult
 from cognee.api.v1.update.incremental import IncrementalUpdateNotPossible, RefusalReason
-from cognee.api.v1.update.result import Fallback
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -26,6 +25,16 @@ update_module = sys.modules["cognee.api.v1.update.update"]
 data_methods_module = sys.modules["cognee.modules.data.methods"]
 
 pytestmark = pytest.mark.asyncio
+
+COUNTER_KEYS = (
+    "regions",
+    "deleted_chunks",
+    "added_chunks",
+    "reused_chunks",
+    "kept_chunks",
+    "reindexed_chunks",
+    "total_chunks",
+)
 
 
 def _relational_engine_stub(row):
@@ -108,15 +117,17 @@ async def test_engine_refusal_becomes_a_full_rebuild_with_its_reason():
 
     result = await _update(stack, data_id, dataset_id)
 
-    assert isinstance(result, UpdateResult)
-    assert (result.status, result.mode) == ("updated", "full_rebuild")
-    assert result.fallback.reason is RefusalReason.NO_BASELINE
-    assert result.fallback.detail == "no stored processed text for this data item"
-    assert result.error is None
-    assert result.duration_seconds >= 0
-    assert result.chunks is None, "a rebuild has no chunk diff to report"
-    assert result.pipeline_run_id == run.pipeline_run_id
-    assert (result.data_id, result.dataset_id) == (data_id, dataset_id)
+    assert isinstance(result, dict)
+    assert result["status"] == "full_rebuild"
+    assert result["fallback"] == {
+        "reason": RefusalReason.NO_BASELINE,
+        "detail": "no stored processed text for this data item",
+    }
+    assert result["error"] is None
+    assert all(result[key] is None for key in COUNTER_KEYS), "a rebuild has no chunk diff"
+    assert result["pipeline_run_id"] == run.pipeline_run_id
+    assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id)
+    assert result["duration_seconds"] >= 0
     stack.delete_data.assert_awaited_once()
     stack.add.assert_awaited_once()
 
@@ -140,12 +151,15 @@ async def test_every_pre_check_downgrade_names_its_reason(kwargs, reason):
     result = await _update(stack, data_id, dataset_id, **kwargs)
 
     incremental.assert_not_called()
-    assert result.mode == "full_rebuild"
-    assert result.fallback.reason is reason
-    assert result.fallback.detail, "the reason comes with a sentence for the caller"
+    assert result["status"] == "full_rebuild"
+    assert result["fallback"]["reason"] is reason
+    assert result["fallback"]["detail"], "the reason comes with a sentence for the caller"
 
 
-async def test_incremental_result_carries_the_chunk_counters_and_no_reason():
+async def test_incremental_result_keeps_the_old_summary_keys_and_adds_the_new_ones():
+    """The chunk-level summary that shipped before is a strict subset: same
+    keys, same values, so a caller reading result["kept_chunks"] or comparing
+    result["status"] == "incremental" is unaffected."""
     data_id, dataset_id = uuid4(), uuid4()
     run_id = uuid4()
     summary = {
@@ -163,18 +177,11 @@ async def test_incremental_result_carries_the_chunk_counters_and_no_reason():
 
     result = await _update(stack, data_id, dataset_id)
 
-    assert (result.status, result.mode) == ("updated", "incremental")
-    assert result.chunks.model_dump() == {
-        "regions": 2,
-        "deleted": 3,
-        "added": 4,
-        "reused": 1,
-        "kept": 7,
-        "reindexed": 2,
-        "total": 11,
-    }
-    assert result.fallback is None
-    assert result.pipeline_run_id == run_id
+    old_summary = {key: value for key, value in summary.items() if key != "pipeline_run_id"}
+    assert {key: result[key] for key in old_summary} == old_summary
+    assert result["fallback"] is None and result["error"] is None
+    assert result["pipeline_run_id"] == run_id
+    assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id)
     stack.delete_data.assert_not_awaited()
     stack.cognify.assert_not_awaited()
 
@@ -196,13 +203,9 @@ async def test_unchanged_content_is_reported_as_unchanged():
 
     result = await _update(stack, data_id, dataset_id)
 
-    assert (result.status, result.mode) == ("unchanged", "incremental")
-    assert result.chunks.model_dump() == {
-        **dict.fromkeys(("regions", "deleted", "added", "reused", "reindexed"), 0),
-        "kept": 9,
-        "total": 9,
-    }
-    assert result.pipeline_run_id is None
+    assert result["status"] == "unchanged"
+    assert (result["kept_chunks"], result["total_chunks"]) == (9, 9)
+    assert result["pipeline_run_id"] is None
 
 
 async def test_errored_rebuild_is_a_failed_result_not_an_exception():
@@ -212,35 +215,28 @@ async def test_errored_rebuild_is_a_failed_result_not_an_exception():
 
     result = await _update(stack, data_id, dataset_id, chunk_level_diff=False)
 
-    assert (result.status, result.mode) == ("failed", "full_rebuild")
-    assert result.fallback.reason is RefusalReason.DISABLED
-    assert (result.error.error_class, result.error.message) == ("LLMRateLimitError", "rate limited")
-    assert result.pipeline_run_id == errored.pipeline_run_id
-    assert (result.data_id, result.dataset_id) == (data_id, dataset_id), (
+    assert result["status"] == "failed"
+    assert result["fallback"]["reason"] is RefusalReason.DISABLED
+    assert result["error"] == {"error_class": "LLMRateLimitError", "message": "rate limited"}
+    assert result["pipeline_run_id"] == errored.pipeline_run_id
+    assert (result["data_id"], result["dataset_id"]) == (data_id, dataset_id), (
         "a failed result keeps the ids the caller needs to retry"
     )
 
 
-def test_result_serializes_to_plain_json():
+def test_result_schema_round_trips_through_json():
     result = UpdateResult(
+        status="full_rebuild",
         data_id=uuid4(),
         dataset_id=uuid4(),
-        status="updated",
-        mode="full_rebuild",
         duration_seconds=1.5,
-        fallback=Fallback(
-            reason=RefusalReason.UNSUPPORTED_CHUNKER, detail="document was chunked by x, not y"
-        ),
         pipeline_run_id=uuid4(),
+        fallback={"reason": RefusalReason.UNSUPPORTED_CHUNKER, "detail": "chunked by x, not y"},
     )
     body = result.model_dump(mode="json")
-    assert body["fallback"] == {
-        "reason": "unsupported_chunker",
-        "detail": "document was chunked by x, not y",
-    }
-    assert body["error"] is None
-    assert body["chunks"] is None
-    assert UpdateResult.model_validate(body) == result
+    assert body["fallback"] == {"reason": "unsupported_chunker", "detail": "chunked by x, not y"}
+    assert body["kept_chunks"] is None and body["error"] is None
+    assert UpdateResult.model_validate(body).model_dump() == result.model_dump()
 
 
 async def test_dlt_replacement_under_another_name_is_refused_before_the_delete():

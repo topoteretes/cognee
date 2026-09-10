@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, status
 from fastapi import UploadFile as UF
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import WithJsonSchema
 
@@ -94,20 +95,23 @@ def get_update_router() -> APIRouter:
                  by the edit instead of re-ingesting the whole document.
 
         ## Response
-        One shape on every path, an `UpdateResult`:
-        - **status**: `"updated"`, `"unchanged"` (the chunk-level path found no content
-          change) or `"failed"` (the rebuild's cognify run errored; `error` says why, and
-          the call can be retried).
-        - **mode**: `"incremental"` or `"full_rebuild"`.
+        One body on every path (`UpdateResult`), a superset of the chunk-level summary
+        returned before:
+        - **status**: `"incremental"` (chunks replaced), `"unchanged"` (no content change),
+          `"full_rebuild"` (delete + re-add + cognify ran) or `"failed"` (the rebuild's
+          cognify run errored; `error` says why, and the call can be retried).
+        - **regions**, **deleted_chunks**, **added_chunks**, **reused_chunks**,
+          **kept_chunks**, **reindexed_chunks**, **total_chunks**: the chunk-level
+          counters; `null` on a rebuild, which has no diff.
+        - **data_id**, **dataset_id**: the document, the handle to retry with.
         - **duration_seconds**: wall-clock time of the update.
-        - **chunks**: the chunk-level counters (`regions`, `deleted`, `added`, `reused`,
-          `kept`, `reindexed`, `total`); `null` on a full rebuild, which has no diff.
-        - **fallback**: set on every full rebuild; its `reason` names why the chunk-level
-          path did not run (`disabled`, `unsupported_metadata`, `custom_extraction_config`,
+        - **pipeline_run_id**: the run to inspect; `null` for a no-op.
+        - **fallback**: set on every rebuild; its `reason` names why the chunk-level path
+          did not run (`disabled`, `unsupported_metadata`, `custom_extraction_config`,
           `per_call_db_config`, `unsupported_backend`, `unsupported_chunker`,
           `no_baseline`, `chunks_not_tiling`, `unreadable_text`) and `detail` says it in
           a sentence.
-        - **pipeline_run_id**: the run to inspect; `null` for a no-op.
+        - **error**: `error_class` and `message` when `status` is `"failed"`.
 
         ## Error Codes
         - **422 Unprocessable Entity**: data_id or dataset_id missing or not a valid UUID
@@ -144,12 +148,12 @@ def get_update_router() -> APIRouter:
                 chunk_level_diff=chunk_level_diff,
             )
 
-            if result.status == "failed":
+            if result["status"] == "failed":
                 # Same body as a success, so the client can read the error and
                 # retry this document; the status code still says it failed.
                 return JSONResponse(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    content=result.model_dump(mode="json"),
+                    content=jsonable_encoder(result),
                 )
             return result
 

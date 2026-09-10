@@ -194,11 +194,9 @@ async def test_incremental_update_full_flow(incremental_env):
     text_v2 = text_v1[:edit_start] + insertion + " CHANGED " + text_v1[mid_next:]
 
     result = await update_like_an_api_request(data_id, text_v2, dataset.id, user=user)
-    assert (result.mode, result.status) == ("incremental", "updated"), (
-        f"chunk-level path did not run: {result}"
-    )
-    assert result.chunks.deleted == 2
-    assert result.chunks.kept == len(old_nodes) - 2
+    assert result["status"] == "incremental", f"chunk-level path did not run: {result}"
+    assert result["deleted_chunks"] == 2
+    assert result["kept_chunks"] == len(old_nodes) - 2
     assert await _stored_text(user, data_id) == text_v2
 
     new_nodes = await _doc_chunk_nodes(data_id, text_v2)
@@ -228,9 +226,9 @@ async def test_incremental_update_full_flow(incremental_env):
         + "MULTI TAIL LINE\n"
     )
     result_multi = await update_like_an_api_request(data_id, text_multi, dataset.id, user=user)
-    assert (result_multi.mode, result_multi.status) == ("incremental", "updated")
-    assert result_multi.chunks.regions == 3, f"expected three regions: {result_multi}"
-    assert result_multi.chunks.kept >= total_before - 6, (
+    assert result_multi["status"] == "incremental"
+    assert result_multi["regions"] == 3, f"expected three regions: {result_multi}"
+    assert result_multi["kept_chunks"] >= total_before - 6, (
         f"disjoint edits must keep the untouched middle: {result_multi}"
     )
     assert await _stored_text(user, data_id) == text_multi
@@ -289,7 +287,8 @@ async def test_incremental_update_full_flow(incremental_env):
     # Retry with the same content: stored chunks no longer tile the stored
     # text (old + new region chunks coexist), so the full update takes over.
     retry = await update_like_an_api_request(data_id, text_v5, dataset.id, user=user)
-    assert retry.mode == "full_rebuild", "retry after crash must fall back to the full update"
+    assert retry["status"] == "full_rebuild", "retry after crash must fall back to the full update"
+    assert retry["fallback"]["reason"] == "chunks_not_tiling", retry["fallback"]
     # The full update is pinned to the existing row too, so callers keep the
     # same handle even when incremental preconditions fail.
     healed_data = (await get_dataset_data(dataset.id))[0]
@@ -320,7 +319,7 @@ async def test_incremental_update_full_flow(incremental_env):
         f"{healed_data.name}.{healed_data.original_extension}",
     )
     result6 = await update_like_an_api_request(data_id, [upload], dataset.id, user=user)
-    assert (result6.mode, result6.status) == ("incremental", "updated"), (
+    assert result6["status"] == "incremental", (
         f"single-UploadFile update must run chunk-level: {result6}"
     )
     healed_text = await _stored_text(user, data_id)

@@ -191,7 +191,7 @@ async def _scenario():
     insert_at = sum(len(p) for p in paragraphs[:3])
     text_v2 = text_v1[:insert_at] + _para("x", "ENTX") + text_v1[insert_at:]
     result = await cognee.update(data_id, text_v2, dataset.id, user=user)
-    assert (result.mode, result.status) == ("incremental", "updated"), result
+    assert isinstance(result, dict) and result.get("status") == "incremental", result
 
     data_id = (await get_dataset_data(dataset.id))[0].id
     stored = await _read_processed_text((await get_data(user.id, data_id)).raw_data_location)

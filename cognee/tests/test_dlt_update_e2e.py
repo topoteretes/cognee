@@ -16,7 +16,6 @@ import json
 import dlt
 
 import cognee
-from cognee.api.v1.update import UpdateResult
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.methods import get_datasets
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -71,10 +70,10 @@ async def main():
     result = await cognee.update(
         manifest.id, dlt.resource(ROWS_V2, name="people", primary_key="id"), dataset.id, user=user
     )
-    assert isinstance(result, UpdateResult), result
-    assert (result.status, result.mode) == ("updated", "full_rebuild"), result
-    assert result.fallback.reason.value == "no_baseline", result.fallback
-    assert "dlt_source cognify route" in result.fallback.detail, result.fallback
+    assert result["status"] == "full_rebuild", result
+    assert result["fallback"]["reason"] == "no_baseline", result["fallback"]
+    assert "dlt_source cognify route" in result["fallback"]["detail"], result["fallback"]
+    assert result["data_id"] == manifest.id and result["regions"] is None, result
 
     rows = await get_dataset_data(dataset.id)
     assert len(rows) == 1 and rows[0].id == manifest.id, (

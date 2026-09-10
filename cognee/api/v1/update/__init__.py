@@ -1,2 +1,2 @@
-from .result import ChunkChanges, UpdateResult
+from .result import UpdateResult
 from .update import update
