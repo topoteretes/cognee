@@ -430,7 +430,10 @@ async def test_a_named_target_counts_its_group_under_every_spelling(monkeypatch)
     context = await BroadRetriever().get_context_from_objects("q", result)
 
     assert result.total == 3
-    assert match_inputs == []  # "Megha" is a merged spelling of Megha-gbs: matched by code
+    # "Megha" is a merged spelling of Megha-gbs: known by code, and the model is
+    # asked only whether any other name is the same person, anchored on that.
+    assert "already known to be it: Megha-gbs" in match_inputs[0]
+    assert "Akshats-git" in match_inputs[0] and "\nMegha-gbs" not in match_inputs[0]
     assert "TOTAL: 3" in context
     assert 'assignee is Megha-gbs (the names matching "Megha")' in context
     assert all(f"#{issue}" in context for issue in ("1", "2", "4"))
@@ -440,7 +443,8 @@ async def test_a_named_target_counts_its_group_under_every_spelling(monkeypatch)
 @pytest.mark.asyncio
 async def test_a_target_the_text_declares_equal_needs_no_model_call(monkeypatch):
     """ "Ann-dev, usually called Ann": asking about Ann finds Ann-dev by code, even when
-    the alias group came back as one comma-joined string."""
+    the alias group came back as one comma-joined string, and even if the model adds
+    nothing. When Ann-dev is the only name there is nothing left to ask the model."""
     shard = ShardItems(
         items=[
             ExtractedItem(unit=0, key="#1", group="Ann-dev", evidence="#1 to Ann-dev"),
@@ -454,15 +458,19 @@ async def test_a_target_the_text_declares_equal_needs_no_model_call(monkeypatch)
         models.append(model)
         if model is ShardItems:
             return shard
+        if model is TargetMatch:
+            return TargetMatch(names=[])
         return NameGroups(groups=[["Ann-dev"], ["Bob"]])
 
     _stub_llm(monkeypatch, respond)
     plan = CountPlan(source="text", item="a ticket", group_by="assignee", target="Ann")
+    retriever = BroadRetriever(shard_tokens=10_000)
 
-    result = await BroadRetriever(shard_tokens=10_000).count_by_reading(plan, _units(2, words=2))
+    result = await retriever.count_by_reading(plan, _units(2, words=2))
+    alone = await retriever.match_target("Ann", ["Ann-dev"], [["Ann-dev", "Ann"]], {})
 
     assert result.total == 1 and result.target_names == ["Ann-dev"]
-    assert TargetMatch not in models
+    assert alone == ["Ann-dev"] and models.count(TargetMatch) == 1
 
 
 @pytest.mark.asyncio

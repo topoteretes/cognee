@@ -569,12 +569,17 @@ class BroadRetriever(CompletionRetriever):
                 wanted.update(_loose_name(name) for name in group)
         spelling_of = {_loose_name(name): name for name in names}
         spelling_of.update({_loose_name(variant): head for variant, head in canonical.items()})
-        matched = sorted({spelling_of[w] for w in wanted if spelling_of.get(w) in names})
-        if matched:
-            logger.info("BROAD target %r matched %s by spelling", target, matched)
-            return matched
+        by_spelling = sorted({spelling_of[w] for w in wanted if spelling_of.get(w) in names})
+        others = [name for name in names if name not in by_spelling]
+        if not others:
+            return by_spelling
 
-        text_input = f"Name in the question: {target}\n\nNames in the corpus:\n" + "\n".join(names)
+        # The model adds what spelling cannot see (a translation, a code, a nickname
+        # the text never explains), anchored on the spellings already known to match.
+        text_input = f"Name in the question: {target}\n"
+        if by_spelling:
+            text_input += "Corpus names already known to be it: " + ", ".join(by_spelling) + "\n"
+        text_input += "\nNames in the corpus:\n" + "\n".join(others)
         stated = _stated_aliases(aliases)
         if stated:
             text_input += "\n\nStated in the text to be the same:\n" + "\n".join(stated)
@@ -583,8 +588,10 @@ class BroadRetriever(CompletionRetriever):
             system_prompt=_read_prompt("broad_match_target.txt"),
             response_model=TargetMatch,
         )
-        matched = [name for name in names if name in set(result.names)]
-        logger.info("BROAD target %r matched %s", target, matched)
+        matched = by_spelling + [name for name in others if name in set(result.names)]
+        logger.info(
+            "BROAD target %r matched %s (%d by spelling)", target, matched, len(by_spelling)
+        )
         return matched
 
     # --- context / completion -------------------------------------------------------
