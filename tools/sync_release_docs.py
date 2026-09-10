@@ -98,22 +98,13 @@ def _cookie_scheme() -> dict:
     return {"type": "apiKey", "in": "cookie", "name": default_transport.cookie_name}
 
 
-# Mintlify compiles every `description` in the spec as MDX, not as the CommonMark
-# the OpenAPI spec says the field holds. MDX gives `{` and `<` JSX meaning, so a
-# docstring that mentions `{"source": "crm"}` or `<int>` is a *syntax error* there.
-# Mintlify does not fail the build on one: it drops the whole description to raw
-# text, so the page still renders but the headings, bullets and bold markup show up
-# as literal `##`, `-` and `**`. Twelve description fields shipped that way.
-#
-# Escaping with a backslash is the fix that costs nothing elsewhere: `\{` and `\<`
-# are valid CommonMark escapes too, so the published spec stays correct for Swagger
-# UI, client generators and anything else that reads it — rendered output is
-# byte-identical. Code spans and fences are left alone; MDX does not interpret
-# their contents, and escaping inside them would show the backslashes.
-#
-# A run of backticks opens a span that a matching run closes, which covers ``` fences,
-# ordinary spans, and the ``inline literals`` these reStructuredText-flavoured
-# docstrings use.
+# Mintlify compiles every `description` as MDX, where `{` opens a JS expression and
+# `<` opens a JSX tag. So `{"source": "crm"}` or `<int>` in a docstring is a syntax
+# error, and Mintlify drops that description to raw text instead of failing — the
+# page renders with its `##` and `**` showing literally. Backslash escapes cost
+# nothing elsewhere: `\{` and `\<` are valid CommonMark too, so the spec stays
+# correct for every other reader. Code spans keep their contents; a run of backticks
+# opens one and a matching run closes it, covering fences and ``RST literals`` alike.
 _CODE_SPAN = re.compile(r"(`+)[\s\S]*?\1")
 
 
