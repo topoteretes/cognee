@@ -6,7 +6,7 @@ Choose the source:
 
 Fields:
 - entity_types: for source "entities", the exact type names from the list that the counted things belong to. Empty for "text".
-- item: one countable item in plain words, general enough to cover the items of anyone or anything ("an issue assignment", "a received shipment"). Never put the target's name in it.
+- item: one countable item in plain words, general enough to cover the items of anyone or anything ("an issue assignment", "a received shipment"). Never put the target's name in it. Keep every qualifier the question gives: a verb such as imported, delivered, paid, shipped or opened means the event actually happened, so records whose status says it did not (cancelled, refunded, rejected, failed, never shipped) are excluded — write that exclusion into the condition ("the shipment was received, not cancelled").
 - name_contains: for source "entities", when the restriction is only that the name contains some text (e.g. "companies with Tech in their name" -> "Tech"), that text; `condition` stays null. Otherwise null.
 - literal_terms: for source "text", ONLY when the question asks how many times a word or name is mentioned, appears or is used (e.g. "How many times is Paris mentioned?"), the exact spellings to match, with capitalization as written in the text. Code counts whole-word matches exactly. Empty for everything else — never for rows, records, events, or anything that needs reading to recognize.
 - condition: a restriction beyond the item that needs reading, written out in full with its values ("arrived late, in March 2026"), or null. Never "is mentioned", "exists" or "appears in the text"; never a reference to another field ("the target").
