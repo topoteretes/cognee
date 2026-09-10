@@ -130,6 +130,40 @@ def test_mapping_same_name_different_type_is_two_nodes():
     assert sorted(node.id for node in graph.nodes) == ["organization:apple", "product:apple"]
 
 
+def test_mapping_same_span_keeps_highest_confidence_type():
+    graph = knowledge_graph_from_gliner_result(
+        {
+            "entities": {
+                "organization": [{"text": "Audi", "confidence": 0.9, "start": 0, "end": 4}],
+                "car": [{"text": "e-tron", "confidence": 0.61, "start": 14, "end": 20}],
+                "electric_car": [{"text": "e-tron", "confidence": 0.89, "start": 14, "end": 20}],
+            },
+            "relation_extraction": {"produces": [["Audi", "e-tron"]]},
+        }
+    )
+
+    assert sorted(node.id for node in graph.nodes) == [
+        "electric_car:e-tron",
+        "organization:audi",
+    ]
+    assert [
+        (edge.source_node_id, edge.relationship_name, edge.target_node_id) for edge in graph.edges
+    ] == [("organization:audi", "produces", "electric_car:e-tron")]
+
+
+def test_mapping_same_text_at_different_spans_keeps_both_types():
+    graph = knowledge_graph_from_gliner_result(
+        {
+            "entities": {
+                "person": [{"text": "Paris", "confidence": 0.8, "start": 0, "end": 5}],
+                "city": [{"text": "Paris", "confidence": 0.9, "start": 20, "end": 25}],
+            }
+        }
+    )
+
+    assert sorted(node.id for node in graph.nodes) == ["city:paris", "person:paris"]
+
+
 def test_mapping_ids_are_stable_across_calls():
     first = knowledge_graph_from_gliner_result(APPLE_RESULT)
     second = knowledge_graph_from_gliner_result(APPLE_RESULT)
@@ -513,7 +547,7 @@ async def test_task_returns_text_summaries_and_hands_graphs_to_extract_graph_fro
     assert call["texts"] == [c.text for c in chunks]
     assert call["schema"].entity_types == {"person": "", "organization": "", "location": ""}
     assert call["overlap_policy"] == "longest"
-    assert call["include_spans"] is False
+    assert call["include_confidence"] is True and call["include_spans"] is True
     assert call["chunk_size"] == 384 and call["chunk_overlap"] == 64
 
     assert (stats.chunks, stats.nodes, stats.candidate_edges, stats.kept_edges) == (2, 10, 4, 4)

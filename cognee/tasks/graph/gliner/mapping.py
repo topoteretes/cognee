@@ -5,11 +5,11 @@ GLiNER returns strings, not offsets::
     {"entities": {type: [name, ...]},
      "relation_extraction": {relation: [[head, tail], ...]}}
 
-Every ``(type, name)`` pair becomes one ``Node`` whose id is derived from the
+Every surviving ``(type, name)`` pair becomes one ``Node`` whose id is derived from the
 type and the normalized name, so the same mention repeated in a chunk collapses
-to a single node while the same name under two types stays two nodes (within
-the chunk — cross-chunk entity identity is name-based downstream, exactly as on
-the LLM path). Relation endpoints are matched to those nodes without offsets:
+to a single node. Competing types for the same span keep the highest-confidence
+one; the same name at different spans may remain distinct. Relation endpoints
+are matched to those nodes without offsets:
 exact normalized match first, then unambiguous containment. Pairs that do not
 resolve are dropped and counted, never guessed.
 """
@@ -69,12 +69,28 @@ def _mention_text(mention: Any) -> str | None:
 
 
 def iter_entities(result: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
-    """Yield ``(type, mention)`` pairs in GLiNER's output order."""
+    """Yield one ``(type, mention)`` per span, preferring confidence."""
+    winners: dict[tuple[Any, Any], tuple[float, str, str]] = {}
     for type_name, mentions in (result or {}).get("entities", {}).items():
         for mention in mentions or ():
             text = _mention_text(mention)
-            if text:
-                yield str(type_name), text
+            if not text:
+                continue
+            has_span = isinstance(mention, Mapping) and all(
+                isinstance(mention.get(field), int) for field in ("start", "end")
+            )
+            key = (
+                (mention["start"], mention["end"])
+                if has_span
+                else (normalize_key(type_name), normalize_key(text))
+            )
+            confidence = mention.get("confidence", 0.0) if isinstance(mention, Mapping) else 0.0
+            candidate = (float(confidence), str(type_name), text)
+            if key not in winners or candidate[:2] > winners[key][:2]:
+                winners[key] = candidate
+
+    for _, type_name, text in winners.values():
+        yield type_name, text
 
 
 def iter_relations(result: Mapping[str, Any]) -> Iterator[tuple[str, str, str]]:
