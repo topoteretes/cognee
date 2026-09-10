@@ -41,6 +41,10 @@ def node_id_for(type_name: str, name: str) -> str:
     return f"{normalize_key(type_name)}:{normalize_key(name)}"
 
 
+def _contains_name(container: str, name: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", container) is not None
+
+
 @dataclass(frozen=True)
 class MappedChunk:
     """A chunk's graph plus the edge bookkeeping the demo reports."""
@@ -101,17 +105,18 @@ class _EndpointIndex:
             return None
 
         exact = self._by_key.get(key)
-        if exact:
-            # Same name under several types: pick deterministically (by node id).
-            return min(exact)
+        if exact is not None:
+            return exact[0] if len(exact) == 1 else None
 
         # Containment: the endpoint sits inside an entity name (Apple -> Apple Inc.)
         # or an entity name sits inside the endpoint (Cupertino, California -> Cupertino).
-        hits = [k for k in self._by_key if key in k or k in key]
-        if not hits:
-            return None
-        longest = max(hits, key=lambda k: (len(k), k))
-        return min(self._by_key[longest])
+        hits = [
+            node_id
+            for candidate, node_ids in self._by_key.items()
+            if _contains_name(candidate, key) or _contains_name(key, candidate)
+            for node_id in node_ids
+        ]
+        return hits[0] if len(hits) == 1 else None
 
 
 def map_gliner_result(result: Mapping[str, Any]) -> MappedChunk:
