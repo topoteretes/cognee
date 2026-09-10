@@ -7,7 +7,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.agentic_retriever import AgenticRetriever
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.bm25_retriever import BM25ChunksRetriever
-from cognee.modules.retrieval.broad_retriever import BROAD_DEFAULT_TOP_K, BroadRetriever
+from cognee.modules.retrieval.broad_retriever import BroadRetriever
 
 # Retrievers
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
@@ -52,37 +52,6 @@ def _hybrid_lane_top_k(config: dict, key: str, search_top_k: int | None) -> int 
     return min(search_top_k, DEFAULT_HYBRID_LANE_TOP_K)
 
 
-# Global retrieval budget. One value shared by every search type that does not
-# ask for its own — unchanged for existing callers.
-DEFAULT_TOP_K = 15
-
-# Retrieval budget when the caller did not choose one, per search type.
-# A search type belongs here when its unit of retrieval is a different size:
-# BROAD retrieves table ROWS, which cost a fraction of a document chunk, so 15
-# of them is far too narrow to answer an aggregate over a table (SDK-324).
-#
-# HYBRID_COMPLETION maps to None deliberately: it splits one budget across a
-# chunk lane and an entity lane and owns its own per-lane defaults, so handing
-# it a resolved number silently overrides them. Anything absent from this map
-# gets DEFAULT_TOP_K, which is what every caller saw before.
-SEARCH_TYPE_TOP_K_DEFAULTS: dict[SearchType, int | None] = {
-    SearchType.BROAD: BROAD_DEFAULT_TOP_K,
-    SearchType.HYBRID_COMPLETION: None,
-}
-
-
-def resolve_top_k(query_type: SearchType, top_k: int | None) -> int | None:
-    """The retrieval budget for this search: explicit value wins, else per-type.
-
-    ``top_k=None`` means "the caller did not choose", which is why the public
-    signatures default to None rather than 15 — a hardcoded 15 at the API
-    boundary makes a per-type default unreachable.
-    """
-    if top_k is not None:
-        return top_k
-    return SEARCH_TYPE_TOP_K_DEFAULTS.get(query_type, DEFAULT_TOP_K)
-
-
 async def get_search_type_retriever_instance(
     query_type: SearchType,
     query_text: str,
@@ -106,7 +75,7 @@ async def get_search_type_retriever_instance(
         retriever_specific_config = {}
 
     # Extract common defaults with fallback values from kwargs
-    top_k = resolve_top_k(query_type, kwargs.get("top_k"))
+    top_k = kwargs.get("top_k", 15)
     if top_k is not None and top_k <= 0:
         raise QueryValidationError(message="top_k must be a positive integer.")
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
@@ -162,21 +131,6 @@ async def get_search_type_retriever_instance(
                 "node_name": node_name,
                 "node_name_filter_operator": node_name_filter_operator,
                 "wide_search_top_k": wide_search_top_k,
-            },
-        ),
-        SearchType.BROAD: (
-            BroadRetriever,
-            {
-                "system_prompt_path": system_prompt_path,
-                "top_k": top_k,
-                "system_prompt": system_prompt,
-                "session_id": session_id,
-                "response_model": retriever_specific_config.get("response_model", str),
-                "include_references": include_references,
-                "node_name": node_name,
-                "node_name_filter_operator": node_name_filter_operator,
-                "max_context_rows": retriever_specific_config.get("max_context_rows"),
-                "max_context_chunks": retriever_specific_config.get("max_context_chunks"),
             },
         ),
         SearchType.HYBRID_COMPLETION: (
@@ -322,6 +276,24 @@ async def get_search_type_retriever_instance(
                 "neighborhood_depth": neighborhood_depth,
                 "neighborhood_seed_top_k": neighborhood_seed_top_k,
                 "include_references": include_references,
+            },
+        ),
+        # No top_k or wide_search_top_k: BROAD ranks the whole graph and the
+        # LLM's context window decides how much of it goes in (SDK-324).
+        SearchType.BROAD: (
+            BroadRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "node_type": node_type,
+                "node_name": node_name,
+                "node_name_filter_operator": node_name_filter_operator,
+                "system_prompt": system_prompt,
+                "triplet_distance_penalty": triplet_distance_penalty,
+                "feedback_influence": feedback_influence,
+                "session_id": session_id,
+                "response_model": retriever_specific_config.get("response_model", str),
+                "include_references": include_references,
+                "context_window_tokens": retriever_specific_config.get("context_window_tokens"),
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (

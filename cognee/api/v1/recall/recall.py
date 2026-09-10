@@ -38,7 +38,6 @@ from cognee.modules.recall.types.RecallResponse import (
     ResponseToolEntry,
 )
 from cognee.modules.recall.types.SearchResultItem import SearchResultItem
-from cognee.modules.search.methods.get_search_type_retriever_instance import DEFAULT_TOP_K
 from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
 from cognee.modules.search.types import ContextFormat, SearchResult, SearchType
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
@@ -343,7 +342,7 @@ async def recall(
     *,
     datasets: list[str] | None = None,
     dataset_ids: list[UUID] | None = None,
-    top_k: int | None = None,
+    top_k: int = 15,
     auto_route: bool = True,
     scope: str | list[str] | None = None,
     system_prompt: str | None = None,
@@ -449,11 +448,6 @@ async def recall(
 
     # Pass the User through rather than pre-resolving its id: send_telemetry
     # reads both id and tenant_id off it.
-    # Session and trace lanes rank in Python and slice with ``scored[:top_k]``,
-    # where None would mean 'the whole list'. They take the global default when
-    # the caller did not choose; only the graph lane forwards None, so the
-    # per-search-type default can still apply there (SDK-324).
-    session_top_k = top_k if top_k is not None else DEFAULT_TOP_K
     telemetry_user = user or "sdk"
 
     # Resolve scope → concrete source list. "auto" (the default) picks
@@ -577,7 +571,7 @@ async def recall(
                     await _search_session(
                         query_text=query_text,
                         session_id=session_id,
-                        top_k=session_top_k,
+                        top_k=top_k,
                         user=user,
                     )
                 )
@@ -589,7 +583,7 @@ async def recall(
                     await _search_trace(
                         query_text=query_text,
                         session_id=session_id,
-                        top_k=session_top_k,
+                        top_k=top_k,
                         user=user,
                     )
                 )

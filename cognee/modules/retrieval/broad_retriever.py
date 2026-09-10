@@ -1,418 +1,132 @@
-"""BROAD: wide retrieval over row-shaped data with a bounded prompt (SDK-324).
+"""BROAD search type: graph completion sized to the model's context window (SDK-324).
 
-Row-shaped sources (CSV and anything else ingested through DLT) land one
-``DltRow`` node per row in its own ``DltRow_text`` collection — document chunk
-search is documents-only and deliberately excludes them. Rows are small, so the
-retrieval budget that suits a document chunk is far too narrow here: the
-default ``top_k`` of 15 answers "who has the most issues assigned?" from 15 of
-140 rows and returns a confident, plausible, wrong name. Nothing errors, so the
-caller cannot tell a truncated answer from a correct one.
-
-BROAD changes two things and nothing else:
-
-* it retrieves with its own wide default (``BROAD_DEFAULT_TOP_K``) instead of
-  the global 15, because a row costs a fraction of a chunk; and
-* it bounds what reaches the prompt by a RECORD COUNT whose value depends on
-  whether rows or document chunks answered, so widening retrieval cannot grow
-  the completion input without limit.
-
-The cap is per-unit rather than a single number because a row and a document
-chunk differ in size by two orders of magnitude: 500 rows is a modest prompt,
-500 chunks is millions of characters. Text itself is concatenated whole, as in
-every other retriever.
-
-Widening alone is NOT enough, and this was measured rather than assumed. With
-all 140 rows of the SDK-324 CSV in context the model still answered "Akshats-git
-and koopatroopa787, 5 each" — the right name, an invented tie, because
-koopatroopa787 has 4. An LLM asked to count 140 rows miscounts whether or not
-the set was truncated. So BROAD counts in Python: it parses the row fields,
-computes exact per-column value frequencies over the FULL retrieved set, and
-puts that table in front of the evidence. The model reads a number instead of
-deriving one. That is the "defined notion of what is being counted" the issue
-asks for: per-column value frequency over every row retrieved.
-
-Rows repeat their table's schema header verbatim in every row's text (see
-``_build_schema_context_text``). Emitting it once and stripping it from the
-remaining rows is what makes the budget go far enough to hold a whole small
-table — on the SDK-324 CSV it is the difference between ~40 and all 140 rows.
+GRAPH_COMPLETION ranks triplets against the query and keeps the ``top_k`` best,
+drawn from the neighbourhood of the 100 nearest nodes. Questions that need the
+whole dataset in view ("who has the most ...", "how many ...") see a sliver of it
+that way. BROAD ranks every triplet in the graph with the same scorer and keeps
+as many as the configured LLM's context window holds: ``top_k`` is not an input,
+the model's window is the budget.
 """
 
-import re
-from collections import Counter
-from typing import Any
+import sys
 
-from cognee.infrastructure.databases.vector import get_vector_engine_async
-from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.modules.retrieval.completion_retriever import CompletionRetriever
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+import litellm
+
+from cognee.infrastructure.llm.config import get_llm_context_config
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.completion import build_completion_prompts
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("BroadRetriever")
 
-# Retrieval budget. Rows are small, so this buys breadth cheaply; the prompt is
-# bounded separately by the per-unit record caps, so a wide value here can
-# never on its own blow up the completion input.
-BROAD_DEFAULT_TOP_K = 500
+# Rank every triplet in the graph; the context window, not a count, cuts the list.
+ALL_TRIPLETS = sys.maxsize
 
-# How many retrieved records may be formatted into the completion prompt.
-#
-# The cap keys off WHAT was retrieved, because the two collections hold units
-# that differ in size by two orders of magnitude. A row is ~150-500 chars, so
-# hundreds cost less than one chunk; a document chunk at the default budget is
-# ~32k chars, so a handful is already a large prompt. One shared number would
-# either throw away the rows BROAD exists to count or send 500 chunks to the
-# model. There is deliberately no character ceiling — context length is the
-# caller's business here, exactly as in the other retrievers.
-BROAD_MAX_CONTEXT_ROWS = 5_000
-BROAD_MAX_CONTEXT_CHUNKS = 15
-
-# Row text is written as "<schema header>\n\nRow Data:\n<fields>". Rows from one
-# table repeat the header verbatim, so it is emitted once and elided after that.
-_ROW_DATA_MARKER = "Row Data:"
-
-# Row-shaped collections first; document chunks are the fallback so BROAD still
-# answers on corpora ingested through the plain (non-DLT) cognify flow.
-BROAD_ROW_COLLECTION = "DltRow_text"
-BROAD_FALLBACK_COLLECTION = "DocumentChunk_text"
+# Share of the window held back for what the budget cannot count exactly:
+# tokenizer drift (context is counted with tiktoken, not the model's own
+# tokenizer) and the session history / preference text added at completion time.
+CONTEXT_SAFETY_MARGIN = 0.05
 
 
-def _split_schema_header(text: str) -> tuple[str, str]:
-    """Split row text into (schema header, row body).
+def resolve_context_window(context_window_tokens: int | None = None) -> int:
+    """Input-token window of the configured LLM; an explicit value wins.
 
-    Returns ``("", text)`` when the text carries no recognisable header, which
-    is the case for ordinary document chunks on the fallback path.
+    Raises when litellm does not know the model, since BROAD cannot size its
+    context without a window — pass ``context_window_tokens`` for such models.
     """
-    marker_at = text.find(_ROW_DATA_MARKER)
-    if marker_at == -1:
-        return "", text
-    return text[:marker_at].rstrip(), text[marker_at:]
+    if context_window_tokens is not None:
+        return context_window_tokens
+
+    model = get_llm_context_config().llm_model
+    try:
+        window = litellm.get_model_info(model).get("max_input_tokens")
+    except Exception as error:
+        raise ValueError(
+            f"BROAD search needs the context window of {model!r}, which litellm does not "
+            "know. Pass retriever_specific_config={'context_window_tokens': <int>}."
+        ) from error
+    if not window:
+        raise ValueError(
+            f"litellm reports no max_input_tokens for {model!r}. "
+            "Pass retriever_specific_config={'context_window_tokens': <int>}."
+        )
+    return window
 
 
-# --- deterministic aggregation ---------------------------------------------
-# Two row renderings exist and BROAD has to count both, because which one a CSV
-# gets depends only on whether the `dlt` extra is installed:
-#
-#   DLT route   (DltRow)      "Row Data:" then "  col: value" lines
-#                             one row per retrieved record, values may span lines
-#   plain route (csv_loader)  "Row 7:" then "col: value, col: value, ..."
-#                             MANY rows per retrieved chunk, all on one line
-#
-# A row line in the DLT form is exactly two spaces, a column name, a colon and
-# the value. Anything else is a continuation — free-text columns such as `notes`
-# legitimately contain newlines.
-_ROW_FIELD = re.compile(r"^  (\w+): ?(.*)$")
+class BroadRetriever(GraphCompletionRetriever):
+    """GRAPH_COMPLETION over the whole graph, cut by the LLM's context window."""
 
-# Start of a csv_loader row block: "Row 7:" on its own line.
-_PLAIN_ROW_HEADER = re.compile(r"^Row (\d+):$", re.MULTILINE)
+    def __init__(self, context_window_tokens: int | None = None, **kwargs):
+        super().__init__(top_k=ALL_TRIPLETS, **kwargs)
+        # Score the whole graph rather than the neighbourhood of the nearest
+        # nodes: an aggregate question needs every record to be a candidate.
+        self.wide_search_top_k = None
+        self.context_window_tokens = context_window_tokens
+        self.tokenizer = TikTokenTokenizer()
 
-# csv_loader joins pairs with ", ", and free-text values contain commas too, so
-# split only where a comma is followed by something that really looks like a
-# column name and a colon. build_aggregate_block additionally refuses the parse
-# unless the recovered column set agrees across rows, which is what catches a
-# bad split rather than silently counting garbage.
-_PLAIN_PAIR_SPLIT = re.compile(r",\s+(?=[A-Za-z_][A-Za-z0-9_]*:\s)")
+    def count_tokens(self, text: str) -> int:
+        return len(self.tokenizer.extract_tokens(text))
 
-# Private key carrying a csv_loader row's source index. Stripped before counting.
-_ROW_INDEX_KEY = "__row_index__"
-
-# Fraction of rows that must share one column set before the parse is trusted.
-_MIN_CONSISTENT_SHAPE_RATIO = 0.8
-
-# Values longer than this on average mark a free-text column (notes, comments).
-# Counting them produces one bucket per row and tells the reader nothing.
-_MAX_CATEGORICAL_VALUE_LEN = 80
-
-# Per column, how many of the most common values to show.
-_TOP_VALUES_PER_COLUMN = 10
-
-# A column whose values are this close to all-distinct is an identifier
-# (issue_number, uuid, primary key). Its frequency table is noise: it costs
-# context budget and can only mislead a ranking question.
-_IDENTIFIER_DISTINCT_RATIO = 0.9
-
-# Values that mean "no value" in a DLT row rendering.
-_EMPTY_VALUES = {"", "None", "null", "NULL", "nan"}
-
-
-def parse_row_fields(text: str) -> dict[str, str]:
-    """Extract ``{column: value}`` from a row's ``Row Data:`` block."""
-    marker_at = text.find(_ROW_DATA_MARKER)
-    if marker_at == -1:
-        return {}
-    fields: dict[str, str] = {}
-    last_key: str | None = None
-    for line in text[marker_at + len(_ROW_DATA_MARKER) :].splitlines():
-        match = _ROW_FIELD.match(line)
-        if match:
-            last_key = match.group(1)
-            fields[last_key] = match.group(2).strip()
-        elif last_key is not None and line.strip():
-            # Continuation of a multi-line value.
-            fields[last_key] = f"{fields[last_key]} {line.strip()}"
-    return fields
-
-
-def parse_plain_rows(text: str) -> list[dict[str, str]]:
-    """Extract every ``Row N:`` block from a csv_loader chunk.
-
-    A document chunk holds several rows, not one, so this returns a list.
-    """
-    rows: list[dict[str, str]] = []
-    parts = _PLAIN_ROW_HEADER.split(text)
-    # split() with one capture group yields [pre, index, block, index, block, ...]
-    for index, block in zip(parts[1::2], parts[2::2]):
-        line = block.strip().split("\n\n", 1)[0].replace("\n", " ").strip()
-        if not line:
-            continue
-        fields: dict[str, str] = {}
-        for part in _PLAIN_PAIR_SPLIT.split(line):
-            key, sep, value = part.partition(":")
-            key = key.strip()
-            if sep and key and " " not in key:
-                fields[key] = value.strip()
-        if fields:
-            # The source row number rides along so build_aggregate_block can tell
-            # whether chunking dropped rows at a boundary. It is stripped before
-            # counting.
-            fields[_ROW_INDEX_KEY] = index
-            rows.append(fields)
-    return rows
-
-
-def parse_rows(text: str) -> list[dict[str, str]]:
-    """Every row this retrieved record carries, in whichever rendering."""
-    fields = parse_row_fields(text)
-    if fields:
-        return [fields]
-    return parse_plain_rows(text)
-
-
-def build_aggregate_block(retrieved_objects: Any, retrieval_capped: bool = False) -> str:
-    """Exact per-column value frequencies over every retrieved row.
-
-    Returns "" when the retrieved objects are not rows (the document-chunk
-    fallback), and when ``retrieval_capped`` says the rows are only a sample of
-    a larger table — in both cases BROAD degrades to plain wide RAG rather than
-    putting a number in front of the model that does not mean what it says.
-    """
-    if retrieval_capped:
-        # Measured on a 2000-row table with the default top_k of 500: the block
-        # read "EXACT COUNTS computed over all 500 retrieved rows" and the model
-        # answered 321 where the truth was 676. Every word of that header was
-        # true and the answer was still wrong by half, because "all retrieved
-        # rows" is not "the table" and nobody reads it that way. A count is only
-        # worth stating when it is a count of everything.
-        logger.info("BROAD: retrieval hit its top_k cap - rows are a sample, omitting exact counts")
-        return ""
-    parsed: list[dict[str, str]] = []
-    for found in retrieved_objects:
-        payload = getattr(found, "payload", None) or {}
-        parsed.extend(parse_rows(payload.get("text") or ""))
-    if not parsed:
-        return ""
-
-    # Refuse an unreliable parse rather than count garbage. Rows of one table
-    # render the same column set every time; if most of them disagree, the split
-    # went wrong (a free-text value that happens to look like "key: ") and any
-    # total built on it would be quietly incorrect.
-    # Chunking does not respect row boundaries: a "Row 7:" block can be cut in
-    # half, so the document route loses rows silently. csv_loader numbers its
-    # rows, which makes the loss measurable — and where any row is missing this
-    # emits NOTHING rather than a short total.
-    #
-    # Exact or nothing is the only safe rule here. A tally labelled approximate
-    # is still a number in front of the model, and it will trust it over its own
-    # reading of the rows: on this CSV a 3-row loss turned one assignee's 4 into
-    # a 3 while leaving the header's caveat easy to ignore. Handing over a
-    # quietly-short count is the precise failure this retriever exists to stop.
-    # With no block, BROAD is still a wide retrieval, which on the document
-    # route already answers the aggregate correctly.
-    #
-    # DltRow records carry no index because each one IS a whole row — nothing
-    # can be lost mid-row — so that route always reports exact.
-    indices = {int(f[_ROW_INDEX_KEY]) for f in parsed if _ROW_INDEX_KEY in f}
-    for fields in parsed:
-        fields.pop(_ROW_INDEX_KEY, None)
-    if indices:
-        missing = (max(indices) - min(indices) + 1) - len(indices)
-        if missing:
-            logger.info(
-                "BROAD: %d row(s) cut across chunk boundaries — omitting exact counts",
-                missing,
+    def context_token_budget(self, query: str) -> int:
+        """Tokens the rendered graph context may use for this query."""
+        window = resolve_context_window(self.context_window_tokens)
+        user_prompt, system_prompt = build_completion_prompts(
+            query=query,
+            context="",
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
+        )
+        prompt_shell = self.count_tokens(user_prompt) + self.count_tokens(system_prompt)
+        # litellm's max_input_tokens is the whole window for some models (shared
+        # with the output) and input-only for others; reserving the configured
+        # completion length is correct for both.
+        output_reserve = get_llm_context_config().llm_max_completion_tokens
+        budget = window - prompt_shell - output_reserve - int(window * CONTEXT_SAFETY_MARGIN)
+        if budget <= 0:
+            raise ValueError(
+                f"A context window of {window} tokens leaves no room for BROAD context "
+                f"after the prompt ({prompt_shell}) and output ({output_reserve}) reserves."
             )
-            return ""
+        return budget
 
-    shapes = Counter(tuple(sorted(fields)) for fields in parsed)
-    dominant_shape, dominant_count = shapes.most_common(1)[0]
-    if dominant_count / len(parsed) < _MIN_CONSISTENT_SHAPE_RATIO:
+    async def fit_to_window(self, query: str, triplets: list[Edge]) -> list[Edge]:
+        """Longest best-first prefix of ``triplets`` whose rendered text fits the budget.
+
+        Rendered size only grows with the prefix, so a binary search finds the
+        cut in log2(n) renders.
+        """
+        budget = self.context_token_budget(query)
+        low, high = 0, len(triplets)
+        while low < high:
+            mid = (low + high + 1) // 2
+            if self.count_tokens(await self.resolve_edges_to_text(triplets[:mid])) <= budget:
+                low = mid
+            else:
+                high = mid - 1
+
         logger.info(
-            "BROAD: row parse inconsistent (%d/%d share a column set) - no exact counts",
-            dominant_count,
-            len(parsed),
+            "BROAD context: %d of %d ranked triplets fit the %d-token budget",
+            low,
+            len(triplets),
+            budget,
         )
-        return ""
-    parsed = [fields for fields in parsed if tuple(sorted(fields)) == dominant_shape]
+        return triplets[:low]
 
-    columns: dict[str, Counter] = {}
-    lengths: dict[str, list[int]] = {}
-    for fields in parsed:
-        for key, value in fields.items():
-            columns.setdefault(key, Counter())[value] += 1
-            lengths.setdefault(key, []).append(len(value))
+    async def get_retrieved_objects(
+        self, query: str | None = None, query_batch: list[str] | None = None
+    ) -> list[Edge] | list[list[Edge]]:
+        """Rank every triplet, then keep what fits the window.
 
-    sections: list[str] = []
-    for column, counter in columns.items():
-        mean_len = sum(lengths[column]) / len(lengths[column])
-        if mean_len > _MAX_CATEGORICAL_VALUE_LEN:
-            continue  # free text, not a category
-        populated = Counter(
-            {value: n for value, n in counter.items() if value not in _EMPTY_VALUES}
-        )
-        if not populated or max(populated.values()) < 2:
-            continue  # every value unique — an identifier, nothing to count
-        if len(populated) / sum(populated.values()) > _IDENTIFIER_DISTINCT_RATIO:
-            continue  # near-unique: an identifier column, not a category
-        empty = sum(n for value, n in counter.items() if value in _EMPTY_VALUES)
-        head = "\n".join(
-            f"    {value}: {n}" for value, n in populated.most_common(_TOP_VALUES_PER_COLUMN)
-        )
-        more = len(populated) - _TOP_VALUES_PER_COLUMN
-        tail = f"\n    (+{more} more distinct values, all with lower counts)" if more > 0 else ""
-        sections.append(
-            f'  Column "{column}" — {sum(populated.values())} non-empty values, '
-            f"{len(populated)} distinct"
-            + (f", {empty} empty" if empty else "")
-            + f":\n{head}{tail}"
-        )
-
-    if not sections:
-        return ""
-
-    body = "\n".join(sections)
-    return (
-        f"EXACT COUNTS computed over all {len(parsed)} retrieved rows.\n"
-        "These were counted programmatically, not estimated. For any question about "
-        "which value occurs most, how many, or ranking by frequency, use these numbers "
-        "directly and do not recount the rows below.\n"
-        f"{body}\n"
-    )
-
-
-class BroadRetriever(CompletionRetriever):
-    """Wide row retrieval with a character-bounded completion context."""
-
-    def __init__(
-        self,
-        *args: Any,
-        max_context_rows: int | None = None,
-        max_context_chunks: int | None = None,
-        **kwargs: Any,
-    ) -> None:
-        kwargs.setdefault("top_k", BROAD_DEFAULT_TOP_K)
-        super().__init__(*args, **kwargs)
-        self.max_context_rows = (
-            max_context_rows if max_context_rows is not None else BROAD_MAX_CONTEXT_ROWS
-        )
-        self.max_context_chunks = (
-            max_context_chunks if max_context_chunks is not None else BROAD_MAX_CONTEXT_CHUNKS
-        )
-        # Which collection answered, so the record cap can match the unit size.
-        self._served_from_rows = False
-        # Set by get_retrieved_objects: True when the search returned exactly
-        # top_k rows, so the store may hold more than was seen.
-        self._retrieval_capped = False
-
-    async def get_retrieved_objects(self, query: str) -> Any:
-        """Search the row collection, falling back to document chunks.
-
-        The fallback is not a silent degradation: a corpus ingested through the
-        plain cognify flow has no rows at all, and answering it from chunks is
-        the only sensible reading of a BROAD query there.
+        Cutting here rather than at rendering keeps session bookkeeping and
+        evidence references limited to the triplets the LLM actually receives.
         """
-        vector_engine = await get_vector_engine_async()
-
-        for collection in (BROAD_ROW_COLLECTION, BROAD_FALLBACK_COLLECTION):
-            try:
-                found = await vector_engine.search(
-                    collection,
-                    query,
-                    limit=self.top_k,
-                    include_payload=True,
-                    node_name=self.node_name,
-                    node_name_filter_operator=self.node_name_filter_operator,
-                )
-            except CollectionNotFoundError:
-                logger.debug("BROAD: collection %s not present, trying next", collection)
-                continue
-            if found:
-                # Hitting the limit exactly means the store had at least this
-                # many matches and may have had more: the set is a
-                # similarity-ranked SAMPLE, not the table. build_aggregate_block
-                # refuses to call a sample exact.
-                self._retrieval_capped = len(found) >= self.top_k
-                self._served_from_rows = collection == BROAD_ROW_COLLECTION
-                logger.debug(
-                    "BROAD: %s returned %d rows (capped=%s)",
-                    collection,
-                    len(found),
-                    self._retrieval_capped,
-                )
-                return found
-
-        raise NoDataError("No data found in the system, please add data first.")
-
-    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
-        """Format the retrieved records into the completion context.
-
-        Bounded by a RECORD COUNT, not a character budget, and the count that
-        applies depends on which collection answered. Text is concatenated
-        whole, as every other retriever does.
-        """
-        if not retrieved_objects:
-            return ""
-
-        # Counted first, and over the FULL retrieved set — the aggregate must
-        # not depend on how many records survive the cap below.
-        aggregate = build_aggregate_block(retrieved_objects, self._retrieval_capped)
-
-        limit = self.max_context_rows if self._served_from_rows else self.max_context_chunks
-        shown = retrieved_objects[:limit]
-
-        parts: list[str] = [aggregate] if aggregate else []
-        header_emitted = ""
-        for found in shown:
-            payload = getattr(found, "payload", None) or {}
-            text = payload.get("text") or ""
-            if not text:
-                continue
-            header, body = _split_schema_header(text)
-            piece = body
-            if header and header != header_emitted:
-                # First row of a table (or a new table in a multi-table source):
-                # carry its header so the LLM can read the column names.
-                piece = f"{header}\n{body}"
-                header_emitted = header
-            parts.append(piece)
-
-        omitted = len(retrieved_objects) - len(shown)
-        if omitted > 0:
-            # Say it in the context. When the aggregate survived it already
-            # covers everything retrieved, so only the raw evidence is partial.
-            parts.append(
-                f"\n[NOTE: showing {len(shown)} of {len(retrieved_objects)} retrieved "
-                f"records; {omitted} were omitted to bound the prompt."
-                + (
-                    f" The EXACT COUNTS block above still covers all "
-                    f"{len(retrieved_objects)} of them.]"
-                    if aggregate
-                    else " Any count below is over the shown records only.]"
-                )
-            )
-            logger.info(
-                "BROAD context: showing %d/%d records (%s cap)",
-                len(shown),
-                len(retrieved_objects),
-                "row" if self._served_from_rows else "chunk",
-            )
-
-        return "\n".join(parts)
+        ranked = await super().get_retrieved_objects(query=query, query_batch=query_batch)
+        if query_batch:
+            return [
+                await self.fit_to_window(batched_query, batched_triplets)
+                for batched_query, batched_triplets in zip(query_batch, ranked)
+            ]
+        return await self.fit_to_window(query, ranked)

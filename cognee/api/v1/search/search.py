@@ -46,7 +46,7 @@ async def search(
     dataset_ids: list[UUID] | UUID | None = None,
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: str | None = None,
-    top_k: int | None = None,
+    top_k: int = 15,
     node_type: type | None = NodeSet,
     node_name: list[str] | None = None,
     node_name_filter_operator: str = "OR",

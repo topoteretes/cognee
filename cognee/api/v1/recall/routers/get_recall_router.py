@@ -63,9 +63,7 @@ class RecallPayloadDTO(InDTO):
             "/v1/add or /v1/remember). Omit to search all nodes."
         ),
     )
-    # None means 'not chosen' so the per-search-type default applies
-    # downstream (SDK-324); see get_search_router for the same reasoning.
-    top_k: int | None = Field(default=None)
+    top_k: int | None = Field(default=15)
     only_context: bool = Field(default=False)
     context_format: ContextFormat = Field(
         default=ContextFormat.CONTEXT,
@@ -218,7 +216,7 @@ def get_recall_router() -> APIRouter:
         - **query** (str): The search query string
         - **system_prompt** (Optional[str]): System prompt for completion searches
         - **node_name** (Optional[List[str]]): Filter to specific node sets
-        - **top_k** (Optional[int]): Maximum results. Defaults per search type (15 for most, 500 for BROAD).
+        - **top_k** (Optional[int]): Maximum results (default: 15)
         - **only_context** (bool): Return only the LLM context
         - **context_format** (str): Shape of an only_context result — "context"
           (default, the bare retrieval context) or "prompt" (the full envelope a

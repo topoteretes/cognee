@@ -65,11 +65,7 @@ class SearchPayloadDTO(InDTO):
             " (the node_set values used during add/remember)."
         ),
     )
-    # None means 'not chosen': the retriever factory then applies the
-    # per-search-type default (15 for most types, wider for BROAD). A
-    # hardcoded 15 here would make that per-type default unreachable
-    # over HTTP (SDK-324).
-    top_k: int | None = Field(default=None)
+    top_k: int | None = Field(default=15)
     only_context: bool = Field(default=False)
     context_format: ContextFormat = Field(
         default=ContextFormat.CONTEXT,
@@ -218,7 +214,7 @@ def get_search_router() -> APIRouter:
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
         - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
-        - **top_k** (Optional[int]): Maximum number of results to return. Defaults per search type (15 for most, 500 for BROAD).
+        - **top_k** (Optional[int]): Maximum number of results to return (default: 15)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
         - **context_format** str: Shape of an only_context result — "context" (default, the bare retrieval context) or "prompt" (the full envelope a completion would receive: session guidance, conversation history, and the rendered user and system prompts).
         - **session_id** (Optional[str]): Session whose history and guidance feed the completion or the prompt preview; the default session when omitted.
