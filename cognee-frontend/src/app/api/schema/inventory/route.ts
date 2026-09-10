@@ -19,13 +19,21 @@ export async function GET(request: NextRequest) {
   const apiKey = request.headers.get("x-api-key");
   if (apiKey) headers["x-api-key"] = apiKey;
 
-  if (!cookie && !authHeader && !apiKey) {
+  // Server-side default-user login, used only when the browser sent no
+  // credentials at all. It runs only when DEFAULT_USER_PASSWORD is configured:
+  // the default user has no loginable password otherwise, and this route must
+  // never carry a publicly-known credential of its own.
+  const defaultUserPassword = process.env.DEFAULT_USER_PASSWORD;
+  if (!cookie && !authHeader && !apiKey && defaultUserPassword) {
     console.log("[api/schema/inventory] no auth headers, attempting default login");
     try {
       const loginResp = await fetch(`${localApiUrl}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "username=default_user@example.com&password=default_password",
+        body: new URLSearchParams({
+          username: process.env.DEFAULT_USER_EMAIL || "default_user@example.com",
+          password: defaultUserPassword,
+        }).toString(),
       });
       console.log("[api/schema/inventory] login response status:", loginResp.status);
       if (loginResp.ok) {

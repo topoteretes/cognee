@@ -6,7 +6,10 @@ import AuthCard from "@/ui/elements/Auth/AuthCard";
 import { getLocalApiUrl } from "@/modules/users/getLocalApiUrl";
 
 const DEFAULT_EMAIL = "default_user@example.com";
-const DEFAULT_PASSWORD = "default_password";
+// No password prefill: the default user only has a loginable password when the
+// operator sets DEFAULT_USER_PASSWORD, so prefilling a fixed literal would just
+// pre-fail the form (and taught everyone a public superuser credential).
+const DEFAULT_PASSWORD = "";
 
 export default function LocalSignInForm() {
   const localApiUrl = getLocalApiUrl();
