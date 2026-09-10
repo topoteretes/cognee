@@ -1,5 +1,5 @@
 """
-Custom pipeline example: LLM-powered entity extraction on DataPoint objects.
+Custom pipeline example: LLM-powered entity extraction into typed DataPoints.
 
 Demonstrates a custom Task pipeline with typed DataPoint models, field
 annotations, LLM structured output, and per-source freshness tracking via
@@ -28,7 +28,7 @@ from cognee.tasks.storage import add_data_points
 
 DATASET_NAME = "science_claims"
 
-# -- Data models --
+# -- Graph models: what gets stored --
 
 
 class ScientificClaim(DataPoint):
@@ -47,56 +47,78 @@ class Person(DataPoint):
     claims: list[ScientificClaim] | None = None
 
 
-class AnalysisResult(DataPoint):
-    """LLM output model for structured extraction.
+# -- LLM output models: what the model is asked to produce --
+#
+# Kept separate from the DataPoints on purpose. A DataPoint carries id, metadata,
+# versioning and provenance fields, and a structured-output call would hand every
+# one of them to the LLM to fill in. Extract into plain schemas, then build the
+# DataPoints from them so ids, metadata and provenance come from cognee.
 
-    A DataPoint rather than a plain BaseModel so the pipeline's provenance
-    stamping walks into it and reaches the nested Person and ScientificClaim
-    objects; a plain BaseModel would stop the walk and leave their
-    source_content_hash empty. It is never stored — only its contents are.
-    """
 
-    people: list[Person] = Field(default_factory=list)
-    claims: list[ScientificClaim] = Field(default_factory=list)
+class ExtractedPerson(BaseModel):
+    name: str
+    role: str = ""
+
+
+class ExtractedClaim(BaseModel):
+    text: str
+    subject: str = ""
+    confidence: float = 1.0
+
+
+class ExtractionResult(BaseModel):
+    people: list[ExtractedPerson] = Field(default_factory=list)
+    claims: list[ExtractedClaim] = Field(default_factory=list)
+
+
+class ClaimAssignment(BaseModel):
+    person_name: str
+    claim_texts: list[str]
+
+
+class Assignments(BaseModel):
+    assignments: list[ClaimAssignment]
 
 
 # -- Pipeline tasks --
 
 
-async def extract_entities(data_items: list[Data]) -> AnalysisResult:
-    """Read the ingested document(s) and use LLM to extract people and claims."""
+async def extract_entities(data_items: list[Data]) -> list[Person | ScientificClaim]:
+    """Read the ingested document(s) and extract people and claims as DataPoints."""
     text_parts = []
     for data_item in data_items:
         async with open_data_file(data_item.raw_data_location, mode="r", encoding="utf-8") as file:
             text_parts.append(file.read())
 
-    result = await LLMGateway.acreate_structured_output(
+    extraction = await LLMGateway.acreate_structured_output(
         text_input="\n".join(text_parts),
         system_prompt=(
             "Extract all people and scientific claims from the text. "
             "For each person, provide their name and role. "
             "For each claim, provide the claim text, subject, and confidence (0-1)."
         ),
-        response_model=AnalysisResult,
+        response_model=ExtractionResult,
     )
-    return result
+
+    people = [Person(name=p.name, role=p.role) for p in extraction.people]
+    claims = [
+        ScientificClaim(text=c.text, subject=c.subject, confidence=c.confidence)
+        for c in extraction.claims
+    ]
+
+    # Returned as one list of DataPoints so the pipeline stamps provenance —
+    # including the source document's content hash — on every node before the
+    # next task wires them together.
+    return [*people, *claims]
 
 
-async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
+async def link_claims_to_people(nodes: list[Person | ScientificClaim]) -> list[Person]:
     """Associate claims with the people who made them, using LLM."""
-
-    class ClaimAssignment(BaseModel):
-        person_name: str
-        claim_texts: list[str]
-
-    class Assignments(BaseModel):
-        assignments: list[ClaimAssignment]
+    people = [node for node in nodes if isinstance(node, Person)]
+    claims = [node for node in nodes if isinstance(node, ScientificClaim)]
 
     assignments = await LLMGateway.acreate_structured_output(
-        text_input=(
-            f"People: {[p.name for p in analysis.people]}\n"
-            f"Claims: {[c.text for c in analysis.claims]}"
-        ),
+        text_input=(f"People: {[p.name for p in people]}\nClaims: {[c.text for c in claims]}"),
         system_prompt=(
             "Assign each claim to the person who made it or is most associated with it. "
             "Return a list of assignments, each with a person_name and their claim_texts."
@@ -105,15 +127,15 @@ async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
     )
 
     # Build lookup and attach claims to people
-    claim_lookup = {c.text: c for c in analysis.claims}
+    claim_lookup = {c.text: c for c in claims}
     for assignment in assignments.assignments:
-        for person in analysis.people:
+        for person in people:
             if person.name.lower() == assignment.person_name.lower():
                 person.claims = [
                     claim_lookup[t] for t in assignment.claim_texts if t in claim_lookup
                 ]
 
-    return analysis.people
+    return people
 
 
 async def store_and_summarize(people: list[Person]) -> str:
