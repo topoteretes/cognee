@@ -1,9 +1,10 @@
 """
 Custom pipeline example: LLM-powered entity extraction on DataPoint objects.
 
-Demonstrates the deferred-call pipeline pattern (TaskSpec / BoundTask)
-with typed DataPoint models, field annotations, LLM structured output,
-and per-source freshness tracking via source_content_hash.
+Demonstrates a custom Task pipeline with typed DataPoint models, field
+annotations, LLM structured output, and per-source freshness tracking via
+source_content_hash — run against a named dataset so the nodes it stores are
+attributed to that dataset and searchable with recall().
 
 Usage:
     uv run python examples/demos/custom_pipelines/custom_pipeline_single_object_example.py
@@ -17,11 +18,15 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+import cognee
 from cognee.infrastructure.engine import DataPoint, Dedup, Embeddable
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.pipelines.operations.run_pipeline import run_pipeline
-from cognee.modules.pipelines.tasks.task import task
+from cognee.modules.data.models import Data
+from cognee.modules.pipelines import Task
 from cognee.tasks.storage import add_data_points
+
+DATASET_NAME = "science_claims"
 
 # -- Data models --
 
@@ -42,8 +47,14 @@ class Person(DataPoint):
     claims: list[ScientificClaim] | None = None
 
 
-class AnalysisResult(BaseModel):
-    """LLM output model for structured extraction."""
+class AnalysisResult(DataPoint):
+    """LLM output model for structured extraction.
+
+    A DataPoint rather than a plain BaseModel so the pipeline's provenance
+    stamping walks into it and reaches the nested Person and ScientificClaim
+    objects; a plain BaseModel would stop the walk and leave their
+    source_content_hash empty. It is never stored — only its contents are.
+    """
 
     people: list[Person] = Field(default_factory=list)
     claims: list[ScientificClaim] = Field(default_factory=list)
@@ -52,11 +63,15 @@ class AnalysisResult(BaseModel):
 # -- Pipeline tasks --
 
 
-@task
-async def extract_entities(text: str) -> AnalysisResult:
-    """Use LLM to extract people and claims from text."""
+async def extract_entities(data_items: list[Data]) -> AnalysisResult:
+    """Read the ingested document(s) and use LLM to extract people and claims."""
+    text_parts = []
+    for data_item in data_items:
+        async with open_data_file(data_item.raw_data_location, mode="r", encoding="utf-8") as file:
+            text_parts.append(file.read())
+
     result = await LLMGateway.acreate_structured_output(
-        text_input=text,
+        text_input="\n".join(text_parts),
         system_prompt=(
             "Extract all people and scientific claims from the text. "
             "For each person, provide their name and role. "
@@ -67,7 +82,6 @@ async def extract_entities(text: str) -> AnalysisResult:
     return result
 
 
-@task
 async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
     """Associate claims with the people who made them, using LLM."""
 
@@ -102,9 +116,8 @@ async def link_claims_to_people(analysis: AnalysisResult) -> list[Person]:
     return analysis.people
 
 
-@task
 async def store_and_summarize(people: list[Person]) -> str:
-    """Store DataPoints in graph + vector DBs, then return a summary."""
+    """Store DataPoints in graph + vector DBs, then print and return a summary."""
 
     # add_data_points persists nodes and edges to graph DB,
     # and indexes embeddable fields in vector DB
@@ -121,14 +134,16 @@ async def store_and_summarize(people: list[Person]) -> str:
                 lines.append(f"  - {claim.text} [confidence: {claim.confidence}]")
         else:
             lines.append("  (no claims linked)")
-    return "\n".join(lines)
+
+    summary = "\n".join(lines)
+    print(summary)
+    return summary
 
 
 # -- Run --
 
 
 async def main():
-    import cognee
     from cognee.infrastructure.databases.relational.create_db_and_tables import (
         create_db_and_tables,
     )
@@ -145,24 +160,29 @@ async def main():
         "Niels Bohr proposed the atomic model with quantized electron orbits in 1913."
     )
 
-    # Run the custom pipeline
-    results = await run_pipeline(
-        [
-            extract_entities(),
-            link_claims_to_people(),
-            store_and_summarize(),
+    # Ingest the text into a dataset first. This creates the dataset, stores the
+    # text as a Data record with a content hash, and is what makes the graph the
+    # custom pipeline builds below both attributable and searchable.
+    await cognee.add(sample_text, dataset_name=DATASET_NAME)
+
+    # Run the custom pipeline over the dataset's ingested documents. With no
+    # `data` argument the first task receives the dataset's Data records.
+    await cognee.run_custom_pipeline(
+        tasks=[
+            Task(extract_entities),
+            Task(link_claims_to_people),
+            Task(store_and_summarize),
         ],
-        data=sample_text,
+        dataset=DATASET_NAME,
         pipeline_name="entity_extraction",
     )
-
-    print(results[0] if results else "No output")
 
     # Recall from the graph
     print("\n--- Recall: 'Who worked on gravity?' ---")
     answer = await cognee.recall(
         "Who worked on gravity?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
+        datasets=[DATASET_NAME],
     )
     print(f"  {answer}")
 
