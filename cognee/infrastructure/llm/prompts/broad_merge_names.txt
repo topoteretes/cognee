@@ -1,0 +1,1 @@
+You are given names that were extracted from one corpus. Group together the names that refer to the same person or thing (nicknames, handles with or without @, possessives, spelling variants). Only merge names you are sure about. Return every name exactly once; put the most complete form first in each group.
